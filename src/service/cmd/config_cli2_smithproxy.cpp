@@ -73,6 +73,7 @@ std::string setting_text(const libconfig::Setting& parent, const char* name, std
 
 std::string policy_description(const libconfig::Setting& policy, const libconfig::Setting& root) {
     std::string description = setting_text(policy, "name", "<unnamed>") + ": " +
+                              setting_text(policy, "proto", "any") + " " +
                               setting_text(policy, "src", "any") + " -> " +
                               setting_text(policy, "dst", "any") + ":" +
                               setting_text(policy, "dport", "all") + ", nat: " +
