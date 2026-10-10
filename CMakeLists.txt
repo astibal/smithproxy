@@ -286,6 +286,7 @@ add_executable(smithproxy
         src/proxy/mitmhost.cpp
         src/proxy/mitmproxy.cpp
         src/proxy/capture_enrichment.cpp
+        src/proxy/capture_protocol_tracer.cpp
         src/proxy/mitmcom.hpp
         src/proxy/mitmcom.cpp
         src/proxy/ssh/sshprotocol.cpp
@@ -467,7 +468,9 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/proxy/tests/explicitproxy_dns_state_tests.cpp
                 src/proxy/tests/proxymaker_utils_tests.cpp
                 src/proxy/tests/capture_enrichment_tests.cpp
+                src/proxy/tests/capture_protocol_tracer_tests.cpp
                 src/proxy/capture_enrichment.cpp
+                src/proxy/capture_protocol_tracer.cpp
                 src/proxy/filters/statistics/entropy.cpp
                 src/proxy/filters/statistics/flowanalysis.cpp
                 src/proxy/filters/statistics/statistics_tests.cpp

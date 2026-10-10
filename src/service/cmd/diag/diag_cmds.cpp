@@ -1090,6 +1090,7 @@ int cli_diag_capture_status(DiagCli *cli, const char *command, char *argv[], int
               "  SXME: %llu\n"
               "  SXST: %llu\n"
               "  SXTL: %llu\n"
+              "  SXPP: %llu\n"
               "TLS snapshots:\n"
               "  L ready: %llu\n"
               "  R ready: %llu\n",
@@ -1102,6 +1103,7 @@ int cli_diag_capture_status(DiagCli *cli, const char *command, char *argv[], int
               static_cast<unsigned long long>(stats.sxme_written),
               static_cast<unsigned long long>(stats.sxst_written),
               static_cast<unsigned long long>(stats.sxtl_written),
+              static_cast<unsigned long long>(stats.sxpp_written),
               static_cast<unsigned long long>(stats.tls_left_ready),
               static_cast<unsigned long long>(stats.tls_right_ready));
     return CLI_OK;
@@ -1115,7 +1117,8 @@ int cli_diag_capture_schemas(DiagCli *cli, const char *command, char *argv[], in
                      "  block: 0x40000BAD (PCAPNG non-copyable Custom Block)\n"
                      "  SXME type=1 version=1 schema=smithproxy.metadata.v1\n"
                      "  SXST type=1 version=1 schema=smithproxy.statistics.v1\n"
-                     "  SXTL type=1 version=1 schema=smithproxy.tls.v1\n");
+                     "  SXTL type=1 version=1 schema=smithproxy.tls.v1\n"
+                     "  SXPP type=1 version=1 format=smithproxy.protocol-profile.csv.v1\n");
 }
 
 int cli_diag_priv_stats(DiagCli* cli, const char* command, char* argv[], int argc) {

@@ -620,6 +620,19 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added SSH upstream host-key policy");
         return true;
     }
+    else if(upgrade_to_num == 1048) {
+        if(cfgapi.getRoot().exists("content_profiles")) {
+            Setting& profiles = cfgapi.getRoot()["content_profiles"];
+            for(int i = 0; i < profiles.getLength(); ++i) {
+                if(!profiles[i].exists("capture_proto_profiling")) {
+                    profiles[i].add("capture_proto_profiling",
+                                    Setting::TypeBoolean) = false;
+                }
+            }
+        }
+        log.event(INF, "added content_profile.[x].capture_proto_profiling");
+        return true;
+    }
 
 
     return false;
@@ -2312,6 +2325,8 @@ int CfgFactory::load_db_prof_content () {
         }
 
         load_if_exists(cur_object, "webhook_enable", new_profile->webhook_enable);
+        load_if_exists(cur_object, "capture_proto_profiling",
+                       new_profile->capture_proto_profiling);
         load_if_exists(cur_object, "webhook_lock_traffic", new_profile->webhook_lock_traffic);
         load_if_exists(cur_object, "ja4_tls_ch", new_profile->ja4_tls_ch);
         load_if_exists(cur_object, "ja4_tls_ch_ignore_sni", new_profile->ja4_tls_ch_ignore_sni);
@@ -2943,6 +2958,8 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, MitmProxy *mitm_pro
             mitm_proxy->writer_opts()->auto_metadata = auto_metadata;
             mitm_proxy->writer_opts()->auto_statistics =
                 capture_automation.statistics_enabled(pc->write_payload);
+            mitm_proxy->writer_opts()->proto_profiling = pc->write_payload
+                and (pc->capture_proto_profiling or auto_metadata);
             mitm_proxy->acct_opts.ja4_clienthello |= auto_metadata;
             mitm_proxy->acct_opts.ja4_serverhello |= auto_metadata;
             mitm_proxy->acct_opts.ja4_http |= auto_metadata;
@@ -2978,6 +2995,7 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, MitmProxy *mitm_pro
             mitm_proxy->writer_opts()->auto_metadata = auto_metadata;
             mitm_proxy->writer_opts()->auto_statistics =
                 capture_automation.statistics_enabled(cfg_wrt);
+            mitm_proxy->writer_opts()->proto_profiling = cfg_wrt and auto_metadata;
             mitm_proxy->acct_opts.ja4_clienthello |= auto_metadata;
             mitm_proxy->acct_opts.ja4_serverhello |= auto_metadata;
             mitm_proxy->acct_opts.ja4_http |= auto_metadata;
@@ -2991,6 +3009,8 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, MitmProxy *mitm_pro
 
             if(mitm_proxy->tlog())
                 mitm_proxy->tlog()->write_left("Connection start\n");
+            if(mitm_proxy->writer_opts()->proto_profiling)
+                mitm_proxy->enable_protocol_profiling();
         }
     } else {
         _war("policy_apply: cannot apply content profile: cast to MitmProxy failed.");
@@ -4329,6 +4349,7 @@ bool CfgFactory::new_content_profile(Setting& ex, std::string const& name) const
     try {
         Setting & item = ex.add(name, Setting::TypeGroup);
         item.add("write_payload", Setting::TypeBoolean) = false;
+        item.add("capture_proto_profiling", Setting::TypeBoolean) = false;
         item.add("content_rules", Setting::TypeList);
     }
     catch(libconfig::SettingNameException const& e) {
@@ -4355,6 +4376,8 @@ int CfgFactory::save_content_profiles(Config& ex) const {
 
         Setting& item = objects.add(name, Setting::TypeGroup);
         item.add("write_payload", Setting::TypeBoolean) = obj->write_payload;
+        item.add("capture_proto_profiling", Setting::TypeBoolean) =
+            obj->capture_proto_profiling;
         item.add("write_format", Setting::TypeString) = obj->write_format.to_str();
 
         item.add("webhook_enable", Setting::TypeBoolean) = obj->webhook_enable;

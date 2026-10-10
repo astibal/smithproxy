@@ -233,4 +233,20 @@ std::unique_ptr<socle::baseTrafficLogger> stream_log_adapter::wrap(
         new stream_log(std::move(shared_output), context_, stream_log::shared_output_tag {}));
 }
 
+void stream_log_adapter::protocol_tracing(bool enabled) noexcept {
+    if (context_.connection && context_.connection->native_log)
+        context_.connection->native_log->protocol_tracing(enabled);
+}
+
+std::optional<std::uint64_t>
+stream_log_adapter::protocol_trace_subject() const noexcept {
+    if (!context_.connection) return std::nullopt;
+    return context_.stream_id;
+}
+
+socle::ProtocolTracer*
+stream_log_adapter::session_protocol_tracer() const noexcept {
+    return context_.connection ? context_.connection->protocol_tracer : nullptr;
+}
+
 } // namespace sx::quic::spq1

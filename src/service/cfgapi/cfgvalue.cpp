@@ -684,6 +684,13 @@ void CfgValueHelp::init() {
             .value_filter(is_in_vector([]() -> std::vector<std::string> { return {"smcap", "pcap", "pcap_single"}; },"smcap, pcap or pcap_single"))
             .suggestion_generator([](std::string const& section, std::string const& variable) -> std::vector<std::string> {  return {"smcap", "pcap", "pcap_single"};   });
 
+    add("content_profiles.[x].capture_proto_profiling",
+        "record protocol lifecycle and technical decisions as SXPP")
+            .help_quick(CfgValue::HELP_BOOL)
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_BOOL)
+            .suggestion_generator(CfgValue::SUGGESTION_BOOL);
+
 
     add("detection_profiles.[x].mode", "0 = disabled, 1 = enabled")
             .help_quick("<integer>: 0-1")

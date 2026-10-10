@@ -75,6 +75,7 @@ struct whitelist_verify_entry {
 };
 
 class FilterProxy;
+class CaptureProtocolTracer;
 namespace sx {
 class StreamHandler;
 enum class stream_direction;
@@ -114,11 +115,16 @@ class MitmProxy : public baseProxy, public IOController {
     std::optional<nlohmann::json> capture_tls_left_;
     std::optional<nlohmann::json> capture_tls_right_;
     bool capture_tls_written_ = false;
+    std::unique_ptr<CaptureProtocolTracer> protocol_tracer_;
+    socle::ProtocolTracer* active_protocol_tracer_ = nullptr;
+    std::optional<std::uint64_t> protocol_trace_subject_;
+    void attach_protocol_tracer() noexcept;
 public:
     struct CaptureDiagnostics {
         uint64_t sxme_written = 0;
         uint64_t sxst_written = 0;
         uint64_t sxtl_written = 0;
+        uint64_t sxpp_written = 0;
         uint64_t tls_left_ready = 0;
         uint64_t tls_right_ready = 0;
     };
@@ -144,6 +150,7 @@ public:
         bool write_payload = false;
         bool auto_metadata = false;
         bool auto_statistics = false;
+        bool proto_profiling = false;
 
         bool webhook_enable = false;
         bool webhook_lock_traffic = false;
@@ -200,6 +207,9 @@ public:
         traffic_log_adapter_ = std::move(adapter);
     }
     void toggle_tlog ();
+    void enable_protocol_profiling();
+    void trace_protocol(socle::protocol_trace_event const& event) noexcept;
+    void write_protocol_profile(std::string_view csv_row);
 
     // Transfer exclusive stream I/O to a protocol-specific handler. The
     // handler is intentionally generic; MitmProxy does not know about SSH,
@@ -316,6 +326,7 @@ private:
     static std::atomic_uint64_t& capture_sxme_written();
     static std::atomic_uint64_t& capture_sxst_written();
     static std::atomic_uint64_t& capture_sxtl_written();
+    static std::atomic_uint64_t& capture_sxpp_written();
     static std::atomic_uint64_t& capture_tls_left_ready();
     static std::atomic_uint64_t& capture_tls_right_ready();
 

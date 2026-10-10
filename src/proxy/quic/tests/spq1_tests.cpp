@@ -28,9 +28,11 @@ public:
         std::shared_ptr<std::vector<captured_packet>> packets,
         std::shared_ptr<std::vector<captured_packet>> native_packets = {},
         std::shared_ptr<std::vector<captured_secret>> secrets = {},
-        std::shared_ptr<std::vector<std::string>> events = {})
+        std::shared_ptr<std::vector<std::string>> events = {},
+        std::shared_ptr<std::vector<std::vector<unsigned char>>> metadata = {})
         : packets_(std::move(packets)), native_packets_(std::move(native_packets)),
-          secrets_(std::move(secrets)), events_(std::move(events)) {}
+          secrets_(std::move(secrets)), events_(std::move(events)),
+          metadata_(std::move(metadata)) {}
 
     void write(socle::side_t side, buffer const& data) override {
         auto const* begin = static_cast<unsigned char const*>(data.data());
@@ -50,12 +52,19 @@ public:
         auto const* begin = static_cast<unsigned char const*>(data.data());
         secrets_->push_back({format, {begin, begin + data.size()}});
     }
+    void write_metadata(buffer const& data) override {
+        if (!metadata_) return;
+        if (events_) events_->push_back("metadata");
+        auto const* begin = static_cast<unsigned char const*>(data.data());
+        metadata_->emplace_back(begin, begin + data.size());
+    }
 
 private:
     std::shared_ptr<std::vector<captured_packet>> packets_;
     std::shared_ptr<std::vector<captured_packet>> native_packets_;
     std::shared_ptr<std::vector<captured_secret>> secrets_;
     std::shared_ptr<std::vector<std::string>> events_;
+    std::shared_ptr<std::vector<std::vector<unsigned char>>> metadata_;
 };
 
 } // namespace
@@ -222,6 +231,32 @@ TEST(SessionTrafficLog, SecretsEvictPacketsAtTheBound) {
     EXPECT_TRUE(native_packets->empty());
     ASSERT_EQ(secrets->size(), 1U);
     EXPECT_EQ(journal.dropped_records(), 1U);
+}
+
+TEST(SessionTrafficLog, ProtocolMetadataRequiresExplicitEnable) {
+    auto packets = std::make_shared<std::vector<captured_packet>>();
+    auto metadata =
+        std::make_shared<std::vector<std::vector<unsigned char>>>();
+    sx::session_traffic_log disabled(1024);
+    std::string const early = "early-sxpp";
+    buffer early_data(early.data(), early.size());
+    disabled.write_protocol_metadata(early_data);
+    ASSERT_TRUE(disabled.install(std::make_shared<capture_sink>(
+        packets, nullptr, nullptr, nullptr, metadata)));
+    EXPECT_TRUE(metadata->empty());
+
+    sx::session_traffic_log enabled(1024);
+    enabled.write_protocol_metadata(early_data);
+    enabled.protocol_tracing(true);
+    ASSERT_TRUE(enabled.install(std::make_shared<capture_sink>(
+        packets, nullptr, nullptr, nullptr, metadata)));
+    ASSERT_EQ(metadata->size(), 1U);
+    EXPECT_EQ(std::string(metadata->front().begin(), metadata->front().end()), early);
+
+    std::string const late = "late-sxpp";
+    buffer late_data(late.data(), late.size());
+    enabled.write_protocol_metadata(late_data);
+    ASSERT_EQ(metadata->size(), 2U);
 }
 
 TEST(SessionTrafficLog, SerializesConcurrentPublishers) {

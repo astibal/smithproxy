@@ -20,11 +20,12 @@ namespace sx::quic::spq1 {
 /** Shared identity and packet-number space for one exported QUIC connection. */
 struct connection_context {
     connection_context(std::uint64_t id, std::string protocol,
-                       std::shared_ptr<sx::session_traffic_log> native_log = {})
+                       std::shared_ptr<sx::session_traffic_log> native_log = {},
+                       socle::ProtocolTracer* protocol_tracer = nullptr)
         : session_id(id), alpn(std::move(protocol)),
           h3_decoder(alpn.rfind("h3", 0) == 0
               ? std::make_shared<h3_capture_decoder>() : nullptr),
-          native_log(std::move(native_log)) {}
+          native_log(std::move(native_log)), protocol_tracer(protocol_tracer) {}
 
     std::uint64_t session_id = 0;
     std::string alpn;
@@ -33,6 +34,8 @@ struct connection_context {
     std::shared_ptr<h3_capture_decoder> h3_decoder;
     /** Encrypted session packets and secrets routed into the selected logger. */
     std::shared_ptr<sx::session_traffic_log> native_log;
+    /** Non-owning session tracer; listener outlives all stream adapters. */
+    socle::ProtocolTracer* protocol_tracer = nullptr;
 };
 
 /** Metadata which remains constant for one downstream-visible QUIC stream. */
@@ -103,6 +106,11 @@ public:
 
     std::unique_ptr<socle::baseTrafficLogger> wrap(
         std::unique_ptr<socle::baseTrafficLogger> output) override;
+    void protocol_tracing(bool enabled) noexcept override;
+    [[nodiscard]] std::optional<std::uint64_t>
+    protocol_trace_subject() const noexcept override;
+    [[nodiscard]] socle::ProtocolTracer*
+    session_protocol_tracer() const noexcept override;
 
 private:
     stream_context context_;

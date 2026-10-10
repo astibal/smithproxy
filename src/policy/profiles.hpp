@@ -160,6 +160,7 @@ class ProfileContent : public CfgElement {
 public:
     // if true, content of proxy transmission will dumped to file
     bool write_payload = false;
+    bool capture_proto_profiling = false;
 
     // content webhook options
     bool webhook_enable = false;

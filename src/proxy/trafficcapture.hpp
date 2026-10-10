@@ -8,11 +8,13 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <utility>
 #include <vector>
 
 #include <buffer.hpp>
 #include <traflog/basetraflog.hpp>
+#include <protocoltracer.hpp>
 
 namespace sx {
 
@@ -29,6 +31,11 @@ public:
 
     virtual std::unique_ptr<socle::baseTrafficLogger> wrap(
         std::unique_ptr<socle::baseTrafficLogger> output) = 0;
+    virtual void protocol_tracing(bool) noexcept {}
+    [[nodiscard]] virtual std::optional<std::uint64_t>
+    protocol_trace_subject() const noexcept { return std::nullopt; }
+    [[nodiscard]] virtual socle::ProtocolTracer*
+    session_protocol_tracer() const noexcept { return nullptr; }
 };
 
 /**
@@ -65,7 +72,11 @@ public:
             if (item.type == record_type::secret) dispatch(*output_, item);
         }
         for (auto const& item : pending) {
-            if (item.type == record_type::packet) dispatch(*output_, item);
+            if (item.type != record_type::secret
+                && (item.type != record_type::metadata
+                    || protocol_tracing_.load(std::memory_order_acquire))) {
+                dispatch(*output_, item);
+            }
         }
         return true;
     }
@@ -80,6 +91,14 @@ public:
         publish(record {record_type::secret, socle::side_t::LEFT, format, copy(secret)});
     }
 
+    void write_protocol_metadata(buffer const& block) {
+        publish(record {record_type::metadata, socle::side_t::LEFT, {}, copy(block)});
+    }
+
+    void protocol_tracing(bool enabled) noexcept {
+        protocol_tracing_.store(enabled, std::memory_order_release);
+    }
+
     [[nodiscard]] std::size_t pending_bytes() const {
         std::lock_guard lock(state_mutex_);
         return pending_bytes_;
@@ -87,9 +106,15 @@ public:
     [[nodiscard]] std::uint64_t dropped_records() const {
         return dropped_records_.load(std::memory_order_relaxed);
     }
+    [[nodiscard]] static std::uint64_t metadata_records_written() noexcept {
+        return metadata_records_written_counter().load(std::memory_order_relaxed);
+    }
+    static void reset_metadata_records_written() noexcept {
+        metadata_records_written_counter().store(0, std::memory_order_relaxed);
+    }
 
 private:
-    enum class record_type { packet, secret };
+    enum class record_type { packet, secret, metadata };
     struct record {
         record_type type;
         socle::side_t side;
@@ -110,7 +135,16 @@ private:
         buffer data(const_cast<unsigned char*>(item.data.data()),
                     item.data.size(), item.data.size(), false);
         if (item.type == record_type::packet) output.write_packet(item.side, data);
-        else output.write_secret(item.secret_format, data);
+        else if (item.type == record_type::secret) output.write_secret(item.secret_format, data);
+        else {
+            output.write_metadata(data);
+            metadata_records_written_counter().fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+
+    static std::atomic_uint64_t& metadata_records_written_counter() noexcept {
+        static std::atomic_uint64_t value {0};
+        return value;
     }
 
     void publish(record item) {
@@ -145,6 +179,8 @@ private:
             }
         }
 
+        if (item.type == record_type::metadata
+            && !protocol_tracing_.load(std::memory_order_acquire)) return;
         std::lock_guard output_lock(output_mutex_);
         dispatch(*output, item);
     }
@@ -156,6 +192,7 @@ private:
     std::deque<record> pending_;
     std::size_t pending_bytes_ = 0;
     std::atomic_uint64_t dropped_records_ {0};
+    std::atomic_bool protocol_tracing_ {false};
 };
 
 } // namespace sx

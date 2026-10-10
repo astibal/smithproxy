@@ -15,6 +15,8 @@
 #include <string>
 #include <vector>
 
+class CaptureProtocolTracer;
+
 namespace sx::quic {
 
 using flow_proxy_factory = std::function<std::unique_ptr<multiflow::flow_proxy>(
@@ -194,6 +196,8 @@ private:
         std::shared_ptr<openssl_connection> upstream;
         std::shared_ptr<keylog_store> keylog; ///< Downstream secrets for capture export.
         std::shared_ptr<sx::session_traffic_log> capture_log; ///< Policy-bound wire journal.
+        std::unique_ptr<CaptureProtocolTracer> protocol_tracer; ///< Buffered SXPP events.
+        bool upstream_handshake_traced = false;
         std::uint64_t capture_association = 0; ///< Downstream dispatcher CID family.
         std::size_t keylog_cursor = 0; ///< Number of keylog records already published.
         std::unique_ptr<multiflow::flow_proxy> proxy;

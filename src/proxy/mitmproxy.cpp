@@ -47,6 +47,7 @@
 
 #include <proxy/mitmproxy.hpp>
 #include <proxy/capture_enrichment.hpp>
+#include <proxy/capture_protocol_tracer.hpp>
 #include <proxy/mitmhost.hpp>
 #include <proxy/streamhandler.hpp>
 #include <proxy/mitmproxy_utils.hpp>
@@ -224,6 +225,8 @@ void MitmProxy::toggle_tlog () {
         auto install_logger = [this](
                 std::unique_ptr<socle::baseTrafficLogger> output) {
             if (traffic_log_adapter_) {
+                traffic_log_adapter_->protocol_tracing(
+                    writer_opts()->proto_profiling);
                 output = traffic_log_adapter_->wrap(std::move(output));
             }
             tlog_ = std::move(output);
@@ -323,6 +326,11 @@ void MitmProxy::toggle_tlog () {
 
 
 MitmProxy::~MitmProxy() {
+    trace_protocol({socle::trace_side::proxy,
+                    protocol_trace_subject_ ? socle::trace_component::stream
+                                            : socle::trace_component::proxy,
+                    socle::trace_scope::session, 0, false,
+                    socle::trace_event::closed, socle::trace_status::ok, {}});
     
     if(writer_opts()->write_payload) {
         _deb("MitmProxy::destructor: syncing writer");
@@ -371,6 +379,80 @@ MitmProxy::~MitmProxy() {
     current_sessions()--;
 }
 
+void MitmProxy::attach_protocol_tracer() noexcept {
+    if(!active_protocol_tracer_) return;
+    baseProxy::protocol_tracer(active_protocol_tracer_);
+    for(auto* context : {first_left(), first_right()}) {
+        if(context && context->com()
+           && context->com()->protocol_tracer() != active_protocol_tracer_) {
+            context->com()->protocol_tracer(active_protocol_tracer_);
+        }
+    }
+}
+
+void MitmProxy::enable_protocol_profiling() {
+    if(active_protocol_tracer_) return;
+    if(traffic_log_adapter_) traffic_log_adapter_->protocol_tracing(true);
+    auto const subject = traffic_log_adapter_
+        ? traffic_log_adapter_->protocol_trace_subject() : std::nullopt;
+    protocol_trace_subject_ = subject;
+    active_protocol_tracer_ = traffic_log_adapter_
+        ? traffic_log_adapter_->session_protocol_tracer() : nullptr;
+    if(!active_protocol_tracer_) {
+        protocol_tracer_ = std::make_unique<CaptureProtocolTracer>(
+            this, [](void* context, std::string_view row) {
+                static_cast<MitmProxy*>(context)->write_protocol_profile(row);
+            }, subject);
+        active_protocol_tracer_ = protocol_tracer_.get();
+    }
+    attach_protocol_tracer();
+    trace_protocol({socle::trace_side::proxy,
+                    subject ? socle::trace_component::stream
+                            : socle::trace_component::proxy,
+                    subject ? socle::trace_scope::stream
+                            : socle::trace_scope::session,
+                    0, false, subject ? socle::trace_event::opened
+                                      : socle::trace_event::created,
+                    socle::trace_status::ok, {}});
+    if(!subject) trace_protocol({socle::trace_side::left,
+                    socle::trace_component::tcp,
+                    socle::trace_scope::connection, 0, false,
+                    socle::trace_event::accepted, socle::trace_status::ok, {}});
+    if(matched_policy() >= 0) {
+        auto const detail = string_format("policy=%d", matched_policy());
+        trace_protocol({socle::trace_side::proxy, socle::trace_component::policy,
+                        subject ? socle::trace_scope::stream
+                                : socle::trace_scope::session, 0, false,
+                        socle::trace_event::matched, socle::trace_status::ok,
+                        detail});
+    }
+}
+
+void MitmProxy::trace_protocol(
+    socle::protocol_trace_event const& event) noexcept {
+    if(!active_protocol_tracer_) return;
+    if(!protocol_trace_subject_ || event.has_subject_id) {
+        active_protocol_tracer_->trace(event);
+        return;
+    }
+    auto stream_event = event;
+    stream_event.subject_id = *protocol_trace_subject_;
+    stream_event.has_subject_id = true;
+    if(stream_event.scope == socle::trace_scope::session)
+        stream_event.scope = socle::trace_scope::stream;
+    active_protocol_tracer_->trace(stream_event);
+}
+
+void MitmProxy::write_protocol_profile(std::string_view csv_row) {
+    if(!tlog() || !writer_opts()->write_payload || !writer_opts()->proto_profiling)
+        return;
+    auto encoded = CaptureProtocolTracer::encode_block(csv_row);
+    if(encoded.empty()) return;
+    buffer serialized(encoded.data(), encoded.size());
+    tlog()->write_metadata(serialized);
+    capture_sxpp_written()++;
+}
+
 nlohmann::json MitmProxy::capture_identity() const {
     return {
         {"session_id", to_connection_ID()},
@@ -394,6 +476,11 @@ std::atomic_uint64_t& MitmProxy::capture_sxtl_written() {
     return value;
 }
 
+std::atomic_uint64_t& MitmProxy::capture_sxpp_written() {
+    static std::atomic_uint64_t value{};
+    return value;
+}
+
 std::atomic_uint64_t& MitmProxy::capture_tls_left_ready() {
     static std::atomic_uint64_t value{};
     return value;
@@ -409,6 +496,8 @@ MitmProxy::CaptureDiagnostics MitmProxy::capture_diagnostics() noexcept {
         capture_sxme_written().load(),
         capture_sxst_written().load(),
         capture_sxtl_written().load(),
+        capture_sxpp_written().load()
+            + sx::session_traffic_log::metadata_records_written(),
         capture_tls_left_ready().load(),
         capture_tls_right_ready().load(),
     };
@@ -418,6 +507,8 @@ void MitmProxy::reset_capture_diagnostics() noexcept {
     capture_sxme_written() = 0;
     capture_sxst_written() = 0;
     capture_sxtl_written() = 0;
+    capture_sxpp_written() = 0;
+    sx::session_traffic_log::reset_metadata_records_written();
     capture_tls_left_ready() = 0;
     capture_tls_right_ready() = 0;
 }
@@ -674,6 +765,7 @@ void MitmProxy::add_filter(std::string const& name, FilterProxy* fp) {
 
 
 int MitmProxy::handle_sockets_once(baseCom* xcom) {
+    attach_protocol_tracer();
 
     webhook_session_start();
 
