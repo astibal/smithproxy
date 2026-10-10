@@ -538,7 +538,10 @@ public:
     bool apply_config_change(std::string_view section);
     int policy_apply (baseHostCX *originator, MitmProxy *proxy, int matched_policy=-1);
     void policy_apply_features(std::shared_ptr<PolicyRule> const& policy_rule, MitmProxy *mitm_proxy);
-    std::shared_ptr<PolicyRule> lookup_policy(std::size_t i) { if(i < db_policy_list.size()) return db_policy_list.at(i); else return nullptr; }
+    std::shared_ptr<PolicyRule> lookup_policy(std::size_t i) {
+        std::scoped_lock<std::recursive_mutex> guard(lock_);
+        return i < db_policy_list.size() ? db_policy_list.at(i) : nullptr;
+    }
 
     bool policy_apply_tls (int policy_num, baseCom *xcom);
     bool policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCom *xcom);
