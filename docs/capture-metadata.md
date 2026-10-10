@@ -50,6 +50,13 @@ u32 total length
 
 Numeric fields follow the byte order of the containing PCAPNG section.
 
+The Lua dissector in `tools/wireshark/smithproxy.lua` exposes the envelope,
+JSON correlation fields and typed SXPP columns as Wireshark display-filter
+fields. See `tools/wireshark/README.md` for installation and examples. A
+deterministic capture containing HTTP, TLS 1.3 and all four custom namespaces
+is available as `artifacts/synthetic-smithproxy-extensions.pcapng` and can be
+regenerated with `tools/wireshark/generate_sample.py`.
+
 The JSON snapshots (`SXME`, `SXST`, `SXTL`) contain both correlation keys:
 
 - `session_id`: process-local Smithproxy connection identifier.
