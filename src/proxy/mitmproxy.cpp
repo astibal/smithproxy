@@ -42,7 +42,10 @@
 #include <cerrno>
 #include <chrono>
 #include <thread>
+#include <memory>
+#include <openssl/evp.h>
 #include <openssl/rand.h>
+#include <openssl/x509.h>
 
 #include <proxy/mitmproxy.hpp>
 #include <proxy/mitmhost.hpp>
@@ -73,6 +76,96 @@
 #include <traflog/traflog.hpp>
 
 using namespace socle;
+
+namespace {
+
+std::string x509_common_name(X509_NAME* name) {
+    if(!name) return {};
+    std::array<char, 512> value{};
+    return X509_NAME_get_text_by_NID(
+               name, NID_commonName, value.data(), value.size() - 1) < 0
+           ? std::string{} : std::string(value.data());
+}
+
+nlohmann::json capture_peer_certificate(SSL* ssl) {
+    nlohmann::json result;
+    if(!ssl) return result;
+
+    std::unique_ptr<X509, decltype(&X509_free)> certificate(
+        SSL_get_peer_certificate(ssl), X509_free);
+    if(!certificate) return result;
+
+    std::array<unsigned char, EVP_MAX_MD_SIZE> digest{};
+    unsigned int digest_size = 0;
+    if(X509_digest(certificate.get(), EVP_sha256(), digest.data(), &digest_size) == 1) {
+        result["sha256"] = hex_print(digest.data(), digest_size);
+    }
+
+    auto subject_cn = x509_common_name(X509_get_subject_name(certificate.get()));
+    auto issuer_cn = x509_common_name(X509_get_issuer_name(certificate.get()));
+    if(!subject_cn.empty()) result["subject_cn"] = std::move(subject_cn);
+    if(!issuer_cn.empty()) result["issuer_cn"] = std::move(issuer_cn);
+    return result;
+}
+
+nlohmann::json capture_tls_leg(SSLCom const& com, bool include_verify) {
+    nlohmann::json result = {
+        {"role", com.is_server() ? "server" : "client"},
+        {"state", "ready"},
+    };
+    SSL* ssl = com.get_SSL();
+    if(!ssl) return result;
+
+    if(auto const* version = SSL_get_version(ssl); version) result["version"] = version;
+    if(auto const* cipher = SSL_get_current_cipher(ssl); cipher) {
+        result["cipher"] = SSL_CIPHER_get_name(cipher);
+        int algorithm_bits = 0;
+        result["cipher_bits"] = SSL_CIPHER_get_bits(cipher, &algorithm_bits);
+    }
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+    if(auto const group = SSL_get_negotiated_group(ssl); group > 0) {
+        if(auto const* group_name = OBJ_nid2sn(group); group_name) {
+            result["group"] = group_name;
+        }
+    }
+#endif
+
+    unsigned char const* alpn = nullptr;
+    unsigned int alpn_size = 0;
+    SSL_get0_alpn_selected(ssl, &alpn, &alpn_size);
+    if(alpn && alpn_size) {
+        result["alpn"] = std::string(
+            reinterpret_cast<char const*>(alpn), alpn_size);
+    }
+    if(auto const* sni = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name); sni) {
+        result["sni"] = sni;
+    }
+    result["session_reused"] = SSL_session_reused(ssl) == 1;
+
+    auto certificate = capture_peer_certificate(ssl);
+    if(!certificate.empty()) result["peer_certificate"] = std::move(certificate);
+
+    if(include_verify) {
+        auto const openssl_code = SSL_get_verify_result(ssl);
+        std::vector<std::string> extended;
+        for(auto const value : com.verify_extended_info()) {
+            extended.emplace_back(MitmProxy::verify_flag_string_extended(value));
+        }
+        result["verify"] = {
+            {"performed", com.verify_get() != SSLCom::verify_status_t::VRF_NOTTESTED},
+            {"ok", openssl_code == X509_V_OK
+                   && com.verify_get() == SSLCom::verify_status_t::VRF_OK},
+            {"openssl_code", openssl_code},
+            {"openssl_text", X509_verify_cert_error_string(openssl_code)},
+            {"sx_flag", MitmProxy::verify_flag_string(com.verify_get())},
+            {"origin", SSLCom::verify_origin_str(com.verify_origin())},
+            {"extended_info", std::move(extended)},
+        };
+    }
+    return result;
+}
+
+} // namespace
 
 MitmProxy::MitmProxy(baseCom* c): baseProxy(c), start_stop_tls_(*this) {
 
@@ -303,22 +396,51 @@ nlohmann::json MitmProxy::capture_identity() const {
     };
 }
 
+void MitmProxy::write_capture_block(std::array<uint8_t, 4> name_space,
+                                    nlohmann::json payload) {
+    if(!tlog()) return;
+
+    auto const text = payload.dump();
+    socle::pcapng::pcapng_custom_block block;
+    block.pen = 67005U;
+    block.name_space = name_space;
+    block.entry_type = 1;
+    block.version = 1;
+    block.payload = std::make_shared<buffer>(text.data(), text.size());
+    buffer serialized;
+    if(block.append(serialized) != 0U) tlog()->write_metadata(serialized);
+}
+
+void MitmProxy::observe_tls_ready() {
+    if(capture_tls_written_ || !writer_opts()->write_payload
+       || !writer_opts()->auto_metadata) return;
+
+    auto observe = [](MitmHostCX const* context, bool include_verify)
+        -> std::optional<nlohmann::json> {
+        auto const* tls = context
+                          ? dynamic_cast<SSLCom const*>(context->com()) : nullptr;
+        if(!tls || tls->opt.bypass || !tls->get_SSL()) return std::nullopt;
+        if(tls->sslcom_op_state != SSLCom::sslcom_op_state_t::READY
+           && !SSL_is_init_finished(tls->get_SSL())) return std::nullopt;
+        return capture_tls_leg(*tls, include_verify);
+    };
+
+    if(!capture_tls_left_) capture_tls_left_ = observe(first_left(), false);
+    if(!capture_tls_right_) capture_tls_right_ = observe(first_right(), true);
+    if(!capture_tls_left_ || !capture_tls_right_ || !tlog()) return;
+
+    auto tls = capture_identity();
+    tls["schema"] = "smithproxy.tls.v1";
+    tls["transport"] = session_protocol().empty()
+                       ? "tcp" : std::string(session_protocol());
+    tls["L"] = std::move(*capture_tls_left_);
+    tls["R"] = std::move(*capture_tls_right_);
+    write_capture_block({'S', 'X', 'T', 'L'}, std::move(tls));
+    capture_tls_written_ = true;
+}
+
 void MitmProxy::write_capture_enrichment() {
     if(!tlog() || !writer_opts()->write_payload) return;
-
-    constexpr uint32_t ecosystem_pen = 67005U;
-    auto emit = [&](std::array<uint8_t, 4> name_space,
-                    nlohmann::json payload) {
-        auto const text = payload.dump();
-        socle::pcapng::pcapng_custom_block block;
-        block.pen = ecosystem_pen;
-        block.name_space = name_space;
-        block.entry_type = 1;
-        block.version = 1;
-        block.payload = std::make_shared<buffer>(text.data(), text.size());
-        buffer serialized;
-        if(block.append(serialized) != 0U) tlog()->write_metadata(serialized);
-    };
 
     if(writer_opts()->auto_metadata) {
         auto metadata = capture_identity();
@@ -333,7 +455,7 @@ void MitmProxy::write_capture_enrichment() {
             {"client", ja4.ClientHello},
             {"server", ja4.ServerHello},
         };
-        emit({'S', 'X', 'M', 'E'}, std::move(metadata));
+        write_capture_block({'S', 'X', 'M', 'E'}, std::move(metadata));
     }
 
     if(writer_opts()->auto_statistics) {
@@ -342,7 +464,7 @@ void MitmProxy::write_capture_enrichment() {
             auto statistics = capture_identity();
             statistics["schema"] = "smithproxy.statistics.v1";
             statistics["statistics"] = filter->to_json(iINF);
-            emit({'S', 'X', 'S', 'T'}, std::move(statistics));
+            write_capture_block({'S', 'X', 'S', 'T'}, std::move(statistics));
             break;
         }
     }
@@ -560,6 +682,10 @@ int MitmProxy::handle_sockets_once(baseCom* xcom) {
     }
 
     auto const handled = baseProxy::handle_sockets_once(xcom);
+
+    // Snapshot negotiated TLS before shutdown/error handling can alter the
+    // live SSL objects.  The block is emitted once both legs reached READY.
+    observe_tls_ready();
 
     // baseProxy drains writes after reads.  Re-check here so an origin EOF
     // observed in this very cycle can close immediately after its response

@@ -42,7 +42,9 @@
  #define MITMPROXY_HPP
 
 #include <atomic>
+#include <array>
 #include <ctime>
+#include <optional>
 #include <nlohmann/json.hpp>
 
 #include <basecom.hpp>
@@ -105,7 +107,13 @@ class MitmProxy : public baseProxy, public IOController {
     static inline long half_timeout_ = 5;
     std::time_t created_at_ = std::time(nullptr);
     void write_capture_enrichment();
+    void observe_tls_ready();
+    void write_capture_block(std::array<uint8_t, 4> name_space,
+                             nlohmann::json payload);
     [[nodiscard]] nlohmann::json capture_identity() const;
+    std::optional<nlohmann::json> capture_tls_left_;
+    std::optional<nlohmann::json> capture_tls_right_;
+    bool capture_tls_written_ = false;
 public:
     using whitelist_verify_entry_t = expiring<whitelist_verify_entry> ;
     using whitelist_map_t = ptr_cache<std::string,whitelist_verify_entry_t>;
