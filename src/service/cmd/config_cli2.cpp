@@ -23,6 +23,26 @@ bool parse_index(std::string_view text, int& result) {
     return true;
 }
 
+bool parse_plain_index(std::string_view text, int& result) {
+    if (text.empty()) return false;
+    const std::string number(text);
+    char* end = nullptr;
+    const long value = std::strtol(number.c_str(), &end, 10);
+    if (!end || *end != '\0' || value < 0) return false;
+    result = static_cast<int>(value);
+    return true;
+}
+
+std::string entry_name(const libconfig::Setting& setting) {
+    if (!setting.isGroup() || !setting.exists("name")) return {};
+    try {
+        const char* name = setting["name"];
+        return name ? name : "";
+    } catch (const libconfig::SettingTypeException&) {
+        return {};
+    }
+}
+
 }  // namespace
 
 ConfigCli2Session::ConfigCli2Session(ConfigCli2Access access) : access_(std::move(access)) {}
@@ -48,7 +68,7 @@ ConfigCli2Session::children_at(const std::vector<std::string>& components) const
     std::unique_lock<std::recursive_mutex> lock;
     if (access_.mutex) lock = std::unique_lock<std::recursive_mutex>(*access_.mutex);
     const auto* node = resolve(components);
-    return node ? children(*node) : std::vector<libcli2::CompletionItem>{};
+    return node ? children(*node, true) : std::vector<libcli2::CompletionItem>{};
 }
 
 std::vector<libcli2::CompletionItem> ConfigCli2Session::current_children() const {
@@ -79,8 +99,26 @@ libconfig::Setting* ConfigCli2Session::resolve(const std::vector<std::string>& c
                 if (!setting->isAggregate() || index >= setting->getLength()) return nullptr;
                 setting = &(*setting)[index];
             } else {
-                if (!setting->isAggregate() || !setting->exists(component.c_str())) return nullptr;
-                setting = &(*setting)[component.c_str()];
+                if (!setting->isAggregate()) return nullptr;
+                if (setting->isList()) {
+                    if (parse_plain_index(component, index)) {
+                        if (index >= setting->getLength()) return nullptr;
+                        setting = &(*setting)[index];
+                        continue;
+                    }
+                    libconfig::Setting* match = nullptr;
+                    for (int i = 0; i < setting->getLength(); ++i) {
+                        auto& candidate = (*setting)[i];
+                        if (entry_name(candidate) != component) continue;
+                        if (match) return nullptr;
+                        match = &candidate;
+                    }
+                    if (!match) return nullptr;
+                    setting = match;
+                } else {
+                    if (!setting->exists(component.c_str())) return nullptr;
+                    setting = &(*setting)[component.c_str()];
+                }
             }
         }
     } catch (const libconfig::SettingException&) {
@@ -89,7 +127,8 @@ libconfig::Setting* ConfigCli2Session::resolve(const std::vector<std::string>& c
     return setting;
 }
 
-std::vector<libcli2::CompletionItem> ConfigCli2Session::children(const libconfig::Setting& setting) const {
+std::vector<libcli2::CompletionItem> ConfigCli2Session::children(const libconfig::Setting& setting,
+                                                                 bool navigation_aliases) const {
     std::vector<libcli2::CompletionItem> result;
     if (!setting.isAggregate()) return result;
     for (int i = 0; i < setting.getLength(); ++i) {
@@ -97,6 +136,11 @@ std::vector<libcli2::CompletionItem> ConfigCli2Session::children(const libconfig
         if (!navigable(child)) continue;
         std::string description = child.getPath();
         const char* child_name = child.getName();
+        std::string selector = child_name ? child_name : "[" + std::to_string(i) + "]";
+        if (navigation_aliases && setting.isList()) {
+            const auto semantic_name = entry_name(child);
+            selector = semantic_name.empty() ? std::to_string(i) : semantic_name;
+        }
         if (!child_name && child.isGroup() && child.exists("name")) {
             try {
                 const char* display_name = child["name"];
@@ -104,7 +148,11 @@ std::vector<libcli2::CompletionItem> ConfigCli2Session::children(const libconfig
             } catch (const libconfig::SettingTypeException&) {
             }
         }
-        result.push_back({child_name ? child_name : "[" + std::to_string(i) + "]", std::move(description)});
+        if (access_.describe_entry) {
+            auto custom_description = access_.describe_entry(setting.getPath(), child);
+            if (!custom_description.empty()) description = std::move(custom_description);
+        }
+        result.push_back({std::move(selector), std::move(description)});
     }
     return result;
 }

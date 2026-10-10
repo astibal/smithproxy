@@ -151,6 +151,40 @@ TEST_F(ConfigCli2Test, NavigatesLiveConfigurationWithoutNumericModes) {
     EXPECT_EQ(last_set, "policy.[1]:proto=tcp");
 }
 
+TEST_F(ConfigCli2Test, PolicyCanBeEditedByNamePlainIndexOrExplicitIndex) {
+    ASSERT_TRUE(cli.execute("configure terminal", context));
+
+    ASSERT_TRUE(cli.execute("edit policy first", context));
+    EXPECT_EQ(state->path(), "policy.[0]");
+    ASSERT_TRUE(cli.execute("end", context));
+
+    ASSERT_TRUE(cli.execute("edit policy 1", context));
+    EXPECT_EQ(state->path(), "policy.[1]");
+    ASSERT_TRUE(cli.execute("end", context));
+
+    ASSERT_TRUE(cli.execute("edit policy [0]", context));
+    EXPECT_EQ(state->path(), "policy.[0]");
+}
+
+TEST_F(ConfigCli2Test, UnnamedPolicyCompletesWithItsPlainIndex) {
+    config.lookup("policy.[1]").remove("name");
+    ASSERT_TRUE(cli.execute("configure terminal", context));
+    ASSERT_TRUE(cli.execute("edit policy", context));
+
+    const auto result = cli.complete("edit 1", context);
+    ASSERT_EQ(result.items.size(), 1U);
+    EXPECT_EQ(result.items[0].value, "1");
+    ASSERT_TRUE(cli.execute("edit 1", context));
+    EXPECT_EQ(state->path(), "policy.[1]");
+}
+
+TEST_F(ConfigCli2Test, DuplicatePolicyNameIsRejectedAsAmbiguous) {
+    config.lookup("policy.[1].name") = "first";
+    ASSERT_TRUE(cli.execute("configure terminal", context));
+    EXPECT_FALSE(cli.execute("edit policy first", context));
+    EXPECT_TRUE(state->path().empty());
+}
+
 TEST_F(ConfigCli2Test, CompletionReadsCurrentNodeAndPreviousArgument) {
     ASSERT_TRUE(cli.execute("configure terminal", context));
     ASSERT_TRUE(cli.execute("edit policy [0]", context));
@@ -241,12 +275,12 @@ TEST_F(ConfigCli2Test, AddAndRemoveAreImmediatelyVisibleToCompletion) {
     ASSERT_TRUE(cli.execute("edit policy", context));
     ASSERT_TRUE(cli.execute("add third", context));
 
-    auto after_add = cli.complete("edit [", context);
+    auto after_add = cli.complete("edit ", context);
     ASSERT_EQ(after_add.items.size(), 3U);
-    EXPECT_EQ(after_add.items.back().value, "[2]");
+    EXPECT_EQ(after_add.items.back().value, "third");
 
     ASSERT_TRUE(cli.execute("remove [2]", context));
-    auto after_remove = cli.complete("edit [", context);
+    auto after_remove = cli.complete("edit ", context);
     ASSERT_EQ(after_remove.items.size(), 2U);
 }
 
@@ -335,18 +369,37 @@ TEST_F(ConfigCli2Test, RemoveAndMoveAreHiddenOutsideObjectCollections) {
 TEST_F(ConfigCli2Test, IndexedEntryCompletionShowsItsSemanticName) {
     ASSERT_TRUE(cli.execute("configure terminal", context));
     ASSERT_TRUE(cli.execute("edit policy", context));
-    const auto result = cli.complete("edit [0", context);
+    const auto result = cli.complete("edit fir", context);
     ASSERT_EQ(result.items.size(), 1U);
-    EXPECT_EQ(result.items[0].value, "[0]");
+    EXPECT_EQ(result.items[0].value, "first");
     EXPECT_EQ(result.items[0].description, "first");
+}
+
+TEST_F(ConfigCli2Test, EntryDescriptionCanBeEnrichedWithoutChangingItsSelector) {
+    access.describe_entry = [](std::string_view parent, const libconfig::Setting& entry) {
+        if (parent != "policy") return std::string{};
+        return std::string(static_cast<const char*>(entry["name"])) + ": any -> internet:https, nat: auto -> accept";
+    };
+    state.reset(new ConfigCli2Session(access));
+    context.user_data = state.get();
+    libcli2::Cli custom_cli;
+    state->register_commands(custom_cli);
+
+    ASSERT_TRUE(custom_cli.execute("configure terminal", context));
+    ASSERT_TRUE(custom_cli.execute("edit policy", context));
+    const auto result = custom_cli.complete("edit fir", context);
+    ASSERT_EQ(result.items.size(), 1U);
+    EXPECT_EQ(result.items[0].value, "first");
+    EXPECT_EQ(result.items[0].description, "first: any -> internet:https, nat: auto -> accept");
 }
 
 TEST_F(ConfigCli2Test, AddIsAvailableForAnotherExplicitOrderedCollection) {
     ASSERT_TRUE(cli.execute("configure terminal", context));
     ASSERT_TRUE(cli.execute("edit signatures", context));
     ASSERT_TRUE(cli.execute("add named-signature", context));
-    const auto result = cli.complete("edit [", context);
+    const auto result = cli.complete("edit named", context);
     ASSERT_EQ(result.items.size(), 1U);
+    EXPECT_EQ(result.items[0].value, "named-signature");
     EXPECT_EQ(result.items[0].description, "named-signature");
 }
 

@@ -26,6 +26,7 @@ struct ConfigCli2Access {
     std::recursive_mutex* mutex = nullptr;
     std::function<std::vector<libcli2::CompletionItem>(std::string_view path, std::string_view property)> values;
     std::function<std::vector<libcli2::CompletionItem>(std::string_view path)> add_arguments;
+    std::function<std::string(std::string_view parent_path, const libconfig::Setting& entry)> describe_entry;
     std::function<ConfigCollectionKind(std::string_view path)> collection_kind;
     std::function<bool(std::string_view path)> can_add;
     std::function<bool(std::string_view path)> can_move;
@@ -54,7 +55,8 @@ private:
     bool enter_path(const std::vector<std::string>& components);
     std::vector<libcli2::CompletionItem> children_at(const std::vector<std::string>& components) const;
     std::vector<libcli2::CompletionItem> current_children() const;
-    std::vector<libcli2::CompletionItem> children(const libconfig::Setting& setting) const;
+    std::vector<libcli2::CompletionItem> children(const libconfig::Setting& setting,
+                                                   bool navigation_aliases = false) const;
     bool navigable(const libconfig::Setting& setting) const;
     std::vector<libcli2::CompletionItem> properties() const;
     std::vector<libcli2::CompletionItem> toggle_properties() const;
