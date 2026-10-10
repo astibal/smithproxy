@@ -61,10 +61,10 @@ std::string FqdnAddress::to_string(int verbosity) const {
 
         auto lc_ = std::scoped_lock(DNS::get_dns_lock());
 
-        if(DNS::get_dns_cache().get("A:"+fqdn_) != nullptr) {
+        if(DNS::get_dns_cache().get(dns_cache_key("A", fqdn_)) != nullptr) {
             cached_a = true;
         }
-        if(DNS::get_dns_cache().get("AAAA:"+fqdn_) != nullptr) {
+        if(DNS::get_dns_cache().get(dns_cache_key("AAAA", fqdn_)) != nullptr) {
             cached_4a = true;
         }
 
@@ -88,9 +88,9 @@ std::string FqdnAddress::to_string(int verbosity) const {
 std::shared_ptr<DNS_Response> FqdnAddress::find_dns_response(int cidr_type) const {
 
     if (cidr_type == CIDR_IPV4) {
-        return DNS::get_dns_cache().get("A:" + fqdn_);
+        return DNS::get_dns_cache().get(dns_cache_key("A", fqdn_));
     } else if (cidr_type == CIDR_IPV6) {
-        return DNS::get_dns_cache().get("AAAA:" + fqdn_);
+        return DNS::get_dns_cache().get(dns_cache_key("AAAA", fqdn_));
     }
 
     return nullptr;
