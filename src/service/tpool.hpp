@@ -111,7 +111,7 @@ private:
                 info_long.emplace_back();
                 info_details.emplace_back();
                 log_buffer.emplace_back();
-                is_finished.emplace_back(false);
+                is_finished.emplace_back(true);
             }
         };
 
