@@ -509,6 +509,23 @@ void SmithProxy::run() {
             ++wh_nbr_seconds;
         }
 
+        static unsigned int ct_warning_seconds = 5 * 60;
+        if(ct_warning_seconds >= 5 * 60) {
+            bool ct_unavailable = false;
+            {
+                const auto lock = std::scoped_lock(CfgFactory::lock());
+                ct_unavailable = CfgFactory::get()->ct_requested() &&
+                    !SSLFactory::factory().is_ct_available();
+            }
+            if(ct_unavailable) {
+                _war("%s", CfgFactory::CT_UNAVAILABLE_WARNING.data());
+                Log::get()->events().insert(
+                    WAR, "%s", CfgFactory::CT_UNAVAILABLE_WARNING.data());
+            }
+            ct_warning_seconds = 0;
+        }
+        ++ct_warning_seconds;
+
         // Keep the housekeeping loop paced even when webhooks are disabled.
         std::this_thread::sleep_for(std::chrono::seconds(1));
 #ifdef ASAN_LEAKS

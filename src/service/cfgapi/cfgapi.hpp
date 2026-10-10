@@ -204,6 +204,9 @@ public:
     constexpr static inline const int SCHEMA_VERSION  = 1047;
 
     static inline std::atomic_bool LOAD_ERRORS = false;
+    static constexpr std::string_view CT_UNAVAILABLE_WARNING =
+        "Certificate Transparency is enabled by policy, but the CT log list is "
+        "unavailable. CT validation remains FAIL-CLOSED.";
 
     CfgFactory() = default;
     CfgFactory(CfgFactory const &) = delete;
@@ -227,6 +230,8 @@ public:
     static std::recursive_mutex& lock() { return get()->lock_; }
     static libconfig::Setting& cfg_root() { return get()->cfgapi.getRoot(); }
     static libconfig::Config&  cfg_obj() { return get()->cfgapi; }
+
+    [[nodiscard]] bool ct_requested() const;
 
     loglevel args_debug_flag = NON;
 

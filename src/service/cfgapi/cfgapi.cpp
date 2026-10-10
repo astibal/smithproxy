@@ -77,6 +77,15 @@
 
 using namespace libconfig;
 
+bool CfgFactory::ct_requested() const {
+    return std::any_of(db_prof_tls.begin(), db_prof_tls.end(),
+        [](const auto& entry) {
+            const auto profile =
+                std::dynamic_pointer_cast<ProfileTls>(entry.second);
+            return profile && profile->opt_ct_enable;
+        });
+}
+
 std::map<std::string, std::shared_ptr<CfgElement>>& CfgFactory::section_db(std::string const& section) {
     if(section == "proto_objects" or section == "proto_objects.[x]") {
         return db_proto;

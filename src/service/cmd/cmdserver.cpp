@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <arpa/inet.h>
+#include <chrono>
 #include <cstring>
 #include <sstream>
 #include <sys/socket.h>
@@ -39,9 +40,17 @@ struct CliGlobals {
         static const std::string value = create_hostname();
         return value;
     }
-    static thread_local inline bool ct_warning_flag = false;
+    static thread_local inline std::chrono::steady_clock::time_point
+        ct_warning_next{};
     static thread_local inline bool cfg_error_flag = false;
 };
+
+constexpr auto ct_warning_interval = std::chrono::minutes(5);
+
+bool ct_is_requested() {
+    const auto lock = std::scoped_lock(CfgFactory::lock());
+    return CfgFactory::get()->ct_requested();
+}
 
 std::string prompt(const libcli2::Context& context) {
     const auto d = context.decor();
@@ -101,11 +110,18 @@ int regular(libcli2::Context& context) {
                       d.command("show event list") + " to see more details");
         CliGlobals::cfg_error_flag = true;
     }
-    if (!SSLFactory::factory().is_ct_available() && !CliGlobals::ct_warning_flag) {
+    const bool ct_unavailable = ct_is_requested() &&
+                                !SSLFactory::factory().is_ct_available();
+    const auto now = std::chrono::steady_clock::now();
+    if(ct_unavailable && now >= CliGlobals::ct_warning_next) {
         const auto d = context.decor();
-        context.print(d.warning("Warning: Certificate Transparency checks not available") + "\n    - download it using " +
+        context.print(d.warning(std::string("Warning: ") +
+                      CfgFactory::CT_UNAVAILABLE_WARNING.data()) +
+                      "\n    - download it using " +
                       d.command("sx_download_ctlog") + " and restart service");
-        CliGlobals::ct_warning_flag = true;
+        CliGlobals::ct_warning_next = now + ct_warning_interval;
+    } else if(!ct_unavailable) {
+        CliGlobals::ct_warning_next = {};
     }
     return 0;
 }
