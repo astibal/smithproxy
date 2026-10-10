@@ -462,6 +462,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/proxy/ssh/sshprotocol.cpp
                 src/proxy/ssh/tests/sshprotocol_test.cpp
                 src/proxy/tests/streamhandler_test.cpp
+                src/proxy/tests/mitmproxy_identity_tests.cpp
                 src/proxy/socks5/socks5_protocol_tests.cpp
                 src/proxy/tests/explicitproxy_dns_state_tests.cpp
                 src/proxy/tests/proxymaker_utils_tests.cpp
