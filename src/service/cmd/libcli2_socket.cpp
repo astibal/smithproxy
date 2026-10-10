@@ -1,4 +1,5 @@
 #include "libcli2_socket.hpp"
+#include "cli_socket_io.hpp"
 
 #include <algorithm>
 #include <cerrno>
@@ -10,26 +11,10 @@
 
 namespace {
 
-bool write_all(libcli2::FdTransport& transport, std::string_view text) {
-    std::size_t written = 0;
-    while (written < text.size()) {
-        const auto count = transport.write_some(text.data() + written, text.size() - written);
-        if (count > 0) { written += static_cast<std::size_t>(count); continue; }
-        return false;
-    }
-    return true;
-}
-
-bool read_exact(libcli2::FdTransport& transport, void* destination, std::size_t size) {
-    auto* bytes = static_cast<unsigned char*>(destination);
-    std::size_t received = 0;
-    while (received < size) {
-        const auto count = transport.read_some(bytes + received, size - received);
-        if (count <= 0) return false;
-        received += static_cast<std::size_t>(count);
-    }
-    return true;
-}
+// The socket editor is reachable before authentication.  Keep one partial
+// line bounded so an idle local client cannot grow memory indefinitely (and
+// make redraw cost quadratic) merely by withholding the newline.
+constexpr std::size_t max_input_line_size = 4096;
 
 std::string common_prefix(const std::vector<libcli2::CompletionItem>& items) {
     if (items.empty()) return {};
@@ -51,26 +36,26 @@ public:
         line.clear();
         std::size_t cursor = 0, history_index = history_.size();
         std::string saved_line;
-        if (!write_all(transport_, prompt)) return false;
+        if (!sx::cli::write_all(transport_, prompt)) return false;
         while (true) {
             pollfd descriptor{transport_.input_fd(), POLLIN, 0};
             const int ready = ::poll(&descriptor, 1, 1000);
             if (ready < 0) { if (errno == EINTR) continue; return false; }
             if (ready == 0) {
                 if (regular_ && regular_(context_) != 0) return false;
-                if (echo) redraw(prompt, line, cursor);
+                if (echo && !redraw(prompt, line, cursor)) return false;
                 continue;
             }
             unsigned char key = 0;
             if (transport_.read_some(&key, 1) != 1) return false;
             if (key == 0xff) {
                 unsigned char option[2];
-                if (!read_exact(transport_, option, sizeof(option))) return false;
+                if (!read_exact(option, sizeof(option))) return false;
                 continue;
             }
             if (key == '\r' || key == '\n') {
                 if (key == '\r') consume_lf();
-                write_all(transport_, "\r\n");
+                sx::cli::write_all(transport_, "\r\n");
                 if (echo && !line.empty() && (history_.empty() || history_.back() != line)) history_.push_back(line);
                 return true;
             }
@@ -88,7 +73,7 @@ public:
             else if (key == '?') show_help(line, cursor);
             else if (key == 27) {
                 unsigned char sequence[2];
-                if (!read_exact(transport_, sequence, sizeof(sequence))) return false;
+                if (!read_exact(sequence, sizeof(sequence))) return false;
                 if (sequence[0] != '[') continue;
                 if (sequence[1] == 'C' && cursor < line.size()) ++cursor;
                 if (sequence[1] == 'D' && cursor > 0) --cursor;
@@ -100,22 +85,46 @@ public:
                     ++history_index; line = history_index == history_.size() ? saved_line : history_[history_index];
                     cursor = line.size();
                 }
-            } else if (key >= 32) line.insert(cursor++, 1, static_cast<char>(key));
-            redraw(prompt, line, cursor);
+            } else if (key >= 32) {
+                if (line.size() >= max_input_line_size) return false;
+                line.insert(cursor++, 1, static_cast<char>(key));
+            }
+            if(!redraw(prompt, line, cursor)) return false;
         }
     }
 
 private:
+    bool read_exact(void* destination, std::size_t size) {
+        auto* bytes = static_cast<unsigned char*>(destination);
+        std::size_t received = 0;
+        while (received < size) {
+            pollfd descriptor{transport_.input_fd(), POLLIN, 0};
+            const int ready = ::poll(&descriptor, 1, 1000);
+            if (ready < 0) {
+                if (errno == EINTR) continue;
+                return false;
+            }
+            if (ready == 0) {
+                if (regular_ && regular_(context_) != 0) return false;
+                continue;
+            }
+            const auto count = transport_.read_some(bytes + received, size - received);
+            if (count <= 0) return false;
+            received += static_cast<std::size_t>(count);
+        }
+        return true;
+    }
+
     void consume_lf() const {
         pollfd descriptor{transport_.input_fd(), POLLIN, 0};
         if (::poll(&descriptor, 1, 0) <= 0) return;
         unsigned char next = 0; ::recv(transport_.input_fd(), &next, 1, MSG_PEEK);
         if (next == '\n' || next == 0) transport_.read_some(&next, 1);
     }
-    void redraw(const std::string& prompt, const std::string& line, std::size_t cursor) const {
+    bool redraw(const std::string& prompt, const std::string& line, std::size_t cursor) const {
         std::string output = "\r\033[2K" + prompt + line;
         if (cursor < line.size()) output += "\033[" + std::to_string(line.size() - cursor) + "D";
-        write_all(transport_, output);
+        return sx::cli::write_all(transport_, output);
     }
     void show_items(const std::vector<libcli2::CompletionItem>& items) const {
         const auto d = context_.decor();
@@ -126,7 +135,7 @@ private:
             if (!item.description.empty()) output += "\t" + d.muted(item.description);
             output += "\r\n";
         }
-        write_all(transport_, output);
+        sx::cli::write_all(transport_, output);
     }
     void complete(std::string& line, std::size_t& cursor) {
         const auto result = cli_.complete(std::string_view(line).substr(0, cursor), context_);
@@ -150,7 +159,7 @@ private:
         if (output.empty()) { show_items({}); return; }
         std::string wire = "\r\n";
         for (char ch : output) wire += ch == '\n' ? "\r\n" : std::string(1, ch);
-        write_all(transport_, wire);
+        sx::cli::write_all(transport_, wire);
     }
 
     libcli2::FdTransport& transport_;
@@ -164,7 +173,7 @@ private:
 
 int libcli2_socket_loop(libcli2::FdTransport& transport, Libcli2SocketOptions options) {
     static constexpr char telnet_options[] = "\xff\xfb\x03\xff\xfb\x01\xff\xfd\x03\xff\xfd\x01";
-    write_all(transport, std::string_view(telnet_options, sizeof(telnet_options) - 1));
+    sx::cli::write_all(transport, std::string_view(telnet_options, sizeof(telnet_options) - 1));
 
     libcli2::Cli cli;
     libcli2::Context context;
@@ -176,7 +185,7 @@ int libcli2_socket_loop(libcli2::FdTransport& transport, Libcli2SocketOptions op
         std::string wire;
         for (char ch : text) wire += ch == '\n' ? "\r\n" : std::string(1, ch);
         wire += "\r\n";
-        write_all(transport, wire);
+        sx::cli::write_all(transport, wire);
     };
     ConfigCli2Session config(std::move(options.config_access));
     context.user_data = &config;
@@ -237,7 +246,7 @@ int libcli2_socket_loop(libcli2::FdTransport& transport, Libcli2SocketOptions op
         });
     if (options.register_commands) options.register_commands(cli);
     SocketEditor editor(transport, cli, context, options.regular);
-    if (!options.banner.empty()) write_all(transport, context.decor().heading(options.banner) + "\r\n");
+    if (!options.banner.empty()) sx::cli::write_all(transport, context.decor().heading(options.banner) + "\r\n");
 
     if (options.authenticate) {
         bool accepted = false;
@@ -245,7 +254,7 @@ int libcli2_socket_loop(libcli2::FdTransport& transport, Libcli2SocketOptions op
             std::string username, password;
             if (!editor.read_line("Username: ", username) || !editor.read_line("Password: ", password, false)) return -1;
             accepted = options.authenticate(username, password) == 0;
-            if (!accepted) write_all(transport, context.decor().error("Access denied") + "\r\n");
+            if (!accepted) sx::cli::write_all(transport, context.decor().error("Access denied") + "\r\n");
         }
         if (!accepted) return -1;
         if (options.privilege_after_auth) context.privilege = 15;
@@ -264,19 +273,19 @@ int libcli2_socket_loop(libcli2::FdTransport& transport, Libcli2SocketOptions op
                 std::string password;
                 if (!editor.read_line("Password: ", password, false)) break;
                 if (password == options.enable_password) context.privilege = 15;
-                else write_all(transport, context.decor().error("Access denied") + "\r\n");
+                else sx::cli::write_all(transport, context.decor().error("Access denied") + "\r\n");
             }
             continue;
         }
         const auto result = cli.execute(line, context);
         if (result.handler_status == 1) break;
         if (result.status != libcli2::ExecuteStatus::ok && result.status != libcli2::ExecuteStatus::empty) {
-            write_all(transport, context.decor().error("% " + result.message) + "\r\n");
+            sx::cli::write_all(transport, context.decor().error("% " + result.message) + "\r\n");
             if (!result.candidates.empty()) {
                 const auto d = context.decor();
                 std::string candidates = d.muted("  candidates:");
                 for (const auto& candidate : result.candidates) candidates += " " + d.command(candidate);
-                write_all(transport, candidates + "\r\n");
+                sx::cli::write_all(transport, candidates + "\r\n");
             }
         }
     }

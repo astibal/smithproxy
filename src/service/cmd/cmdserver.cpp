@@ -1,4 +1,5 @@
 #include "cmdserver.hpp"
+#include "cli_client_tasks.hpp"
 
 #include "cli_debug_state.hpp"
 #include "config_cli2_smithproxy.hpp"
@@ -21,6 +22,7 @@
 #include <algorithm>
 #include <arpa/inet.h>
 #include <chrono>
+#include <cerrno>
 #include <cstring>
 #include <sstream>
 #include <sys/socket.h>
@@ -180,28 +182,66 @@ void cli_loop(unsigned short port) {
     static auto log = logan::create("service");
     sockaddr_in address{};
     int reuse = 1;
-    const int server = socle::socket(AF_INET, SOCK_STREAM, 0);
-    socle::setsockopt(server, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+    const int server = socle::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (server < 0) {
+        _err("cli main thread - cannot create listener: %s", string_error().c_str());
+        return;
+    }
+    if (socle::setsockopt(server, SOL_SOCKET, SO_REUSEADDR,
+                          &reuse, sizeof(reuse)) != 0) {
+        _err("cli main thread - cannot configure listener: %s", string_error().c_str());
+        close(server);
+        return;
+    }
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     address.sin_port = htons(port);
     while (socle::bind(server, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
         if (SmithProxy::instance().terminate_flag) { close(server); return; }
         _err("cli main thread - cannot bind %d port: %s", port, string_error().c_str());
+        if(errno != EADDRINUSE) {
+            close(server);
+            return;
+        }
         sleep(1);
     }
-    socle::listen(server, 50);
+    if (socle::listen(server, 50) != 0) {
+        _err("cli main thread - cannot listen on port %d: %s", port, string_error().c_str());
+        close(server);
+        return;
+    }
     epoll poller;
-    if (poller.init() <= 0) { _err("cli main thread: Can't initialize epoll"); close(server); return; }
-    poller.add(server, EPOLLIN);
-    std::vector<std::thread> clients;
+    if (poller.init() < 0) { _err("cli main thread: Can't initialize epoll"); close(server); return; }
+    if (!poller.add(server, EPOLLIN)) {
+        _err("cli main thread: Can't monitor listener");
+        close(server);
+        return;
+    }
+    std::vector<sx::cli::client_task> clients;
     while (!SmithProxy::instance().terminate_flag) {
+        sx::cli::reap_finished_client_tasks(clients);
         if (poller.wait(1000) <= 0) continue;
         sockaddr_storage peer{};
         socklen_t length = sizeof(peer);
-        const int client = accept(server, reinterpret_cast<sockaddr*>(&peer), &length);
-        if (client >= 0) clients.emplace_back(client_thread, client);
+        const int client = accept4(server, reinterpret_cast<sockaddr*>(&peer), &length,
+                                   SOCK_CLOEXEC | SOCK_NONBLOCK);
+        if (client >= 0) {
+            auto finished = std::make_shared<std::atomic_bool>(false);
+            clients.push_back({
+                std::thread([client, finished] {
+                    try {
+                        client_thread(client);
+                    } catch(std::exception const& error) {
+                        _err("CLI client thread failed: %s", error.what());
+                    } catch(...) {
+                        _err("CLI client thread failed with an unknown exception");
+                    }
+                    finished->store(true, std::memory_order_release);
+                }),
+                std::move(finished),
+            });
+        }
     }
     close(server);
-    for (auto& client : clients) if (client.joinable()) client.join();
+    for (auto& client : clients) if (client.worker.joinable()) client.worker.join();
 }

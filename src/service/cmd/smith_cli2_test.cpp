@@ -49,7 +49,8 @@ std::shared_ptr<DNS_Response> send_dns_request(libcli2::Context& context, const 
     context.print(context.decor().heading("DNS generated request:") + "\n" + hex_dump(request) + ", " +
                   context.decor().value(std::to_string(generated) + "B"));
 
-    const int fd = socle::socket(nameserver.family, SOCK_DGRAM, IPPROTO_UDP);
+    const int fd = socle::socket(nameserver.family,
+                                 SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
     if (fd < 0 || ::connect(fd, reinterpret_cast<const sockaddr*>(nameserver.as_ss()), sizeof(sockaddr_storage)) != 0) {
         if (fd >= 0) ::close(fd);
         context.print(libcli2::Style::error, "cannot connect socket");

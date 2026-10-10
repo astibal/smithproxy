@@ -1,10 +1,86 @@
 #include "config_cli2.hpp"
+#include "cli_client_tasks.hpp"
+#include "cli_socket_io.hpp"
+#include <service/cfgapi/cfg_numeric.hpp>
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cerrno>
+#include <sys/socket.h>
+#include <unistd.h>
 
 namespace {
+
+TEST(ConfigNumeric, RejectsPartialAndOutOfRangeValuesWithoutThrowing) {
+    EXPECT_EQ(sx::cfg::parse_number<int>("2147483647"), 2147483647);
+    EXPECT_FALSE(sx::cfg::parse_number<int>("2147483648"));
+    EXPECT_FALSE(sx::cfg::parse_number<int>("12junk"));
+    EXPECT_FALSE(sx::cfg::parse_number<long long>("999999999999999999999"));
+    EXPECT_EQ(sx::cfg::parse_number<float>("1.25"), 1.25F);
+    EXPECT_FALSE(sx::cfg::parse_number<float>("1.25junk"));
+    EXPECT_EQ(sx::cfg::parse_number<int>(""), 0);
+    EXPECT_TRUE(sx::cfg::integer_array_path("settings.udp_quick_ports"));
+    EXPECT_TRUE(sx::cfg::integer_array_path(
+        "tls_profiles.fresh.redirect_warning_ports"));
+    EXPECT_FALSE(sx::cfg::integer_array_path(
+        "tls_profiles.fresh.sni_filter_bypass"));
+    EXPECT_EQ(sx::cfg::parse_transport_port("0"), 0);
+    EXPECT_EQ(sx::cfg::parse_transport_port("65535"), 65535);
+    EXPECT_FALSE(sx::cfg::parse_transport_port(""));
+    EXPECT_FALSE(sx::cfg::parse_transport_port("443junk"));
+    EXPECT_FALSE(sx::cfg::parse_transport_port("+443"));
+    EXPECT_FALSE(sx::cfg::parse_transport_port("65536"));
+    EXPECT_EQ(sx::cfg::parse_transport_port("64535", 1000), 64535);
+    EXPECT_FALSE(sx::cfg::parse_transport_port("64536", 1000));
+}
+
+TEST(CliClientTasks, ReapsOnlyCompletedSessionThreads) {
+    std::atomic_bool release {false};
+    auto completed = std::make_shared<std::atomic_bool>(false);
+    auto running = std::make_shared<std::atomic_bool>(false);
+    std::vector<sx::cli::client_task> tasks;
+    tasks.push_back({std::thread([completed] {
+                         completed->store(true, std::memory_order_release);
+                     }), completed});
+    tasks.push_back({std::thread([running, &release] {
+                         while(!release.load(std::memory_order_acquire))
+                             std::this_thread::yield();
+                         running->store(true, std::memory_order_release);
+                     }), running});
+
+    while(!completed->load(std::memory_order_acquire))
+        std::this_thread::yield();
+    EXPECT_EQ(sx::cli::reap_finished_client_tasks(tasks), 1U);
+    ASSERT_EQ(tasks.size(), 1U);
+    EXPECT_EQ(tasks.front().finished, running);
+
+    release.store(true, std::memory_order_release);
+    while(!running->load(std::memory_order_acquire))
+        std::this_thread::yield();
+    EXPECT_EQ(sx::cli::reap_finished_client_tasks(tasks), 1U);
+    EXPECT_TRUE(tasks.empty());
+}
+
+TEST(CliSocketIo, StalledNonblockingClientCannotTrapAWriter) {
+    int sockets[2] {-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC,
+                           0, sockets), 0);
+    libcli2::FdTransport writer(libcli2::FdPair(sockets[0], sockets[0]));
+    std::string block(64 * 1024, 'x');
+
+    ssize_t result;
+    do {
+        result = writer.write_some(block.data(), block.size());
+    } while(result > 0);
+    const int write_error = errno;
+    ASSERT_LT(result, 0);
+    ASSERT_TRUE(write_error == EAGAIN || write_error == EWOULDBLOCK)
+        << "unexpected write error " << write_error;
+    EXPECT_FALSE(sx::cli::write_all(writer, "blocked", 0));
+
+    ::close(sockets[1]);
+}
 
 class ConfigCli2Test : public testing::Test {
 protected:
