@@ -81,17 +81,50 @@ void CaptureProtocolTracer::trace(
 
         auto const unix_us = std::chrono::duration_cast<std::chrono::microseconds>(
             wall_now.time_since_epoch()).count();
+        record entry;
+        entry.sequence = ++sequence_;
+        entry.timestamp = utc_timestamp(wall_now);
+        entry.timestamp_unix_us = unix_us;
+        entry.delta_us = delta;
+        entry.side = event.side;
+        entry.component = event.component;
+        entry.scope = event.scope;
+        if(event.has_subject_id) entry.subject_id = event.subject_id;
+        else entry.subject_id = default_subject_;
+        entry.event = event.event;
+        entry.status = event.status;
+        entry.detail = event.detail;
+
         std::ostringstream row;
-        row << ++sequence_ << ',' << utc_timestamp(wall_now) << ',' << unix_us
-            << ',' << delta << ',' << socle::to_string(event.side) << ','
-            << socle::to_string(event.component) << ','
-            << socle::to_string(event.scope) << ',';
-        if(event.has_subject_id) row << event.subject_id;
-        else if(default_subject_) row << *default_subject_;
-        row << ',' << socle::to_string(event.event) << ','
-            << socle::to_string(event.status) << ',' << csv_field(event.detail);
+        row << entry.sequence << ',' << entry.timestamp << ','
+            << entry.timestamp_unix_us << ',' << entry.delta_us << ','
+            << socle::to_string(entry.side) << ','
+            << socle::to_string(entry.component) << ','
+            << socle::to_string(entry.scope) << ',';
+        if(entry.subject_id) row << *entry.subject_id;
+        row << ',' << socle::to_string(entry.event) << ','
+            << socle::to_string(entry.status) << ',' << csv_field(entry.detail);
         write(row.str());
+
+        if(records_.size() < maximum_webhook_records)
+            records_.push_back(std::move(entry));
+        else
+            ++dropped_records_;
     } catch(...) {
         // Diagnostics must never affect the proxied connection.
     }
+}
+
+CaptureProtocolTracer::snapshot CaptureProtocolTracer::records(
+    std::optional<std::uint64_t> subject_id) const {
+    std::scoped_lock lock(mutex_);
+    snapshot result;
+    result.dropped = dropped_records_;
+    result.records.reserve(records_.size());
+    for(auto const& entry : records_) {
+        if(subject_id && entry.subject_id && entry.subject_id != subject_id)
+            continue;
+        result.records.push_back(entry);
+    }
+    return result;
 }

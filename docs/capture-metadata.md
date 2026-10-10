@@ -137,3 +137,30 @@ diag capture schemas
 written block counters and the number of captured `L`/`R` TLS-ready snapshots.
 `schemas` prints the PEN, block type and registered namespace/schema versions.
 Counters are process-local and reset when Smithproxy restarts.
+
+## Webhook parity
+
+When webhooks are enabled, the final `connection-info` event mirrors generated
+capture enrichment under `capture`:
+
+```json
+{
+  "capture": {
+    "metadata": { "schema": "smithproxy.metadata.v1" },
+    "statistics": { "schema": "smithproxy.statistics.v1" },
+    "tls": { "schema": "smithproxy.tls.v1" },
+    "protocol_profile": {
+      "schema": "smithproxy.protocol-profile.v1",
+      "dropped": 0,
+      "events": []
+    }
+  }
+}
+```
+
+The JSON objects for metadata, statistics and TLS are the same values written
+to `SXME`, `SXST` and `SXTL`. Protocol events are represented as structured JSON
+instead of CSV. The in-memory webhook journal is bounded to 1024 events; SXPP
+capture remains complete, while `dropped` reports records omitted from the
+webhook payload. For QUIC streams, each webhook receives connection-level
+events plus events for its own stream ID, not events from sibling streams.

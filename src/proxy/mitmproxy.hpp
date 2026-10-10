@@ -110,10 +110,15 @@ class MitmProxy : public baseProxy, public IOController {
     void write_capture_enrichment();
     void observe_tls_ready();
     void write_capture_block(std::array<uint8_t, 4> name_space,
-                             nlohmann::json payload);
+                             nlohmann::json const& payload);
     [[nodiscard]] nlohmann::json capture_identity() const;
+    [[nodiscard]] std::optional<nlohmann::json>
+    capture_protocol_profile();
     std::optional<nlohmann::json> capture_tls_left_;
     std::optional<nlohmann::json> capture_tls_right_;
+    std::optional<nlohmann::json> capture_metadata_payload_;
+    std::optional<nlohmann::json> capture_statistics_payload_;
+    std::optional<nlohmann::json> capture_tls_payload_;
     bool capture_tls_written_ = false;
     std::unique_ptr<CaptureProtocolTracer> protocol_tracer_;
     socle::ProtocolTracer* active_protocol_tracer_ = nullptr;

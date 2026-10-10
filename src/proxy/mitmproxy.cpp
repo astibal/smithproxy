@@ -354,7 +354,7 @@ MitmProxy::~MitmProxy() {
     }
 
 
-    if(not filters_.empty() and sx::http::webhooks::is_enabled()) {
+    if(sx::http::webhooks::is_enabled()) {
         auto event = nlohmann::json();
         bool got_something = false;
 
@@ -366,6 +366,24 @@ MitmProxy::~MitmProxy() {
             else {
                 _dia("filter %s did not profile any useful data for webhook", name.c_str());
             }
+        }
+
+        auto capture = nlohmann::json::object();
+        if(capture_metadata_payload_) {
+            capture["metadata"] = *capture_metadata_payload_;
+        }
+        if(capture_statistics_payload_) {
+            capture["statistics"] = *capture_statistics_payload_;
+        }
+        if(capture_tls_payload_) {
+            capture["tls"] = *capture_tls_payload_;
+        }
+        if(auto profile = capture_protocol_profile(); profile) {
+            capture["protocol_profile"] = std::move(*profile);
+        }
+        if(!capture.empty()) {
+            event["capture"] = std::move(capture);
+            got_something = true;
         }
 
         if(got_something) {
@@ -461,6 +479,42 @@ nlohmann::json MitmProxy::capture_identity() const {
     };
 }
 
+std::optional<nlohmann::json> MitmProxy::capture_protocol_profile() {
+    if(!writer_opts()->proto_profiling || !active_protocol_tracer_)
+        return std::nullopt;
+    auto const* tracer = dynamic_cast<CaptureProtocolTracer const*>(
+        active_protocol_tracer_);
+    if(!tracer) return std::nullopt;
+
+    auto const snapshot = tracer->records(protocol_trace_subject_);
+    if(snapshot.records.empty() && snapshot.dropped == 0)
+        return std::nullopt;
+
+    nlohmann::json events = nlohmann::json::array();
+    for(auto const& entry : snapshot.records) {
+        nlohmann::json item = {
+            {"seq", entry.sequence},
+            {"timestamp", entry.timestamp},
+            {"timestamp_unix_us", entry.timestamp_unix_us},
+            {"delta_us", entry.delta_us},
+            {"side", socle::to_string(entry.side)},
+            {"component", socle::to_string(entry.component)},
+            {"scope", socle::to_string(entry.scope)},
+            {"event", socle::to_string(entry.event)},
+            {"status", socle::to_string(entry.status)},
+            {"detail", entry.detail},
+        };
+        if(entry.subject_id) item["stream_id"] = *entry.subject_id;
+        events.push_back(std::move(item));
+    }
+
+    return nlohmann::json {
+        {"schema", "smithproxy.protocol-profile.v1"},
+        {"dropped", snapshot.dropped},
+        {"events", std::move(events)},
+    };
+}
+
 std::atomic_uint64_t& MitmProxy::capture_sxme_written() {
     static std::atomic_uint64_t value{};
     return value;
@@ -514,7 +568,7 @@ void MitmProxy::reset_capture_diagnostics() noexcept {
 }
 
 void MitmProxy::write_capture_block(std::array<uint8_t, 4> name_space,
-                                    nlohmann::json payload) {
+                                    nlohmann::json const& payload) {
     if(!tlog()) return;
 
     auto const text = payload.dump();
@@ -560,11 +614,11 @@ void MitmProxy::observe_tls_ready() {
     }
     if(!capture_tls_left_ || !capture_tls_right_ || !tlog()) return;
 
-    auto tls = sx::capture::tls_payload(
+    capture_tls_payload_ = sx::capture::tls_payload(
         capture_identity(),
         session_protocol().empty() ? "tcp" : std::string(session_protocol()),
         std::move(*capture_tls_left_), std::move(*capture_tls_right_));
-    write_capture_block({'S', 'X', 'T', 'L'}, std::move(tls));
+    write_capture_block({'S', 'X', 'T', 'L'}, *capture_tls_payload_);
     capture_tls_written_ = true;
 }
 
@@ -584,7 +638,8 @@ void MitmProxy::write_capture_enrichment() {
             {"client", ja4.ClientHello},
             {"server", ja4.ServerHello},
         };
-        write_capture_block({'S', 'X', 'M', 'E'}, std::move(metadata));
+        capture_metadata_payload_ = std::move(metadata);
+        write_capture_block({'S', 'X', 'M', 'E'}, *capture_metadata_payload_);
     }
 
     if(writer_opts()->auto_statistics) {
@@ -593,7 +648,9 @@ void MitmProxy::write_capture_enrichment() {
             auto statistics = capture_identity();
             statistics["schema"] = "smithproxy.statistics.v1";
             statistics["statistics"] = filter->to_json(iINF);
-            write_capture_block({'S', 'X', 'S', 'T'}, std::move(statistics));
+            capture_statistics_payload_ = std::move(statistics);
+            write_capture_block({'S', 'X', 'S', 'T'},
+                                *capture_statistics_payload_);
             break;
         }
     }
