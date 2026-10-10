@@ -43,6 +43,7 @@
 
 #include <atomic>
 #include <ctime>
+#include <nlohmann/json.hpp>
 
 #include <basecom.hpp>
 #include <hostcx.hpp>
@@ -103,6 +104,8 @@ class MitmProxy : public baseProxy, public IOController {
     std::string replacement_msg;
     static inline long half_timeout_ = 5;
     std::time_t created_at_ = std::time(nullptr);
+    void write_capture_enrichment();
+    [[nodiscard]] nlohmann::json capture_identity() const;
 public:
     using whitelist_verify_entry_t = expiring<whitelist_verify_entry> ;
     using whitelist_map_t = ptr_cache<std::string,whitelist_verify_entry_t>;
@@ -120,6 +123,8 @@ public:
 
     struct Opts_ContentWriter {
         bool write_payload = false;
+        bool auto_metadata = false;
+        bool auto_statistics = false;
 
         bool webhook_enable = false;
         bool webhook_lock_traffic = false;

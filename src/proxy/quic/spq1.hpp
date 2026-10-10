@@ -71,6 +71,8 @@ public:
     /** Forward session secrets to the capture implementation unchanged. */
     void write_secret(socle::traffic_secret_format format,
                       buffer const& data) override;
+    /** Forward serialized PCAPNG metadata blocks unchanged. */
+    void write_metadata(buffer const& block) override;
     void finish(socle::side_t side);
 
 private:

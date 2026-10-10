@@ -346,6 +346,16 @@ void CfgValueHelp::init() {
     add("settings.write_payload_file_suffix", "packet dumps file suffix")
         .help_quick("dump filename suffix");
 
+    add("settings.capture_auto_metadata", "automatically collect inexpensive metadata for captured content")
+        .help_quick("true or false")
+        .may_be_empty(false)
+        .value_filter(CfgValue::VALUE_BOOL);
+
+    add("settings.capture_auto_statistics", "automatically collect costly entropy and flow statistics for captured content; implies metadata")
+        .help_quick("true or false")
+        .may_be_empty(false)
+        .value_filter(CfgValue::VALUE_BOOL);
+
     add("settings.write_pcap_single_quota", "on how many bytes roll over pcap_single file (0 means never)")
             .help_quick("<number>")
             .may_be_empty(false)

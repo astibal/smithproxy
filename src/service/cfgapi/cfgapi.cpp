@@ -832,6 +832,12 @@ bool CfgFactory::load_settings () {
     load_if_exists(cfgapi.getRoot()["settings"], "accept_api", accept_api);
     load_if_exists(cfgapi.getRoot()["settings"], "policy_fail_open", policy_fail_open);
     load_if_exists(cfgapi.getRoot()["settings"], "policy_access_request_fail_open", policy_access_request_fail_open);
+    load_if_exists(cfgapi.getRoot()["settings"], "capture_auto_metadata", capture_automation.metadata);
+    load_if_exists(cfgapi.getRoot()["settings"], "capture_auto_statistics", capture_automation.statistics);
+    if(capture_automation.metadata or capture_automation.statistics) {
+        // Automatic metadata includes JA4S, which needs a retained ServerHello.
+        SSLComOptions::server_hello_copy = true;
+    }
     load_if_exists(cfgapi.getRoot()["settings"], "plaintext_port",listen_tcp_port_base); listen_tcp_port = listen_tcp_port_base;
     load_if_exists(cfgapi.getRoot()["settings"], "plaintext_workers",num_workers_tcp);
     load_if_exists(cfgapi.getRoot()["settings"], "ssl_port",listen_tls_port_base); listen_tls_port = listen_tls_port_base;
@@ -2933,9 +2939,18 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, MitmProxy *mitm_pro
             mitm_proxy->acct_opts.ja4_clienthello_ignore_sni = pc->ja4_tls_ch_ignore_sni;
             mitm_proxy->acct_opts.ja4_serverhello = pc->ja4_tls_sh;
             mitm_proxy->acct_opts.ja4_http = pc->ja4_http;
+            const bool auto_metadata = pc->write_payload
+                                       and (capture_automation.metadata
+                                            or capture_automation.statistics);
+            mitm_proxy->writer_opts()->auto_metadata = auto_metadata;
+            mitm_proxy->writer_opts()->auto_statistics = pc->write_payload
+                                                         and capture_automation.statistics;
+            mitm_proxy->acct_opts.ja4_clienthello |= auto_metadata;
+            mitm_proxy->acct_opts.ja4_serverhello |= auto_metadata;
+            mitm_proxy->acct_opts.ja4_http |= auto_metadata;
             auto* mh = MitmHostCX::from_baseHostCX(originator);
             if(mh) {
-                mh->engine_ctx.options.http.ja4h = true;
+                mh->engine_ctx.options.http.ja4h = mitm_proxy->acct_opts.ja4_http;
             }
 
             bool filter_ok = true;
@@ -2961,6 +2976,16 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, MitmProxy *mitm_pro
         else if(load_if_exists(cfgapi.getRoot()["settings"], "default_write_payload", cfg_wrt)) {
             _dia("policy_apply: global content profile: %d", cfg_wrt);
             mitm_proxy->writer_opts()->write_payload = cfg_wrt;
+            const bool auto_metadata = cfg_wrt and (capture_automation.metadata
+                                                     or capture_automation.statistics);
+            mitm_proxy->writer_opts()->auto_metadata = auto_metadata;
+            mitm_proxy->writer_opts()->auto_statistics = cfg_wrt and capture_automation.statistics;
+            mitm_proxy->acct_opts.ja4_clienthello |= auto_metadata;
+            mitm_proxy->acct_opts.ja4_serverhello |= auto_metadata;
+            mitm_proxy->acct_opts.ja4_http |= auto_metadata;
+            if(auto* mh = MitmHostCX::from_baseHostCX(originator); mh) {
+                mh->engine_ctx.options.http.ja4h = mitm_proxy->acct_opts.ja4_http;
+            }
         }
         
         if(mitm_proxy->writer_opts()->write_payload) {
@@ -3210,7 +3235,7 @@ bool CfgFactory::prof_script_apply (baseHostCX *originator, MitmProxy *new_proxy
 void CfgFactory::policy_apply_features(std::shared_ptr<PolicyRule> const & policy_rule, MitmProxy *mitm_proxy) {
 
     // apply feature tags
-    if(policy_rule and not policy_rule->features.empty()) {
+    if(policy_rule) {
         FilterProxy* sink_filter = nullptr;
         FilterProxy* statistics_filter = nullptr;
         FilterProxy* access_filter = nullptr;
@@ -3235,6 +3260,10 @@ void CfgFactory::policy_apply_features(std::shared_ptr<PolicyRule> const & polic
                         mitm_proxy, policy_access_request_fail_open);
                 }
             }
+        }
+
+        if(not statistics_filter and mitm_proxy->writer_opts()->auto_statistics) {
+            statistics_filter = new StatsFilter(mitm_proxy);
         }
 
         if(access_filter) {
@@ -5553,6 +5582,8 @@ int save_settings(Config& ex) {
     objects.add("accept_http_connect", Setting::TypeBoolean) = CfgFactory::get()->accept_http_connect;
     objects.add("policy_fail_open", Setting::TypeBoolean) = CfgFactory::get()->policy_fail_open;
     objects.add("policy_access_request_fail_open", Setting::TypeBoolean) = CfgFactory::get()->policy_access_request_fail_open;
+    objects.add("capture_auto_metadata", Setting::TypeBoolean) = CfgFactory::get()->capture_automation.metadata;
+    objects.add("capture_auto_statistics", Setting::TypeBoolean) = CfgFactory::get()->capture_automation.statistics;
 
     // nameservers
     Setting& it_ns  = objects.add("nameservers", Setting::TypeArray);

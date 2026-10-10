@@ -171,6 +171,10 @@ void stream_log::write_secret(socle::traffic_secret_format format,
     if (status() && output_) output_->write_secret(format, data);
 }
 
+void stream_log::write_metadata(buffer const& block) {
+    if(status() && output_) output_->write_metadata(block);
+}
+
 void stream_log::finish(socle::side_t side) {
     auto const index = side_index(side);
     if (finished_[index]) return;

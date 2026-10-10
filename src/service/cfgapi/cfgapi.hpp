@@ -347,6 +347,13 @@ public:
         std::string bind_interface;
     } capture_remote;
 
+    struct capture_automation_t {
+        // Cheap connection, policy, protocol and fingerprint metadata.
+        bool metadata = false;
+        // Entropy and flow/exchange analysis; implies metadata.
+        bool statistics = false;
+    } capture_automation;
+
     struct settings_webhook_t {
         bool enabled = false;
         std::string cfg_url;

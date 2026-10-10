@@ -70,6 +70,7 @@
 #include <socle/timed_guard.hpp>
 
 #include <inspect/fp/ja4.hpp>
+#include <traflog/traflog.hpp>
 
 using namespace socle;
 
@@ -265,6 +266,7 @@ MitmProxy::~MitmProxy() {
         }         
         
         if(tlog()) tlog()->write_left("Connection stop\n");
+        write_capture_enrichment();
     }
 
 
@@ -291,6 +293,59 @@ MitmProxy::~MitmProxy() {
     }
 
     current_sessions()--;
+}
+
+nlohmann::json MitmProxy::capture_identity() const {
+    return {
+        {"session_id", to_connection_ID()},
+        {"proxy_session_key", socle::traflog::traflog_file_key(
+            const_cast<MitmProxy*>(this), 'L')},
+    };
+}
+
+void MitmProxy::write_capture_enrichment() {
+    if(!tlog() || !writer_opts()->write_payload) return;
+
+    constexpr uint32_t ecosystem_pen = 67005U;
+    auto emit = [&](std::array<uint8_t, 4> name_space,
+                    nlohmann::json payload) {
+        auto const text = payload.dump();
+        socle::pcapng::pcapng_custom_block block;
+        block.pen = ecosystem_pen;
+        block.name_space = name_space;
+        block.entry_type = 1;
+        block.version = 1;
+        block.payload = std::make_shared<buffer>(text.data(), text.size());
+        buffer serialized;
+        if(block.append(serialized) != 0U) tlog()->write_metadata(serialized);
+    };
+
+    if(writer_opts()->auto_metadata) {
+        auto metadata = capture_identity();
+        metadata["schema"] = "smithproxy.metadata.v1";
+        metadata["started_at"] = created_at_;
+        metadata["ended_at"] = std::time(nullptr);
+        metadata["duration_seconds"] = age();
+        metadata["policy_index"] = matched_policy();
+        metadata["connection"] = to_connection_label(false);
+        metadata["application"] = get_application().value_or("");
+        metadata["ja4"] = {
+            {"client", ja4.ClientHello},
+            {"server", ja4.ServerHello},
+        };
+        emit({'S', 'X', 'M', 'E'}, std::move(metadata));
+    }
+
+    if(writer_opts()->auto_statistics) {
+        for(auto& [name, filter] : filters_) {
+            if(name != "statistics" || !filter || !filter->update_states()) continue;
+            auto statistics = capture_identity();
+            statistics["schema"] = "smithproxy.statistics.v1";
+            statistics["statistics"] = filter->to_json(iINF);
+            emit({'S', 'X', 'S', 'T'}, std::move(statistics));
+            break;
+        }
+    }
 }
 
 std::string MitmProxy::to_connection_label(bool force_resolve) const {
