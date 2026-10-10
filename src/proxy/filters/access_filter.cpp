@@ -87,6 +87,10 @@ void AccessFilter::update(socle::side_t side, buffer const& buf) {
             }
             else {
                 _dia("AccessFilter: response NOT received");
+                if(not fail_open_) {
+                    _err("AccessFilter: webhook transport failed, rejecting (fail-closed)");
+                    parent()->state().dead(true);
+                }
             }
         });
 

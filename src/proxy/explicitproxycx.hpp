@@ -4,10 +4,85 @@
 #include <proxy/mitmhost.hpp>
 #include <async/asyncdns.hpp>
 #include <socketinfo.hpp>
+#include <algorithm>
+#include <array>
+#include <arpa/inet.h>
+#include <cctype>
+#include <cstring>
 #include <optional>
+#include <unordered_set>
 
 namespace sx::explicit_proxy {
+    // baseCom reserves zero as its "no descriptor" sentinel. DNSFactory
+    // promotes a raw fd 0 before handing a query to this event-loop path.
     inline bool valid_dns_socket(int fd) { return fd > 0; }
+
+    inline bool is_unspecified_address(std::string_view text) noexcept {
+        if(text.empty() || text.size() >= INET6_ADDRSTRLEN) return false;
+        std::array<char, INET6_ADDRSTRLEN> terminated {};
+        std::memcpy(terminated.data(), text.data(), text.size());
+
+        in_addr v4 {};
+        if(::inet_pton(AF_INET, terminated.data(), &v4) == 1)
+            return v4.s_addr == htonl(INADDR_ANY);
+        in6_addr v6 {};
+        return ::inet_pton(AF_INET6, terminated.data(), &v6) == 1 &&
+               IN6_IS_ADDR_UNSPECIFIED(&v6);
+    }
+
+    inline std::vector<std::string> fresh_dns_addresses(
+            std::shared_ptr<DNS_Response> const& response,
+            std::time_t now = std::time(nullptr)) {
+        std::vector<std::string> addresses;
+        if (!response || response->questions().size() != 1 ||
+            response->questions().front().rec_class != 1 ||
+            response->answers().empty() ||
+            (response->flags() & 0x0200U) != 0 ||
+            (response->flags() & 0x000fU) != 0)
+            return addresses;
+
+        auto normalize = [](std::string_view value) {
+            while(!value.empty() && value.back() == '.') value.remove_suffix(1);
+            std::string result(value);
+            std::transform(result.begin(), result.end(), result.begin(),
+                           [](unsigned char c) {
+                               return static_cast<char>(std::tolower(c));
+                           });
+            return result;
+        };
+        std::unordered_set<std::string> permitted_names;
+        permitted_names.insert(normalize(response->questions().front().rec_str));
+        const auto age = now > response->loaded_at
+            ? static_cast<std::uint64_t>(now - response->loaded_at) : 0U;
+        for(std::size_t pass = 0; pass < response->answers().size(); ++pass) {
+            bool changed = false;
+            for(auto const& answer : response->answers()) {
+                if(answer.class_ != 1 || answer.type_ != CNAME ||
+                   answer.ttl_ == 0 || age >= answer.ttl_ ||
+                   answer.rdata_name_.empty() ||
+                   permitted_names.count(normalize(answer.qname_)) == 0) {
+                    continue;
+                }
+                changed |= permitted_names.insert(
+                    normalize(answer.rdata_name_)).second;
+            }
+            if(!changed) break;
+        }
+
+        const auto requested_type = response->questions().front().rec_type;
+        for (auto const& answer : response->answers()) {
+            if(answer.class_ != 1 || answer.type_ != requested_type ||
+               (answer.type_ != A && answer.type_ != AAAA) ||
+               permitted_names.count(normalize(answer.qname_)) == 0) {
+                continue;
+            }
+            if(answer.ttl_ == 0 || age >= answer.ttl_)
+                continue;
+            if (auto address = answer.ip(false); !address.empty())
+                addresses.push_back(std::move(address));
+        }
+        return addresses;
+    }
 
     inline std::optional<DNS_Record_Type> next_dns_retry(
             bool mixed_ip_versions, bool tested_a, bool tested_aaaa) {
@@ -18,6 +93,25 @@ namespace sx::explicit_proxy {
         if (!tested_a)
             return A;
         return std::nullopt;
+    }
+
+    inline std::vector<DNS_Record_Type> dns_query_order(
+            int carrier_family, bool prefer_ipv6, bool mixed_ip_versions) {
+        const auto first = carrier_family == AF_INET6 || prefer_ipv6 ? AAAA : A;
+        std::vector<DNS_Record_Type> order {first};
+        if (mixed_ip_versions)
+            order.push_back(first == A ? AAAA : A);
+        return order;
+    }
+
+    template <class Resolver>
+    bool resolve_first_available(
+            std::vector<DNS_Record_Type> const& order, Resolver&& resolver) {
+        for (auto const type : order) {
+            if (resolver(type))
+                return true;
+        }
+        return false;
     }
 }
 

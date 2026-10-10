@@ -52,6 +52,7 @@ struct FakeProxy;
 
 struct FakeCom {
     std::vector<int> monitored;
+    std::vector<int> write_monitored;
     std::map<int, FakeProxy*> handlers;
     std::vector<int> valid_descriptors {12};
     bool descriptor_valid(int fd) const {
@@ -59,6 +60,7 @@ struct FakeCom {
                != valid_descriptors.end();
     }
     void set_monitor(int fd) { monitored.push_back(fd); }
+    void set_write_monitor(int fd) { write_monitored.push_back(fd); }
     void set_poll_handler(int fd, FakeProxy* proxy) { handlers[fd] = proxy; }
 };
 
@@ -103,6 +105,7 @@ TEST(ProxyMakerUtils, RejectsFailedUpstreamBeforeRegisteringHandlers) {
     EXPECT_FALSE(sx::proxymaker::connect_owned_proxy(&owner, std::move(proxy)));
     EXPECT_NE(proxy, nullptr);
     EXPECT_TRUE(transport.monitored.empty());
+    EXPECT_TRUE(transport.write_monitored.empty());
     EXPECT_TRUE(transport.handlers.empty());
     EXPECT_EQ(owner.child, nullptr);
     proxy.reset();
@@ -123,7 +126,8 @@ TEST(ProxyMakerUtils, RegistersBothSocketsBeforeTransferringOwnership) {
     EXPECT_TRUE(sx::proxymaker::connect_owned_proxy(&owner, std::move(proxy)));
     ASSERT_NE(owner.child, nullptr);
     EXPECT_EQ(owner.child.get(), identity);
-    EXPECT_EQ(transport.monitored, (std::vector<int>{12}));
+    EXPECT_EQ(transport.monitored, (std::vector<int>{11}));
+    EXPECT_EQ(transport.write_monitored, (std::vector<int>{12}));
     EXPECT_EQ(transport.handlers.at(11), identity);
     EXPECT_EQ(transport.handlers.at(12), identity);
     EXPECT_EQ(FakeProxy::destructed, 0);
@@ -141,7 +145,8 @@ TEST(ProxyMakerUtils, AcceptsTransportValidatedVirtualDescriptor) {
 
     EXPECT_TRUE(sx::proxymaker::connect_owned_proxy(&owner, std::move(proxy)));
     ASSERT_NE(owner.child, nullptr);
-    EXPECT_EQ(transport.monitored, (std::vector<int>{-2}));
+    EXPECT_EQ(transport.monitored, (std::vector<int>{11}));
+    EXPECT_EQ(transport.write_monitored, (std::vector<int>{-2}));
     EXPECT_EQ(transport.handlers.at(-2), owner.child.get());
 }
 
@@ -416,7 +421,7 @@ TEST(MitmProxyTlsState, ClientCertificateActionsPreserveTheirDocumentedMeaning) 
     EXPECT_EQ(sx::mitmproxy::client_certificate_next(true, 1), action::none);
     EXPECT_EQ(sx::mitmproxy::client_certificate_next(true, 2), action::whitelist_next);
     EXPECT_EQ(sx::mitmproxy::client_certificate_next(true, 3), action::none);
-    EXPECT_EQ(sx::mitmproxy::client_certificate_next(true, 99), action::none);
+    EXPECT_EQ(sx::mitmproxy::client_certificate_next(true, 99), action::block);
 }
 
 TEST(MitmProxyTlsState, ClientCertificateRequestIsNotACertificateValidationFailure) {

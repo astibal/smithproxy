@@ -209,7 +209,9 @@ inline client_certificate_action client_certificate_next(bool requested,
     if(!requested) return client_certificate_action::none;
     if(configured_action == 0) return client_certificate_action::block;
     if(configured_action == 2) return client_certificate_action::whitelist_next;
-    return client_certificate_action::none;
+    if(configured_action == 1 || configured_action == 3)
+        return client_certificate_action::none;
+    return client_certificate_action::block;
 }
 
 inline bool tls_verification_failed(unsigned status,

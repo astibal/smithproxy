@@ -1,10 +1,79 @@
 #include <proxy/httpconnect/httpconnect.hpp>
 
+#include <algorithm>
+#include <array>
+#include <cerrno>
 #include <sstream>
 
 namespace {
 
 constexpr std::size_t max_connect_header_size = 8 * 1024;
+
+class HttpConnectFramingTCPCom final : public TCPCom {
+public:
+    // This transport exists only while parsing the CONNECT preface.  Child
+    // connections are ordinary TCP transports.
+    baseCom* replicate() override { return new TCPCom(); }
+
+    ssize_t read(int fd, void* destination, std::size_t capacity,
+                 int flags) override {
+        if(header_complete_) {
+            // baseHostCX drains a readable stream in a loop before it runs the
+            // protocol handoff.  Do not let that same plaintext parser consume
+            // tunnel bytes after the terminator; the replacement transport
+            // will receive them on the next dispatch.
+            errno = EAGAIN;
+            return -1;
+        }
+        if(capacity == 0 || (flags & MSG_PEEK) != 0)
+            return TCPCom::read(fd, destination, capacity, flags);
+
+        std::array<unsigned char, max_connect_header_size> preview{};
+        const auto preview_capacity = std::min(capacity, preview.size());
+        const auto available = TCPCom::peek(
+            fd, preview.data(), preview_capacity, flags);
+        if(available <= 0)
+            return available;
+
+        auto match = delimiter_match_;
+        std::size_t consume = static_cast<std::size_t>(available);
+        for(std::size_t i = 0; i < consume; ++i) {
+            match = advance_match(match, preview[i]);
+            if(match == delimiter.size()) {
+                consume = i + 1;
+                break;
+            }
+        }
+
+        const auto received = TCPCom::read(fd, destination, consume, flags);
+        if(received > 0) {
+            auto const* bytes = static_cast<unsigned char const*>(destination);
+            for(ssize_t i = 0; i < received; ++i) {
+                delimiter_match_ = advance_match(delimiter_match_, bytes[i]);
+                if(delimiter_match_ == delimiter.size()) {
+                    header_complete_ = true;
+                    break;
+                }
+            }
+        }
+        return received;
+    }
+
+private:
+    static constexpr std::array<unsigned char, 4> delimiter {
+        '\r', '\n', '\r', '\n'
+    };
+
+    static std::size_t advance_match(std::size_t match,
+                                     unsigned char byte) noexcept {
+        if(byte == delimiter[match])
+            return match + 1;
+        return byte == delimiter[0] ? 1U : 0U;
+    }
+
+    std::size_t delimiter_match_ = 0;
+    bool header_complete_ = false;
+};
 
 } // namespace
 
@@ -55,6 +124,10 @@ std::size_t HttpConnectServerCX::process_in() {
         return request_size;
     }
 
+    // setup_target() can replace this frontend before process_in() returns.
+    // Publish the exact framing boundary first so bytes pipelined after the
+    // CONNECT headers survive that handoff.
+    req_hdr_size = request_size;
     request_error_ = prepare_connect_target(request->host, request->port);
     if(request_error_ != explicit_request_error::NONE) {
         send_error(502, "Bad Gateway");
@@ -120,7 +193,9 @@ void HttpConnectProxy::on_left_message(baseHostCX* basecx) {
 }
 
 baseHostCX* MitmHttpConnectProxy::new_cx(int s) {
-    return new HttpConnectServerCX(com()->slave(), s);
+    auto* transport = new HttpConnectFramingTCPCom();
+    transport->master(com()->master());
+    return new HttpConnectServerCX(transport, s);
 }
 
 void MitmHttpConnectProxy::on_left_new(std::unique_ptr<baseHostCX> accepted_cx) {

@@ -1,6 +1,8 @@
 #include <proxy/httpconnect/httpconnectrequest.hpp>
 
+#include <algorithm>
 #include <charconv>
+#include <arpa/inet.h>
 
 namespace {
 
@@ -12,6 +14,12 @@ std::optional<unsigned short> parse_port(std::string_view text) {
         return std::nullopt;
     }
     return static_cast<unsigned short>(port);
+}
+
+bool valid_host_text(std::string_view host) {
+    return !host.empty() && std::none_of(host.begin(), host.end(), [](unsigned char c) {
+        return c <= 0x20 || c == 0x7f;
+    });
 }
 
 } // namespace
@@ -36,7 +44,9 @@ std::optional<HttpConnectRequest> HttpConnectRequest::parse(std::string_view lin
 
     std::string_view host;
     std::string_view port_text;
+    bool bracketed_ipv6 = false;
     if(authority.front() == '[') {
+        bracketed_ipv6 = true;
         auto const bracket = authority.find(']');
         if(bracket == std::string_view::npos or bracket + 1 >= authority.size()
            or authority[bracket + 1] != ':') {
@@ -54,8 +64,14 @@ std::optional<HttpConnectRequest> HttpConnectRequest::parse(std::string_view lin
     }
 
     auto const port = parse_port(port_text);
-    if(host.empty() or not port) {
+    if(not valid_host_text(host) or not port) {
         return std::nullopt;
+    }
+    if(bracketed_ipv6) {
+        in6_addr address{};
+        std::string host_copy(host);
+        if(inet_pton(AF_INET6, host_copy.c_str(), &address) != 1)
+            return std::nullopt;
     }
 
     return HttpConnectRequest {std::string(host), *port};

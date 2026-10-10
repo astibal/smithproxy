@@ -428,8 +428,16 @@ std::string MitmProxy::to_string(int verbosity) const {
 
 
             if(matched_policy() >= 0) {
-                auto p = CfgFactory::get()->db_policy_list.at(matched_policy());
-                r << string_format("\n    Policy: %s", p->element_name().c_str());
+                auto lock = std::scoped_lock(CfgFactory::lock());
+                auto p = CfgFactory::get()->lookup_policy(
+                    static_cast<std::size_t>(matched_policy()));
+                if(p) {
+                    r << string_format("\n    Policy: %s", p->element_name().c_str());
+                } else if(matched_policy() == PolicyRule::POLICY_IMPLICIT_PASS) {
+                    r << "\n    Policy: implicit pass (fail-open)";
+                } else {
+                    r << "\n    Policy: unavailable";
+                }
             }
 
 
@@ -483,6 +491,20 @@ int MitmProxy::handle_sockets_once(baseCom* xcom) {
         do {
             result = stream_handler_->drive();
         } while (result == result_t::progress && !state().dead());
+
+        // A protocol library can retain encrypted/control output internally
+        // after returning its non-blocking equivalent of EAGAIN.  Track that
+        // demand explicitly; otherwise an EPOLLIN-only socket can sleep
+        // forever while the peer is ready for our pending write.
+        auto update_handler_monitor = [this](baseHostCX* cx,
+                                             sx::stream_direction direction) {
+            if (!cx) return;
+            int events = EPOLLIN;
+            if (stream_handler_->write_event_pending(direction)) events |= EPOLLOUT;
+            com()->change_monitor(cx->socket(), events);
+        };
+        update_handler_monitor(first_left(), sx::stream_direction::downstream);
+        update_handler_monitor(first_right(), sx::stream_direction::upstream);
 
         if (result == result_t::finished
             || result == result_t::blocked
@@ -2001,7 +2023,6 @@ std::optional<buffer> MitmProxy::content_replace_apply(const buffer &ref) {
     for(auto& profile: *content_rule()) {
         
         try {
-            const std::regex re_match(profile.match.c_str());
             const std::string repl = profile.replace;
             
             if(profile.replacement_due()) {

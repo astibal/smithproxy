@@ -42,9 +42,14 @@ bool connect_owned_proxy(Owner* owner, std::unique_ptr<Proxy>&& proxy) {
     const int right_socket = right->connect();
     if(right->com() == nullptr || !right->com()->descriptor_valid(right_socket)) return false;
 
-    owner_com->set_monitor(right_socket);
     owner_com->set_poll_handler(left->socket(), proxy.get());
     owner_com->set_poll_handler(right_socket, proxy.get());
+    // The accepted client descriptor changes ownership here. Registering its
+    // handler without EPOLLIN leaves a queued ClientHello/request unread.
+    owner_com->set_monitor(left->socket());
+    // A non-blocking connect completes through EPOLLOUT.  Registering only
+    // EPOLLIN leaves a quiet upstream socket permanently in `opening` state.
+    owner_com->set_write_monitor(right_socket);
     owner->add_proxy(std::move(proxy));
     return true;
 }
