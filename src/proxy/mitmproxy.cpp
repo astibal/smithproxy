@@ -876,7 +876,8 @@ static std::string b64_decode(std::string const& encoded) {
 
 
 
-bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer) {
+bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
+                                std::string_view payload_layer) {
 
     auto& log = log_content;
 
@@ -893,6 +894,7 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer) {
     j["info"] = {
         { "session", cl },
         { "side", string_format("%c", from_side(side)) },
+        { "payload_layer", std::string(payload_layer) },
         { "content", encoded }
     };
 
@@ -983,7 +985,7 @@ bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t 
                          to_string(iNOT).c_str(), attempt_no);
 
                 }
-                return content_webhook(from, side, from->to_read());
+                return content_webhook(from, side, from->to_read(), "tcp");
             }
         }
         _err("[%s]: content_webhook: previous webhook takes too long to complete, content NOT sent to webhook.",
@@ -993,7 +995,7 @@ bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t 
 
     }
     else {
-        return content_webhook(from, side, from->to_read());
+        return content_webhook(from, side, from->to_read(), "tcp");
     }
     return false;
 }
