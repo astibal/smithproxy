@@ -321,6 +321,19 @@ bool DNS_Inspector::store(std::shared_ptr<DNS_Response> ptr) {
         _dia("DNS_Inspector::update: %s added to cache (%d elements of max %d)", ptr->question_str_0().c_str(),
              DNS::get_dns_cache().cache().size(), DNS::get_dns_cache().max_size());
 
+        if(not ptr->questions().empty()) {
+            auto const& hostname = ptr->questions().front().rec_str;
+            std::vector<std::string> addresses;
+            for(auto const& answer: ptr->answers()) {
+                if(answer.type_ != A and answer.type_ != AAAA) continue;
+                auto const address = answer.ip(false);
+                if(not address.empty()) addresses.push_back(address);
+            }
+            if(not addresses.empty() and hostname_observer_) {
+                hostname_observer_("dns", addresses, hostname);
+            }
+        }
+
 
         std::pair<std::string,std::string> dom_pair = split_fqdn_subdomain(question);
         _deb("topdomain = %s, subdomain = %s",dom_pair.first.c_str(), dom_pair.second.c_str());

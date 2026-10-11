@@ -682,6 +682,13 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
         }
     }
 
+    if(not wh_sni and scom and not scom->get_sni().empty()) {
+        if(auto const* target = first_right(); target) {
+            wh_sni = sx::http::webhooks::hostname_info(
+                "sni", {target->host()}, scom->get_sni());
+        }
+    }
+
     bool redirected = false;
 
     auto const client_cert_action = scom

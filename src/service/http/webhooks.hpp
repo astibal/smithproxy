@@ -46,6 +46,7 @@
 #include <cstdint>
 #include <deque>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
 
 #include <nlohmann/json.hpp>
@@ -152,6 +153,11 @@ namespace sx::http::webhooks {
     void neighbor_state(std::vector<std::string> const& address_vec, std::string const& state);
     void neighbor_new(std::string const& address_str);
 
+    bool hostname_info(std::string const& origin, std::vector<std::string> const& addresses,
+                       std::string const& hostname);
+    bool hostname_info_dns_cache();
+
+    void send_action(std::string const& action, nlohmann::json const& details);
     void send_action(std::string const& action, std::string const& action_id, nlohmann::json const& details);
     bool send_action_wait(std::string const& action, std::string const& action_id, nlohmann::json const& details, sx::http::AsyncRequest::reply_hook hook);
 }

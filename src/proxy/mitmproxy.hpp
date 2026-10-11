@@ -265,6 +265,8 @@ public:
     mutable bool wh_stop = false;
     void webhook_session_stop() const;
 
+    bool wh_sni = false;
+
     int handle_sockets_once(baseCom*) override;
     
     void init_content_replace();

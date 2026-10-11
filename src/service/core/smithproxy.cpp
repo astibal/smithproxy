@@ -54,6 +54,7 @@
 #include "service/http/webhooks.hpp"
 #include "proxy/nbrhood.hpp"
 #include "proxy/multiflow/mfmitmproxy.hpp"
+#include <inspect/dnsinspector.hpp>
 
 #ifdef ASAN_LEAKS
 extern "C" int __lsan_do_recoverable_leak_check();
@@ -85,6 +86,11 @@ void SmithProxy::create_log_writer_thread() {
 
 
 void SmithProxy::create_dns_thread() {
+    DNS_Inspector::set_hostname_observer(
+        [](std::string const& origin, std::vector<std::string> const& addresses,
+           std::string const& hostname) {
+            sx::http::webhooks::hostname_info(origin, addresses, hostname);
+        });
     dns_thread = std::shared_ptr<std::thread>(create_dns_updater());
     if(dns_thread) {
         pthread_setname_np( dns_thread->native_handle(),
@@ -444,6 +450,7 @@ void SmithProxy::run() {
     unsigned int wh_ping_seconds = webhook_ping_interval > 10
                                    ? webhook_ping_interval - 10 : 0; // speed-up first ping
     unsigned int wh_nbr_seconds = 0;
+    bool wh_hostname_snapshot_sent = false;
 
 
 
@@ -480,6 +487,10 @@ void SmithProxy::run() {
 
                 wh_ping_seconds = 0;
                 sx::http::webhooks::ping();
+                if(not wh_hostname_snapshot_sent) {
+                    sx::http::webhooks::hostname_info_dns_cache();
+                    wh_hostname_snapshot_sent = true;
+                }
                 sx::webserver::HttpSessions::cleanup();
 
                 state_save();
