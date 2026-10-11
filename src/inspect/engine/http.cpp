@@ -1072,6 +1072,52 @@ namespace sx::engine::http {
 #endif
         }
 
+        bool synchronize_headers_impl(EngineCtx& ctx, side_t side,
+                                      buffer const& data,
+                                      bool validate_push_promise) {
+#ifdef USE_HPACK
+            auto const& log = log::http2_headers;
+            if(data.empty() || data.size() > max_pending_header_block_size)
+                return false;
+            auto* connection = std::any_cast<Http2Connection>(&ctx.state_data);
+            if(!connection) {
+                ctx.state_data = std::make_any<Http2Connection>();
+                connection = std::any_cast<Http2Connection>(&ctx.state_data);
+            }
+            auto& decoder = side == side_t::LEFT
+                ? *connection->request_decoder : *connection->response_decoder;
+            std::vector<uint8_t> encoded(
+                static_cast<uint8_t const*>(data.data()),
+                static_cast<uint8_t const*>(data.data()) + data.size());
+            try {
+                if(!decoder.decode(encoded)) {
+                    _err("Frame: hpack synchronization decode error");
+                    if(decoder.failure() != HPACK::decoder_t::failure_t::header_semantics)
+                        connection->connection_invalid = true;
+                    return false;
+                }
+            } catch(std::exception const& error) {
+                _err("Frame: hpack synchronization exception: %s", error.what());
+                connection->connection_invalid = true;
+                return false;
+            }
+
+            // H2-056/H2-057 need the compression context updated even when
+            // the stream is semantically refused. PUSH_PROMISE semantic
+            // validation belongs to the later HTTP/2 validation tranche.
+            (void)validate_push_promise;
+            return true;
+#else
+            (void)ctx; (void)side; (void)data; (void)validate_push_promise;
+            return false;
+#endif
+        }
+
+        void synchronize_headers(EngineCtx& ctx, side_t side,
+                                 buffer const& data) {
+            (void)synchronize_headers_impl(ctx, side, data, false);
+        }
+
         void process_data(EngineCtx& ctx, side_t side, long stream_id, uint8_t flags, buffer const& data) {
 //            auto const &log = log::http2;
             auto const& log = log::http2;
@@ -1457,6 +1503,51 @@ namespace sx::engine::http {
                     }
                 }
 
+                if(typ == 7) {
+                    const auto last_stream_id = ntohl(
+                        frame.get_at<uint32_t>(preamble_sz)) & 0x7fffffffU;
+                    const auto peer_initiated_parity = side == side_t::RIGHT
+                        ? 1U : 0U;
+                    if(last_stream_id != 0 &&
+                       (last_stream_id & 1U) != peer_initiated_parity) {
+                        _err("Frame: HTTP/2 GOAWAY boundary belongs to sender");
+                        connection->connection_invalid = true;
+                        return preamble_sz + frame_sz;
+                    }
+                    auto& prior = side == side_t::RIGHT
+                        ? connection->server_goaway_last_stream_id
+                        : connection->client_goaway_last_stream_id;
+                    if(prior && last_stream_id > *prior) {
+                        _err("Frame: increasing HTTP/2 GOAWAY last-stream-id");
+                        connection->connection_invalid = true;
+                        return preamble_sz + frame_sz;
+                    }
+                    prior = last_stream_id;
+
+                    if(side == side_t::RIGHT) {
+                        auto& pending = connection->request_headers_pending;
+                        if(pending.active() &&
+                           static_cast<uint32_t>(pending.stream_id) > last_stream_id) {
+                            pending.decode_only = true;
+                            connection->refused_client_streams.insert(
+                                static_cast<uint32_t>(pending.stream_id));
+                        }
+                    } else {
+                        for(auto it = connection->promised_streams.begin();
+                            it != connection->promised_streams.end();) {
+                            const auto promised = *it;
+                            if(promised > last_stream_id) {
+                                connection->refused_promised_streams.insert(promised);
+                                connection->active_promised_streams.erase(promised);
+                                connection->promised_flow_windows.erase(promised);
+                                it = connection->promised_streams.erase(it);
+                            } else {
+                                ++it;
+                            }
+                        }
+                    }
+                }
+
                 if(typ == 8) {
                     const auto increment = ntohl(
                         frame.get_at<uint32_t>(preamble_sz)) & 0x7fffffffU;
@@ -1518,7 +1609,7 @@ namespace sx::engine::http {
                 std::size_t payload_size = frame_sz;
                 std::size_t padding_size = 0;
 
-                if ((typ == 0 || typ == 1) && (flg & 0x08)) {
+                if ((typ == 0 || typ == 1 || typ == 5) && (flg & 0x08)) {
                     if (payload_size < 1)
                         return preamble_sz + frame_sz;
                     padding_size = frame.get_at<uint8_t>(payload_offset++);
@@ -1555,6 +1646,11 @@ namespace sx::engine::http {
                     return preamble_sz + frame_sz;
                 }
                 payload_size -= padding_size;
+                if(typ == 5 && payload_size < sizeof(uint32_t)) {
+                    _err("Frame: padded PUSH_PROMISE has no promised stream id");
+                    connection->connection_invalid = true;
+                    return preamble_sz + frame_sz;
+                }
 
                 {
                     _inf("Frame: type = %s, flags = %d, size = %d, stream = %d, side = %c", frame_type_str(typ), flg, frame_sz,
@@ -1638,7 +1734,16 @@ namespace sx::engine::http {
                             buffer data;
                             if(payload_size != 0)
                                 data = frame.view(payload_offset, payload_size);
-                            if(!pushed_stream)
+                            const auto id = static_cast<uint32_t>(stream_id);
+                            if(side == side_t::LEFT &&
+                               connection->refused_client_streams.count(id) != 0) {
+                                if((flg & 0x01U) != 0)
+                                    connection->refused_client_streams.erase(id);
+                            } else if(side == side_t::RIGHT &&
+                                      connection->refused_promised_streams.count(id) != 0) {
+                                if((flg & 0x01U) != 0)
+                                    connection->refused_promised_streams.erase(id);
+                            } else if(!pushed_stream)
                                 process_data(ctx, side, stream_id, flg, data);
                             else if((flg & 0x01U) != 0) {
                                 connection->promised_streams.erase(
@@ -1648,7 +1753,7 @@ namespace sx::engine::http {
                                 connection->promised_flow_windows.erase(
                                     static_cast<uint32_t>(stream_id));
                             }
-                        } else if (typ == 1 || typ == 9) {
+                        } else if (typ == 1 || typ == 5 || typ == 9) {
                             auto data = frame.view(payload_offset, payload_size);
                             auto* connection = std::any_cast<Http2Connection>(&ctx.state_data);
                             if (!connection) {
@@ -1660,17 +1765,131 @@ namespace sx::engine::http {
                                             : connection->response_headers_pending;
 
                             if (typ == 1) {
+                                bool pushed_response = side == side_t::RIGHT &&
+                                    connection->promised_streams.count(
+                                        static_cast<uint32_t>(stream_id)) != 0;
+                                bool refused_pushed_response = side == side_t::RIGHT &&
+                                    connection->refused_promised_streams.count(
+                                        static_cast<uint32_t>(stream_id)) != 0;
+                                if(pushed_response &&
+                                   connection->active_promised_streams.count(
+                                       static_cast<uint32_t>(stream_id)) == 0) {
+                                    connection->active_promised_streams.insert(
+                                        static_cast<uint32_t>(stream_id));
+                                    connection->promised_flow_windows.emplace(
+                                        static_cast<uint32_t>(stream_id),
+                                        connection->server_initial_stream_window);
+                                }
+                                bool refused_request = side == side_t::LEFT &&
+                                    connection->refused_client_streams.count(
+                                        static_cast<uint32_t>(stream_id)) != 0;
+                                if(side == side_t::LEFT &&
+                                   connection->streams.count(stream_id) == 0 &&
+                                   !refused_request) {
+                                    const bool exceeds_goaway =
+                                        connection->server_goaway_last_stream_id &&
+                                        static_cast<uint32_t>(stream_id) >
+                                            *connection->server_goaway_last_stream_id;
+                                    if(exceeds_goaway) {
+                                        if(connection->refused_client_streams.size() >=
+                                           max_tracked_streams) {
+                                            connection->connection_invalid = true;
+                                            return preamble_sz + frame_sz;
+                                        }
+                                        connection->refused_client_streams.insert(
+                                            static_cast<uint32_t>(stream_id));
+                                        refused_request = true;
+                                    }
+                                }
                                 if (flg & flag_end_headers) {
-                                    process_headers(ctx, side, stream_id, flg, data);
+                                    if(pushed_response || refused_pushed_response) {
+                                        synchronize_headers(ctx, side, data);
+                                        if((flg & 0x01U) != 0) {
+                                            const auto id = static_cast<uint32_t>(stream_id);
+                                            connection->promised_streams.erase(id);
+                                            connection->active_promised_streams.erase(id);
+                                            connection->promised_flow_windows.erase(id);
+                                            connection->refused_promised_streams.erase(id);
+                                        }
+                                    } else if(refused_request) {
+                                        synchronize_headers(ctx, side, data);
+                                        if((flg & 0x01U) != 0)
+                                            connection->refused_client_streams.erase(
+                                                static_cast<uint32_t>(stream_id));
+                                    } else {
+                                        process_headers(ctx, side, stream_id, flg, data);
+                                    }
                                 } else {
                                     pending.stream_id = stream_id;
                                     pending.initial_flags = flg;
+                                    pending.decode_only = pushed_response ||
+                                        refused_pushed_response || refused_request;
                                     pending.bytes.clear();
                                     if (data.size() > max_pending_header_block_size) {
                                         _err("initial HTTP/2 header fragment exceeds inspection limit");
                                         pending.clear();
                                         connection->connection_invalid = true;
                                     } else if (!data.empty()) {
+                                        auto* begin = static_cast<unsigned char*>(data.data());
+                                        pending.bytes.assign(begin, begin + data.size());
+                                    }
+                                }
+                            } else if(typ == 5) {
+                                const auto associated = connection->streams.find(stream_id);
+                                const bool valid_push = side == side_t::RIGHT &&
+                                    connection->server_push_enabled && stream_id != 0 &&
+                                    payload_size >= 4 &&
+                                    associated != connection->streams.end() &&
+                                    !associated->second.response_ended_;
+                                if(!valid_push) {
+                                    _err("invalid HTTP/2 PUSH_PROMISE");
+                                    connection->connection_invalid = true;
+                                    return preamble_sz + frame_sz;
+                                }
+                                const auto promised_stream = ntohl(
+                                    frame.get_at<uint32_t>(payload_offset)) & 0x7fffffffU;
+                                if(promised_stream == 0 || (promised_stream & 1U) != 0 ||
+                                   promised_stream <= connection->highest_promised_stream_id) {
+                                    _err("invalid HTTP/2 promised stream id");
+                                    connection->connection_invalid = true;
+                                    return preamble_sz + frame_sz;
+                                }
+                                if(connection->promised_streams.size() +
+                                       connection->refused_promised_streams.size() >=
+                                   max_tracked_streams) {
+                                    connection->connection_invalid = true;
+                                    return preamble_sz + frame_sz;
+                                }
+                                connection->highest_promised_stream_id = promised_stream;
+                                const bool exceeds_goaway =
+                                    connection->client_goaway_last_stream_id &&
+                                    promised_stream > *connection->client_goaway_last_stream_id;
+                                if(exceeds_goaway)
+                                    connection->refused_promised_streams.insert(promised_stream);
+                                else
+                                    connection->promised_streams.insert(promised_stream);
+                                payload_offset += sizeof(uint32_t);
+                                payload_size -= sizeof(uint32_t);
+                                data.clear();
+                                if(payload_size != 0)
+                                    data = frame.view(payload_offset, payload_size);
+                                if(flg & flag_end_headers) {
+                                    if(data.empty() || !synchronize_headers_impl(
+                                           ctx, side, data, true)) {
+                                        connection->promised_streams.erase(promised_stream);
+                                        connection->refused_promised_streams.insert(promised_stream);
+                                        associated->second.response_invalid_ = true;
+                                    }
+                                } else {
+                                    pending.stream_id = stream_id;
+                                    pending.promised_stream_id = promised_stream;
+                                    pending.initial_flags = 0;
+                                    pending.decode_only = true;
+                                    pending.bytes.clear();
+                                    if(data.size() > max_pending_header_block_size) {
+                                        pending.clear();
+                                        connection->connection_invalid = true;
+                                    } else if(!data.empty()) {
                                         auto* begin = static_cast<unsigned char*>(data.data());
                                         pending.bytes.assign(begin, begin + data.size());
                                     }
@@ -1696,9 +1915,33 @@ namespace sx::engine::http {
                                     complete_headers.assign(pending.bytes.data(), pending.bytes.size());
                                     const auto complete_flags = static_cast<uint8_t>(
                                         pending.initial_flags | flag_end_headers);
+                                    const bool decode_only = pending.decode_only;
+                                    const auto promised_stream_id = pending.promised_stream_id;
+                                    const bool retire_refused = decode_only &&
+                                        side == side_t::LEFT &&
+                                        (complete_flags & 0x01U) != 0 &&
+                                        connection->refused_client_streams.count(
+                                            static_cast<uint32_t>(stream_id)) != 0;
                                     pending.clear();
-                                    process_headers(ctx, side, stream_id,
-                                                    complete_flags, complete_headers);
+                                    if(decode_only) {
+                                        if(promised_stream_id != 0) {
+                                            if(!synchronize_headers_impl(ctx, side,
+                                                   complete_headers, true)) {
+                                                connection->promised_streams.erase(
+                                                    promised_stream_id);
+                                                connection->refused_promised_streams.insert(
+                                                    promised_stream_id);
+                                            }
+                                        } else {
+                                            synchronize_headers(ctx, side, complete_headers);
+                                        }
+                                    } else {
+                                        process_headers(ctx, side, stream_id,
+                                                        complete_flags, complete_headers);
+                                    }
+                                    if(retire_refused)
+                                        connection->refused_client_streams.erase(
+                                            static_cast<uint32_t>(stream_id));
                                 }
                             }
                         } else if(typ == 6) {

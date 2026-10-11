@@ -109,6 +109,167 @@ namespace sx::engine::http::v2 {
     void save_state(EngineCtx& ctx, std::size_t absolute_index, std::size_t processed);
 }
 
+TEST(HTTP2, RejectsGoawayBoundaryOwnedByTheSender) {
+    auto frame = [](uint32_t last_stream) {
+        std::vector<uint8_t> payload(8);
+        payload[0] = static_cast<uint8_t>((last_stream >> 24) & 0x7f);
+        payload[1] = static_cast<uint8_t>((last_stream >> 16) & 0xff);
+        payload[2] = static_cast<uint8_t>((last_stream >> 8) & 0xff);
+        payload[3] = static_cast<uint8_t>(last_stream & 0xff);
+        std::vector<uint8_t> bytes {0, 0, 8, 7, 0, 0, 0, 0, 0};
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+
+    sx::engine::EngineCtx server_ctx;
+    auto server_bad = frame(2);
+    v2::process_frame(server_ctx, socle::side_t::RIGHT, server_bad);
+    auto* server_connection =
+        std::any_cast<v2::Http2Connection>(&server_ctx.state_data);
+    ASSERT_NE(server_connection, nullptr);
+    EXPECT_TRUE(server_connection->connection_invalid);
+
+    sx::engine::EngineCtx client_ctx;
+    auto client_bad = frame(1);
+    v2::process_frame(client_ctx, socle::side_t::LEFT, client_bad);
+    auto* client_connection =
+        std::any_cast<v2::Http2Connection>(&client_ctx.state_data);
+    ASSERT_NE(client_connection, nullptr);
+    EXPECT_TRUE(client_connection->connection_invalid);
+
+    for(auto side: {socle::side_t::LEFT, socle::side_t::RIGHT}) {
+        sx::engine::EngineCtx zero_ctx;
+        auto zero = frame(0);
+        v2::process_frame(zero_ctx, side, zero);
+        auto* connection =
+            std::any_cast<v2::Http2Connection>(&zero_ctx.state_data);
+        ASSERT_NE(connection, nullptr);
+        EXPECT_FALSE(connection->connection_invalid);
+    }
+}
+
+TEST(HTTP2, ServerGoawaySuppressesNewRequestsWithoutPoisoningExistingStreams) {
+    auto frame = [](uint8_t type, uint8_t flags, uint32_t stream,
+                    std::vector<uint8_t> const& payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), type, flags,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+    auto request = [&](uint32_t stream, std::string const& authority) {
+        HPACK::encoder_t encoder;
+        encoder.add(":method", "GET", false, true);
+        encoder.add(":scheme", "https", false, true);
+        encoder.add(":path", "/", false, true);
+        encoder.add(":authority", authority, false, true);
+        return frame(1, 0x04, stream, encoder.data());
+    };
+
+    sx::engine::EngineCtx ctx;
+    auto first = request(1, "first.example");
+    v2::process_frame(ctx, socle::side_t::LEFT, first);
+    auto goaway = frame(7, 0, 0, {0, 0, 0, 1, 0, 0, 0, 0});
+    v2::process_frame(ctx, socle::side_t::RIGHT, goaway);
+
+    HPACK::encoder_t refused_encoder;
+    refused_encoder.add(":method", "GET", false, true);
+    refused_encoder.add(":scheme", "https", false, true);
+    refused_encoder.add(":path", "/", false, true);
+    refused_encoder.add(":authority", "refused.example", false, true);
+    refused_encoder.add("x-goaway-sync", "retained", false);
+    auto refused = frame(1, 0x04, 3, refused_encoder.data());
+    v2::process_frame(ctx, socle::side_t::LEFT, refused);
+
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    EXPECT_FALSE(connection->connection_invalid);
+    EXPECT_EQ(connection->streams.count(1), 1U);
+    EXPECT_EQ(connection->streams.count(3), 0U);
+
+    auto trailer = frame(1, 0x05, 1, {0xbe});
+    v2::process_frame(ctx, socle::side_t::LEFT, trailer);
+    EXPECT_FALSE(connection->connection_invalid);
+    EXPECT_EQ(connection->request_decoder->headers().at("x-goaway-sync").front(),
+              "retained");
+
+    auto increasing_goaway = frame(7, 0, 0, {0, 0, 0, 3, 0, 0, 0, 0});
+    v2::process_frame(ctx, socle::side_t::RIGHT, increasing_goaway);
+    EXPECT_TRUE(connection->connection_invalid);
+}
+
+TEST(HTTP2, ClientGoawaySuppressesNewPushWithoutPoisoningExistingStreams) {
+    auto frame = [](uint8_t type, uint8_t flags, uint32_t stream,
+                    std::vector<uint8_t> const& payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), type, flags,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+
+    sx::engine::EngineCtx ctx;
+    HPACK::encoder_t client;
+    client.add(":method", "GET", false, true);
+    client.add(":scheme", "https", false, true);
+    client.add(":authority", "fixture.example", false, true);
+    client.add(":path", "/", false, true);
+    auto request = frame(1, 0x04, 1, client.data());
+    v2::process_frame(ctx, socle::side_t::LEFT, request);
+
+    auto goaway = frame(7, 0, 0, std::vector<uint8_t>(8));
+    v2::process_frame(ctx, socle::side_t::LEFT, goaway);
+
+    HPACK::encoder_t server;
+    server.add(":method", "GET", false, true);
+    server.add(":scheme", "https", false, true);
+    server.add(":authority", "push.example", false, true);
+    server.add(":path", "/late", false, true);
+    server.add("x-goaway-sync", "retained", false);
+    std::vector<uint8_t> promise {0, 0, 0, 2};
+    promise.insert(promise.end(), server.data().begin(), server.data().end());
+    auto push = frame(5, 0x04, 1, promise);
+    v2::process_frame(ctx, socle::side_t::RIGHT, push);
+
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    EXPECT_FALSE(connection->connection_invalid);
+    EXPECT_EQ(connection->promised_streams.count(2), 0U);
+    EXPECT_EQ(connection->refused_promised_streams.count(2), 1U);
+    EXPECT_EQ(connection->streams.count(2), 0U);
+
+    const auto response_offset = server.data().size();
+    server.add(":status", "200", false, true);
+    server.add("x-goaway-sync", "retained", false);
+    std::vector<uint8_t> response_block(
+        server.data().begin() + response_offset, server.data().end());
+    auto response = frame(1, 0x05, 1, response_block);
+    v2::process_frame(ctx, socle::side_t::RIGHT, response);
+
+    ASSERT_EQ(connection->streams.count(1), 1U);
+    EXPECT_EQ(connection->streams.at(1).response_header("x-goaway-sync"),
+              "retained");
+    EXPECT_FALSE(connection->connection_invalid);
+}
+
 std::shared_ptr<app_HttpRequest> parse(std::string data) {
     sx::engine::EngineCtx ctx;
 
