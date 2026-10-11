@@ -46,9 +46,130 @@
 
 #include <common/numops.hpp>
 
+#include <poll.h>
+#include <unistd.h>
+
 bool ExplicitProxyCX::global_async_dns = true;
 
+namespace {
+bool udp_control_channel_alive(socksServerCX const* control) noexcept {
+    if(control == nullptr ||
+       !sx::socks5::pollable_control_socket(control->socket())) return false;
+
+    short requested = POLLIN;
+#ifdef POLLRDHUP
+    requested |= POLLRDHUP;
+#endif
+    pollfd descriptor {control->socket(), requested, 0};
+    const auto status = ::poll(&descriptor, 1, 0);
+    if(status < 0) return errno == EINTR;
+    if(status == 0) return true;
+
+    short terminal = POLLERR | POLLHUP | POLLNVAL;
+#ifdef POLLRDHUP
+    terminal |= POLLRDHUP;
+#endif
+    if((descriptor.revents & terminal) != 0) return false;
+    if((descriptor.revents & POLLIN) == 0) return true;
+
+    unsigned char byte = 0;
+    const auto received = ::recv(control->socket(), &byte, sizeof(byte),
+                                 MSG_PEEK | MSG_DONTWAIT);
+    if(received >= 0) return received != 0;
+    return errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR;
+}
+
+socksServerCX* claim_udp_association_locked(
+        socksServerCX::UDP::associations& associations,
+        std::string const& host, std::string const& port) {
+    const std::string exact = string_format("%s:%s", host.c_str(), port.c_str());
+    if(auto found = associations.clients.find(exact);
+       found != associations.clients.end()) {
+        if(!udp_control_channel_alive(found->second)) {
+            associations.clients.erase(found);
+            return nullptr;
+        }
+        return found->second;
+    }
+
+    // RFC 1928 permits UDP_ASSOCIATE with DST.PORT zero when the client does
+    // not yet know which UDP source port it will use. Bind that wildcard to
+    // the first datagram from the authenticated TCP peer's address.
+    const std::string wildcard = string_format("%s:0", host.c_str());
+    auto found = associations.clients.find(wildcard);
+    if(found == associations.clients.end())
+        return nullptr;
+    if(!udp_control_channel_alive(found->second)) {
+        associations.clients.erase(found);
+        return nullptr;
+    }
+
+    auto* control = found->second;
+    associations.clients.erase(found);
+    associations.clients.emplace(exact, control);
+    control->get_udp()->my_assoc = exact;
+    return control;
+}
+}
+
 socksServerCX::socksServerCX(baseCom* c, unsigned int s) : ExplicitProxyCX(c,s) {
+    // SOCKS greeting and request framing is incremental. A zero process_in()
+    // result means "retain until the next read", not "discard on the next
+    // read cycle".
+    if(c && c->l4_proto() != SOCK_DGRAM)
+        auto_finish(false);
+}
+
+socksServerCX::~socksServerCX() {
+    retire_udp_association();
+}
+
+void socksServerCX::retire_udp_association() noexcept {
+    if(!udp_ || udp_->my_assoc.empty()) return;
+
+    auto associations = UDP::db();
+    auto lock = std::scoped_lock(UDP::lock);
+    auto found = associations->clients.find(udp_->my_assoc);
+    if(found != associations->clients.end() && found->second == this)
+        associations->clients.erase(found);
+    udp_->my_assoc.clear();
+}
+
+bool socksServerCX::udp_association_available() {
+    auto associations = UDP::db();
+    auto lock = std::scoped_lock(UDP::lock);
+    return claim_udp_association_locked(*associations, host(), port()) != nullptr;
+}
+
+bool socksServerCX::prepare_udp_handoff_datagram() {
+    if(com()->l4_proto() != SOCK_DGRAM || state_ != socks5_state::ZOMBIE)
+        return true;
+
+    auto* datagram = readbuf();
+    const auto header = sx::socks5::inspect_udp_header(
+        datagram->data(), datagram->size());
+    if(header != sx::socks5::udp_header_status::ready) {
+        datagram->flush(datagram->size());
+        return false;
+    }
+
+    socks_error_ = socks5_request_error::NONE;
+    const auto saved_state = state_;
+    try {
+        socks_error_ = socks5_parse_request();
+    } catch(std::out_of_range const&) {
+        socks_error_ = socks5_request_error::MALFORMED_DATA;
+    }
+    state_ = saved_state;
+
+    if(socks_error_ != socks5_request_error::NONE ||
+       req_hdr_size > datagram->size()) {
+        datagram->flush(datagram->size());
+        return false;
+    }
+
+    datagram->flush(req_hdr_size);
+    return true;
 }
 
 ExplicitProxyCX::ExplicitProxyCX(baseCom* c, unsigned int s) : MitmHostCX(c,s) {
@@ -77,6 +198,14 @@ std::size_t socksServerCX::process_in() {
         case socks5_state::WAIT_REQUEST:
             _dia("process_in: state WAIT_REQUEST");
             return process_socks_request();
+        case socks5_state::HANDOFF:
+            // UDP_ASSOCIATE keeps this TCP connection solely as the RFC 1928
+            // lifetime anchor. Consume any unexpected control-channel bytes
+            // so an open client cannot grow the retained stream buffer.
+            if(req_cmd == socks5_cmd::UDP_ASSOCIATE) {
+                return readbuf()->size();
+            }
+            break;
         default:
             _dia("process_in: state *");
             break;
@@ -87,13 +216,19 @@ std::size_t socksServerCX::process_in() {
 
 std::size_t socksServerCX::process_socks_udp_request() {
     buffer const *b = readbuf();
+    socks_error_ = socks5_request_error::NONE;
     const auto header_status = sx::socks5::inspect_udp_header(b->data(), b->size());
     if(header_status == sx::socks5::udp_header_status::incomplete) {
-        return 0;
+        // UDP preserves message boundaries: a short datagram can never become
+        // complete by retaining it for the next read. Consume/drop it instead
+        // of letting a second packet splice bytes onto this request.
+        return b->size();
     }
     if(header_status != sx::socks5::udp_header_status::ready) {
         socks_error_ = socks5_request_error::MALFORMED_DATA;
-        error(true);
+        // UDP is connectionless: an invalid packet must not tear down the
+        // authenticated association (or poison its reusable pseudo-flow).
+        // Consume just this datagram and let the next one be parsed afresh.
         return b->size();
     }
 
@@ -108,14 +243,15 @@ std::size_t socksServerCX::process_socks_udp_request() {
         if(err != socks5_request_error::NONE) {
             _dia("process_socks_udp_request: request error %d", err);
             socks_error_ = err;
-            error(true);
+            if(err != socks5_request_error::UNAUTHORIZED)
+                state_ = socks5_state::INIT;
             return b->size();
         }
     }
     catch(std::out_of_range const&) {
         _dia("process_socks_udp_request: error");
         socks_error_ = socks5_request_error::MALFORMED_DATA;
-        error(true);
+        state_ = socks5_state::INIT;
         return b->size();
     }
 
@@ -129,31 +265,40 @@ std::size_t socksServerCX::process_socks_udp_request() {
 std::size_t socksServerCX::process_socks_hello_tcp() {
 
     buffer const* b = readbuf();
-    if (b->size() < 3) {
-        // minimal size of "client hello" is 3 bytes
-        return 0;
-    }
-    version = b->get_at<unsigned char>(0);
-    unsigned char nmethods = b->get_at<unsigned char>(1);
+    const auto greeting_size = sx::socks5::initial_frame_size_if_complete(
+        b->data(), b->size());
+    if(greeting_size == 0) return 0;
 
-    if (b->size() < (unsigned int) (2 + nmethods)) {
-        return 0;
-    }
+    version = b->get_at<unsigned char>(0);
 
     // at this stage we have full client hello received
     if (version == 5) {
         _dia("process_socks_hello_tcp: version %d", version);
+        const auto nmethods = b->get_at<unsigned char>(1);
 
         unsigned char server_hello[2];
         server_hello[0] = 5; // version
-        server_hello[1] = 0; // no authentication
+        server_hello[1] = sx::socks5::offers_no_authentication(
+            b->data() + 2, nmethods) ? 0 : 0xff;
 
         writebuf()->append(server_hello, 2);
-        state_ = socks5_state::HELLO_SENT;
+        readbuf()->flush(greeting_size);
+
+        if(server_hello[1] == 0xff) {
+            _dia("process_socks_hello_tcp: no supported authentication method");
+            state_ = socks5_state::HELLO_SENT;
+            close_after_write(true);
+            com()->set_write_monitor(socket());
+            return 0;
+        }
+
         state_ = socks5_state::WAIT_REQUEST;
 
-        // flush all data, assuming
-        return b->size();
+        // A client may pipeline its request with the greeting. Parse the
+        // retained bytes now; no new socket-read edge is guaranteed.
+        if(!readbuf()->empty())
+            process_socks_request();
+        return 0;
     } else if (version == 4) {
         _dia("process_socks_hello_tcp: version %d", version);
         return process_socks_request();
@@ -177,6 +322,12 @@ std::size_t socksServerCX::process_socks_hello() {
 }
 
 bool ExplicitProxyCX::choose_server_ip(std::vector<std::string>& target_ips) {
+
+    target_ips.erase(std::remove_if(
+        target_ips.begin(), target_ips.end(),
+        [](std::string const& target) {
+            return sx::explicit_proxy::is_unspecified_address(target);
+        }), target_ips.end());
 
     if(target_ips.empty()) {
         _dia("choose_server_ip: empty");
@@ -202,17 +353,12 @@ bool ExplicitProxyCX::choose_server_ip(std::vector<std::string>& target_ips) {
 
 bool ExplicitProxyCX::process_dns_response(std::shared_ptr<DNS_Response> resp) {
 
-    std::vector<std::string> target_ips;
+    auto target_ips = sx::explicit_proxy::fresh_dns_addresses(resp);
     bool ret = true;
 
     if (resp) {
-        for (auto const& a: resp->answers()) {
-            std::string a_ip = a.ip(false);
-            if (! a_ip.empty()) {
-                _dia("process_dns_response: target candidate: %s", a_ip.c_str());
-                target_ips.push_back(a_ip);
-            }
-        }
+        for (auto const& target : target_ips)
+            _dia("process_dns_response: validated target candidate: %s", target.c_str());
 
         if (! target_ips.empty()) {
 
@@ -221,8 +367,9 @@ bool ExplicitProxyCX::process_dns_response(std::shared_ptr<DNS_Response> resp) {
         }
     }
 
-    if(!target_ips.empty() && choose_server_ip(target_ips)) {
-        setup_target();
+    const bool selected = choose_server_ip(target_ips);
+    const bool prepared = selected && setup_target();
+    if(sx::socks5::target_setup_succeeded(selected, prepared)) {
         _dia("process_dns_response: waiting for policy check");
 
     } else {
@@ -257,8 +404,16 @@ void ExplicitProxyCX::setup_dns_async(std::string const& fqdn, DNS_Record_Type t
                 tested_dns_a = true;
         }
 
-        async_dns_query_->tap(dns_sock);
-        state_ = socks5_state::DNS_QUERY_SENT;
+        if(async_dns_query_->tap(dns_sock)) {
+            state_ = socks5_state::DNS_QUERY_SENT;
+        } else {
+            _err("failed to register dns request socket %d", dns_sock);
+            ::close(dns_sock);
+            async_dns_query_.reset();
+            state_ = socks5_state::DNS_RESP_FAILED;
+            com()->set_monitor(socket());
+            com()->set_write_monitor(socket());
+        }
     } else {
         _err("failed to send dns request: %s", fqdn.c_str());
         state_ = socks5_state::DNS_RESP_FAILED;
@@ -270,21 +425,6 @@ void ExplicitProxyCX::setup_dns_async(std::string const& fqdn, DNS_Record_Type t
 explicit_request_error ExplicitProxyCX::resolve_connect_target() {
 
     if(req_str_addr.empty()) return socks5_request_error::MALFORMED_DATA;
-
-    auto fill_w_dns_cache = [this](std::shared_ptr<DNS_Response> const& dns_resp, std::vector<std::string> where) {
-        if ( ! dns_resp->answers().empty() ) {
-            long ttl = (dns_resp->loaded_at + dns_resp->answers().at(0).ttl_) - time(nullptr);
-            if(ttl > 0) {
-                for( auto const& a: dns_resp->answers() ) {
-                    std::string a_ip = a.ip(false);
-                    if(! a_ip.empty() ) {
-                        _dia("handle5_connect_fqdn: cache candidate: %s",a_ip.c_str());
-                        where.push_back(a_ip);
-                    }
-                }
-            }
-        }
-    };
 
     com()->nonlocal_dst_port() = req_port;
     com()->nonlocal_src(true);
@@ -310,7 +450,9 @@ explicit_request_error ExplicitProxyCX::resolve_connect_target() {
 
         auto dns_resp = DNS::get_dns_cache().get(( ipver == AF_INET6 ? "AAAA:" : "A:")+req_str_addr);
         if(dns_resp) {
-            fill_w_dns_cache(dns_resp, target_ips);
+            target_ips = sx::explicit_proxy::fresh_dns_addresses(dns_resp);
+            for (auto const& target : target_ips)
+                _dia("handle5_connect_fqdn: cache candidate: %s", target.c_str());
         }
     }
 
@@ -318,45 +460,41 @@ explicit_request_error ExplicitProxyCX::resolve_connect_target() {
     // cache is not populated - send out query
     if(target_ips.empty()) {
         // no targets, send DNS query
-
-        auto const& nameserver = DNS_Setup::choose_dns_server(ipver);
+        const auto query_order = sx::explicit_proxy::dns_query_order(
+            ipver, prefer_ipv6, mixed_ip_versions);
 
         if(!async_dns_) {
-
-            std::shared_ptr<DNS_Response> resp(DNSFactory::get().resolve_dns_s(req_str_addr, A, nameserver));
-
-            process_dns_response(resp);
-            setup_target();
+            const bool resolved = sx::explicit_proxy::resolve_first_available(
+                query_order, [&](DNS_Record_Type type) {
+                    auto const& nameserver = DNS_Setup::choose_dns_server(
+                        type == AAAA ? AF_INET6 : AF_INET);
+                    std::shared_ptr<DNS_Response> response(
+                        DNSFactory::get().resolve_dns_s(
+                            req_str_addr, type, nameserver));
+                    return process_dns_response(std::move(response));
+                });
+            if(!resolved) {
+                state_ = socks5_state::DNS_RESP_FAILED;
+                error(true);
+            }
 
         } else {
             _dia("handle5_connect:");
-
-            auto dns_req_type = DNS_Record_Type::A;
-
-
-
-            if(ipver == AF_INET6) {
-                _dia("handle5_connect: carrier ipv6");
-                dns_req_type = DNS_Record_Type::AAAA;
-            }
-            else {
-                _dia("handle5_connect: carrier default");
-
-                if(prefer_ipv6) {
-                    _dia("handle5_connect: DNS override to query AAAA");
-                    dns_req_type = DNS_Record_Type::AAAA;
-                }
-            }
-
+            const auto dns_req_type = query_order.front();
+            auto const& nameserver = DNS_Setup::choose_dns_server(
+                dns_req_type == AAAA ? AF_INET6 : AF_INET);
             setup_dns_async(req_str_addr, dns_req_type, nameserver);
         }
     }
     else {
-        if(! target_ips.empty() && choose_server_ip(target_ips)) {
-            setup_target();
+        const bool selected = !target_ips.empty() && choose_server_ip(target_ips);
+        const bool prepared = selected && setup_target();
+        if(sx::socks5::target_setup_succeeded(selected, prepared)) {
+            return socks5_request_error::NONE;
         } else {
             _err("handle5_connect: unable to find destination address for the request");
             error(true);
+            return socks5_request_error::MALFORMED_DATA;
         }
     }
 
@@ -371,11 +509,19 @@ socks5_request_error socksServerCX::handle4_connect() {
         return socks5_request_error::MALFORMED_DATA;
     }
 
-    req_atype = socks5_atype::IPV4;
     state_ = socks5_state::REQ_RECEIVED;
     _dia("process_socks_request: socks4 request received");
 
     req_port = ntohs(readbuf()->get_at<uint16_t>(2));
+    if(!sx::socks5::target_port_is_valid(req_cmd, req_port))
+        return socks5_request_error::MALFORMED_DATA;
+    if(auto domain = sx::socks5::socks4a_domain(
+            readbuf()->data(), req_hdr_size); domain) {
+        req_atype = socks5_atype::FQDN;
+        return prepare_connect_target(std::string(*domain), req_port);
+    }
+
+    req_atype = socks5_atype::IPV4;
     auto dst = readbuf()->get_at<uint32_t>(4);
 
 
@@ -383,16 +529,22 @@ socks5_request_error socksServerCX::handle4_connect() {
     req_addr.family = AF_INET;
     req_addr.as_v4()->sin_family = AF_INET;
     req_addr.as_v4()->sin_addr.s_addr= dst;
-    req_addr.as_v4()->sin_port = req_port;
+    req_addr.as_v4()->sin_port = sx::socks5::sockaddr_port(req_port);
 
     req_addr.unpack();
+
+    if(sx::explicit_proxy::is_unspecified_address(req_addr.str_host))
+        return socks5_request_error::MALFORMED_DATA;
 
     com()->nonlocal_dst_host() = req_addr.str_host;
     com()->nonlocal_dst_port() = req_port;
     com()->nonlocal_src(true);
     _dia("process_socks_request: request (SOCKSv4) for %s -> %s:%d",c_type(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
 
-    setup_target();
+    if(not sx::socks5::target_setup_succeeded(true, setup_target())) {
+        _err("handle4_connect: target setup failed");
+        return socks5_request_error::MALFORMED_DATA;
+    }
 
     return socks5_request_error::NONE;
 }
@@ -413,26 +565,26 @@ explicit_request_error ExplicitProxyCX::prepare_connect_target(
 socks5_request_error socksServerCX::socks5_parse_request() {
 
     auto authorize_if_udp = [this](std::string const& server, unsigned short srv_port) -> bool {
-        // check specific UDP requirement - with the same clientIP:port should not
-        if(com()->l4_proto() == SOCK_DGRAM and not get_udp()->make_authorized(server, srv_port)) {
+        if(com()->l4_proto() == SOCK_DGRAM) {
+            auto associations = UDP::db();
+            auto lock = std::scoped_lock(UDP::lock);
+            auto* control = claim_udp_association_locked(
+                *associations, host(), port());
+            if(control && control->get_udp()->make_authorized(server, srv_port))
+                return true;
+
             _err("authorize_if_udp: UDP violating original target restrictions");
             error(true);
-
-            auto ass = UDP::db();
-
-            auto lc_ = std::scoped_lock(UDP::lock);
-            std::string key = string_format("%s:%s", host().c_str(), port().c_str());
-
-            auto it = ass->clients.find(key);
-            if(it != ass->clients.end()) {
-
-                auto* cx = it->second;
-                if(cx) {
-                    _dia("authorize_if_udp: shutting down UDP association connection");
-                    cx->error(true);
-                }
+            if(control) {
+                _dia("authorize_if_udp: revoking UDP association control channel");
+                auto& association = control->get_udp();
+                auto found = associations->clients.find(association->my_assoc);
+                if(found != associations->clients.end() && found->second == control)
+                    associations->clients.erase(found);
+                association->my_assoc.clear();
+                if(sx::socks5::pollable_control_socket(control->socket()))
+                    ::shutdown(control->socket(), SHUT_RDWR);
             }
-
             return false;
         }
         return true;
@@ -450,8 +602,13 @@ socks5_request_error socksServerCX::socks5_parse_request() {
         state_ = socks5_state::REQ_RECEIVED;
 
         auto fqdn_sz = readbuf()->get_at<unsigned char>(4);
-        if((unsigned int)fqdn_sz + 4 + 2 >= readbuf()->size()) {
+        if(fqdn_sz == 0 || static_cast<std::size_t>(fqdn_sz) + 7 > readbuf()->size()) {
             _err("handle5_connect: protocol error: request header out of boundary.");
+            return socks5_request_error_::MALFORMED_DATA;
+        }
+        if(!sx::socks5::is_unambiguous_domain(
+                readbuf()->data() + 5, fqdn_sz)) {
+            _err("handle5_connect: protocol error: ambiguous FQDN identity");
             return socks5_request_error_::MALFORMED_DATA;
         }
 
@@ -462,6 +619,9 @@ socks5_request_error socksServerCX::socks5_parse_request() {
 
         req_port = ntohs(readbuf()->get_at<uint16_t>(5+fqdn_sz));
         _dia("handle5_connect: port requested: %d",req_port);
+
+        if(!sx::socks5::target_port_is_valid(req_cmd, req_port))
+            return socks5_request_error::MALFORMED_DATA;
 
         req_hdr_size = 5 + fqdn_sz + 2;
 
@@ -485,7 +645,7 @@ socks5_request_error socksServerCX::socks5_parse_request() {
             req_addr.family = AF_INET;
             req_addr.as_v4()->sin_family = AF_INET;
             req_addr.as_v4()->sin_addr.s_addr = dst;
-            req_addr.as_v4()->sin_port = req_port;
+            req_addr.as_v4()->sin_port = sx::socks5::sockaddr_port(req_port);
             req_addr.unpack();
 
         }
@@ -499,15 +659,21 @@ socks5_request_error socksServerCX::socks5_parse_request() {
             req_addr.family = AF_INET6;
             req_addr.as_v6()->sin6_family = AF_INET6;
             std::memcpy(&req_addr.as_v6()->sin6_addr, arr6.data(), 16);
-            req_addr.as_v6()->sin6_port = req_port;
+            req_addr.as_v6()->sin6_port = sx::socks5::sockaddr_port(req_port);
             req_addr.unpack();
         }
+
+        if(req_cmd != socks5_cmd::UDP_ASSOCIATE &&
+           sx::explicit_proxy::is_unspecified_address(req_addr.str_host))
+            return socks5_request_error::MALFORMED_DATA;
 
         com()->nonlocal_dst_host() = req_addr.str_host;
         com()->nonlocal_dst_port() = req_port;
         com()->nonlocal_src(true);
         _dia("handle5_connect: request for %s -> %s:%d",c_type(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
 
+        if(!sx::socks5::target_port_is_valid(req_cmd, req_port))
+            return socks5_request_error::MALFORMED_DATA;
         if(not authorize_if_udp(com()->nonlocal_dst_host(), req_port)) return socks5_request_error::UNAUTHORIZED;
 
 
@@ -525,7 +691,11 @@ socks5_request_error socksServerCX::handle5_connect() {
 
     auto parse_status = socks5_parse_request();
 
-    if(com()->l4_proto() == SOCK_DGRAM) {
+    // A semantically invalid datagram must be consumed without poisoning its
+    // reusable virtual flow. Association lookup is meaningful only after the
+    // parser has validated and authorized a complete destination.
+    if(parse_status == socks5_request_error::NONE &&
+       com()->l4_proto() == SOCK_DGRAM) {
 
         // check if we are in associated clients
         auto ass = UDP::db();
@@ -581,15 +751,35 @@ std::size_t socksServerCX::process_socks_request() {
 
         _dum("Request dump:\r\n%s", hex_dump(readbuf()->data(), readbuf()->size(), 4, 0, true).c_str());
 
-        version = readbuf()->get_at<unsigned char>(0);
+        if(readbuf()->size() < 2)
+            return 0;
+
+        const auto request_version = readbuf()->get_at<unsigned char>(0);
+        // A successful SOCKS5 method negotiation binds the remainder of the
+        // control connection to SOCKS5.  Reinterpreting the next frame as a
+        // fresh SOCKS4 handshake creates a cross-version state transition
+        // which neither protocol permits.
+        if(state_ == socks5_state::WAIT_REQUEST &&
+           !sx::socks5::request_version_matches_negotiation(
+               version, request_version)) {
+            version = request_version;
+            socks_error_ = socks5_request_error::UNSUPPORTED_VERSION;
+            error(true);
+            return 0;
+        }
+        version = request_version;
         req_cmd = readbuf()->get_at<unsigned char>(1);
         //@2 is reserved
 
         if (version == 5) {
-
-            if (readbuf()->size() < 10) {
-                _dia("process_socks_request: socks5 request header too short");
-                return -1;
+            if(readbuf()->size() < 4)
+                return 0;
+            if(readbuf()->get_at<unsigned char>(2) != 0) {
+                socks_error_ = socks5_request_error::MALFORMED_DATA;
+            } else if(sx::socks5::request_size_if_complete(
+                          readbuf()->data(), readbuf()->size()) == 0) {
+                _dia("process_socks_request: incomplete socks5 request");
+                return 0;
             } else if (req_cmd == socks5_cmd::CONNECT) {
                 socks_error_ = handle5_connect();
             } else if (req_cmd == socks5_cmd::UDP_ASSOCIATE) {
@@ -600,7 +790,28 @@ std::size_t socksServerCX::process_socks_request() {
                 socks_error_ = socks5_request_error::UNSUPPORTED_METHOD;
             }
         } else if (version == 4) {
-            socks_error_ = handle4_connect();
+            req_hdr_size = sx::socks5::socks4_request_size_if_complete(
+                readbuf()->data(), readbuf()->size());
+            if(req_hdr_size == 0) {
+                if(readbuf()->size() <
+                   sx::socks5::maximum_socks4_request_size)
+                    return 0;
+                socks_error_ = socks5_request_error::MALFORMED_DATA;
+                error(true);
+                return 0;
+            }
+            if(req_hdr_size > sx::socks5::maximum_socks4_request_size) {
+                socks_error_ = socks5_request_error::MALFORMED_DATA;
+            } else if(req_cmd != socks5_cmd::CONNECT) {
+                socks_error_ = socks5_request_error::UNSUPPORTED_METHOD;
+            } else if(sx::socks5::is_socks4a(
+                          readbuf()->data(), req_hdr_size) &&
+                      !sx::socks5::socks4a_domain(
+                          readbuf()->data(), req_hdr_size)) {
+                socks_error_ = socks5_request_error::MALFORMED_DATA;
+            } else {
+                socks_error_ = handle4_connect();
+            }
         } else {
             socks_error_ = socks5_request_error::UNSUPPORTED_VERSION;
         }
@@ -612,15 +823,36 @@ std::size_t socksServerCX::process_socks_request() {
 
     if(socks_error_ != socks5_request_error_::NONE) {
         _dia("process_socks_request: error %d", socks_error_);
-        error(true);
+        const bool replyable_v5_error = version == 5 &&
+            (socks_error_ == socks5_request_error::UNSUPPORTED_METHOD ||
+             socks_error_ == socks5_request_error::UNSUPPORTED_ATYPE);
+        const bool replyable_v4_error = version == 4 &&
+            socks_error_ == socks5_request_error::UNSUPPORTED_METHOD;
+        if(!replyable_v5_error && !replyable_v4_error)
+            error(true);
     }
 
 
-    return readbuf()->size();
+    // TCP framing is retained explicitly (auto_finish is disabled). The
+    // context is handed off or closed after this point, and setup_target()
+    // has copied any bytes following the request into the replacement client
+    // context. Keeping the original bytes here also covers asynchronous DNS.
+    return com()->l4_proto() == SOCK_DGRAM ? readbuf()->size() : 0;
 }
 
 bool ExplicitProxyCX::setup_target() {
         // prepare a new CX!
+
+        // Resolve and validate the accepted endpoint before constructing a
+        // replacement which would otherwise temporarily own the same socket.
+        const auto source = sx::explicit_proxy::resolve_source_endpoint(
+            socket(), [this](int descriptor, std::string* host, std::string* port) {
+                return com()->resolve_socket_src(descriptor, host, port);
+            });
+        if(not source) {
+            _err("ExplicitProxyCX::setup_target: cannot resolve source endpoint");
+            return false;
+        }
 
         // LEFT
         int s = socket();
@@ -661,6 +893,12 @@ bool ExplicitProxyCX::setup_target() {
             // with UDP, we receive data with the request, n_cx must have it
             readbuf()->flush(req_hdr_size);
             n_cx->readbuf()->append(readbuf()->data(), readbuf()->size());
+        } else if(req_hdr_size > 0 && readbuf()->size() > req_hdr_size) {
+            // Preserve a pipelined TLS ClientHello or application payload
+            // which arrived in the same read as any explicit CONNECT
+            // frontend request (SOCKS or HTTP CONNECT).
+            n_cx->readbuf()->append(readbuf()->data() + req_hdr_size,
+                                    readbuf()->size() - req_hdr_size);
         }
 
         // Use of "left" differs between UDP and TCP.
@@ -678,20 +916,6 @@ bool ExplicitProxyCX::setup_target() {
 
         
         // RIGHT
-        std::string h;
-        std::string p;
-        if(not com()->resolve_socket_src(socket(),&h,&p)) {
-            _err("ExplicitProxyCX::setup_target: cannot resolve source endpoint");
-            return false;
-        }
-
-        auto const source_port = sx::explicit_proxy::parse_source_port(p);
-        if(not source_port) {
-            _err("ExplicitProxyCX::setup_target: invalid source endpoint %s:%s",
-                 h.c_str(), p.c_str());
-            return false;
-        }
-
         auto *target_cx = new MitmHostCX(com()->slave(), com()->nonlocal_dst_host().c_str(),
                                             string_format("%d",com()->nonlocal_dst_port()).c_str()
                                             );
@@ -700,8 +924,8 @@ bool ExplicitProxyCX::setup_target() {
 
         
         target_cx->com()->nonlocal_src(false);
-        target_cx->com()->nonlocal_src_host() = h;
-        target_cx->com()->nonlocal_src_port() = *source_port;
+        target_cx->com()->nonlocal_src_host() = source->host;
+        target_cx->com()->nonlocal_src_port() = source->port;
 
 
 
@@ -715,10 +939,23 @@ bool ExplicitProxyCX::setup_target() {
 }
 
 bool ExplicitProxyCX::new_message() const {
+    if(auto const* socks = dynamic_cast<socksServerCX const*>(this);
+       socks != nullptr && socks->com()->l4_proto() != SOCK_DGRAM &&
+       request_error_ != explicit_request_error::NONE &&
+       state_ != explicit_state::REQRES_SENT &&
+       state_ != explicit_state::HANDOFF && state_ != explicit_state::ZOMBIE)
+        return true;
+
     if(state_ == socks5_state::WAIT_POLICY && verdict_ == socks5_policy::PENDING) {
         _dia("new_message: policy pending");
         return true;
 
+    }
+    if(state_ == socks5_state::HANDOFF) {
+        auto const* socks = dynamic_cast<socksServerCX const*>(this);
+        if(socks != nullptr &&
+           socks->request_command() == socks5_cmd::UDP_ASSOCIATE)
+            return false;
     }
     _dia("new_message: %s", state_ == socks5_state::HANDOFF ? "handoff" : "other");
     return state_ == socks5_state::HANDOFF;
@@ -733,10 +970,14 @@ void socksServerCX::verdict(socks5_policy p) {
             auto lc_ = std::scoped_lock(UDP::lock);
 
             auto key = string_format("%s:%d", host().c_str(), req_port);
-            ass->clients.emplace(key, this);
-
-            auto& udp = get_udp();
-            udp->my_assoc = key;
+            auto [entry, inserted] = ass->clients.emplace(key, this);
+            if(!inserted && entry->second != this) {
+                _err("verdict: conflicting UDP association for %s", key.c_str());
+                p = socks5_policy::REJECT;
+            } else {
+                auto& udp = get_udp();
+                udp->my_assoc = key;
+            }
         }
         ExplicitProxyCX::verdict(p);
 }
@@ -752,7 +993,7 @@ void ExplicitProxyCX::verdict(explicit_policy p) {
 
 std::size_t socksServerCX::process_socks_reply_v5() {
 
-    std::array<uint8_t,128> response {0};
+    std::array<uint8_t, sx::socks5::maximum_tcp_reply_size> response {0};
 
     response[0] = 5;
     response[1] = 2; // denied
@@ -761,25 +1002,59 @@ std::size_t socksServerCX::process_socks_reply_v5() {
     response[2] = 0;
     int cur_data_ptr = 3;
 
+    if(verdict_ != socks5_policy::ACCEPT) {
+        close_after_write(true);
+        switch(socks_error_) {
+            case socks5_request_error::UNSUPPORTED_METHOD:
+                response[1] = 7;
+                break;
+            case socks5_request_error::UNSUPPORTED_ATYPE:
+                response[1] = 8;
+                break;
+            case socks5_request_error::MALFORMED_DATA:
+            case socks5_request_error::UNSUPPORTED_VERSION:
+                response[1] = 1;
+                break;
+            case socks5_request_error::NONE:
+            case socks5_request_error::UNAUTHORIZED:
+                break;
+        }
+        response[3] = static_cast<uint8_t>(socks5_atype::IPV4);
+        cur_data_ptr = 10;
+        goto reply_ready;
+    }
+
     if(req_cmd == socks5_cmd::CONNECT) {
         response[3] = static_cast<uint8_t>(req_atype);
         ++cur_data_ptr;
 
         if (req_atype == socks5_atype::IPV4) {
-            *((uint32_t *) &response[cur_data_ptr]) = req_addr.as_v4()->sin_addr.s_addr;
+            std::memcpy(&response[cur_data_ptr],
+                        &req_addr.as_v4()->sin_addr.s_addr, sizeof(uint32_t));
             cur_data_ptr += sizeof(uint32_t);
 
-            *((uint16_t*)&response[cur_data_ptr]) = htons(req_port);
+            const auto network_port = htons(req_port);
+            std::memcpy(&response[cur_data_ptr], &network_port, sizeof(network_port));
             cur_data_ptr += sizeof(uint16_t);
 
         } else if (req_atype == socks5_atype::IPV6) {
             std::memcpy(&response[cur_data_ptr], &req_addr.as_v6()->sin6_addr, sizeof(in6_addr));
             cur_data_ptr += sizeof(in6_addr);
 
-            *((uint16_t*)&response[cur_data_ptr]) = htons(req_port);
+            const auto network_port = htons(req_port);
+            std::memcpy(&response[cur_data_ptr], &network_port, sizeof(network_port));
             cur_data_ptr += sizeof(uint16_t);
 
         } else if (req_atype == socks5_atype::FQDN) {
+
+            auto const reply_size = sx::socks5::domain_reply_size(req_str_addr.size());
+            if(!reply_size || *reply_size > response.size()) {
+                _err("process_socks_reply_v5: invalid FQDN reply size");
+                response[1] = 1;
+                response[3] = static_cast<uint8_t>(socks5_atype::IPV4);
+                cur_data_ptr = 10;
+                goto reply_ready;
+            }
 
             response[cur_data_ptr] = (unsigned char) req_str_addr.size();
             cur_data_ptr++;
@@ -789,7 +1064,8 @@ std::size_t socksServerCX::process_socks_reply_v5() {
                 cur_data_ptr++;
             }
 
-            *((uint16_t*)&response[cur_data_ptr]) = htons(req_port);
+            const auto network_port = htons(req_port);
+            std::memcpy(&response[cur_data_ptr], &network_port, sizeof(network_port));
             cur_data_ptr += sizeof(uint16_t);
         }
     }
@@ -797,7 +1073,8 @@ std::size_t socksServerCX::process_socks_reply_v5() {
         response[3] = 1u;
         ++cur_data_ptr;
 
-        *((uint32_t*)&response[cur_data_ptr]) = 0U;
+        const uint32_t any_address = 0;
+        std::memcpy(&response[cur_data_ptr], &any_address, sizeof(any_address));
         cur_data_ptr += sizeof(uint32_t);
 
         std::string relay_port_text;
@@ -806,15 +1083,20 @@ std::size_t socksServerCX::process_socks_reply_v5() {
         const auto relay_port = relay_resolved
             ? sx::explicit_proxy::parse_source_port(relay_port_text)
             : std::nullopt;
-        if(!relay_port) {
+        if(!sx::socks5::udp_relay_endpoint_ready(relay_resolved, relay_port)) {
             _err("process_socks_reply_v5: cannot resolve UDP relay port");
             response[1] = 1; // general SOCKS server failure
+            // verdict() has already registered this control association. A
+            // failure reply must not leave authorization live behind it.
+            retire_udp_association();
+            close_after_write(true);
         }
-        *((uint16_t*)&response[cur_data_ptr]) = htons(relay_port.value_or(0));
+        const auto network_port = htons(relay_port.value_or(0));
+        std::memcpy(&response[cur_data_ptr], &network_port, sizeof(network_port));
         cur_data_ptr += sizeof(uint16_t);
     }
 
-
+reply_ready:
     writebuf()->append(response.data(), cur_data_ptr);
     state_ = socks5_state::REQRES_SENT;
 
@@ -846,9 +1128,14 @@ int socksServerCX::process_socks_reply_v4() {
     b[0] = 0;
     b[1] = 91; // denied
     if(verdict_ == socks5_policy::ACCEPT) b[1] = 90; //accept
+    else close_after_write(true);
 
-    *((uint16_t*)&b[2]) = htons(req_port);
-    *((uint32_t*)&b[4]) = req_addr.as_v4()->sin_addr.s_addr;
+    const auto network_port = verdict_ == socks5_policy::ACCEPT
+        ? htons(req_port) : uint16_t{0};
+    std::memcpy(&b[2], &network_port, sizeof(network_port));
+    const auto network_address = verdict_ == socks5_policy::ACCEPT
+        ? req_addr.as_v4()->sin_addr.s_addr : uint32_t{0};
+    std::memcpy(&b[4], &network_address, sizeof(network_address));
 
     writebuf()->append(b,8);
     state_ = socks5_state::REQRES_SENT;
@@ -861,6 +1148,17 @@ int socksServerCX::process_socks_reply_v4() {
 std::size_t socksServerCX::process_proxy_reply() {
 
     _dia("process_socks_reply: version %d", version);
+
+    if(verdict_ == socks5_policy::ACCEPT && req_cmd == socks5_cmd::CONNECT &&
+       (version == 4 || version == 5)) {
+        // CONNECT success is meaningful only after the nonblocking upstream
+        // connect completes.  Keep the same flush-driven transition so a
+        // pipelined SOCKS5 method reply leaves before the frontend handoff;
+        // ExplicitProxy will send the final protocol reply afterwards.
+        state_ = socks5_state::REQRES_SENT;
+        com()->set_write_monitor(socket());
+        return 0;
+    }
 
     switch(version) {
         case 4:
@@ -881,13 +1179,50 @@ std::size_t socksServerCX::process_proxy_reply() {
     return 0;
 }
 
+std::string_view socksServerCX::upstream_success_response() const {
+    static constexpr char socks5[] = {
+        0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    };
+    static constexpr char socks4[] = {
+        0x00, 0x5a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    };
+    if(version == 5) return {socks5, sizeof(socks5)};
+    if(version == 4) return {socks4, sizeof(socks4)};
+    return {};
+}
+
+std::string_view socksServerCX::upstream_failure_response() const {
+    static constexpr char socks5[] = {
+        0x05, 0x05, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    };
+    static constexpr char socks4[] = {
+        0x00, 0x5b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    };
+    if(version == 5) return {socks5, sizeof(socks5)};
+    if(version == 4) return {socks4, sizeof(socks4)};
+    return {};
+}
+
 void ExplicitProxyCX::pre_write() {
     _deb("socksServerCX::pre_write[%s]: writebuf=%d, readbuf=%d",c_type(),writebuf()->size(),readbuf()->size());
-    if(state_ == socks5_state::REQRES_SENT ) {
+    if(state_ == socks5_state::HELLO_SENT) {
+        // HELLO_SENT is retained only for the terminal 0xff authentication
+        // response. Close after the response has actually left the buffer.
+        if(writebuf()->empty())
+            error(true);
+    }
+    else if(state_ == socks5_state::REQRES_SENT ) {
         if(writebuf()->empty()) {
             _dia("socksServerCX::pre_write[%s]: all flushed, state change to HANDOFF: writebuf=%d, readbuf=%d",c_type(),writebuf()->size(),readbuf()->size());
-            waiting_for_peercom(true);
+            // A UDP association has no stream peer to wait for. Keep the TCP
+            // control channel readable so its EOF terminates the association.
+            auto const* socks = dynamic_cast<socksServerCX const*>(this);
+            bool const udp_association = socks != nullptr &&
+                socks->request_command() == socks5_cmd::UDP_ASSOCIATE;
+            waiting_for_peercom(!udp_association);
             state(socks5_state::HANDOFF);
+            if(udp_association)
+                com()->set_monitor(socket());
         }
     }
     else if(state_ == socks5_state::DNS_RESP_FAILED) {
@@ -944,22 +1279,22 @@ std::size_t socksServerCX::process_socks_response() {
 
     buffer b(writebuf()->size() + 200);
 
-    (*(uint16_t*)&b.data()[0]) = 0;
+    sx::socks5::store_network_u16(&b.data()[0], 0);
     b.data()[2] = 0;
 
     b.data()[3] = static_cast<uint8_t>(req_atype);
     b.size(4);
 
     if(req_atype == socks5_atype::IPV4) {
-
-        (*(uint32_t *) &b.data()[4]) = req_addr.as_v4()->sin_addr.s_addr;
-        (*(uint16_t *) &b.data()[8]) = htons(req_port);
+        sx::socks5::store_network_u32(
+            &b.data()[4], req_addr.as_v4()->sin_addr.s_addr);
+        sx::socks5::store_network_u16(&b.data()[8], req_port);
         b.size(10);
     }
     if(req_atype == socks5_atype::IPV6) {
 
         std::memcpy(&b.data()[4], &req_addr.as_v6()->sin6_addr, 16);
-        (*(uint16_t *) &b.data()[20]) = htons(req_port);
+        sx::socks5::store_network_u16(&b.data()[20], req_port);
         b.size(22);
     }
     else if(req_atype == socks5_atype::FQDN) {

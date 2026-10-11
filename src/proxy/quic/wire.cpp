@@ -68,6 +68,10 @@ parse_result parse_header(const std::uint8_t* data, std::size_t size) {
 
     if (!long_header) {
         if (!fixed_bit) return failure(std::move(parsed), parse_error::not_quic, 0);
+        // Even with a zero-length destination CID, a short header contains at
+        // least one protected packet-number byte after its invariant octet.
+        if(size < 2)
+            return failure(std::move(parsed), parse_error::truncated, size);
         parsed.form = packet_form::short_header;
         parsed.packet_number_offset = 1;
         parsed.packet_end = size;
@@ -106,6 +110,21 @@ parse_result parse_header(const std::uint8_t* data, std::size_t size) {
     offset += source_size;
 
     if (parsed.version == 0) {
+        // A Version Negotiation packet carries one or more 32-bit versions
+        // after the connection IDs.  Accepting arbitrary trailing bytes makes
+        // random long-header UDP payloads look like a valid QUIC transition.
+        const auto version_bytes = size - offset;
+        if(version_bytes == 0 || version_bytes % sizeof(std::uint32_t) != 0) {
+            return failure(std::move(parsed), parse_error::invalid_length, offset);
+        }
+        // Version zero identifies Version Negotiation itself and is reserved
+        // from the advertised version list. Accepting it gives malformed UDP
+        // input valid QUIC/routing semantics before an endpoint rejects it.
+        for(std::size_t item = offset; item < size; item += sizeof(std::uint32_t)) {
+            if(read_u32(data + item) == 0) {
+                return failure(std::move(parsed), parse_error::invalid_length, item);
+            }
+        }
         parsed.type = packet_type::version_negotiation;
         parsed.packet_number_offset = offset;
         parsed.packet_end = size;
@@ -113,7 +132,24 @@ parse_result parse_header(const std::uint8_t* data, std::size_t size) {
     }
 
     parsed.type = decode_long_type(parsed.version, parsed.first_byte);
-    if (parsed.type == packet_type::retry || parsed.type == packet_type::unknown) {
+    if (parsed.type == packet_type::retry) {
+        // Retry ends with the 128-bit Retry Integrity Tag.  The token may be
+        // empty, but a shorter remainder cannot be a complete Retry packet.
+        constexpr std::size_t retry_integrity_tag_size = 16;
+        if(size - offset < retry_integrity_tag_size) {
+            return failure(std::move(parsed), parse_error::truncated, offset);
+        }
+        parsed.packet_number_offset = offset;
+        parsed.packet_end = size;
+        return { std::move(parsed), parse_error::none, 0 };
+    }
+    if (parsed.type == packet_type::unknown) {
+        // Packet-type layouts are version-specific, but every long-header
+        // packet still carries data after both invariant connection IDs. An
+        // empty remainder is only a long-header-shaped UDP prefix, not a
+        // complete packet suitable for QUIC routing/classification.
+        if(offset == size)
+            return failure(std::move(parsed), parse_error::truncated, offset);
         parsed.packet_number_offset = offset;
         parsed.packet_end = size;
         return { std::move(parsed), parse_error::none, 0 };
@@ -134,6 +170,13 @@ parse_result parse_header(const std::uint8_t* data, std::size_t size) {
     offset += payload_size.encoded_size;
     parsed.packet_number_offset = offset;
     parsed.protected_payload_length = payload_size.value;
+
+    // Length covers the protected packet number plus payload. Every QUIC
+    // packet number occupies at least one byte, irrespective of the
+    // header-protected packet-number-length bits.
+    if(payload_size.value == 0) {
+        return failure(std::move(parsed), parse_error::invalid_length, offset);
+    }
 
     if (payload_size.value > std::numeric_limits<std::size_t>::max() - offset) {
         return failure(std::move(parsed), parse_error::invalid_length, offset);

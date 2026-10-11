@@ -70,14 +70,13 @@
 #include <socle/timed_guard.hpp>
 
 #include <inspect/fp/ja4.hpp>
-#include <proxy/connection_identity.hpp>
 
 using namespace socle;
 
 MitmProxy::MitmProxy(baseCom* c): baseProxy(c), start_stop_tls_(*this) {
 
     current_sessions()++;
-    session_id_ = total_sessions().fetch_add(1, std::memory_order_relaxed) + 1;
+    total_sessions()++;
 }
 
 bool MitmProxy::stage_stream_handler(std::unique_ptr<sx::StreamHandler> handler) {
@@ -312,7 +311,8 @@ std::string_view MitmProxy::session_protocol() const noexcept {
 
 
 std::string MitmProxy::to_connection_ID() const {
-    return sx::proxy::connection_id(StaticContent::boot_random, session_id_);
+    return string_format("Proxy-%lX-PTR-%lX", StaticContent::boot_random,
+                         reinterpret_cast<std::uintptr_t>(this));
 }
 
 void MitmProxy::webhook_session_start() const {

@@ -100,15 +100,7 @@ private:
 class socksServerCX : public ExplicitProxyCX {
 public:
     socksServerCX(baseCom* c, unsigned int s);
-    ~socksServerCX() override {
-
-        if(udp_) {
-            auto ass = UDP::db();
-
-            auto lc_ = std::scoped_lock(UDP::lock);
-            ass->clients.erase(udp_->my_assoc);
-        }
-    }
+    ~socksServerCX() override;
 
     std::size_t process_in() override;
     virtual std::size_t process_socks_hello();
@@ -125,7 +117,14 @@ public:
         std::string my_allowed_target;
 
         bool make_authorized(std::string const& server, unsigned short port) {
-            std::string const key = string_format("%s:%d", server.c_str(), port);
+            std::string normalized_server = server;
+            for(char& ch: normalized_server) {
+                auto const value = static_cast<unsigned char>(ch);
+                if(value >= 'A' && value <= 'Z')
+                    ch = static_cast<char>(value + ('a' - 'A'));
+            }
+            std::string const key = string_format(
+                "%s:%d", normalized_server.c_str(), port);
             if(my_allowed_target.empty()) {
                 my_allowed_target = key;
                 return true;
@@ -134,20 +133,14 @@ public:
         }
 
         static std::shared_ptr<associations> db() {
-
-            // double condition check to prevent locks
-            if(not db_) {
-                auto lc_ = std::scoped_lock(lock);
-                if(not db_) {
-                    db_ = std::make_shared<associations>();
-                }
-            }
-            return db_;
+            // Function-local static initialization is synchronized by the
+            // language.  Reading and assigning one shared_ptr around a
+            // double-checked mutex was itself an unsynchronized data race.
+            static const auto instance = std::make_shared<associations>();
+            return instance;
         }
 
         static inline std::mutex lock;
-    private:
-        static inline std::shared_ptr<associations> db_;
     };
 
     std::unique_ptr<UDP> udp_;
@@ -164,6 +157,8 @@ public:
     std::size_t process_proxy_reply() override;
     virtual int process_socks_reply_v4();
     virtual std::size_t process_socks_reply_v5();
+    std::string_view upstream_success_response() const override;
+    std::string_view upstream_failure_response() const override;
     void verdict(socks5_policy) override;
 
     // Compatibility names local to SOCKS framing.
@@ -175,6 +170,11 @@ public:
     std::size_t process_out() override;
 
 private:
+    friend class SocksProxy;
+    void retire_udp_association() noexcept;
+    bool udp_association_available();
+    bool prepare_udp_handoff_datagram();
+
     uint8_t version {0};
     uint8_t req_cmd {0};
     socks5_atype req_atype {0};

@@ -7,6 +7,7 @@
 
 #include <chrono>
 #include <ctime>
+#include <filesystem>
 #include <thread>
 
 #if SMITHPROXY_OPENSSL_QUIC
@@ -17,6 +18,24 @@
 #endif
 
 namespace quic = sx::quic;
+
+TEST(QuicCertificateCallbackIdentity, RejectsReusedBorrowedHandles) {
+    EXPECT_TRUE(quic::detail::same_certificate_callback_identity(
+        "origin.example", 41, "origin.example", 41));
+    EXPECT_FALSE(quic::detail::same_certificate_callback_identity(
+        "other.example", 41, "origin.example", 41));
+    EXPECT_FALSE(quic::detail::same_certificate_callback_identity(
+        "origin.example", 40, "origin.example", 41));
+    EXPECT_FALSE(quic::detail::same_certificate_callback_identity(
+        "origin.example", 0, "origin.example", 0));
+}
+
+TEST(QuicCertificateCallbackIdentity, PreservesGenerationAcrossCallbackReentry) {
+    EXPECT_TRUE(quic::detail::same_dispatcher_callback_association(17, 17));
+    EXPECT_FALSE(quic::detail::same_dispatcher_callback_association(17, 18));
+    EXPECT_FALSE(quic::detail::same_dispatcher_callback_association(17, 0));
+    EXPECT_FALSE(quic::detail::same_dispatcher_callback_association(0, 0));
+}
 
 class QuicListenerService : public ::testing::Test {
 protected:
@@ -99,6 +118,16 @@ TEST_F(QuicListenerService, IdleListenerSleepsUntilExplicitWakeup) {
 #if SMITHPROXY_OPENSSL_QUIC
 namespace {
 
+std::size_t open_descriptor_count() {
+    std::error_code error;
+    std::size_t count = 0;
+    for(std::filesystem::directory_iterator entry("/proc/self/fd", error), end;
+        !error && entry != end; entry.increment(error)) {
+        ++count;
+    }
+    return error ? 0 : count;
+}
+
 int select_h3_for_origin(SSL*, const unsigned char** output, unsigned char* output_size,
                          const unsigned char* input, unsigned input_size, void*) {
     static constexpr unsigned char supported[] = { 2, 'h', '3' };
@@ -115,6 +144,29 @@ bool nonblocking(int fd) {
 }
 
 } // namespace
+
+TEST_F(QuicListenerService, FailedPrepareDoesNotLeakDescriptorsAcrossRetries) {
+    const int occupied = ::socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+    ASSERT_GE(occupied, 0);
+    sockaddr_in address {};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_ANY);
+    ASSERT_EQ(::bind(occupied, reinterpret_cast<sockaddr*>(&address),
+                     sizeof(address)), 0);
+    socklen_t address_size = sizeof(address);
+    ASSERT_EQ(::getsockname(occupied, reinterpret_cast<sockaddr*>(&address),
+                            &address_size), 0);
+
+    quic::listener_service service(
+        ntohs(address.sin_port), "etc/certs/default/srv-cert.pem",
+        "etc/certs/default/srv-key.pem", false, 443, false);
+    const auto before = open_descriptor_count();
+    ASSERT_NE(before, 0U);
+    for(int attempt = 0; attempt < 5; ++attempt)
+        EXPECT_FALSE(service.prepare());
+    EXPECT_EQ(open_descriptor_count(), before);
+    ::close(occupied);
+}
 
 TEST_F(QuicListenerService, CleansUpHandshakeTimeout) {
     auto client_context = quic::make_openssl_quic_context(false);
@@ -137,7 +189,8 @@ TEST_F(QuicListenerService, CleansUpHandshakeTimeout) {
     lifecycle.drain_timeout = std::chrono::milliseconds(100);
     quic::listener_service proxy(0, "etc/certs/default/srv-cert.pem",
                                  "etc/certs/default/srv-key.pem", false,
-                                 ntohs(silent_origin.sin_port), false, lifecycle);
+                                 ntohs(silent_origin.sin_port), false, lifecycle,
+                                 {}, "127.0.0.1");
     ASSERT_TRUE(proxy.prepare()) << proxy.last_error();
     std::thread runner([&proxy]() { proxy.run(); });
     struct cleanup_guard {
@@ -156,7 +209,7 @@ TEST_F(QuicListenerService, CleansUpHandshakeTimeout) {
     std::string error;
     auto external = quic::connect_openssl_quic(
         client_context.get(), reinterpret_cast<sockaddr*>(&proxy_address),
-        sizeof(proxy_address), "127.0.0.1", &error);
+        sizeof(proxy_address), "Smithproxy-Server-Certificate", &error);
     ASSERT_NE(external, nullptr) << error;
 
     bool accepted = false;
@@ -208,7 +261,7 @@ TEST_F(QuicListenerService, RejectsSessionsBeyondConfiguredLimit) {
     std::string error;
     auto external = quic::connect_openssl_quic(
         client_context.get(), reinterpret_cast<sockaddr*>(&address),
-        sizeof(address), "127.0.0.1", &error);
+        sizeof(address), "Smithproxy-Server-Certificate", &error);
     ASSERT_NE(external, nullptr) << error;
 
     auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
@@ -258,7 +311,8 @@ TEST_F(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
     lifecycle.drain_timeout = std::chrono::milliseconds(100);
     quic::listener_service proxy(0, "etc/certs/default/srv-cert.pem",
                                  "etc/certs/default/srv-key.pem", false,
-                                 ntohs(origin_address.sin_port), false, lifecycle);
+                                 ntohs(origin_address.sin_port), false, lifecycle,
+                                 {}, "127.0.0.1");
     ASSERT_TRUE(proxy.prepare()) << proxy.last_error();
     std::thread proxy_thread([&proxy]() { proxy.run(); });
     struct thread_guard {
@@ -277,7 +331,7 @@ TEST_F(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
     std::string error;
     auto external = quic::connect_openssl_quic(
         client_context.get(), reinterpret_cast<sockaddr*>(&proxy_address),
-        sizeof(proxy_address), "127.0.0.1", &error);
+        sizeof(proxy_address), "Smithproxy-Server-Certificate", &error);
     ASSERT_NE(external, nullptr) << error;
 
     std::unique_ptr<quic::openssl_connection> origin;
@@ -333,7 +387,7 @@ TEST_F(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
     }
     ASSERT_EQ(snapshots.size(), 1U);
     EXPECT_EQ(snapshots.front().state, "active");
-    EXPECT_EQ(snapshots.front().server_name, "127.0.0.1");
+    EXPECT_EQ(snapshots.front().server_name, "Smithproxy-Server-Certificate");
     EXPECT_EQ(snapshots.front().downstream_alpn, "h3");
     EXPECT_EQ(snapshots.front().upstream_alpn, "h3");
     EXPECT_EQ(snapshots.front().streams, 1U);

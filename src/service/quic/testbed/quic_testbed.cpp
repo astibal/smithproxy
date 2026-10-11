@@ -198,7 +198,8 @@ quic::unique_ssl_ctx make_verified_client_context() {
 
 class origin_server {
 public:
-    origin_server() {
+    explicit origin_server(std::chrono::milliseconds initial_delay = 0ms)
+        : initial_delay_(initial_delay) {
         context_ = quic::make_openssl_quic_context(true);
         if (!context_) return;
 
@@ -287,6 +288,7 @@ private:
     };
 
     void run() {
+        if (initial_delay_ != 0ms) std::this_thread::sleep_for(initial_delay_);
         while (!stopping_) {
             listener_->handle_events();
             while (auto accepted = listener_->accept()) {
@@ -373,6 +375,7 @@ private:
     std::unique_ptr<quic::openssl_listener> listener_;
     std::atomic_bool stopping_ = false;
     std::thread thread_;
+    std::chrono::milliseconds initial_delay_ {};
     std::vector<connection_state> connections_;
     std::vector<unsigned char> certificate_fingerprint_;
     std::atomic_size_t handshake_count_ = 0;
@@ -568,6 +571,42 @@ bool await_handshake(quic::openssl_connection& connection,
         std::this_thread::sleep_for(1ms);
     }
     return connection.handshake_complete();
+}
+
+TEST(QuicTestbed, KeepsCallbackGenerationAfterEarlyAccept) {
+    // Make the origin certificate probe finish after OpenSSL has already
+    // published the downstream connection. This is the ordering seen with a
+    // real HTTP/3 origin and must not release the callback identity early.
+    origin_server origin(500ms);
+    ASSERT_TRUE(origin.ready());
+    quic::listener_service proxy(0, pki_file("srv-cert.pem"), pki_file("srv-key.pem"), false,
+                                 origin.port(), true, {}, {}, "127.0.0.1");
+    ASSERT_TRUE(proxy.prepare()) << proxy.last_error();
+    running_service runner(proxy);
+
+    auto context = make_verified_client_context();
+    ASSERT_NE(context, nullptr);
+    auto const address = loopback(proxy.bound_port());
+    std::string error;
+    auto client = quic::connect_openssl_quic(
+        context.get(), reinterpret_cast<sockaddr const*>(&address), sizeof(address),
+        test_sni, &error);
+    ASSERT_NE(client, nullptr) << error;
+
+    auto const accept_deadline = std::chrono::steady_clock::now() + 250ms;
+    while (proxy.diagnostics().accepted_sessions == 0
+           && std::chrono::steady_clock::now() < accept_deadline) {
+        client->drain_events();
+        std::this_thread::sleep_for(1ms);
+    }
+    ASSERT_EQ(proxy.diagnostics().accepted_sessions, 1U);
+    ASSERT_EQ(origin.handshake_count(), 0U)
+        << "origin certificate probe completed before early accept was exercised";
+    ASSERT_TRUE(await_handshake(*client, 5s)) << quic::openssl_error_stack();
+    EXPECT_EQ(client->negotiated_alpn(), "h3");
+    EXPECT_GE(origin.handshake_count(), 1U);
+    EXPECT_EQ(proxy.diagnostics().handshake_failures, 0U);
+    client->close();
 }
 
 class QuicFaultProfile : public ::testing::TestWithParam<udp_fault_relay::profile> {};
@@ -1025,11 +1064,7 @@ TEST(QuicTestbed, RepeatedVerifiedReconnectsReleaseEveryIdleSession) {
     }
     EXPECT_EQ(proxy.diagnostics().accepted_sessions, reconnects);
     EXPECT_EQ(proxy.diagnostics().completed_sessions, reconnects);
-    // Every accepted downstream session requires its certificate-probe
-    // handshake. The forwarding-origin handshake may be cancelled when this
-    // test deliberately closes the client immediately after negotiation.
-    EXPECT_GE(origin.handshake_count(), reconnects);
-    EXPECT_LE(origin.handshake_count(), 2 * reconnects);
+    EXPECT_EQ(origin.handshake_count(), 2 * reconnects);
 }
 
 TEST(QuicTestbed, EnforcesStreamLimitOnRealQuicConnection) {

@@ -58,6 +58,20 @@ TEST(MFFlowCom, MapsBackpressureForBaseHostCX) {
     EXPECT_TRUE(com.writable(com.token()));
 }
 
+TEST(MFFlowCom, ZeroLengthIoDoesNotTouchTransportState) {
+    auto connection = std::make_shared<mf::fake_connection>();
+    auto const flow = connection->open_flow(mf::direction::bidirectional);
+    mf::MFFlowCom com(connection, flow);
+
+    EXPECT_EQ(com.read(com.token(), nullptr, 0, 0), 0);
+    EXPECT_EQ(com.peek(com.token(), nullptr, 0, 0), 0);
+    EXPECT_EQ(com.write(com.token(), nullptr, 0, 0), 0);
+
+    connection->close();
+    EXPECT_EQ(com.read(com.token(), nullptr, 0, 0), 0);
+    EXPECT_EQ(com.write(com.token(), nullptr, 0, 0), 0);
+}
+
 TEST(MFFlowCom, DefersPeerFinForIndependentHalfClose) {
     auto connection = std::make_shared<mf::fake_connection>();
     auto const flow = connection->open_flow(mf::direction::bidirectional);

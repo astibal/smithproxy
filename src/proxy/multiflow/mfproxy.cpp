@@ -89,13 +89,25 @@ void MFProxy::pair_new_flow(bool from_left, flow_handle source) {
     // A receive-only local flow cannot be opened. It represents a peer-created
     // unidirectional stream, so the opposite endpoint must create send-only.
     auto destination = destination_connection->open_flow(destination_direction);
-    if (destination.generation == 0) return;
+    if (destination.generation == 0) {
+        // The flow_open event is edge-triggered and has already been consumed.
+        // Leaving the source alive here would strand it forever with no pair
+        // and no future retry signal. Fail this stream explicitly and keep the
+        // rest of the multiplexed connection usable.
+        source_connection->reset(source, 0x107);
+        ++limit_rejections_;
+        return;
+    }
 
     auto created = std::make_unique<pair>();
     created->left_handle = from_left ? source : destination;
     created->right_handle = from_left ? destination : source;
     created->left = std::make_unique<MFFlowCom>(left_, created->left_handle);
     created->right = std::make_unique<MFFlowCom>(right_, created->right_handle);
+    created->left_expects_fin = left_->direction_of(created->left_handle)
+        != direction::send_only;
+    created->right_expects_fin = right_->direction_of(created->right_handle)
+        != direction::send_only;
     pairs_.emplace(created->left_handle.id, std::move(created));
 }
 
@@ -155,8 +167,12 @@ void MFProxy::propagate_fin(pair& current) {
         auto const status = left_->finish(current.left_handle);
         current.left_finish_sent = status != io_status::would_block;
     }
-    if (current.left_peer_fin && current.right_peer_fin
-        && current.left_to_right.empty() && current.right_to_left.empty()) {
+    const bool left_complete = !current.left_expects_fin ||
+        (current.left_peer_fin && current.right_finish_sent);
+    const bool right_complete = !current.right_expects_fin ||
+        (current.right_peer_fin && current.left_finish_sent);
+    if (left_complete && right_complete && current.left_to_right.empty()
+        && current.right_to_left.empty()) {
         retired_.insert(current.left_handle.id);
     }
 }
