@@ -402,10 +402,13 @@ namespace sx::http::webhooks {
             {"source", get_hostid()}, {"type", "proxy"}, {"details", std::move(details)}
         };
         const auto encoded = to_string(metadata);
-        if(encoded.size() > std::numeric_limits<std::uint32_t>::max()) return false;
-        char prefix[17]{};
-        std::snprintf(prefix, sizeof(prefix), "SXBN001:%08X", static_cast<unsigned>(encoded.size()));
-        std::string message(prefix, 16);
+        if(encoded.size() > std::numeric_limits<std::uint32_t>::max() ||
+           payload.size() > std::numeric_limits<std::uint32_t>::max()) return false;
+        char prefix[26]{};
+        std::snprintf(prefix, sizeof(prefix), "SXBN001:%08X:%08X",
+                      static_cast<unsigned>(encoded.size()),
+                      static_cast<unsigned>(payload.size()));
+        std::string message(prefix, 25);
         message.append(encoded);
         message.append(payload.data(), payload.size());
         sx::http::AsyncRequest::emit_wait(message,
