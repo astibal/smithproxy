@@ -3,12 +3,14 @@
  */
 
 #include <proxy/ssh/sshmitm.hpp>
+#include <proxy/ssh/ssh_channel_budget.hpp>
 
 #include <cerrno>
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fcntl.h>
 #include <utility>
 #include <vector>
 
@@ -204,7 +206,11 @@ class mitm_transport::impl {
         std::string stderr_to_downstream;
         bool downstream_eof_forwarded = false;
         bool upstream_eof_forwarded = false;
+        bool upstream_exit_captured = false;
         bool upstream_exit_forwarded = false;
+        std::uint32_t upstream_exit_code = 0;
+        std::string upstream_exit_signal;
+        int upstream_exit_core_dumped = 0;
         bool closing = false;
         channel_mode mode = channel_mode::none;
         ssh_channel_callbacks_struct upstream_callbacks{};
@@ -321,14 +327,16 @@ public:
             set_error("SSH transport is already attached");
             return false;
         }
-        client_fd_ = ::dup(client_fd);
+        client_fd_ = ::fcntl(client_fd, F_DUPFD_CLOEXEC, 0);
         if (client_fd_ < 0) {
             set_error(std::string("cannot duplicate SSH client socket: ") + std::strerror(errno));
             return false;
         }
-        upstream_fd_ = ::dup(upstream_fd);
+        upstream_fd_ = ::fcntl(upstream_fd, F_DUPFD_CLOEXEC, 0);
         if (upstream_fd_ < 0) {
             set_error(std::string("cannot duplicate SSH upstream socket: ") + std::strerror(errno));
+            ::close(client_fd_);
+            client_fd_ = -1;
             return false;
         }
         xdia(transport_log())("attached client_fd=%d upstream_fd=%d", client_fd, upstream_fd);
@@ -706,6 +714,12 @@ public:
     ssh_channel queue_server_channel(
             ssh_session session, int type, char const* destination_address,
             int destination_port, char const* originator_address, int originator_port) {
+        if (!detail::channel_budget_available(
+                channels_.size(), retired_channels_.size(),
+                server_open_channels_.size(), opening_channel_ != nullptr)) {
+            emit_event(false, "ssh event=channel-open action=reject reason=session-limit");
+            return nullptr;
+        }
         auto channel = std::make_unique<channel_pair>();
         channel->owner = this;
         channel->upstream = ssh_channel_new(session);
@@ -792,6 +806,13 @@ public:
 
             auto const type = ssh_message_subtype(message);
             if(type != SSH_CHANNEL_SESSION && type != SSH_CHANNEL_DIRECT_TCPIP) {
+                return reject_message(message, false);
+            }
+            if (!detail::channel_budget_available(
+                    channels_.size(), retired_channels_.size(),
+                    server_open_channels_.size(), opening_channel_ != nullptr)) {
+                emit_event(true,
+                    "ssh event=channel-open action=reject reason=session-limit");
                 return reject_message(message, false);
             }
             if(type == SSH_CHANNEL_DIRECT_TCPIP && !options_.features.local_forward) {
@@ -939,6 +960,14 @@ public:
 
         auto* message = std::exchange(pending_global_message_, nullptr);
         if (result != SSH_OK) {
+            xdia(transport_log())(
+                "upstream SSH global request failed subtype=%d address='%s' port=%d: %s",
+                pending_global_subtype_, pending_global_address_.c_str(),
+                pending_global_port_, ssh_get_error(upstream_));
+            emit_event(false, string_format(
+                "ssh event=remote-forward action=upstream-reject subtype=%d address=\"%s\" port=%d",
+                pending_global_subtype_, ESC_(pending_global_address_).c_str(),
+                pending_global_port_));
             pending_global_address_.clear();
             return reject_message(message, false);
         }
@@ -1153,11 +1182,9 @@ public:
             return progress ? drive_result::progress : drive_result::again;
         }
 
-        // Exit status/signal is channel metadata, not payload. A fast peer may
-        // mark the channel closed in the same dispatch that delivers it, so
-        // collect and forward the metadata before the generic closed-channel
-        // path below can retire the pair.
-        if (channel.expects_exit_state && !channel.upstream_exit_forwarded) {
+        // Capture exit metadata promptly, but forward it only after decoded
+        // stdout/stderr has drained.
+        if (channel.expects_exit_state && !channel.upstream_exit_captured) {
             std::uint32_t exit_code = 0;
 #if LIBSSH_VERSION_INT >= SSH_VERSION_INT(0, 11, 0)
             char* exit_signal = nullptr;
@@ -1165,20 +1192,11 @@ public:
             auto const result = ssh_channel_get_exit_state(
                 channel.upstream, &exit_code, &exit_signal, &core_dumped);
             if (result == SSH_OK) {
-                int forward_result;
-                if (exit_signal) {
-                    forward_result = ssh_channel_request_send_exit_signal(
-                        channel.downstream, exit_signal, core_dumped, "", "");
-                } else {
-                    forward_result = ssh_channel_request_send_exit_status(
-                        channel.downstream, static_cast<int>(exit_code));
-                }
+                channel.upstream_exit_code = exit_code;
+                channel.upstream_exit_signal = exit_signal ? exit_signal : "";
+                channel.upstream_exit_core_dumped = core_dumped;
                 std::free(exit_signal);
-                if (forward_result != SSH_OK) {
-                    set_error("cannot forward upstream SSH exit state");
-                    return drive_result::failed;
-                }
-                channel.upstream_exit_forwarded = true;
+                channel.upstream_exit_captured = true;
                 progress = true;
             } else {
                 std::free(exit_signal);
@@ -1193,13 +1211,9 @@ public:
             // arrive. Exit signals cannot be forwarded by this older API.
             if (channel.upstream_eof_received) {
                 auto const result = ssh_channel_get_exit_status(channel.upstream);
-                if (result >= 0
-                    && ssh_channel_request_send_exit_status(
-                           channel.downstream, result) != SSH_OK) {
-                    set_error("cannot forward upstream SSH exit status");
-                    return drive_result::failed;
-                }
-                channel.upstream_exit_forwarded = true;
+                if (result >= 0)
+                    channel.upstream_exit_code = static_cast<std::uint32_t>(result);
+                channel.upstream_exit_captured = true;
                 progress = true;
             }
 #endif
@@ -1248,6 +1262,23 @@ public:
             return drive_result::failed;
         }
 
+        if (channel.upstream_exit_captured && !channel.upstream_exit_forwarded
+            && channel.upstream_eof_received
+            && channel.to_downstream.empty() && channel.stderr_to_downstream.empty()) {
+            auto const result = channel.upstream_exit_signal.empty()
+                ? ssh_channel_request_send_exit_status(
+                      channel.downstream, static_cast<int>(channel.upstream_exit_code))
+                : ssh_channel_request_send_exit_signal(
+                      channel.downstream, channel.upstream_exit_signal.c_str(),
+                      channel.upstream_exit_core_dumped, "", "");
+            if (result != SSH_OK) {
+                set_error("cannot forward upstream SSH exit state");
+                return drive_result::failed;
+            }
+            channel.upstream_exit_forwarded = true;
+            progress = true;
+        }
+
         if (channel.downstream_eof_received && !channel.downstream_eof_forwarded
             && channel.to_upstream.empty()) {
             if (ssh_channel_send_eof(channel.upstream) == SSH_ERROR) {
@@ -1258,7 +1289,8 @@ public:
             progress = true;
         }
         if (channel.upstream_eof_received && !channel.upstream_eof_forwarded
-            && channel.to_downstream.empty() && channel.stderr_to_downstream.empty()) {
+            && channel.to_downstream.empty() && channel.stderr_to_downstream.empty()
+            && (!channel.expects_exit_state || channel.upstream_exit_forwarded)) {
             if (ssh_channel_send_eof(channel.downstream) == SSH_ERROR) {
                 set_error("cannot forward upstream SSH EOF");
                 return drive_result::failed;
@@ -1433,6 +1465,10 @@ public:
     std::uint64_t bytes_down_ = 0;
 
 public:
+    [[nodiscard]] bool write_pending(ssh_session session) const noexcept {
+        return session && (ssh_get_poll_flags(session) & SSH_WRITE_PENDING) != 0;
+    }
+
     [[nodiscard]] std::string diagnostics() const {
         std::size_t session_channels = 0;
         std::size_t forwarding_channels = 0;
@@ -1492,6 +1528,14 @@ std::uint64_t mitm_transport::bytes_up() const noexcept {
 
 std::uint64_t mitm_transport::bytes_down() const noexcept {
     return impl_->bytes_down_;
+}
+
+bool mitm_transport::upstream_write_pending() const noexcept {
+    return impl_->write_pending(impl_->upstream_);
+}
+
+bool mitm_transport::downstream_write_pending() const noexcept {
+    return impl_->write_pending(impl_->downstream_);
 }
 
 std::string mitm_transport::diagnostics() const {
