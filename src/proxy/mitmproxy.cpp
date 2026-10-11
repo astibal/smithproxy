@@ -897,15 +897,13 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
 
     nlohmann::json j;
     auto cl = to_connection_label();
-    std::string encoded = b64_encode(buffer);
     j["info"] = {
         { "session", cl },
         { "side", string_format("%c", from_side(side)) },
-        { "payload_layer", std::string(payload_layer) },
-        { "content", encoded }
+        { "payload_layer", std::string(payload_layer) }
     };
 
-    sx::http::webhooks::send_action_wait("connection-content", to_connection_ID(), j, [&](sx::http::expected_reply r){
+    auto response_hook = [&](sx::http::expected_reply r){
         if(r.has_value()) {
             auto reply = r.value();
             _dia("webhook content-replace: response %d", reply.response.first);
@@ -946,7 +944,15 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
                 }
             }
         }
-    });
+    };
+    const auto binary_sent = sx::http::webhooks::send_content_wait(
+        to_connection_ID(), j,
+        std::string_view(reinterpret_cast<const char*>(buffer.data()), buffer.size()), response_hook);
+    if(!binary_sent) {
+        j["info"]["content"] = b64_encode(buffer);
+        sx::http::webhooks::send_action_wait(
+            "connection-content", to_connection_ID(), j, response_hook);
+    }
 
     return was_modified;
 }

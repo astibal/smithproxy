@@ -13,6 +13,9 @@
 #include <map>
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
+#include <limits>
+#include <string_view>
 #include <arpa/inet.h>
 
 
@@ -30,6 +33,19 @@ namespace sx::http::webhooks {
     static std::mutex hostid_lock;
     static std::uint64_t stats_updates = 0;
     static refresh_gate accepted_refresh_gate(1);
+    static std::mutex protocol_lock;
+    static std::string sxbn_callback_url;
+
+    static std::string active_webhook_url() {
+        auto lock = std::scoped_lock(CfgFactory::lock());
+        return CfgFactory::get()->settings_webhook.active_url();
+    }
+
+    bool binary_content_enabled() {
+        const auto current = active_webhook_url();
+        auto lock = std::scoped_lock(protocol_lock);
+        return !current.empty() and sxbn_callback_url == current;
+    }
 
     void set_enabled(bool val) {
         enabled.store(val, std::memory_order_release);
@@ -90,6 +106,43 @@ namespace sx::http::webhooks {
 
     void ping() {
         if(enabled) {
+            nlohmann::json const info = {
+                {"action", "info"}, {"source", get_hostid()}, {"type", "proxy"},
+                {"details", {{"protocols", {{"connection-content", {"json-base64", "sxbn-001"}}}}}}
+            };
+            struct info_callback : public default_callback {
+                void on_reply(sx::http::expected_reply const& rep) const override {
+                    if(!rep) return;
+                    bool accepted = false;
+                    if(rep->response.first >= 200 and rep->response.first < 300) {
+                        const auto response = nlohmann::json::parse(rep->response.second, nullptr, false);
+                        if(!response.is_discarded() and response.value("action", "") == "info-response") {
+                            const auto protocols = response.value("protocols", nlohmann::json::object());
+                            const auto content = protocols.value("connection-content", nlohmann::json::array());
+                            accepted = std::find(content.begin(), content.end(), "sxbn-001") != content.end();
+                        }
+                    }
+                    bool enabled_now = false;
+                    bool disabled_now = false;
+                    {
+                        auto lock = std::scoped_lock(protocol_lock);
+                        const auto was_accepted = sxbn_callback_url == rep->request;
+                        if(accepted) sxbn_callback_url = rep->request;
+                        else if(was_accepted) sxbn_callback_url.clear();
+                        enabled_now = accepted and !was_accepted;
+                        disabled_now = !accepted and was_accepted;
+                    }
+                    if(enabled_now) {
+                        Log::get()->events().insert(INF,
+                            "webhook protocol negotiated: sxbn-001 for connection-content");
+                    }
+                    if(disabled_now) {
+                        Log::get()->events().insert(INF,
+                            "webhook protocol fallback: JSON/Base64 connection-content");
+                    }
+                }
+            };
+            sx::http::AsyncRequest::emit(to_string(info), info_callback());
             nlohmann::json const ping = {
                                           { "action", "ping" },
                                           {"source", get_hostid() },
@@ -335,5 +388,30 @@ namespace sx::http::webhooks {
             return true;
         }
         return false;
+    }
+
+    bool send_content_wait(std::string const& action_id, nlohmann::json details,
+                           std::string_view payload, sx::http::AsyncRequest::reply_hook hook) {
+        if(!enabled or !hook or !binary_content_enabled()) return false;
+        auto& info = details["info"];
+        info["payload_encoding"] = "sxbn-001";
+        info["payload_length"] = payload.size();
+        info.erase("content");
+        nlohmann::json metadata = {
+            {"action", "connection-content"}, {"id", action_id},
+            {"source", get_hostid()}, {"type", "proxy"}, {"details", std::move(details)}
+        };
+        const auto encoded = to_string(metadata);
+        if(encoded.size() > std::numeric_limits<std::uint32_t>::max()) return false;
+        char prefix[17]{};
+        std::snprintf(prefix, sizeof(prefix), "SXBN001:%08X", static_cast<unsigned>(encoded.size()));
+        std::string message(prefix, 16);
+        message.append(encoded);
+        message.append(payload.data(), payload.size());
+        sx::http::AsyncRequest::emit_wait(message,
+            [hook = std::move(hook)](sx::http::expected_reply const& reply) {
+                if(!reply || reply->response.first > 0) hook(reply);
+            });
+        return true;
     }
 }
