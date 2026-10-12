@@ -1,13 +1,46 @@
 #include <inspect/dns.hpp>
+#include <inspect/dns_socket_io.hpp>
 #include <inspect/dnsinspector.hpp>
 #include <gtest/gtest.h>
+#include <fcntl.h>
 
 constexpr const char* host = "smithproxy.org";
 AddressInfo nameserver(AF_INET, "1.1.1.1", 53);
 
+TEST(DNS_tests, resolvesA) {
+    auto& df = DNSFactory::get();
+
+    for(auto const& rect: { DNS_Record_Type::A }) {
+        auto resp = df.resolve_dns_s(host, rect, nameserver, 4);
+        ASSERT_TRUE(resp);
+        std::cout << resp->answer_str_list() << "\n";
+    }
+}
+TEST(DnsSocketIo, RetriesInterruptedSocketOperations) {
+    int attempts = 0;
+    EXPECT_EQ(sx::dns::io_detail::retry_on_eintr([&]() -> ssize_t {
+        ++attempts;
+        if(attempts < 4) {
+            errno = EINTR;
+            return -1;
+        }
+        return 17;
+    }), 17);
+    EXPECT_EQ(attempts, 4);
+
+    attempts = 0;
+    EXPECT_EQ(sx::dns::io_detail::retry_on_eintr([&]() -> ssize_t {
+        ++attempts;
+        errno = EIO;
+        return -1;
+    }), -1);
+    EXPECT_EQ(attempts, 1);
+}
+
 class DNSInspectorTestCom final : public baseCom {
 public:
     std::vector<unsigned char> written;
+    std::size_t write_limit = SIZE_MAX;
 
     baseCom* replicate() override { return new DNSInspectorTestCom(); }
     int connect(const char*, const char*) override { return -1; }
@@ -16,8 +49,9 @@ public:
     ssize_t peek(int, void*, size_t, int) override { return -1; }
     ssize_t write(int, const void* data, size_t size, int) override {
         auto first = static_cast<const unsigned char*>(data);
-        written.assign(first, first + size);
-        return static_cast<ssize_t>(size);
+        const auto count = std::min(size, write_limit);
+        written.insert(written.end(), first, first + count);
+        return static_cast<ssize_t>(count);
     }
     void shutdown(int) override {}
     int bind(unsigned short) override { return -1; }
@@ -31,12 +65,63 @@ public:
 class DNSInspectorTestHost final : public AppHostCX {
 public:
     explicit DNSInspectorTestHost(baseCom* com) : AppHostCX(com, 0) {}
+    void run_post_write() { post_write(); }
+    void run_pre_read() { pre_read(); }
+    void run_pre_write() { pre_write(); }
+    std::size_t inspect_calls = 0;
 
 protected:
-    void inspect(char) override {}
+    void inspect(char) override { ++inspect_calls; }
     void on_detect(std::shared_ptr<duplexFlowMatch>, flowMatchState&, vector_range&) override {}
     void on_starttls() override {}
 };
+
+TEST(AppHostFlowState, FirstPostWriteDoesNotReadAnAbsentFlowEntry) {
+    DNSInspectorTestHost host(new DNSInspectorTestCom());
+    host.mode(AppHostCX::mode_t::POST);
+    host.writebuf()->append("server-first", 12);
+
+    EXPECT_NO_THROW(host.run_post_write());
+    ASSERT_EQ(host.flow().flow_queue().size(), 1U);
+    EXPECT_EQ(host.flow().flow_queue().back().size(), 12U);
+    EXPECT_EQ(host.inspect_calls, 1U);
+}
+
+TEST(AppHostFlowState, ImpossiblePostWriteDeltaDoesNotCreateAnInvalidView) {
+    DNSInspectorTestHost host(new DNSInspectorTestCom());
+    host.mode(AppHostCX::mode_t::POST);
+    host.writebuf()->append("short", 5);
+    host.meter_write_bytes = 1000;
+
+    EXPECT_NO_THROW(host.run_post_write());
+    EXPECT_TRUE(host.flow().flow_queue().empty());
+    EXPECT_EQ(host.inspect_calls, 0U);
+    EXPECT_TRUE(host.error());
+}
+
+TEST(AppHostFlowState, ImpossiblePreWriteDeltaFailsClosedBeforeInspection) {
+    DNSInspectorTestHost host(new DNSInspectorTestCom());
+    host.mode(AppHostCX::mode_t::PRE);
+    host.writebuf()->append("short", 5);
+    host.meter_write_bytes = 1000;
+
+    EXPECT_NO_THROW(host.run_pre_write());
+    EXPECT_TRUE(host.error());
+    EXPECT_TRUE(host.flow().flow_queue().empty());
+    EXPECT_EQ(host.inspect_calls, 0U);
+}
+
+TEST(AppHostFlowState, UnrecoverablePreReadGapFailsClosedBeforeCreatingAView) {
+    DNSInspectorTestHost host(new DNSInspectorTestCom());
+    host.mode(AppHostCX::mode_t::PRE);
+    host.meter_read_bytes = 32;
+
+    EXPECT_NO_THROW(host.run_pre_read());
+    EXPECT_TRUE(host.error());
+    ASSERT_TRUE(host.have_flow());
+    EXPECT_TRUE(host.flow().flow_queue().empty());
+    EXPECT_EQ(host.inspect_calls, 0U);
+}
 
 static buffer dns_tcp_frame(const buffer& packet) {
     buffer framed;
@@ -81,16 +166,562 @@ const unsigned char qname_parse_fail_end1[] = {
 
 };
 
+TEST(DNS_Packet, repeated_load_replaces_prior_packet_state) {
+    buffer first;
+    buffer second;
+    DNSFactory::get().generate_dns_request(0x1111, first, "first.test", A);
+    DNSFactory::get().generate_dns_request(0x2222, second, "second.test", AAAA);
 
-TEST(DNS_tests, resolvesA) {
-    auto& df = DNSFactory::get();
+    DNS_Request request;
+    ASSERT_EQ(request.load(&first), std::optional<size_t>(first.size()));
+    ASSERT_EQ(request.questions().size(), 1U);
+    EXPECT_EQ(request.questions().front().rec_str, "first.test");
 
-    for(auto const& rect: { DNS_Record_Type::A }) {
-        auto resp = df.resolve_dns_s(host, rect, nameserver, 4);
-        ASSERT_TRUE(resp);
-        std::cout << resp->answer_str_list() << "\n";
+    ASSERT_EQ(request.load(&second), std::optional<size_t>(second.size()));
+    ASSERT_EQ(request.questions().size(), 1U);
+    EXPECT_EQ(request.id(), 0x2222);
+    EXPECT_EQ(request.questions().front().rec_str, "second.test");
+    EXPECT_EQ(request.questions().front().rec_type, AAAA);
+
+    EXPECT_FALSE(request.load(nullptr).has_value());
+}
+
+TEST(DNS_Packet, accepts_complete_header_only_message) {
+    unsigned char bytes[12] {
+        0x12, 0x34, 0x80, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00
+    };
+    buffer packet(bytes, sizeof(bytes), sizeof(bytes), false);
+    DNS_Response response;
+
+    EXPECT_EQ(response.load(&packet), std::optional<size_t>(sizeof(bytes)));
+    EXPECT_EQ(response.id(), 0x1234);
+    EXPECT_TRUE(response.questions().empty());
+    EXPECT_TRUE(response.answers().empty());
+}
+
+TEST(DNS_Packet, wire_label_octets_keep_distinct_textual_identities) {
+    const unsigned char embedded_dot[] {3, 'a', '.', 'b', 0};
+    const unsigned char label_separator[] {1, 'a', 1, 'b', 0};
+    const unsigned char ambiguous_bytes[] {4, 'a', '\\', 0, 0x7f, 0};
+
+    EXPECT_EQ(DNSFactory::get().construct_qname(
+                  embedded_dot, embedded_dot, sizeof(embedded_dot)),
+              "a\\.b");
+    EXPECT_EQ(DNSFactory::get().construct_qname(
+                  label_separator, label_separator, sizeof(label_separator)),
+              "a.b");
+    EXPECT_NE(DNSFactory::get().construct_qname(
+                  embedded_dot, embedded_dot, sizeof(embedded_dot)),
+              DNSFactory::get().construct_qname(
+                  label_separator, label_separator, sizeof(label_separator)));
+    EXPECT_EQ(DNSFactory::get().construct_qname(
+                  ambiguous_bytes, ambiguous_bytes, sizeof(ambiguous_bytes)),
+              "a\\\\\\000\\127");
+}
+
+TEST(DNS_Packet, question_names_use_bounded_dns_compression_parsing) {
+    const unsigned char compressed_questions[] = {
+        0x12, 0x34, 0x01, 0x00, 0x00, 0x02, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x01, 'x', 0x04, 't', 'e', 's', 't', 0x00,
+        0x00, 0x01, 0x00, 0x01,
+        0xc0, 0x0c, 0x00, 0x1c, 0x00, 0x01
+    };
+    buffer compressed(const_cast<unsigned char*>(compressed_questions),
+                      sizeof(compressed_questions), sizeof(compressed_questions), false);
+    DNS_Request request;
+    ASSERT_EQ(request.load(&compressed),
+              std::optional<size_t>(sizeof(compressed_questions)));
+    ASSERT_EQ(request.questions().size(), 2U);
+    EXPECT_EQ(request.questions()[0].rec_str, "x.test");
+    EXPECT_EQ(request.questions()[1].rec_str, "x.test");
+    EXPECT_EQ(request.questions()[1].rec_type, AAAA);
+
+    const unsigned char reserved_label[] = {
+        0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x40, 0x00, 0x00, 0x01, 0x00, 0x01
+    };
+    buffer malformed(const_cast<unsigned char*>(reserved_label), sizeof(reserved_label),
+                     sizeof(reserved_label), false);
+    DNS_Request rejected;
+    EXPECT_FALSE(rejected.load(&malformed).has_value());
+}
+
+TEST(DNS_Packet, accepts_short_opaque_edns_option_data_without_speculative_read) {
+    // OPT RDATA is opaque to this parser.  A one-byte payload is unusual but
+    // structurally bounded; inspecting fixed option offsets would read beyond
+    // this complete packet before any option-length validation could occur.
+    const unsigned char packet[] = {
+        0x12, 0x34, 0x81, 0x80,  // ID, response/NOERROR
+        0x00, 0x00, 0x00, 0x00,  // QDCOUNT, ANCOUNT
+        0x00, 0x00, 0x00, 0x01,  // NSCOUNT, ARCOUNT
+        0x00,                    // root owner
+        0x00, 0x29,              // OPT
+        0x04, 0xd0,              // UDP payload size
+        0x00, 0x00, 0x00, 0x00,  // extended RCODE, version, flags
+        0x00, 0x01,              // RDLEN
+        0xff                     // deliberately shorter than an option header
+    };
+    buffer input(const_cast<unsigned char*>(packet), sizeof(packet),
+                 sizeof(packet), false);
+    DNS_Response response;
+
+    const auto consumed = response.load(&input);
+    ASSERT_TRUE(consumed.has_value());
+    EXPECT_EQ(*consumed, sizeof(packet));
+}
+
+TEST(DNS_Packet, rejects_malformed_compression_in_resource_record_names) {
+    std::vector<unsigned char> malformed(
+        std::begin(dns_response1), std::end(dns_response1));
+    ASSERT_GT(malformed.size(), 34U);
+    // The first answer begins immediately after the 32-byte question. Point
+    // its owner name back to itself: the encoded field is two bytes long but
+    // its expanded DNS identity can never terminate.
+    malformed[32] = 0xc0;
+    malformed[33] = 0x20;
+
+    buffer packet(malformed.data(), malformed.size(), malformed.size(), false);
+    DNS_Response response;
+    EXPECT_FALSE(response.load(&packet).has_value());
+}
+
+TEST(DNS_Inspector, CacheIdentityCanonicalizesDnsCaseAndRootDot) {
+    {
+        auto lock = std::scoped_lock(DNS::get_dns_lock(), DNS::get_domain_lock());
+        DNS::get_dns_cache().clear();
+        DNS::get_domain_cache().clear();
+    }
+
+    buffer packet(const_cast<unsigned char*>(dns_response1), sizeof(dns_response1),
+                  sizeof(dns_response1), false);
+    auto response = std::make_shared<DNS_Response>();
+    ASSERT_TRUE(response->load(&packet).has_value());
+    ASSERT_EQ(response->questions().size(), 1U);
+    response->questions().front().rec_str = "PCDN.BrAvE.CoM.";
+
+    EXPECT_EQ(response->question_str_0(), "A:PCDN.BrAvE.CoM.");
+    EXPECT_EQ(response->cache_key_0(), "A:pcdn.brave.com");
+    ASSERT_TRUE(DNS_Inspector::store(response));
+    EXPECT_EQ(DNS::get_dns_cache().get("A:pcdn.brave.com"), response);
+
+    FqdnAddress configured("PcDn.Brave.Com.");
+    auto address = cidr::cidr_from_str("172.65.10.226");
+    ASSERT_NE(address, nullptr);
+    EXPECT_TRUE(configured.match(address));
+    cidr::cidr_free(address);
+
+    auto lock = std::scoped_lock(DNS::get_dns_lock(), DNS::get_domain_lock());
+    DNS::get_dns_cache().clear();
+    DNS::get_domain_cache().clear();
+}
+
+TEST(DNS_Inspector, TruncatedResponseCannotPopulateAddressCache) {
+    std::vector<unsigned char> truncated(
+        std::begin(dns_response1), std::end(dns_response1));
+    truncated[2] |= 0x02; // TC
+    buffer packet(truncated.data(), truncated.size(), truncated.size(), false);
+    auto response = std::make_shared<DNS_Response>();
+    ASSERT_TRUE(response->load(&packet).has_value());
+    ASSERT_FALSE(response->get_a_anwsers().empty());
+
+    {
+        auto lock = std::scoped_lock(DNS::get_dns_lock(), DNS::get_domain_lock());
+        DNS::get_dns_cache().clear();
+        DNS::get_domain_cache().clear();
+    }
+    EXPECT_FALSE(DNS_Inspector::store(response));
+    EXPECT_EQ(DNS::get_dns_cache().get("A:pcdn.brave.com"), nullptr);
+
+    // A nonzero RCODE likewise makes any attached address data unusable even
+    // when the rest of the packet is structurally parseable.
+    truncated[2] &= static_cast<unsigned char>(~0x02U);
+    truncated[3] = static_cast<unsigned char>((truncated[3] & 0xf0U) | 0x02U);
+    buffer failed_packet(truncated.data(), truncated.size(), truncated.size(), false);
+    auto failed = std::make_shared<DNS_Response>();
+    ASSERT_TRUE(failed->load(&failed_packet).has_value());
+    ASSERT_FALSE(failed->get_a_anwsers().empty());
+    EXPECT_FALSE(DNS_Inspector::store(failed));
+    EXPECT_EQ(DNS::get_dns_cache().get("A:pcdn.brave.com"), nullptr);
+}
+
+TEST(DNS_Inspector, cached_tcp_reply_queues_a_short_write_suffix) {
+    {
+        auto lock = std::scoped_lock(DNS::get_dns_lock(), DNS::get_domain_lock());
+        DNS::get_dns_cache().clear();
+        DNS::get_domain_cache().clear();
+    }
+
+    buffer cached_wire(const_cast<unsigned char*>(dns_response1),
+                       sizeof(dns_response1), sizeof(dns_response1), false);
+    auto cached = std::make_shared<DNS_Response>();
+    ASSERT_TRUE(cached->load(&cached_wire).has_value());
+    cached->cached_packet = std::make_unique<buffer>();
+    cached->cached_packet->append(cached_wire);
+    ASSERT_TRUE(DNS_Inspector::store(cached));
+
+    auto* com = new DNSInspectorTestCom();
+    com->l4_proto(SOCK_STREAM);
+    com->nonlocal_dst_port() = 53;
+    DNSInspectorTestHost host(com);
+    DNS_Inspector inspector;
+    inspector.opt_cached_responses = true;
+
+    buffer request;
+    ASSERT_NE(DNSFactory::get().generate_dns_request(
+                  0x1234, request, "pcdn.brave.com", A), 0U);
+    auto framed = dns_tcp_frame(request);
+    host.flow().append('r', framed);
+    inspector.update(&host);
+    ASSERT_EQ(inspector.verdict(), Inspector::CACHED);
+
+    com->write_limit = 7;
+    inspector.apply_verdict(&host);
+
+    const auto complete_size = sizeof(std::uint16_t) + sizeof(dns_response1);
+    EXPECT_EQ(com->written.size(), 7U);
+    EXPECT_EQ(host.writebuf()->size(), complete_size - com->written.size());
+
+    {
+        auto lock = std::scoped_lock(DNS::get_dns_lock(), DNS::get_domain_lock());
+        DNS::get_dns_cache().clear();
+        DNS::get_domain_cache().clear();
     }
 }
+
+TEST(DNS_Inspector, DropsUnmatchedUdpResponseWithoutKillingFlow) {
+    auto* com = new DNSInspectorTestCom();
+    com->l4_proto(SOCK_DGRAM);
+    DNSInspectorTestHost host(com);
+    com->nonlocal_dst_port() = 53;
+    host.writebuf()->append("pending", 7);
+
+    DNS_Inspector inspector;
+    host.flow().append('w', dns_response1, sizeof(dns_response1));
+    inspector.update(&host);
+
+    EXPECT_FALSE(host.error());
+    EXPECT_TRUE(host.writebuf()->empty());
+}
+
+TEST(DNS_Inspector, RejectsTrailingBytesInUdpDatagram) {
+    {
+        auto lock = std::scoped_lock(DNS::get_dns_lock(), DNS::get_domain_lock());
+        DNS::get_dns_cache().clear();
+        DNS::get_domain_cache().clear();
+    }
+    auto* com = new DNSInspectorTestCom();
+    com->l4_proto(SOCK_DGRAM);
+    DNSInspectorTestHost host(com);
+    com->nonlocal_dst_port() = 53;
+    DNS_Inspector inspector;
+
+    buffer request;
+    ASSERT_NE(DNSFactory::get().generate_dns_request(
+                  0xf31a, request, "pcdn.brave.com", A), 0U);
+    host.flow().append('r', request);
+    inspector.update(&host);
+    ASSERT_NE(inspector.find_request(0xf31a), nullptr);
+
+    buffer response(const_cast<unsigned char*>(dns_response1),
+                    sizeof(dns_response1), sizeof(dns_response1), false);
+    const unsigned char trailing[] {0xde, 0xad, 0xbe, 0xef};
+    response.append(trailing, sizeof(trailing));
+    host.flow().append('w', response);
+    inspector.update(&host);
+
+    // The malformed datagram must not consume the transaction or become
+    // policy/cache authority merely because its first message was valid.
+    EXPECT_NE(inspector.find_request(0xf31a), nullptr);
+    EXPECT_EQ(DNS::get_dns_cache().get("A:pcdn.brave.com"), nullptr);
+    EXPECT_NE(inspector.to_string(iINF).find("valid responses: 0"),
+              std::string::npos);
+}
+
+TEST(DNS_Inspector, OnlyMatchingResponseConsumesOutstandingTransaction) {
+    auto* com = new DNSInspectorTestCom();
+    com->l4_proto(SOCK_DGRAM);
+    DNSInspectorTestHost host(com);
+    com->nonlocal_dst_port() = 53;
+    DNS_Inspector inspector;
+
+    buffer request;
+    DNSFactory::get().generate_dns_request(0xf31a, request, "good.brave.com", A);
+    host.flow().append('r', request);
+    inspector.update(&host);
+    ASSERT_NE(inspector.find_request(0xf31a), nullptr);
+
+    buffer forged_packet(const_cast<unsigned char*>(dns_response1),
+                         sizeof(dns_response1), sizeof(dns_response1), false);
+    auto forged = std::make_shared<DNS_Response>();
+    ASSERT_TRUE(forged->load(&forged_packet).has_value());
+    ASSERT_EQ(forged->id(), 0xf31a);
+    ASSERT_NE(forged->question_str_0(), "A:good.brave.com");
+    EXPECT_FALSE(inspector.validate_response(forged));
+    EXPECT_NE(inspector.find_request(0xf31a), nullptr);
+
+    // A packet that only guessed/collided with the 16-bit ID must not consume
+    // the legitimate request. Repeated mismatches remain rejected.
+    EXPECT_FALSE(inspector.validate_response(forged));
+    EXPECT_NE(inspector.find_request(0xf31a), nullptr);
+
+    buffer matching_request;
+    DNSFactory::get().generate_dns_request(0xf31a, matching_request,
+                                           "PCDN.BRAVE.COM.", A);
+    host.flow().append('r', matching_request);
+    inspector.update(&host);
+    ASSERT_NE(inspector.find_request(0xf31a), nullptr);
+    EXPECT_TRUE(inspector.validate_response(forged));
+    EXPECT_EQ(inspector.find_request(0xf31a), nullptr);
+    // A successfully matched transaction is still single-use.
+    EXPECT_FALSE(inspector.validate_response(forged));
+}
+
+TEST(DNS_Inspector, BoundsOutstandingRequestStatePerConnection) {
+    auto* com = new DNSInspectorTestCom();
+    com->l4_proto(SOCK_DGRAM);
+    DNSInspectorTestHost host(com);
+    com->nonlocal_dst_port() = 53;
+    DNS_Inspector inspector;
+
+    for(std::uint32_t id = 0; id < 1024; ++id) {
+        buffer request;
+        ASSERT_NE(DNSFactory::get().generate_dns_request(
+                      static_cast<std::uint16_t>(id), request,
+                      "bounded.example", A), 0U);
+        host.flow().append('r', request);
+        inspector.update(&host);
+        ASSERT_FALSE(host.error()) << "request " << id;
+        ASSERT_NE(inspector.find_request(static_cast<std::uint16_t>(id)), nullptr);
+    }
+
+    // Reusing an existing transaction replaces that slot and must not consume
+    // another unit of the bound.
+    buffer retransmit;
+    ASSERT_NE(DNSFactory::get().generate_dns_request(
+                  17, retransmit, "replacement.example", A), 0U);
+    host.flow().append('r', retransmit);
+    inspector.update(&host);
+    ASSERT_FALSE(host.error());
+    ASSERT_NE(inspector.find_request(17), nullptr);
+    EXPECT_EQ(inspector.find_request(17)->questions().front().rec_str,
+              "replacement.example");
+
+    host.writebuf()->assign("must-be-discarded");
+    buffer overflow;
+    ASSERT_NE(DNSFactory::get().generate_dns_request(
+                  1024, overflow, "overflow.example", A), 0U);
+    host.flow().append('r', overflow);
+    inspector.update(&host);
+
+    EXPECT_TRUE(host.error());
+    EXPECT_TRUE(host.writebuf()->empty());
+    EXPECT_EQ(inspector.find_request(1024), nullptr);
+    EXPECT_NE(inspector.to_string(iINF).find("requests: 1024"), std::string::npos);
+}
+
+TEST(DNSFactory, RejectsTrailingBytesInReceivedDatagram) {
+    int sockets[2] {-1, -1};
+    ASSERT_EQ(socketpair(AF_UNIX, SOCK_DGRAM, 0, sockets), 0);
+
+    buffer response;
+    ASSERT_NE(DNSFactory::get().generate_dns_request(
+                  0x1234, response, "example.test", A), 0U);
+    response.set_at<uint16_t>(2, htons(0x8180));
+    const unsigned char trailing[] {0x00, 0x01};
+    response.append(trailing, sizeof(trailing));
+
+    ASSERT_EQ(send(sockets[0], response.data(), response.size(), 0),
+              static_cast<ssize_t>(response.size()));
+    auto received = DNSFactory::get().recv_dns_response(
+        sockets[1], 0, 0x1234, "example.test", A);
+    EXPECT_EQ(received.first, nullptr);
+    EXPECT_EQ(received.second, static_cast<ssize_t>(response.size()));
+
+    close(sockets[0]);
+    close(sockets[1]);
+}
+
+TEST(DNSFactory, ReceivesResponseFromSocketDescriptorZero) {
+    const int saved_stdin = ::dup(STDIN_FILENO);
+    ASSERT_GE(saved_stdin, 0);
+    int sockets[2] {-1, -1};
+    ASSERT_EQ(socketpair(AF_UNIX, SOCK_DGRAM, 0, sockets), 0);
+
+    buffer response;
+    DNSFactory::get().generate_dns_request(0x4567, response,
+                                           "descriptor-zero.test", A);
+    response.set_at<uint16_t>(2, htons(0x8180));
+    ASSERT_EQ(send(sockets[0], response.data(), response.size(), 0),
+              static_cast<ssize_t>(response.size()));
+
+    const int installed = ::dup2(sockets[1], STDIN_FILENO);
+    ::close(sockets[1]);
+    sockets[1] = -1;
+    auto received = DNSFactory::get().recv_dns_response(
+        STDIN_FILENO, 1, 0x4567, "descriptor-zero.test", A);
+    const int restored = ::dup2(saved_stdin, STDIN_FILENO);
+    ::close(saved_stdin);
+    ::close(sockets[0]);
+
+    ASSERT_EQ(installed, STDIN_FILENO);
+    ASSERT_EQ(restored, STDIN_FILENO);
+    std::unique_ptr<DNS_Response> parsed(received.first);
+    ASSERT_NE(parsed, nullptr);
+    EXPECT_EQ(parsed->id(), 0x4567);
+}
+
+TEST(DNSFactory, ReceivesEdnsSizedDatagramWithoutTruncation) {
+    int sockets[2] {-1, -1};
+    ASSERT_EQ(socketpair(AF_UNIX, SOCK_DGRAM, 0, sockets), 0);
+
+    buffer response;
+    DNSFactory::get().generate_dns_request(0x3344, response, "large.example", A);
+    response.set_at<uint16_t>(2, htons(0x8180));
+    response.set_at<uint16_t>(6, htons(1)); // one answer
+    const unsigned char answer_header[] {
+        0xc0, 0x0c,             // owner points at the question
+        0x00, 0x10,             // TXT
+        0x00, 0x01,             // IN
+        0x00, 0x00, 0x00, 0x3c,// TTL
+        0x07, 0xd0              // 2000 bytes of RDATA
+    };
+    response.append(answer_header, sizeof(answer_header));
+    std::vector<unsigned char> rdata(2000, 0);
+    response.append(rdata.data(), rdata.size());
+    ASSERT_GT(response.size(), 1500U);
+
+    ASSERT_EQ(send(sockets[0], response.data(), response.size(), 0),
+              static_cast<ssize_t>(response.size()));
+    auto received = DNSFactory::get().recv_dns_response(
+        sockets[1], 0, 0x3344, "large.example", A);
+    std::unique_ptr<DNS_Response> parsed(received.first);
+    ASSERT_NE(parsed, nullptr);
+    ASSERT_EQ(parsed->answers().size(), 1U);
+    EXPECT_EQ(parsed->answers().front().data_.size(), 2000U);
+    EXPECT_EQ(received.second, static_cast<ssize_t>(response.size()));
+
+    close(sockets[0]);
+    close(sockets[1]);
+}
+
+TEST(DNSFactory, OutgoingQuerySocketIsCloseOnExec) {
+    AddressInfo local_nameserver(AF_INET, "127.0.0.1", 9);
+    uint16_t request_id = 0;
+    const int socket = DNSFactory::get().send_dns_request(
+        "example.test", A, local_nameserver, &request_id);
+    ASSERT_GE(socket, 0);
+    EXPECT_NE(fcntl(socket, F_GETFD, 0) & FD_CLOEXEC, 0);
+    ::close(socket);
+}
+
+TEST(DNSFactory, PromotesDescriptorZeroBeforeEventLoopHandoff) {
+    AddressInfo local_nameserver(AF_INET, "127.0.0.1", 9);
+    const int saved_stdin = ::dup(STDIN_FILENO);
+    ASSERT_GE(saved_stdin, 0);
+    ASSERT_EQ(::close(STDIN_FILENO), 0);
+
+    uint16_t request_id = 0;
+    const int query_socket = DNSFactory::get().send_dns_request(
+        "descriptor-zero.test", A, local_nameserver, &request_id);
+    const int restored = ::dup2(saved_stdin, STDIN_FILENO);
+    ::close(saved_stdin);
+
+    ASSERT_EQ(restored, STDIN_FILENO);
+    ASSERT_GT(query_socket, 0);
+    EXPECT_NE(fcntl(query_socket, F_GETFD, 0) & FD_CLOEXEC, 0);
+    ::close(query_socket);
+}
+
+TEST(DNS_Inspector, ParsesTcpBurstsBeyondLegacyTenMessageLimit) {
+    auto* com = new DNSInspectorTestCom();
+    com->l4_proto(SOCK_STREAM);
+    DNSInspectorTestHost host(com);
+    com->nonlocal_dst_port() = 53;
+    DNS_Inspector inspector;
+
+    buffer burst;
+    for(std::uint16_t id = 1; id <= 11; ++id) {
+        buffer request;
+        ASSERT_NE(DNSFactory::get().generate_dns_request(
+                      id, request, "burst.example", A), 0U);
+        burst.append(dns_tcp_frame(request));
+    }
+    host.flow().append('r', burst);
+    inspector.update(&host);
+
+    EXPECT_FALSE(host.error());
+    for(std::uint16_t id = 1; id <= 11; ++id) {
+        SCOPED_TRACE(id);
+        EXPECT_NE(inspector.find_request(id), nullptr);
+    }
+}
+
+TEST(DNS_Inspector, does_not_alias_multi_question_transactions_in_cache) {
+    {
+        auto lock = std::scoped_lock(DNS::get_dns_lock(), DNS::get_domain_lock());
+        DNS::get_dns_cache().clear();
+        DNS::get_domain_cache().clear();
+    }
+
+    auto* com = new DNSInspectorTestCom();
+    com->l4_proto(SOCK_DGRAM);
+    DNSInspectorTestHost host(com);
+    com->nonlocal_dst_port() = 53;
+    DNS_Inspector inspector;
+    inspector.opt_cached_responses = true;
+
+    buffer request;
+    DNSFactory::get().generate_dns_request(
+        0xf31a, request, "pcdn.brave.com", A);
+    host.flow().append('r', request);
+    inspector.update(&host);
+    host.flow().append('w', dns_response1, sizeof(dns_response1));
+    inspector.update(&host);
+    ASSERT_NE(DNS::get_dns_cache().get("A:pcdn.brave.com"), nullptr);
+
+    buffer multiple;
+    DNSFactory::get().generate_dns_request(
+        0x7172, multiple, "pcdn.brave.com", A);
+    multiple.set_at<uint16_t>(4, htons(2));
+    const unsigned char second_question[] = {
+        0x05, 'o', 't', 'h', 'e', 'r',
+        0x07, 'e', 'x', 'a', 'm', 'p', 'l', 'e',
+        0x00, 0x00, 0x01, 0x00, 0x01
+    };
+    multiple.append(second_question, sizeof(second_question));
+    host.flow().append('r', multiple);
+    inspector.update(&host);
+
+    EXPECT_EQ(inspector.verdict(), Inspector::OK);
+    EXPECT_EQ(inspector.verdict_response(), nullptr);
+
+    buffer response_packet(const_cast<unsigned char*>(dns_response1),
+                           sizeof(dns_response1), sizeof(dns_response1), false);
+    auto response = std::make_shared<DNS_Response>();
+    ASSERT_TRUE(response->load(&response_packet).has_value());
+    response->questions().push_back(
+        DNS_Question{"other.example", A, 1});
+    DNS::get_dns_cache().clear();
+    EXPECT_FALSE(DNS_Inspector::store(response));
+    EXPECT_EQ(DNS::get_dns_cache().get("A:pcdn.brave.com"), nullptr);
+
+    response->questions().resize(1);
+    response->questions().front().rec_class = 3;
+    EXPECT_TRUE(response->get_a_anwsers().empty());
+    EXPECT_FALSE(DNS_Inspector::store(response));
+    EXPECT_EQ(DNS::get_dns_cache().get("A:pcdn.brave.com"), nullptr);
+
+    {
+        auto lock = std::scoped_lock(DNS::get_dns_lock(), DNS::get_domain_lock());
+        DNS::get_dns_cache().clear();
+        DNS::get_domain_cache().clear();
+    }
+}
+
 
 TEST(DNS_tests, resolvesMore) {
     auto& df = DNSFactory::get();
