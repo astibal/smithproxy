@@ -102,6 +102,9 @@ namespace sx::engine::http::v2 {
                       uint8_t flags, buffer const& data);
     void process_ping(EngineCtx& ctx, socle::side_t side, long stream_id,
                       uint8_t flags, buffer const& data);
+    bool ping_acknowledges_liveness(socle::side_t side, long stream_id,
+                                    uint8_t flags,
+                                    std::size_t payload_size) noexcept;
     void process_other(EngineCtx& ctx, socle::side_t side, long stream_id,
                        uint8_t flags, buffer const& data);
     std::size_t process_frame(EngineCtx& ctx, socle::side_t side, buffer& frame);
@@ -1341,6 +1344,43 @@ TEST(HTTP2, DataBeforeResponseHeadersCannotBeRepaired) {
     auto response = frame(1, 0x04, 1, response_encoder.data());
     v2::process_frame(ctx, socle::side_t::RIGHT, response);
     EXPECT_TRUE(connection->streams.at(1).response_headers_.empty());
+}
+
+
+TEST(HTTP2, OnlyValidServerPingAckExtendsInspectionWindow) {
+    EXPECT_TRUE(v2::ping_acknowledges_liveness(
+        socle::side_t::RIGHT, 0, 0x01, 8));
+
+    EXPECT_FALSE(v2::ping_acknowledges_liveness(
+        socle::side_t::RIGHT, 0, 0x00, 8));
+    EXPECT_FALSE(v2::ping_acknowledges_liveness(
+        socle::side_t::LEFT, 0, 0x01, 8));
+    EXPECT_FALSE(v2::ping_acknowledges_liveness(
+        socle::side_t::RIGHT, 1, 0x01, 8));
+    EXPECT_FALSE(v2::ping_acknowledges_liveness(
+        socle::side_t::RIGHT, 0, 0x01, 7));
+    EXPECT_FALSE(v2::ping_acknowledges_liveness(
+        socle::side_t::RIGHT, 0, 0x01, 9));
+
+    sx::engine::EngineCtx ctx;
+    ctx.state_data = std::make_any<v2::Http2Connection>();
+    buffer client_ping;
+    std::array<unsigned char, 8> token{0, 1, 2, 3, 4, 5, 6, 7};
+    client_ping.assign(token.data(), token.size());
+    v2::process_ping(ctx, socle::side_t::LEFT, 0, 0, client_ping);
+
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    ASSERT_EQ(connection->client_pings_pending.size(), 1U);
+
+    buffer unrelated_ack;
+    std::array<unsigned char, 8> other{7, 6, 5, 4, 3, 2, 1, 0};
+    unrelated_ack.assign(other.data(), other.size());
+    v2::process_ping(ctx, socle::side_t::RIGHT, 0, 0x01, unrelated_ack);
+    EXPECT_EQ(connection->client_pings_pending.size(), 1U);
+
+    v2::process_ping(ctx, socle::side_t::RIGHT, 0, 0x01, client_ping);
+    EXPECT_TRUE(connection->client_pings_pending.empty());
 }
 
 
