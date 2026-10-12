@@ -321,10 +321,10 @@ std::vector<std::string> MitmProxy::sift_classifications() const {
     return {sift_classifications_.begin(), sift_classifications_.end()};
 }
 
-void MitmProxy::submit_sift_observation(
+void MitmProxy::submit_flow_observation(
     sx::traffic_log_adapter::flow_observation fields,
     std::string_view payload_layer) {
-    if(fields.empty() || !sx::http::webhooks::sift_enabled()) return;
+    if(fields.empty()) return;
 
     nlohmann::json details;
     auto& info = details["info"];
@@ -332,6 +332,12 @@ void MitmProxy::submit_sift_observation(
     info["side"] = "L";
     info["payload_layer"] = payload_layer;
     for(auto const& [name, value] : fields) info[name] = value;
+
+    if(sx::http::webhooks::is_enabled()) {
+        sx::http::webhooks::send_action(
+            "connection-info", to_connection_ID(), details);
+    }
+    if(!sx::http::webhooks::sift_enabled()) return;
 
     sx::http::webhooks::send_sift_content_wait(
         to_connection_ID(), std::move(details), {},

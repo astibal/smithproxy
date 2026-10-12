@@ -228,7 +228,7 @@ private:
             auto adapter = context_.make_traffic_log_adapter(flow_id);
             adapter->on_flow_observation(
                 [proxy = proxy.get()](sx::traffic_log_adapter::flow_observation fields) {
-                    proxy->submit_sift_observation(std::move(fields), "http3.headers");
+                    proxy->submit_flow_observation(std::move(fields), "http3.headers");
                 });
             proxy->traffic_log_adapter(std::move(adapter));
         }

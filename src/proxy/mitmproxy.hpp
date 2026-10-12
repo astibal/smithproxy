@@ -265,7 +265,7 @@ public:
     std::optional<std::string> get_application() const;
     void add_sift_classification(std::string classification);
     [[nodiscard]] std::vector<std::string> sift_classifications() const;
-    void submit_sift_observation(
+    void submit_flow_observation(
         sx::traffic_log_adapter::flow_observation fields,
         std::string_view payload_layer);
 
