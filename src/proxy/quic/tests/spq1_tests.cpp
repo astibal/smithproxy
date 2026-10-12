@@ -105,6 +105,29 @@ TEST(Spq1, EncodesDecodedH3HeadersAsPrivateExtension) {
     EXPECT_EQ(">>>", std::string(packet.end() - 3, packet.end()));
 }
 
+TEST(Spq1, ConvertsInitialH3RequestHeadersToFlowObservations) {
+    sx::quic::h3_headers_record request {
+        socle::side_t::LEFT,
+        4,
+        {{":method", "GET"}, {":scheme", "https"},
+         {":authority", "video.example"}, {":path", "/watch?id=7"}},
+    };
+
+    auto const fields = sx::quic::spq1::h3_flow_observations(request);
+    EXPECT_EQ("true", fields.at("flow.http3"));
+    EXPECT_EQ("GET", fields.at("flow.http3.method"));
+    EXPECT_EQ("https", fields.at("flow.http3.scheme"));
+    EXPECT_EQ("video.example", fields.at("flow.http3.authority"));
+    EXPECT_EQ("/watch?id=7", fields.at("flow.http3.path"));
+    EXPECT_EQ("https://video.example/watch?id=7", fields.at("flow.http3.url"));
+
+    request.side = socle::side_t::RIGHT;
+    EXPECT_TRUE(sx::quic::spq1::h3_flow_observations(request).empty());
+    request.side = socle::side_t::LEFT;
+    request.fields = {{"content-type", "application/example"}};
+    EXPECT_TRUE(sx::quic::spq1::h3_flow_observations(request).empty());
+}
+
 TEST(Spq1, SplitsGreSafeChunksAndEmitsOneFin) {
     auto packets = std::make_shared<std::vector<captured_packet>>();
     auto connection = std::make_shared<sx::quic::spq1::connection_context>(7, "h3");

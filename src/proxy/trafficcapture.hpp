@@ -7,6 +7,9 @@
 #include <cstdint>
 #include <deque>
 #include <memory>
+#include <functional>
+#include <string>
+#include <unordered_map>
 #include <mutex>
 #include <utility>
 #include <vector>
@@ -25,7 +28,14 @@ namespace sx {
  */
 class traffic_log_adapter {
 public:
+    using flow_observation = std::unordered_map<std::string, std::string>;
+    using observation_hook = std::function<void(flow_observation)>;
+
     virtual ~traffic_log_adapter() = default;
+
+    /** Observe forwarded plaintext independently of capture configuration. */
+    virtual void observe(socle::side_t, buffer const&) {}
+    virtual void on_flow_observation(observation_hook) {}
 
     virtual std::unique_ptr<socle::baseTrafficLogger> wrap(
         std::unique_ptr<socle::baseTrafficLogger> output) = 0;

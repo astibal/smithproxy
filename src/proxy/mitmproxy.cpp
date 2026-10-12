@@ -321,6 +321,38 @@ std::vector<std::string> MitmProxy::sift_classifications() const {
     return {sift_classifications_.begin(), sift_classifications_.end()};
 }
 
+void MitmProxy::submit_sift_observation(
+    sx::traffic_log_adapter::flow_observation fields,
+    std::string_view payload_layer) {
+    if(fields.empty() || !sx::http::webhooks::sift_enabled()) return;
+
+    nlohmann::json details;
+    auto& info = details["info"];
+    info["session"] = to_connection_label();
+    info["side"] = "L";
+    info["payload_layer"] = payload_layer;
+    for(auto const& [name, value] : fields) info[name] = value;
+
+    sx::http::webhooks::send_sift_content_wait(
+        to_connection_ID(), std::move(details), {},
+        [this](sx::http::expected_reply reply) {
+            if(!reply.has_value()) return;
+            auto const status = reply.value().response.first;
+            if(status < 200 || status >= 300) return;
+            auto body = nlohmann::json::parse(
+                reply.value().response.second, nullptr, false);
+            if(body.is_discarded()) return;
+            auto const matches = body.find("matches");
+            if(matches == body.end() || !matches->is_array()) return;
+            for(auto const& match : *matches) {
+                if(!match.is_object()) continue;
+                auto const signature = match.find("signature");
+                if(signature != match.end() && signature->is_string())
+                    add_sift_classification(signature->get<std::string>());
+            }
+        });
+}
+
 
 std::string MitmProxy::to_connection_ID() const {
     return sx::proxy::connection_id(StaticContent::boot_random, session_id_);
@@ -1198,9 +1230,13 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
 
 void MitmProxy::write_traffic_log(side_t side, baseHostCX* cx, buffer* custom_buffer) {
 
-    if(writer_opts()->write_payload) {
-        if(not cx) return;
+    if(not cx) return;
+    auto* observed = custom_buffer ? custom_buffer : &cx->to_read();
+    if(traffic_log_adapter_ and observed and not observed->empty()) {
+        traffic_log_adapter_->observe(side, *observed);
+    }
 
+    if(writer_opts()->write_payload) {
         auto* buffer = custom_buffer;
         if(not buffer) {
             buffer = &cx->to_read();
