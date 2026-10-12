@@ -6,8 +6,8 @@
 namespace {
 std::mutex transport_mutex;
 std::string configured_path;
-std::mutex spider_engine_transport_mutex;
-std::string spider_engine_configured_path;
+std::mutex sift_transport_mutex;
+std::string sift_configured_path;
 }
 
 namespace sx::comm::webhook {
@@ -36,28 +36,28 @@ std::string transport_path() {
 
 } // namespace sx::comm::webhook
 
-namespace sx::comm::spider_engine {
+namespace sx::comm::sift {
 
 int configure_transport(const std::string& path) {
     if(path.empty()) { errno = EINVAL; return -1; }
-    std::lock_guard lock(spider_engine_transport_mutex);
-    spider_engine_configured_path = path;
+    std::lock_guard lock(sift_transport_mutex);
+    sift_configured_path = path;
     return 0;
 }
 
 void clear_transport() noexcept {
-    std::lock_guard lock(spider_engine_transport_mutex);
-    spider_engine_configured_path.clear();
+    std::lock_guard lock(sift_transport_mutex);
+    sift_configured_path.clear();
 }
 
 bool enabled() noexcept {
-    std::lock_guard lock(spider_engine_transport_mutex);
-    return !spider_engine_configured_path.empty();
+    std::lock_guard lock(sift_transport_mutex);
+    return !sift_configured_path.empty();
 }
 
 std::string transport_path() {
-    std::lock_guard lock(spider_engine_transport_mutex);
-    return spider_engine_configured_path;
+    std::lock_guard lock(sift_transport_mutex);
+    return sift_configured_path;
 }
 
-} // namespace sx::comm::spider_engine
+} // namespace sx::comm::sift

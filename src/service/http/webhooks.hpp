@@ -148,11 +148,11 @@ namespace sx::http::webhooks {
     bool is_enabled();
     void set_hostid(std::string const& ref);
     std::string get_hostid();
-    bool spider_engine_enabled();
-    bool send_engine_content_wait(
+    bool sift_enabled();
+    bool send_sift_content_wait(
         std::string const& action_id, nlohmann::json details,
         std::string_view payload, sx::http::AsyncRequest::reply_hook hook);
-    bool send_engine_action(
+    bool send_sift_action(
         std::string const& action, std::string const& action_id,
         nlohmann::json const& details);
 

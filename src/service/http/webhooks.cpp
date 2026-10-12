@@ -63,20 +63,20 @@ namespace sx::http::webhooks {
         return hostid.empty() ? SmithProxy::instance().hostname : hostid;
     }
 
-    bool spider_engine_enabled() {
+    bool sift_enabled() {
         auto lock = std::scoped_lock(CfgFactory::lock());
-        return CfgFactory::get()->settings_webhook.spider_engine;
+        return CfgFactory::get()->settings_webhook.sift;
     }
 
-    static sx::http::AsyncRequest::request_settings engine_settings() {
+    static sx::http::AsyncRequest::request_settings sift_settings() {
         sx::http::AsyncRequest::request_settings settings;
         auto lock = std::scoped_lock(CfgFactory::lock());
         auto const& factory = CfgFactory::get();
-        settings.enabled = factory->settings_webhook.spider_engine;
-        settings.url = factory->settings_webhook.spider_engine_url;
+        settings.enabled = factory->settings_webhook.sift;
+        settings.url = factory->settings_webhook.sift_url;
         settings.verify_tls = true;
         settings.bind_interface = factory->settings_webhook.bind_interface;
-        settings.unix_socket_path = sx::comm::spider_engine::transport_path();
+        settings.unix_socket_path = sx::comm::sift::transport_path();
         std::ostringstream dns;
         for(size_t i = 0; i < factory->db_nameservers.size(); ++i) {
             dns << factory->db_nameservers[i].str_host;
@@ -86,10 +86,10 @@ namespace sx::http::webhooks {
         return settings;
     }
 
-    bool send_engine_action(
+    bool send_sift_action(
         std::string const& action, std::string const& action_id,
         nlohmann::json const& details) {
-        auto settings = engine_settings();
+        auto settings = sift_settings();
         if(not settings.enabled or settings.url.empty()) return false;
         nlohmann::json message = {
             {"action", action}, {"id", action_id}, {"source", get_hostid()},
@@ -123,10 +123,10 @@ namespace sx::http::webhooks {
         return message;
     }
 
-    bool send_engine_content_wait(
+    bool send_sift_content_wait(
         std::string const& action_id, nlohmann::json details,
         std::string_view payload, sx::http::AsyncRequest::reply_hook hook) {
-        auto settings = engine_settings();
+        auto settings = sift_settings();
         if(not settings.enabled or settings.url.empty() or not hook) return false;
         auto message = encode_content(action_id, std::move(details), payload);
         if(message.empty()) return false;

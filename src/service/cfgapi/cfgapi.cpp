@@ -1132,8 +1132,8 @@ bool CfgFactory::load_settings () {
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "enabled", settings_webhook.enabled);
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "url", settings_webhook.cfg_url);
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "tls_verify", settings_webhook.cfg_tls_verify);
-        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "spider_engine", settings_webhook.spider_engine);
-        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "spider_engine_url", settings_webhook.spider_engine_url);
+        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "sift", settings_webhook.sift);
+        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "sift_url", settings_webhook.sift_url);
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "api_override", settings_webhook.allow_api_override);
 
         sx::http::webhooks::set_enabled(settings_webhook.enabled);
@@ -6019,8 +6019,8 @@ int save_settings(Config& ex) {
     webhook_objects.add("enabled", Setting::TypeBoolean) = CfgFactory::get()->settings_webhook.enabled;
     webhook_objects.add("url", Setting::TypeString) = CfgFactory::get()->settings_webhook.cfg_url;
     webhook_objects.add("tls_verify", Setting::TypeBoolean) = CfgFactory::get()->settings_webhook.cfg_tls_verify;
-    webhook_objects.add("spider_engine", Setting::TypeBoolean) = CfgFactory::get()->settings_webhook.spider_engine;
-    webhook_objects.add("spider_engine_url", Setting::TypeString) = CfgFactory::get()->settings_webhook.spider_engine_url;
+    webhook_objects.add("sift", Setting::TypeBoolean) = CfgFactory::get()->settings_webhook.sift;
+    webhook_objects.add("sift_url", Setting::TypeString) = CfgFactory::get()->settings_webhook.sift_url;
     webhook_objects.add("hostid", Setting::TypeString) = CfgFactory::get()->settings_webhook.hostid;
     webhook_objects.add("bind_interface", Setting::TypeString) = CfgFactory::get()->settings_webhook.bind_interface;
     webhook_objects.add("api_override", Setting::TypeBoolean) = CfgFactory::get()->settings_webhook.allow_api_override;

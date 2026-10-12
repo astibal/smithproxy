@@ -212,7 +212,7 @@ public:
     // makes a synchronous API call letting webhook modify the content
     bool content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
                          std::string_view payload_layer,
-                         bool regular_webhook, bool spider_engine);
+                         bool regular_webhook, bool sift);
     bool handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t side);
 
     // this virtual method is called whenever there are new bytes in any LEFT host context!

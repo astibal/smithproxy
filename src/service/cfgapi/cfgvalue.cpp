@@ -471,12 +471,12 @@ void CfgValueHelp::init() {
             .may_be_empty(false)
             .value_filter(CfgValue::VALUE_BOOL);
 
-    add("settings.webhook.spider_engine", "send content to the local SPIDER decision engine")
-            .help_quick("<bool>: enable the secondary sx-spiderd webhook (default: false)")
+    add("settings.webhook.sift", "send content to the local Sift decision engine")
+            .help_quick("<bool>: enable the secondary sx-siftd webhook (default: false)")
             .may_be_empty(false)
             .value_filter(CfgValue::VALUE_BOOL);
 
-    add("settings.webhook.spider_engine_url", "sx-spiderd webhook URL")
+    add("settings.webhook.sift_url", "sx-siftd webhook URL")
             .help_quick("<string>: local engine endpoint (default: http://127.0.0.1:18081/webhook)")
             .may_be_empty(false)
             .value_filter(CfgValue::VALUE_ANY);

@@ -1247,14 +1247,14 @@ int cli_diag_sys_webhook_stats(DiagCli* cli, const char* command,
     return CLI_OK;
 }
 
-int cli_diag_sys_spider_engine_stats(DiagCli* cli, const char* command,
-                                     char* argv[], int argc) {
+int cli_diag_sys_sift_stats(DiagCli* cli, const char* command,
+                            char* argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
     std::ostringstream output;
-    output << "SPIDER engine communication worker:\n";
-    if(sx::comm::spider_engine::enabled()) {
+    output << "Sift communication worker:\n";
+    if(sx::comm::sift::enabled()) {
         output << "  mode: external\n"
-               << "  socket: " << sx::comm::spider_engine::transport_path() << "\n"
+               << "  socket: " << sx::comm::sift::transport_path() << "\n"
                << "  broker stats: unavailable (external process)";
     } else {
         output << "  mode: direct";
@@ -2804,8 +2804,8 @@ void register_diags(libcli2::Cli& native) {
             diag_register_command(cli, diag_sys_api, "stats", cli_diag_sys_api_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display API broker statistics");
         auto diag_sys_webhook = diag_register_command(cli, diag_sys, "webhook", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "webhook communication broker diagnostics");
             diag_register_command(cli, diag_sys_webhook, "stats", cli_diag_sys_webhook_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display webhook transport statistics");
-        auto diag_sys_spider_engine = diag_register_command(cli, diag_sys, "spider-engine", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "SPIDER engine communication broker diagnostics");
-            diag_register_command(cli, diag_sys_spider_engine, "stats", cli_diag_sys_spider_engine_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display SPIDER engine transport statistics");
+        auto diag_sys_sift = diag_register_command(cli, diag_sys, "sift", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "Sift communication broker diagnostics");
+            diag_register_command(cli, diag_sys_sift, "stats", cli_diag_sys_sift_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display Sift transport statistics");
     auto diag_ssl = diag_register_command(cli, diag, "tls", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "ssl related troubleshooting commands");
     auto diag_ssl_cache = diag_register_command(cli, diag_ssl, "cache", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl certificate cache");
     diag_register_command(cli, diag_ssl_cache, "stats", cli_diag_ssl_cache_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "display ssl cert cache statistics");

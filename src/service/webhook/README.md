@@ -21,21 +21,21 @@ smithproxy-webhook-broker \
 smithproxy --comm-webhook /run/smithproxy/comm/webhook.sock
 ```
 
-The SPIDER classification engine uses a separate fixed destination and thus a
+Sift uses a separate fixed destination and thus a
 separate instance of the same opaque relay:
 
 ```bash
 smithproxy-webhook-broker \
-  --comm-webhook /run/smithproxy/comm/spider-engine.sock \
+  --comm-webhook /run/smithproxy/comm/sift.sock \
   --destination 127.0.0.1 --port 18081
 
 smithproxy \
   --comm-webhook /run/smithproxy/comm/webhook.sock \
-  --comm-spider-engine /run/smithproxy/comm/spider-engine.sock
+  --comm-sift /run/smithproxy/comm/sift.sock
 ```
 
-When the SPIDER engine is enabled, using `--comm-webhook` also requires
-`--comm-spider-engine`. This prevents classification traffic from silently
+When Sift is enabled, using `--comm-webhook` also requires
+`--comm-sift`. This prevents classification traffic from silently
 bypassing an explicitly separated communication path.
 
 When `--comm-webhook` is active, failure to connect to the Unix socket is a

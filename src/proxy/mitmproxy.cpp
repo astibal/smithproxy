@@ -317,14 +317,14 @@ std::string MitmProxy::to_connection_ID() const {
 
 void MitmProxy::webhook_session_start() const {
     if(wh_start or (not sx::http::webhooks::is_enabled() and
-                    not sx::http::webhooks::spider_engine_enabled())) return;
+                    not sx::http::webhooks::sift_enabled())) return;
 
     nlohmann::json j;
     auto cl = to_connection_label();
     j["info"] = { {"session", cl } };
     if(sx::http::webhooks::is_enabled())
         sx::http::webhooks::send_action("connection-start", to_connection_ID(), j);
-    sx::http::webhooks::send_engine_action("connection-start", to_connection_ID(), j);
+    sx::http::webhooks::send_sift_action("connection-start", to_connection_ID(), j);
 
     wh_start = true;
 }
@@ -346,7 +346,7 @@ std::optional<std::string> MitmProxy::get_application() const {
 
 void MitmProxy::webhook_session_stop() const {
     if(wh_stop or (not sx::http::webhooks::is_enabled() and
-                   not sx::http::webhooks::spider_engine_enabled())) return;
+                   not sx::http::webhooks::sift_enabled())) return;
 
     nlohmann::json j;
     auto cl = to_connection_label();
@@ -397,7 +397,7 @@ void MitmProxy::webhook_session_stop() const {
 
     if(sx::http::webhooks::is_enabled())
         sx::http::webhooks::send_action("connection-stop", to_connection_ID(), j);
-    sx::http::webhooks::send_engine_action("connection-stop", to_connection_ID(), j);
+    sx::http::webhooks::send_sift_action("connection-stop", to_connection_ID(), j);
 
     wh_stop = true;
 }
@@ -913,11 +913,11 @@ static std::string b64_decode(std::string const& encoded) {
 
 bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
                                 std::string_view payload_layer,
-                                bool regular_webhook, bool spider_engine) {
+                                bool regular_webhook, bool sift) {
 
     auto& log = log_content;
 
-    if(not regular_webhook and not spider_engine) return false;
+    if(not regular_webhook and not sift) return false;
     if(not cx or buffer.empty()) return false;
 
     bool was_modified = false;
@@ -972,8 +972,8 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
             }
         }
     };
-    if(spider_engine) {
-        sx::http::webhooks::send_engine_content_wait(
+    if(sift) {
+        sx::http::webhooks::send_sift_content_wait(
             to_connection_ID(), j,
             std::string_view(reinterpret_cast<const char*>(buffer.data()), buffer.size()),
             response_hook);
@@ -993,13 +993,13 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
 }
 
 bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t side) {
-    const auto engine_enabled = sx::http::webhooks::spider_engine_enabled();
+    const auto sift_is_enabled = sx::http::webhooks::sift_enabled();
     const auto webhook_enabled = sx::http::webhooks::is_enabled() and
                                  writer_opts()->webhook_enable;
 
     // Classification waits only for this flow. It must never participate in
     // the forensic global webhook lock used by the interactive Spider app.
-    if(engine_enabled and content_webhook(
+    if(sift_is_enabled and content_webhook(
             from, side, from->to_read(), "tcp", false, true)) {
         return true;
     }
@@ -1083,7 +1083,7 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
     }
 
     // 1. content webhook first (potentially modifies from->to_read() buffer
-    if(writer_opts()->webhook_enable or sx::http::webhooks::spider_engine_enabled()) {
+    if(writer_opts()->webhook_enable or sx::http::webhooks::sift_enabled()) {
         auto orig_sz = from->to_read().size();
         if(handle_content_webhook(from, to, side)) {
             auto sz = from->to_read().size();

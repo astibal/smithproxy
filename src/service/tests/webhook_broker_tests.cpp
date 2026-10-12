@@ -118,7 +118,7 @@ protected:
 
     void TearDown() override {
         sx::comm::webhook::clear_transport();
-        sx::comm::spider_engine::clear_transport();
+        sx::comm::sift::clear_transport();
         std::error_code ignored;
         std::filesystem::remove_all(directory_, ignored);
     }
@@ -136,22 +136,22 @@ TEST_F(WebhookBrokerTest, SpecializationStoresOnlyTheUnixTransportPath) {
     EXPECT_FALSE(sx::comm::webhook::enabled());
 }
 
-TEST_F(WebhookBrokerTest, SpiderEngineHasAnIndependentUnixTransportPath) {
-    const auto engine_path = directory_ + "/spider-engine.sock";
+TEST_F(WebhookBrokerTest, SiftHasAnIndependentUnixTransportPath) {
+    const auto sift_path = directory_ + "/sift.sock";
     ASSERT_EQ(sx::comm::webhook::configure_transport(path_), 0);
-    ASSERT_EQ(sx::comm::spider_engine::configure_transport(engine_path), 0);
+    ASSERT_EQ(sx::comm::sift::configure_transport(sift_path), 0);
     EXPECT_EQ(sx::comm::webhook::transport_path(), path_);
-    EXPECT_EQ(sx::comm::spider_engine::transport_path(), engine_path);
-    sx::comm::spider_engine::clear_transport();
+    EXPECT_EQ(sx::comm::sift::transport_path(), sift_path);
+    sx::comm::sift::clear_transport();
     EXPECT_TRUE(sx::comm::webhook::enabled());
-    EXPECT_FALSE(sx::comm::spider_engine::enabled());
+    EXPECT_FALSE(sx::comm::sift::enabled());
 }
 
-TEST_F(WebhookBrokerTest, SpiderEngineRejectsAnEmptyTransportPath) {
+TEST_F(WebhookBrokerTest, SiftRejectsAnEmptyTransportPath) {
     errno = 0;
-    EXPECT_EQ(sx::comm::spider_engine::configure_transport(""), -1);
+    EXPECT_EQ(sx::comm::sift::configure_transport(""), -1);
     EXPECT_EQ(errno, EINVAL);
-    EXPECT_FALSE(sx::comm::spider_engine::enabled());
+    EXPECT_FALSE(sx::comm::sift::enabled());
 }
 
 TEST_F(WebhookBrokerTest, RelaysOpaqueBinaryStreamAndPreservesHalfClose) {
