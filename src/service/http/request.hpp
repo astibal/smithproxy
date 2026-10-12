@@ -174,6 +174,11 @@ namespace sx::http {
             }
         }
 
+        bool set_unix_socket_path(std::string const& path) {
+            return curl && !path.empty()
+                && curl_easy_setopt(curl, CURLOPT_UNIX_SOCKET_PATH, path.c_str()) == CURLE_OK;
+        }
+
 
         static int curl_debug_callback(CURL *handle, curl_infotype type, char *data, size_t size, void *userptr) {
             // userptr points to your string or any other type of container

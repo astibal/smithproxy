@@ -77,6 +77,10 @@
 #include <utils/tenants.hpp>
 #include <service/daemon.hpp>
 #include <service/privileged_file.hpp>
+#include <service/gre_broker.hpp>
+#include <service/cli/cli_broker.hpp>
+#include <service/api/api_broker.hpp>
+#include <service/webhook/webhook_broker.hpp>
 #include <staticcontent.hpp>
 #include <smithlog.hpp>
 
@@ -86,6 +90,10 @@
 #include <service/tpool.hpp>
 
 namespace {
+
+std::atomic<bool> gre_broker_failed{false};
+std::atomic<bool> cli_broker_failed{false};
+std::atomic<bool> api_broker_failed{false};
 
 int drop_process_identity(const std::string& run_as) {
     if(geteuid() != 0) {
@@ -133,7 +141,11 @@ std::optional<std::string> resolve_run_as(const std::optional<std::string>& comm
 }
 
 int prepare_privilege_separation(DaemonFactory& daemon, const std::string& config_file,
-                                 const std::optional<std::string>& run_as) {
+                                 const std::optional<std::string>& run_as,
+                                 const std::optional<std::string>& comm_gre,
+                                 const std::optional<std::string>& comm_cli,
+                                 const std::optional<std::string>& comm_api,
+                                 const std::optional<std::string>& comm_webhook) {
     auto const& log = DaemonFactory::instance()->get_log();
 
     if(sx::privsep::files::start_local_helper({config_file, daemon.pid_file}) != 0) {
@@ -147,7 +159,76 @@ int prepare_privilege_separation(DaemonFactory& daemon, const std::string& confi
         return -1;
     }
 
+    if(comm_webhook && sx::comm::webhook::configure_transport(*comm_webhook) != 0) {
+        _fat("cannot initialize webhook transport: %s", string_error().c_str());
+        socle::privsep::stop_local_helper();
+        sx::privsep::files::stop_local_helper();
+        return -1;
+    }
+
+    const int cli_result = comm_cli
+        ? sx::comm::cli::prepare_external_ingress(*comm_cli)
+        : sx::comm::cli::start_internal_broker(
+            static_cast<std::uint16_t>(CfgFactory::get()->cli_port
+                                       + CfgFactory::get()->tenant_index));
+    if(cli_result != 0) {
+        _fat("cannot initialize CLI broker: %s", string_error().c_str());
+        socle::privsep::stop_local_helper();
+        sx::privsep::files::stop_local_helper();
+        return -1;
+    }
+
+    if(CfgFactory::get()->accept_api && sx::webserver::HttpSessions::has_api_keys()) {
+        const std::string api_address = sx::webserver::HttpSessions::loopback_only
+            ? "127.0.0.1"
+            : (sx::webserver::HttpSessions::bind_address.empty()
+                ? "0.0.0.0" : sx::webserver::HttpSessions::bind_address);
+        sx::comm::api::Profile profile{
+            api_address,
+            static_cast<std::uint16_t>(sx::webserver::HttpSessions::api_port
+                                       + CfgFactory::get()->tenant_index),
+            sx::webserver::HttpSessions::allowed_ips,
+            sx::webserver::HttpSessions::bind_interface
+        };
+        const int api_result = comm_api
+            ? sx::comm::api::prepare_external_ingress(*comm_api)
+            : sx::comm::api::start_internal_broker(std::move(profile));
+        if(api_result != 0) {
+            _fat("cannot initialize API broker: %s", string_error().c_str());
+            sx::comm::cli::stop_broker();
+            socle::privsep::stop_local_helper();
+            sx::privsep::files::stop_local_helper();
+            return -1;
+        }
+    }
+
+    const auto& remote = CfgFactory::get()->capture_remote;
+    if(remote.enabled && !remote.tun_dst.empty()) {
+        CidrAddress destination(remote.tun_dst);
+        sx::comm::gre::Profile profile{
+            destination.cidr()->proto, destination.ip(), remote.tun_ttl,
+            remote.bind_interface
+        };
+        const int broker_result = comm_gre
+            ? sx::comm::gre::connect_external_broker(*comm_gre)
+            : sx::comm::gre::start_local_broker(std::move(profile));
+        if(broker_result != 0) {
+            _fat("cannot initialize GRE broker: %s", string_error().c_str());
+            sx::comm::api::stop_broker();
+            sx::comm::cli::stop_broker();
+            socle::privsep::stop_local_helper();
+            sx::privsep::files::stop_local_helper();
+            return -1;
+        }
+        // The initial config load predates helper startup; replace the
+        // singleton's direct transport now. Per-session loggers are newer.
+        CfgFactory::gre_export_apply(&traflog::PcapLog::single_instance());
+    }
+
     if(!daemon.write_pidfile()) {
+        sx::comm::gre::stop_local_broker();
+        sx::comm::api::stop_broker();
+        sx::comm::cli::stop_broker();
         socle::privsep::stop_local_helper();
         sx::privsep::files::stop_local_helper();
         return -1;
@@ -157,6 +238,9 @@ int prepare_privilege_separation(DaemonFactory& daemon, const std::string& confi
         const int saved_errno = errno;
         _fat("cannot drop Smithproxy core identity: %s", string_error(saved_errno).c_str());
         daemon.unlink_pidfile();
+        sx::comm::gre::stop_local_broker();
+        sx::comm::api::stop_broker();
+        sx::comm::cli::stop_broker();
         socle::privsep::stop_local_helper();
         sx::privsep::files::stop_local_helper();
         errno = saved_errno;
@@ -403,6 +487,10 @@ void print_help() {
     std::cerr << "    --config-file, -c <filename> :  specify/override configuration file" << std::endl;
     std::cerr << "    --config-check-only, -o      :  perform configuration file check" << std::endl;
     std::cerr << "    --run-as <user>              :  drop core identity after starting privileged helper" << std::endl;
+    std::cerr << "    --comm-gre <path>            :  use an external GRE comm broker" << std::endl;
+    std::cerr << "    --comm-cli <path>            :  use an external CLI comm broker" << std::endl;
+    std::cerr << "    --comm-api <path>            :  use an external API comm broker" << std::endl;
+    std::cerr << "    --comm-webhook <path>        :  route webhook connections through a Unix socket" << std::endl;
     std::cerr << std::endl;
     std::cerr << "  Notes:" << std::endl;
     std::cerr << std::endl;
@@ -436,6 +524,10 @@ int main(int argc, char *argv[]) {
 
 
     constexpr int option_run_as = 1000;
+    constexpr int option_comm_gre = 1001;
+    constexpr int option_comm_cli = 1002;
+    constexpr int option_comm_api = 1003;
+    constexpr int option_comm_webhook = 1004;
     static struct option long_options[] =
             {
                     /* These options set a flag. */
@@ -449,6 +541,10 @@ int main(int argc, char *argv[]) {
                     {"daemonize", no_argument, nullptr, 'D'},
                     {"version", no_argument, nullptr, 'v'},
                     {"run-as", required_argument, nullptr, option_run_as},
+                    {"comm-gre", required_argument, nullptr, option_comm_gre},
+                    {"comm-cli", required_argument, nullptr, option_comm_cli},
+                    {"comm-api", required_argument, nullptr, option_comm_api},
+                    {"comm-webhook", required_argument, nullptr, option_comm_webhook},
 
                     // multi-tenancy support: listening ports will be shifted by number 'i', while 't' controls logging, pidfile, etc.
                     // both, or none of them have to be set
@@ -468,6 +564,10 @@ int main(int argc, char *argv[]) {
     bool is_custom_config_file = false;
     bool is_dup2cout = false;
     std::optional<std::string> command_line_run_as;
+    std::optional<std::string> command_line_comm_gre;
+    std::optional<std::string> command_line_comm_cli;
+    std::optional<std::string> command_line_comm_api;
+    std::optional<std::string> command_line_comm_webhook;
 
     while(true) {
     /* getopt_long stores the option index here. */
@@ -514,6 +614,38 @@ int main(int argc, char *argv[]) {
                     return EXIT_FAILURE;
                 }
                 command_line_run_as = optarg;
+                break;
+
+            case option_comm_gre:
+                if(optarg == nullptr || *optarg == '\0') {
+                    std::cerr << "--comm-gre requires a non-empty Unix socket path" << std::endl;
+                    return EXIT_FAILURE;
+                }
+                command_line_comm_gre = optarg;
+                break;
+
+            case option_comm_cli:
+                if(optarg == nullptr || *optarg == '\0') {
+                    std::cerr << "--comm-cli requires a non-empty Unix socket path" << std::endl;
+                    return EXIT_FAILURE;
+                }
+                command_line_comm_cli = optarg;
+                break;
+
+            case option_comm_api:
+                if(optarg == nullptr || *optarg == '\0') {
+                    std::cerr << "--comm-api requires a non-empty Unix socket path" << std::endl;
+                    return EXIT_FAILURE;
+                }
+                command_line_comm_api = optarg;
+                break;
+
+            case option_comm_webhook:
+                if(optarg == nullptr || *optarg == '\0') {
+                    std::cerr << "--comm-webhook requires a non-empty Unix socket path" << std::endl;
+                    return EXIT_FAILURE;
+                }
+                command_line_comm_webhook = optarg;
                 break;
                 
                 
@@ -675,8 +807,29 @@ int main(int argc, char *argv[]) {
 
     }
 
+    sx::comm::gre::set_internal_failure_handler([] {
+        gre_broker_failed.store(true, std::memory_order_relaxed);
+        Log::get()->events().insert(
+            CRI, "internal GRE broker terminated unexpectedly; shutting down Smithproxy");
+        SmithProxy::instance().terminate_flag = true;
+    });
+    sx::comm::cli::set_internal_failure_handler([] {
+        cli_broker_failed.store(true, std::memory_order_relaxed);
+        Log::get()->events().insert(
+            CRI, "internal CLI broker terminated unexpectedly; shutting down Smithproxy");
+        SmithProxy::instance().terminate_flag = true;
+    });
+    sx::comm::api::set_internal_failure_handler([] {
+        api_broker_failed.store(true, std::memory_order_relaxed);
+        Log::get()->events().insert(
+            CRI, "internal API broker terminated unexpectedly; shutting down Smithproxy");
+        SmithProxy::instance().terminate_flag = true;
+    });
+
     const auto run_as = resolve_run_as(command_line_run_as);
-    if(prepare_privilege_separation(*this_daemon, CfgFactory::get()->config_file, run_as) != 0) {
+    if(prepare_privilege_separation(*this_daemon, CfgFactory::get()->config_file, run_as,
+                                    command_line_comm_gre, command_line_comm_cli,
+                                    command_line_comm_api, command_line_comm_webhook) != 0) {
         CfgFactory::get()->cleanup();
         return EXIT_FAILURE;
     }
@@ -728,6 +881,15 @@ int main(int argc, char *argv[]) {
     // The socket helper is forked after the file helper and therefore inherits
     // a copy of the file-helper control descriptor.  Stop it first so the file
     // helper can observe EOF, perform PID cleanup and exit.
+    if(sx::comm::gre::stop_local_broker() != 0) {
+        _err("cannot stop local GRE broker: %s", string_error().c_str());
+    }
+    if(sx::comm::api::stop_broker() != 0) {
+        _err("API broker did not stop cleanly: %s", string_error().c_str());
+    }
+    if(sx::comm::cli::stop_broker() != 0) {
+        _err("CLI broker did not stop cleanly: %s", string_error().c_str());
+    }
     if(socle::privsep::stop_local_helper() != 0) {
         _err("privileged socket helper did not stop cleanly: %s", string_error().c_str());
     }
@@ -739,7 +901,10 @@ int main(int argc, char *argv[]) {
     DaemonFactory::generate_crashlog = false;
     #endif
 
-    return EXIT_SUCCESS;
+    return (gre_broker_failed.load(std::memory_order_relaxed)
+            || cli_broker_failed.load(std::memory_order_relaxed)
+            || api_broker_failed.load(std::memory_order_relaxed))
+        ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 
 

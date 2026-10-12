@@ -9,6 +9,7 @@
 #include <service/cfgapi/cfgapi.hpp>
 #include <service/core/authpam.hpp>
 #include <service/core/smithproxy.hpp>
+#include <service/cli/cli_broker.hpp>
 
 #include <inspect/dnsinspector.hpp>
 #include <log/logger.hpp>
@@ -128,7 +129,7 @@ int regular(libcli2::Context& context) {
     return 0;
 }
 
-void client_thread(int client_socket) {
+void run_cli_session(int client_socket, const CliSessionMetadata& metadata) {
     libcli2::FdTransport transport(libcli2::FdPair(client_socket, client_socket));
     std::string admin_group;
     std::string enable_password;
@@ -138,7 +139,9 @@ void client_thread(int client_socket) {
         enable_password = CfgFactory::get()->cli_enable_password;
     }
     UpdateBoardSubscriber subscriber(cli_id(), CfgFactory::board());
-    Log::get()->events().insert(NOT, "admin CLI access");
+    Log::get()->events().insert(NOT, "admin CLI access via %s",
+                                metadata.broker.empty() ? "unknown transport"
+                                                        : metadata.broker.c_str());
     Log::get()->remote_targets(string_format("cli-%d", client_socket), client_socket);
     auto profile = std::make_unique<logger_profile>();
     profile->level_ = CfgFactory::get()->cli_init_level;
@@ -178,38 +181,14 @@ std::string cli_id() {
     return value.str();
 }
 
-void cli_loop(unsigned short port) {
+CliSession::CliSession(int fd, CliSessionMetadata metadata)
+    : fd_(fd), metadata_(std::move(metadata)) {}
+
+void CliSession::run() { run_cli_session(fd_, metadata_); }
+
+void cli_loop(int server) {
     static auto log = logan::create("service");
-    sockaddr_in address{};
-    int reuse = 1;
-    const int server = socle::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
-    if (server < 0) {
-        _err("cli main thread - cannot create listener: %s", string_error().c_str());
-        return;
-    }
-    if (socle::setsockopt(server, SOL_SOCKET, SO_REUSEADDR,
-                          &reuse, sizeof(reuse)) != 0) {
-        _err("cli main thread - cannot configure listener: %s", string_error().c_str());
-        close(server);
-        return;
-    }
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    address.sin_port = htons(port);
-    while (socle::bind(server, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
-        if (SmithProxy::instance().terminate_flag) { close(server); return; }
-        _err("cli main thread - cannot bind %d port: %s", port, string_error().c_str());
-        if(errno != EADDRINUSE) {
-            close(server);
-            return;
-        }
-        sleep(1);
-    }
-    if (socle::listen(server, 50) != 0) {
-        _err("cli main thread - cannot listen on port %d: %s", port, string_error().c_str());
-        close(server);
-        return;
-    }
+    if(server < 0) { _err("CLI ingress is unavailable"); return; }
     epoll poller;
     if (poller.init() < 0) { _err("cli main thread: Can't initialize epoll"); close(server); return; }
     if (!poller.add(server, EPOLLIN)) {
@@ -221,16 +200,16 @@ void cli_loop(unsigned short port) {
     while (!SmithProxy::instance().terminate_flag) {
         sx::cli::reap_finished_client_tasks(clients);
         if (poller.wait(1000) <= 0) continue;
-        sockaddr_storage peer{};
-        socklen_t length = sizeof(peer);
-        const int client = accept4(server, reinterpret_cast<sockaddr*>(&peer), &length,
-                                   SOCK_CLOEXEC | SOCK_NONBLOCK);
+        const int client = accept4(server, nullptr, nullptr, SOCK_CLOEXEC);
         if (client >= 0) {
             auto finished = std::make_shared<std::atomic_bool>(false);
             clients.push_back({
                 std::thread([client, finished] {
                     try {
-                        client_thread(client);
+                        if(sx::comm::cli::receive_handshake(client))
+                            CliSession(client, CliSessionMetadata{{}, {}, "comm broker"}).run();
+                        else
+                            ::close(client);
                     } catch(std::exception const& error) {
                         _err("CLI client thread failed: %s", error.what());
                     } catch(...) {
