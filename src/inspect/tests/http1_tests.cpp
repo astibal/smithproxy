@@ -1219,6 +1219,31 @@ TEST(HTTP2, BoundsConcurrentSemanticStreamState) {
     EXPECT_EQ(available->streams.count(9001), 1u);
 }
 
+TEST(HTTP2, RejectsOversizedCompleteHeaderBlockBeforeDecode) {
+    sx::engine::EngineCtx ctx;
+    constexpr std::size_t inspection_budget = 1024 * 1024;
+    std::vector<unsigned char> bytes(inspection_budget + 1, 0x8f);
+    buffer block;
+    block.assign(bytes.data(), bytes.size());
+
+    v2::process_headers(ctx, socle::side_t::LEFT, 35, 0x04, block);
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    EXPECT_TRUE(connection->connection_invalid);
+    EXPECT_FALSE(ctx.application_data);
+
+    HPACK::encoder_t clean;
+    clean.add(":method", "GET", false);
+    clean.add(":scheme", "https", false);
+    clean.add(":authority", "fixture.example", false);
+    clean.add(":path", "/must-not-recover", false);
+    buffer clean_block;
+    clean_block.assign(clean.data().data(), clean.data().size());
+    v2::process_headers(ctx, socle::side_t::LEFT, 37, 0x04, clean_block);
+    EXPECT_EQ(connection->streams.count(37), 0u);
+}
+
+
 TEST(HTTP2, DecodesHpackHeadersWithoutRequiringAttachedOrigin) {
     sx::engine::EngineCtx ctx;
     ctx.state_data = std::make_any<v2::Http2Connection>();
