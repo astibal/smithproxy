@@ -142,6 +142,7 @@ int decode_broker_stats(const std::string& payload, sx::comm::gre::Stats& output
 class TransportControl : public socle::traflog::GreTransport {
 public:
     virtual int broker_stats(sx::comm::gre::Stats& output) = 0;
+    virtual void request_stop() noexcept = 0;
 };
 
 class SocketTransport final : public TransportControl {
@@ -163,6 +164,10 @@ public:
         sx::comm::Reply reply;
         if(client_.request(gre_stats_opcode, {}, -1, reply) != 0) return -1;
         return decode_broker_stats(reply.payload, output);
+    }
+
+    void request_stop() noexcept override {
+        ::shutdown(client_.native_handle(), SHUT_RDWR);
     }
 
 private:
@@ -219,6 +224,8 @@ public:
         }
         return decode_broker_stats(reply.payload, output);
     }
+
+    void request_stop() noexcept override {}
 
 private:
     static std::shared_ptr<sx::comm::Client> make_client(int fd) {
@@ -418,13 +425,16 @@ int connect_external_broker(const std::string& path) {
 
 int stop_local_broker() {
     std::shared_ptr<socle::traflog::GreTransport> transport_to_close;
+    std::shared_ptr<TransportControl> control;
     bool owned = false;
     {
         std::lock_guard lock(state_mutex);
         broker_stopping.store(true, std::memory_order_relaxed);
         transport_to_close = std::move(installed_transport);
         owned = broker_pid > 0;
+        if(owned) control = std::dynamic_pointer_cast<TransportControl>(transport_to_close);
     }
+    if(control) control->request_stop();
     transport_to_close.reset();
     if(broker_monitor.joinable()) broker_monitor.join();
     const int status = broker_wait_status.load(std::memory_order_relaxed);

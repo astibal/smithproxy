@@ -122,4 +122,13 @@ TEST(GreBrokerTest, InternalBrokerFailureInvokesFatalHandler) {
     sx::comm::gre::set_internal_failure_handler({});
 }
 
+TEST(GreBrokerTest, InternalBrokerStopsWhileAnotherTransportReferenceIsAlive) {
+    sx::comm::gre::Profile profile{AF_INET, "127.0.0.1", 1, {}};
+    ASSERT_EQ(sx::comm::gre::start_local_broker(std::move(profile)), 0);
+    auto retained_transport = sx::comm::gre::transport();
+    ASSERT_NE(retained_transport, nullptr);
+    EXPECT_EQ(sx::comm::gre::stop_local_broker(), 0);
+    retained_transport.reset();
+}
+
 } // namespace
