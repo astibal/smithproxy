@@ -351,6 +351,8 @@ public:
         bool enabled = false;
         std::string cfg_url;
         bool cfg_tls_verify = true;
+        bool spider_engine = false;
+        std::string spider_engine_url = "http://127.0.0.1:18081/webhook";
 
         bool allow_api_override = false;
         struct {
