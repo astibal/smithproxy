@@ -1064,6 +1064,50 @@ TEST(HTTP2, EnforcesPeerAdvertisedMaximumFrameSize) {
 }
 
 
+TEST(HTTP2, BoundsUnacknowledgedSettingsState) {
+    auto frame = [](uint8_t type, uint8_t flags, uint32_t stream,
+                    std::vector<uint8_t> const& payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), type, flags,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+    sx::engine::EngineCtx ctx;
+    auto settings = frame(4, 0, 0, {});
+
+    for(std::size_t i = 0; i < 1024; ++i) {
+        EXPECT_EQ(v2::process_frame(ctx, socle::side_t::LEFT, settings),
+                  settings.size());
+        auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+        ASSERT_NE(connection, nullptr);
+        ASSERT_FALSE(connection->connection_invalid) << i;
+    }
+
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    EXPECT_EQ(connection->left_settings_awaiting_ack, 1024U);
+#ifdef USE_HPACK
+    EXPECT_EQ(connection->left_header_table_settings_pending.size(), 1024U);
+#endif
+
+    EXPECT_EQ(v2::process_frame(ctx, socle::side_t::LEFT, settings),
+              settings.size());
+    EXPECT_TRUE(connection->connection_invalid);
+    EXPECT_EQ(connection->left_settings_awaiting_ack, 1024U);
+#ifdef USE_HPACK
+    EXPECT_EQ(connection->left_header_table_settings_pending.size(), 1024U);
+#endif
+}
+
 TEST(HTTP2, DecodesHpackHeadersWithoutRequiringAttachedOrigin) {
     sx::engine::EngineCtx ctx;
     ctx.state_data = std::make_any<v2::Http2Connection>();
