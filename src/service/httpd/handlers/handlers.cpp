@@ -26,13 +26,13 @@ namespace sx::webserver {
         }
     }
 
-    std::string create_auth_cookie_val(std::string const& token){
+    std::string create_auth_cookie_val(std::string const& token, uint32_t ttl){
         using samesite_t = HttpSessions::cookie_samesite;
 
         std::stringstream ss;
         ss << string_format("%s=%s; Max-Age=%u; Secure; HttpOnly; Path=/",
                             HttpSessions::COOKIE_AUTH_TOKEN,
-                            token.c_str(), HttpSessions::session_ttl);
+                            token.c_str(), ttl);
 
         if(HttpSessions::COOKIE_SAMESITE != samesite_t::None) {
             ss << "; SameSite=";
@@ -42,11 +42,11 @@ namespace sx::webserver {
         return ss.str();
     }
 
-    std::string create_token_cookie_val(std::string const& token){
+    std::string create_token_cookie_val(std::string const& token, uint32_t ttl){
         std::stringstream ss;
         ss << string_format("__Host-%s=%s; Max-Age=%u; Secure; Path=/",
                             HttpSessions::HEADER_CSRF_TOKEN,
-                            token.c_str(), HttpSessions::session_ttl);
+                            token.c_str(), ttl);
 
         if(HttpSessions::COOKIE_SAMESITE != HttpSessions::cookie_samesite::None) {
             ss << "; SameSite=";
@@ -63,16 +63,21 @@ namespace sx::webserver {
         auto auth_token = HttpSessions::generate_auth_token();
         auto csrf_token = HttpSessions::generate_csrf_token();
 
-        response.response = {{"auth_token", auth_token},
-                        {"csrf_token", csrf_token}};
-        response.response_code = MHD_HTTP_OK;
-
-        response.headers.emplace_back("Set-Cookie", create_auth_cookie_val(auth_token));
-        response.headers.emplace_back("Set-Cookie", create_token_cookie_val(csrf_token));
+        if(auth_token.empty() || csrf_token.empty()) {
+            response.response = {{"error", "secure token generation failed"}};
+            response.response_code = MHD_HTTP_SERVICE_UNAVAILABLE;
+            return;
+        }
 
         auto lc_ = std::scoped_lock(HttpSessions::lock);
+        const auto ttl = HttpSessions::session_ttl;
+        response.response = {{"auth_token", auth_token},
+                             {"csrf_token", csrf_token}};
+        response.response_code = MHD_HTTP_OK;
+        response.headers.emplace_back("Set-Cookie", create_auth_cookie_val(auth_token, ttl));
+        response.headers.emplace_back("Set-Cookie", create_token_cookie_val(csrf_token, ttl));
         HttpSessions::access_keys[auth_token]["csrf_token"] = TimedOptional(csrf_token,
-                                                                            HttpSessions::session_ttl);
+                                                                            ttl);
     }
 
 
@@ -171,7 +176,7 @@ namespace sx::webserver {
                     ret.response = {{"error", "access denied"}};
                     ret.response_code = MHD_HTTP_UNAUTHORIZED;
 
-                    [[maybe_unused]] bool pam_enabled = HttpSessions::pam_login;
+                    [[maybe_unused]] bool pam_enabled = HttpSessions::pam_login_enabled();
                     std::string admin_group;
                     {
                         auto lc_ = std::scoped_lock(CfgFactory::lock());

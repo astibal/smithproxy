@@ -68,6 +68,21 @@ TEST(MFProxy, MirrorsIncomingUnidirectionalFlowAsSendOnly) {
     EXPECT_EQ(std::string(sent.begin(), sent.end()), data);
 }
 
+TEST(MFProxy, RetiresACompletedUnidirectionalFlow) {
+    auto left = std::make_shared<mf::fake_connection>();
+    auto right = std::make_shared<mf::fake_connection>();
+    mf::MFProxy proxy(left, right);
+    auto const incoming = left->open_flow(mf::direction::receive_only);
+    proxy.pump_once();
+    mf::flow_handle const outgoing { 0, 1 };
+
+    ASSERT_EQ(left->inject_peer_fin(incoming), mf::io_status::ok);
+    proxy.pump_once();
+
+    EXPECT_TRUE(right->local_finished(outgoing));
+    EXPECT_EQ(proxy.pair_count(), 0U);
+}
+
 TEST(MFProxy, MirrorsRightIncomingUnidirectionalFlowAsSendOnly) {
     auto left = std::make_shared<mf::fake_connection>();
     auto right = std::make_shared<mf::fake_connection>();
@@ -122,6 +137,32 @@ TEST(MFProxy, RetriesFinAfterTransportBackpressure) {
     EXPECT_TRUE(right->local_finished(right_flow));
 }
 
+TEST(MFProxy, DoesNotRetirePairWhileEitherFinIsBackpressured) {
+    auto left = std::make_shared<mf::fake_connection>();
+    auto right = std::make_shared<mf::fake_connection>();
+    mf::MFProxy proxy(left, right);
+    auto const left_flow = left->open_flow(mf::direction::bidirectional);
+    proxy.pump_once();
+    mf::flow_handle const right_flow { 0, 1 };
+
+    left->block_finish(left_flow, true);
+    right->block_finish(right_flow, true);
+    left->inject_peer_fin(left_flow);
+    right->inject_peer_fin(right_flow);
+    proxy.pump_once();
+
+    EXPECT_EQ(proxy.pair_count(), 1U);
+    EXPECT_FALSE(left->local_finished(left_flow));
+    EXPECT_FALSE(right->local_finished(right_flow));
+
+    left->block_finish(left_flow, false);
+    right->block_finish(right_flow, false);
+    proxy.pump_once();
+    EXPECT_TRUE(left->local_finished(left_flow));
+    EXPECT_TRUE(right->local_finished(right_flow));
+    EXPECT_EQ(proxy.pair_count(), 0U);
+}
+
 TEST(MFProxy, PropagatesResetCodeAndRetiresPair) {
     auto left = std::make_shared<mf::fake_connection>();
     auto right = std::make_shared<mf::fake_connection>();
@@ -164,6 +205,21 @@ TEST(MFProxy, RejectsFlowsBeyondConfiguredLimit) {
     ASSERT_TRUE(left->reset_code(rejected));
     EXPECT_EQ(*left->reset_code(rejected), 0x107U);
     EXPECT_FALSE(left->reset_code(accepted));
+}
+
+TEST(MFProxy, ResetsSourceWhenPeerCannotCreateMatchingFlow) {
+    auto left = std::make_shared<mf::fake_connection>();
+    auto right = std::make_shared<mf::fake_connection>();
+    right->block_open(true);
+    mf::MFProxy proxy(left, right);
+
+    auto const source = left->open_flow(mf::direction::bidirectional);
+    proxy.pump_once();
+
+    EXPECT_EQ(proxy.pair_count(), 0U);
+    EXPECT_EQ(proxy.limit_rejections(), 1U);
+    ASSERT_TRUE(left->reset_code(source));
+    EXPECT_EQ(*left->reset_code(source), 0x107U);
 }
 
 TEST(MFProxy, CapsBufferedChunkPerDirection) {

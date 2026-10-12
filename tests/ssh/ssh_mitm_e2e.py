@@ -7,6 +7,7 @@ import argparse
 import os
 from pathlib import Path
 import re
+import secrets
 import shutil
 import socket
 import struct
@@ -32,12 +33,27 @@ AGENT_REPLY = b"ssh-agent-reply"
 SHELL_PAYLOAD = b"shell-e2e\n"
 SHELL_REPLY = b"shell-reply: shell-e2e\n"
 SUBSYSTEM_REPLY = b"subsystem-reply\n"
+HALF_CLOSE_COMMAND = b"smithproxy-half-close"
+HALF_CLOSE_PAYLOAD = b"client-half-close-payload" * 4096
+STRESS_PREFIX = b"smithproxy-stress-"
+STRESS_STDOUT_SIZE = 96 * 1024
+STRESS_STDERR_SIZE = 48 * 1024
 
 
 def free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
+    # Keep listener ports outside Linux's default ephemeral source-port range;
+    # otherwise a connection created during setup can steal the released port.
+    first, count = 61000, 4535
+    start = secrets.randbelow(count)
+    for offset in range(count):
+        port = first + (start + offset) % count
+        with socket.socket() as sock:
+            try:
+                sock.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            return port
+    raise AssertionError("no free high test port")
 
 
 def replace_setting(text: str, name: str, value: str) -> str:
@@ -49,7 +65,7 @@ def replace_setting(text: str, name: str, value: str) -> str:
 
 
 class TestServer(paramiko.ServerInterface):
-    def __init__(self) -> None:
+    def __init__(self, stress_channels: int) -> None:
         self.commands: list[bytes] = []
         self.direct_destinations: dict[int, tuple[str, int]] = {}
         self.remote_forward: tuple[str, int] | None = None
@@ -61,6 +77,7 @@ class TestServer(paramiko.ServerInterface):
         self.subsystem_requested = threading.Event()
         self.pty_requested = threading.Event()
         self.environment_requested = threading.Event()
+        self.stress_channels = stress_channels
 
     def get_allowed_auths(self, username: str) -> str:
         return "password"
@@ -76,6 +93,37 @@ class TestServer(paramiko.ServerInterface):
                 else paramiko.OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED)
 
     def check_channel_exec_request(self, channel: paramiko.Channel, command: bytes) -> bool:
+        if command == HALF_CLOSE_COMMAND:
+            def answer_half_close() -> None:
+                payload = bytearray()
+                while True:
+                    chunk = channel.recv(65536)
+                    if not chunk:
+                        break
+                    payload.extend(chunk)
+                channel.sendall(b"half-close:" + bytes(payload))
+                channel.send_exit_status(0)
+                channel.close()
+
+            threading.Thread(target=answer_half_close, daemon=True).start()
+            return True
+
+        if command.startswith(STRESS_PREFIX):
+            index = int(command[len(STRESS_PREFIX):])
+
+            def answer_stress() -> None:
+                time.sleep(0.02)
+                stdout = bytes([ord("A") + index % 26]) * STRESS_STDOUT_SIZE
+                stderr = bytes([ord("a") + index % 26]) * STRESS_STDERR_SIZE
+                channel.sendall(stdout)
+                channel.sendall_stderr(stderr)
+                channel.send_exit_status(index % 127)
+                channel.shutdown_write()
+                channel.close()
+
+            threading.Thread(target=answer_stress, daemon=True).start()
+            return True
+
         self.commands.append(command)
         index = len(self.commands) - 1
         reply = REPLIES[index] if index < len(REPLIES) else b"unexpected-command\n"
@@ -109,7 +157,7 @@ class TestServer(paramiko.ServerInterface):
         self.shell_requested.set()
 
         def answer() -> None:
-            channel.sendall(b"shell-reply: " + channel.recv(65536))
+            channel.sendall(b"shell-reply: " + recv_exact(channel, len(SHELL_PAYLOAD)))
             channel.send_exit_status(0)
             channel.close()
 
@@ -157,9 +205,9 @@ class TestServer(paramiko.ServerInterface):
 
 def relay_direct(channel: paramiko.Channel, destination: tuple[str, int]) -> None:
     with socket.create_connection(destination, timeout=10) as target:
-        data = channel.recv(65536)
+        data = recv_exact(channel, len(FORWARD_PAYLOAD))
         target.sendall(data)
-        channel.sendall(target.recv(65536))
+        channel.sendall(recv_exact(target, len(FORWARD_PAYLOAD)))
     channel.close()
 
 
@@ -167,7 +215,8 @@ def run_server(listener: socket.socket, host_key: paramiko.PKey,
                ready: threading.Event, errors: list[BaseException],
                expect_direct: bool, expect_remote: bool,
                expect_x11: bool, expect_agent: bool,
-               feature_requests_done: threading.Event) -> None:
+               feature_requests_done: threading.Event,
+               stress_channels: int, feature_stage: list[str]) -> None:
     try:
         ready.set()
         connection, _ = listener.accept()
@@ -175,18 +224,21 @@ def run_server(listener: socket.socket, host_key: paramiko.PKey,
         with connection:
             transport = paramiko.Transport(connection)
             transport.add_server_key(host_key)
-            server = TestServer()
+            server = TestServer(stress_channels)
             transport.start_server(server=server)
             print("e2e server: SSH transport started", flush=True)
             direct_threads: list[threading.Thread] = []
-            # Two exec, shell, subsystem, X11-control and agent-control
-            # sessions, plus the optional direct-tcpip channel.
-            for _ in range(7 if expect_direct else 6):
-                channel = transport.accept(15)
+            direct_seen = not expect_direct
+            accept_deadline = time.monotonic() + 30
+            while not (feature_requests_done.is_set() and direct_seen):
+                channel = transport.accept(0.1)
                 if channel is None:
-                    raise AssertionError("test SSH server did not receive all channels")
+                    if time.monotonic() >= accept_deadline:
+                        raise AssertionError("test SSH server did not reach feature barrier")
+                    continue
                 destination = server.direct_destinations.get(channel.get_id())
                 if destination:
+                    direct_seen = True
                     thread = threading.Thread(
                         target=relay_direct, args=(channel, destination), daemon=True)
                     thread.start()
@@ -201,7 +253,7 @@ def run_server(listener: socket.socket, host_key: paramiko.PKey,
                 remote = transport.open_forwarded_tcpip_channel(
                     server.remote_forward, ("198.51.100.23", 54321))
                 remote.sendall(REMOTE_FORWARD_PAYLOAD)
-                if remote.recv(len(REMOTE_FORWARD_REPLY)) != REMOTE_FORWARD_REPLY:
+                if recv_exact(remote, len(REMOTE_FORWARD_REPLY)) != REMOTE_FORWARD_REPLY:
                     raise AssertionError("unexpected remote-forward response")
                 remote.close()
                 if not server.remote_forward_cancelled.wait(15):
@@ -217,10 +269,14 @@ def run_server(listener: socket.socket, host_key: paramiko.PKey,
             if expect_x11:
                 if not server.x11_requested.wait(15):
                     raise AssertionError("test SSH server did not receive X11 request")
+                feature_stage[0] = "x11-open-started"
                 x11 = transport.open_x11_channel(("203.0.113.11", 6010))
+                feature_stage[0] = "x11-opened"
                 x11.sendall(X11_PAYLOAD)
-                if x11.recv(len(X11_REPLY)) != X11_REPLY:
+                feature_stage[0] = "x11-payload-sent"
+                if recv_exact(x11, len(X11_REPLY)) != X11_REPLY:
                     raise AssertionError("unexpected X11 response")
+                feature_stage[0] = "x11-reply-received"
                 x11.close()
             elif server.x11_requested.wait(0.5):
                 raise AssertionError("x11=reject reached the upstream server")
@@ -229,7 +285,7 @@ def run_server(listener: socket.socket, host_key: paramiko.PKey,
                     raise AssertionError("test SSH server did not receive agent request")
                 agent = transport.open_forward_agent_channel()
                 agent.sendall(AGENT_PAYLOAD)
-                if agent.recv(len(AGENT_REPLY)) != AGENT_REPLY:
+                if recv_exact(agent, len(AGENT_REPLY)) != AGENT_REPLY:
                     raise AssertionError("unexpected agent response")
                 agent.close()
             elif server.agent_requested.wait(0.5):
@@ -248,12 +304,12 @@ def run_server(listener: socket.socket, host_key: paramiko.PKey,
         errors.append(error)
 
 
-def recv_exact(sock: socket.socket, size: int) -> bytes:
+def recv_exact(sock: socket.socket | paramiko.Channel, size: int) -> bytes:
     result = bytearray()
     while len(result) < size:
         chunk = sock.recv(size - len(result))
         if not chunk:
-            raise AssertionError("SOCKS proxy closed unexpectedly")
+            raise AssertionError("stream closed unexpectedly")
         result.extend(chunk)
     return bytes(result)
 
@@ -372,6 +428,12 @@ def main() -> None:
     parser.add_argument("--reject-remote-forward", action="store_true")
     parser.add_argument("--reject-x11", action="store_true")
     parser.add_argument("--reject-agent", action="store_true")
+    parser.add_argument("--hostkey-policy", choices=("insecure", "accept-new", "strict"),
+                        default="insecure")
+    parser.add_argument("--server-port", type=int, default=0)
+    parser.add_argument("--server-key", type=Path)
+    parser.add_argument("--stress-channels", type=int, default=0,
+                        help="open this many concurrent mixed stdout/stderr channels")
     args = parser.parse_args()
     source = args.source.resolve()
 
@@ -381,11 +443,12 @@ def main() -> None:
         mitm_key = tmp / "mitm_ed25519"
         subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "",
                         "-f", str(mitm_key)], check=True)
-        server_key = paramiko.Ed25519Key.from_private_key_file(str(mitm_key))
+        server_key = paramiko.Ed25519Key.from_private_key_file(
+            str(args.server_key or mitm_key))
 
         listener = socket.socket()
         listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        listener.bind(("127.0.0.1", 0))
+        listener.bind(("127.0.0.1", args.server_port))
         listener.listen(1)
         server_port = int(listener.getsockname()[1])
         echo_listener = socket.socket()
@@ -419,7 +482,7 @@ def main() -> None:
         text = re.sub(
             r"ssh_profiles\s*=\s*\{\s*\}",
             f'ssh_profiles = {{ e2e = {{ host_key = "{mitm_key}"; '
-            f'hostkey_policy = "insecure"; '
+            f'hostkey_policy = "{args.hostkey_policy}"; '
             f'local_forward = "{"reject" if args.reject_local_forward else "pass"}"; '
             f'remote_forward = "{"reject" if args.reject_remote_forward else "pass"}"; '
             f'x11 = "{"reject" if args.reject_x11 else "pass"}"; '
@@ -456,6 +519,7 @@ def main() -> None:
 
         ready = threading.Event()
         feature_requests_done = threading.Event()
+        feature_stage = ["not-started"]
         server_errors: list[BaseException] = []
         server_thread = threading.Thread(
             target=run_server,
@@ -464,7 +528,7 @@ def main() -> None:
                   not args.reject_remote_forward,
                   not args.reject_x11,
                   not args.reject_agent,
-                  feature_requests_done), daemon=True)
+                  feature_requests_done, args.stress_channels, feature_stage), daemon=True)
         server_thread.start()
         echo_thread = None
         if not args.reject_local_forward:
@@ -475,9 +539,10 @@ def main() -> None:
 
         env = os.environ.copy()
         env["SMITHPROXY_PID_FILE"] = str(tmp / "smithproxy.pid")
+        process_output = (tmp / "smithproxy.out").open("w+")
         process = subprocess.Popen(
             [str(args.binary.resolve()), "--config-file", str(config), "--debug"],
-            env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            env=env, stdout=process_output, stderr=subprocess.STDOUT, text=True)
         try:
             wait_for_port(process, cli_port)
             enable_ssh_debug(cli_port)
@@ -499,18 +564,61 @@ def main() -> None:
                     raise AssertionError("exec channel returned a non-zero exit status")
                 received.append(bytes(output))
 
+            stress: list[tuple[paramiko.Channel, int]] = []
+            for index in range(args.stress_channels):
+                channel = client.open_session(timeout=15)
+                channel.exec_command(STRESS_PREFIX + str(index).encode())
+                stress.append((channel, index))
+            for channel, index in stress:
+                stdout = bytearray()
+                stderr = bytearray()
+                deadline = time.monotonic() + 30
+                while len(stdout) < STRESS_STDOUT_SIZE \
+                        or len(stderr) < STRESS_STDERR_SIZE \
+                        or not channel.exit_status_ready():
+                    if channel.recv_ready():
+                        stdout.extend(channel.recv(65536))
+                    if channel.recv_stderr_ready():
+                        stderr.extend(channel.recv_stderr(65536))
+                    if time.monotonic() >= deadline:
+                        raise AssertionError(
+                            f"stress channel {index} timed out: stdout={len(stdout)} "
+                            f"stderr={len(stderr)} exit={channel.exit_status_ready()}")
+                    if not channel.recv_ready() and not channel.recv_stderr_ready():
+                        time.sleep(0.001)
+                expected_stdout = bytes([ord("A") + index % 26]) * STRESS_STDOUT_SIZE
+                expected_stderr = bytes([ord("a") + index % 26]) * STRESS_STDERR_SIZE
+                if bytes(stdout) != expected_stdout or bytes(stderr) != expected_stderr:
+                    raise AssertionError(
+                        f"stress channel {index} payload truncated: "
+                        f"stdout={len(stdout)} stderr={len(stderr)}")
+                if channel.recv_exit_status() != index % 127:
+                    raise AssertionError(f"stress channel {index} lost exit status")
+                channel.close()
+
+            half_close = client.open_session(timeout=15)
+            half_close.exec_command(HALF_CLOSE_COMMAND)
+            half_close.sendall(HALF_CLOSE_PAYLOAD)
+            half_close.shutdown_write()
+            expected_half_close = b"half-close:" + HALF_CLOSE_PAYLOAD
+            if recv_exact(half_close, len(expected_half_close)) != expected_half_close:
+                raise AssertionError("half-close response was truncated")
+            if half_close.recv_exit_status() != 0:
+                raise AssertionError("half-close lost exit status")
+            half_close.close()
+
             shell = client.open_session(timeout=15)
             shell.update_environment({"SMITHPROXY_E2E": "yes"})
             shell.get_pty(term="xterm", width=100, height=40)
             shell.invoke_shell()
             shell.sendall(SHELL_PAYLOAD)
-            if shell.recv(len(SHELL_REPLY)) != SHELL_REPLY:
+            if recv_exact(shell, len(SHELL_REPLY)) != SHELL_REPLY:
                 raise AssertionError("unexpected interactive shell response")
             shell.close()
 
             subsystem = client.open_session(timeout=15)
             subsystem.invoke_subsystem("smithproxy-test")
-            if subsystem.recv(len(SUBSYSTEM_REPLY)) != SUBSYSTEM_REPLY:
+            if recv_exact(subsystem, len(SUBSYSTEM_REPLY)) != SUBSYSTEM_REPLY:
                 raise AssertionError("unexpected subsystem response")
             subsystem.close()
 
@@ -526,17 +634,18 @@ def main() -> None:
                 if args.reject_local_forward:
                     raise AssertionError("local_forward=reject accepted direct-tcpip")
                 forwarded.sendall(FORWARD_PAYLOAD)
-                forwarded_reply = forwarded.recv(len(FORWARD_PAYLOAD))
+                forwarded_reply = recv_exact(forwarded, len(FORWARD_PAYLOAD))
                 forwarded.shutdown_write()
                 forwarded.close()
 
             x11_relay_done = threading.Event()
+            x11_handler_started = threading.Event()
             agent_relay_done = threading.Event()
 
             def answer_feature(channel: paramiko.Channel, payload: bytes,
                                reply: bytes, done: threading.Event) -> None:
                 try:
-                    if channel.recv(len(payload)) != payload:
+                    if recv_exact(channel, len(payload)) != payload:
                         raise AssertionError("unexpected server-initiated feature payload")
                     channel.sendall(reply)
                     channel.close()
@@ -546,6 +655,7 @@ def main() -> None:
                     done.set()
 
             def x11_handler(channel: paramiko.Channel, origin: tuple[str, int]) -> None:
+                x11_handler_started.set()
                 threading.Thread(target=answer_feature,
                     args=(channel, X11_PAYLOAD, X11_REPLY, x11_relay_done),
                     daemon=True).start()
@@ -584,13 +694,16 @@ def main() -> None:
                 remote = client.accept(15)
                 if remote is None:
                     raise AssertionError("client did not receive forwarded-tcpip channel")
-                if remote.recv(len(REMOTE_FORWARD_PAYLOAD)) != REMOTE_FORWARD_PAYLOAD:
+                if recv_exact(remote, len(REMOTE_FORWARD_PAYLOAD)) != REMOTE_FORWARD_PAYLOAD:
                     raise AssertionError("unexpected remote-forward payload")
                 remote.sendall(REMOTE_FORWARD_REPLY)
                 remote.close()
                 client.cancel_port_forward("127.0.0.1", remote_port)
             if not args.reject_x11 and not x11_relay_done.wait(15):
-                raise AssertionError("client did not receive X11 channel")
+                state = "payload stalled" if x11_handler_started.is_set() else "channel missing"
+                raise AssertionError(
+                    f"client X11 relay failed: {state}; server={feature_stage[0]}; "
+                    f"server_errors={[str(error) for error in server_errors]}")
             if not args.reject_agent and not agent_relay_done.wait(15):
                 raise AssertionError("client did not receive agent channel")
             if args.reject_x11 and x11_relay_done.wait(0.5):
@@ -651,12 +764,14 @@ def main() -> None:
         except BaseException:
             process.terminate()
             try:
-                output, _ = process.communicate(timeout=5)
+                process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 process.kill()
-                output, _ = process.communicate(timeout=5)
+                process.wait(timeout=5)
+            process_output.flush()
+            process_output.seek(0)
             print("--- smithproxy output ---")
-            print(output)
+            print(process_output.read())
             raise
         finally:
             listener.close()
@@ -667,6 +782,7 @@ def main() -> None:
                     process.wait(timeout=10)
                 except subprocess.TimeoutExpired:
                     process.kill()
+            process_output.close()
 
 
 if __name__ == "__main__":

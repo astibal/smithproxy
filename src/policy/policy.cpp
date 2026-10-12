@@ -40,9 +40,32 @@
 #include <vars.hpp>
 #include <policy/policy.hpp>
 
+#include <charconv>
 #include <optional>
 
 using namespace socle;
+
+namespace {
+
+std::optional<unsigned short> parse_policy_port(std::string_view text) {
+    unsigned int value = 0;
+    auto const [end, error] = std::from_chars(
+        text.data(), text.data() + text.size(), value);
+    if(error != std::errc{} || end != text.data() + text.size() ||
+       value > 65535U) {
+        return std::nullopt;
+    }
+    return static_cast<unsigned short>(value);
+}
+
+bool complete_policy_endpoints(std::vector<baseHostCX*> const& endpoints) {
+    return std::all_of(endpoints.begin(), endpoints.end(),
+        [](baseHostCX const* endpoint) {
+            return endpoint != nullptr && endpoint->com() != nullptr;
+        });
+}
+
+}
 
 std::string PolicyRule::to_string(int verbosity) const {
 
@@ -60,7 +83,7 @@ std::string PolicyRule::to_string(int verbosity) const {
     }
 
 
-    switch(proto->value()) {
+    switch(proto ? proto->value() : -1) {
         case 6:
             from << "[tcp] ";
             break;
@@ -68,7 +91,11 @@ std::string PolicyRule::to_string(int verbosity) const {
             from << "[udp] ";
             break;
         default:
-            from << string_format(" [proto-%d] ", proto->value());
+            if(proto) {
+                from << string_format(" [proto-%d] ", proto->value());
+            } else {
+                from << "[invalid-proto] ";
+            }
     }
 
     for(auto const& it: src) {
@@ -143,7 +170,8 @@ std::string PolicyRule::to_string(int verbosity) const {
 
 
     if(verbosity > iINF)
-        out << " [" << std::to_string(cnt_matches) << "x]";
+        out << " [" << std::to_string(
+            __atomic_load_n(&cnt_matches, __ATOMIC_RELAXED)) << "x]";
     
     out << ": ";
 
@@ -163,6 +191,7 @@ std::string PolicyRule::to_string(int verbosity) const {
     print_profile("det", profile_detection);
     print_profile("cont", profile_content);
     print_profile("alg_dns", profile_alg_dns);
+    print_profile("script", profile_script);
     print_profile("routing", profile_routing);
 
     if(not features.empty()) {
@@ -213,14 +242,12 @@ bool PolicyRule::match_rangegrp_cx(group_of_ports const& ranges, baseHostCX* cx)
     bool match = false;
 
     if(not cx) return false;
-    
-    if(ranges.empty()) {
-        return  true;
-    }
 
-    int p = safe_val(cx->port());
+    const auto parsed_port = parse_policy_port(cx->port());
+    if(!parsed_port) return false;
+    const auto p = *parsed_port;
 
-    if(p < 0) return false;
+    if(ranges.empty()) return true;
 
     for(auto const& comp: ranges) {
 
@@ -348,7 +375,11 @@ bool PolicyRule::match(baseProxy* p) {
     if(cfg_err_is_disabled) return true;
 
     if((p->ls().empty() && p->lda().empty()) ||
-       (p->rs().empty() && p->rda().empty())) {
+       (p->rs().empty() && p->rda().empty()) ||
+       !complete_policy_endpoints(p->ls()) ||
+       !complete_policy_endpoints(p->lda()) ||
+       !complete_policy_endpoints(p->rs()) ||
+       !complete_policy_endpoints(p->rda())) {
         _err("PolicyRule::match: proxy has an incomplete endpoint set");
         return false;
     }
@@ -357,12 +388,13 @@ bool PolicyRule::match(baseProxy* p) {
 
         // compare if policy has proto match
         bool proto_match = false;
+        int const proto_value = proto ? proto->value() : 0;
 
-        if(proto && proto->value() != 0) {
-            proto_match = match_proto_vecx(proto->value(), p->ls()) &&
-                          match_proto_vecx(proto->value(), p->lda()) &&
-                          match_proto_vecx(proto->value(), p->rs()) &&
-                          match_proto_vecx(proto->value(), p->rda());
+        if(proto_value != 0) {
+            proto_match = match_proto_vecx(proto_value, p->ls()) &&
+                          match_proto_vecx(proto_value, p->lda()) &&
+                          match_proto_vecx(proto_value, p->rs()) &&
+                          match_proto_vecx(proto_value, p->rda());
 
         } else {
             // proto 0 means we don't care
@@ -388,12 +420,12 @@ bool PolicyRule::match(baseProxy* p) {
 
         if (proto_match && lmatch && lpmatch && rmatch && rpmatch) {
             _inf("PolicyRule::match %s OK", p->to_string(iINF).c_str());
-            cnt_matches++;
+            __atomic_fetch_add(&cnt_matches, 1U, __ATOMIC_RELAXED);
 
             return true;
 
         } else {
-            _dia("PolicyRule::match %s FAILED: %d-%d:%d->%d:%d", p->to_string(iINF).c_str(), proto->value(), lmatch, lpmatch, rmatch, rpmatch);
+            _dia("PolicyRule::match %s FAILED: %d-%d:%d->%d:%d", p->to_string(iINF).c_str(), proto_value, lmatch, lpmatch, rmatch, rpmatch);
         }
 
     }
@@ -418,7 +450,9 @@ bool PolicyRule::match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r)
         rs = r[0]->str();
     }
 
-    if(l.empty() or r.empty()) {
+    if(l.empty() or r.empty() ||
+       !complete_policy_endpoints(l) ||
+       !complete_policy_endpoints(r)) {
         _dia("PolicyRule::match_lr: incomplete endpoint set");
         return false;
     }
@@ -432,10 +466,11 @@ bool PolicyRule::match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r)
 
     // compare if policy has proto match
     bool proto_match = false;
+    int const proto_value = proto ? proto->value() : 0;
 
-    if(proto && proto->value() != 0) {
-        proto_match = match_proto_vecx(proto->value(), l) &&
-                      match_proto_vecx(proto->value(), r);
+    if(proto_value != 0) {
+        proto_match = match_proto_vecx(proto_value, l) &&
+                      match_proto_vecx(proto_value, r);
 
     } else {
         // proto 0 means we don't care
@@ -461,18 +496,18 @@ bool PolicyRule::match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r)
     if(*log.level() >= DEB ) {
         for(auto i: l) _dum("PolicyRule::match_lr L: %s", i->str().c_str());
         for(auto i: r) _dum("PolicyRule::match_lr R: %s", i->str().c_str());
-        _deb("PolicyRule::match_lr Success: %d-%d:%d->%d:%d", proto->value(), lmatch, lpmatch, rmatch, rpmatch);
+        _deb("PolicyRule::match_lr Success: %d-%d:%d->%d:%d", proto_value, lmatch, lpmatch, rmatch, rpmatch);
     }
 
     end:
 
     if (proto_match && lmatch && lpmatch && rmatch && rpmatch) {
         _inf("PolicyRule::match_lr %s <+> %s OK", ls.c_str(), rs.c_str());
-        cnt_matches++;
+        __atomic_fetch_add(&cnt_matches, 1U, __ATOMIC_RELAXED);
         
         return true;
     } else {
-        _dia("PolicyRule::match_lr %s <+> %s FAILED: %d-%d:%d->%d:%d", ls.c_str(), rs.c_str(), proto->value(), lmatch, lpmatch, rmatch, rpmatch);
+        _dia("PolicyRule::match_lr %s <+> %s FAILED: %d-%d:%d->%d:%d", ls.c_str(), rs.c_str(), proto_value, lmatch, lpmatch, rmatch, rpmatch);
     }
 
     return false;

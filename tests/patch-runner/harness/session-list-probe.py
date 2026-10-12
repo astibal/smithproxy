@@ -3,7 +3,18 @@
 import argparse, json, re, socket, statistics, time
 
 ANSI_ESCAPE = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]")
+CLI_PROMPT = re.compile(
+    rb"smithpr(?:oxy|\xe2\x8c\x80xy)\([^\r\n]*\)"
+    rb"(?:<\*>|<!>)*(?:\(config:/[^\r\n]*\))?[#>] "
+)
 MAX_RESPONSE_BYTES = 64 * 1024 * 1024
+
+def is_cli_prompt(data, markers):
+    """Recognize the complete Smithproxy prompt, not arbitrary output '# '."""
+    plain = ANSI_ESCAPE.sub(b"", data)
+    tail = re.split(rb"[\r\n]", plain)[-1]
+    return CLI_PROMPT.fullmatch(tail) is not None and any(
+        tail.endswith(marker) for marker in markers)
 
 def percentile(values, fraction):
     ordered = sorted(values)
@@ -25,17 +36,25 @@ def main():
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise TimeoutError("CLI prompt deadline exceeded")
+                raise TimeoutError(
+                    f"CLI prompt deadline exceeded after {len(data)} bytes; "
+                    f"wire tail={bytes(data[-256:])!r}"
+                )
             sock.settimeout(remaining)
-            chunk = sock.recv(65536)
+            try:
+                chunk = sock.recv(65536)
+            except TimeoutError as error:
+                raise TimeoutError(
+                    f"CLI prompt receive timed out after {len(data)} bytes; "
+                    f"wire tail={bytes(data[-256:])!r}"
+                ) from error
             if not chunk: raise RuntimeError("CLI closed before prompt")
             data.extend(chunk)
             if len(data) > MAX_RESPONSE_BYTES:
                 raise RuntimeError("CLI response exceeded 64 MiB")
-            plain = ANSI_ESCAPE.sub(b"", data)
-            if any(plain.endswith(marker) for marker in markers):
+            if is_cli_prompt(data, markers):
                 return bytes(data)
-    prompt(b")> "); sock.sendall(b"enable\r\n"); prompt(b")# ")
+    prompt(b"> "); sock.sendall(b"enable\r\n"); prompt(b"# ")
     rows = []
     for sample in range(a.samples):
         level = 6 if sample % 2 == 0 else 8
@@ -45,7 +64,7 @@ def main():
         # privilege marker.  Accept either prompt here and validate the
         # command by its session rows; an unprivileged rejection therefore
         # still fails deterministically instead of waiting forever.
-        output = prompt(b")# ", b")> ")
+        output = prompt(b"# ", b"> ")
         elapsed = (time.perf_counter_ns() - started) / 1_000_000
         sessions = output.count(b"MitM|")
         if b"timed out" in output: raise RuntimeError(f"snapshot {sample + 1}: timeout")

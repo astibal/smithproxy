@@ -4,7 +4,6 @@
 #include "service/quic/quiclog.hpp"
 
 #include <traflog/pcapapi.hpp>
-#include <privileged_socket.hpp>
 
 #include <algorithm>
 #include <cerrno>
@@ -174,52 +173,60 @@ void listener_service::fail(std::string message) {
 
 bool listener_service::open_socket() {
 #if SMITHPROXY_OPENSSL_QUIC
+    auto close_open_descriptors = [this]() {
+        if (udp_fd_ >= 0) {
+            ::close(udp_fd_);
+            udp_fd_ = -1;
+        }
+        if (wake_fd_ >= 0) {
+            ::close(wake_fd_);
+            wake_fd_ = -1;
+        }
+    };
+    close_open_descriptors();
+    auto fail_open = [this, &close_open_descriptors](std::string message) {
+        close_open_descriptors();
+        fail(std::move(message));
+        return false;
+    };
     wake_fd_ = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
     if (wake_fd_ < 0) {
-        fail(std::string("eventfd: ") + std::strerror(errno));
-        return false;
+        return fail_open(std::string("eventfd: ") + std::strerror(errno));
     }
-    udp_fd_ = socle::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    udp_fd_ = ::socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
     if (udp_fd_ < 0) {
-        fail(std::string("socket: ") + std::strerror(errno));
-        return false;
+        return fail_open(std::string("socket: ") + std::strerror(errno));
     }
 
     int enabled = 1;
-    if (socle::setsockopt(udp_fd_, SOL_SOCKET, SO_REUSEADDR, &enabled, sizeof(enabled)) != 0) {
-        fail(std::string("SO_REUSEADDR: ") + std::strerror(errno));
-        return false;
+    if (::setsockopt(udp_fd_, SOL_SOCKET, SO_REUSEADDR, &enabled, sizeof(enabled)) != 0) {
+        return fail_open(std::string("SO_REUSEADDR: ") + std::strerror(errno));
     }
     if (transparent_
-        && socle::setsockopt(udp_fd_, SOL_IP, IP_TRANSPARENT, &enabled, sizeof(enabled)) != 0) {
-        fail(std::string("IP_TRANSPARENT: ") + std::strerror(errno));
-        return false;
+        && ::setsockopt(udp_fd_, SOL_IP, IP_TRANSPARENT, &enabled, sizeof(enabled)) != 0) {
+        return fail_open(std::string("IP_TRANSPARENT: ") + std::strerror(errno));
     }
     if (transparent_
-        && socle::setsockopt(udp_fd_, SOL_IP, IP_RECVORIGDSTADDR,
+        && ::setsockopt(udp_fd_, SOL_IP, IP_RECVORIGDSTADDR,
                         &enabled, sizeof(enabled)) != 0) {
-        fail(std::string("IP_RECVORIGDSTADDR: ") + std::strerror(errno));
-        return false;
+        return fail_open(std::string("IP_RECVORIGDSTADDR: ") + std::strerror(errno));
     }
 
     auto const flags = ::fcntl(udp_fd_, F_GETFL, 0);
     if (flags < 0 || ::fcntl(udp_fd_, F_SETFL, flags | O_NONBLOCK) != 0) {
-        fail(std::string("O_NONBLOCK: ") + std::strerror(errno));
-        return false;
+        return fail_open(std::string("O_NONBLOCK: ") + std::strerror(errno));
     }
 
     sockaddr_in address {};
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_ANY);
     address.sin_port = htons(port_);
-    if (socle::bind(udp_fd_, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
-        fail(std::string("bind: ") + std::strerror(errno));
-        return false;
+    if (::bind(udp_fd_, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
+        return fail_open(std::string("bind: ") + std::strerror(errno));
     }
     socklen_t address_size = sizeof(address);
     if (::getsockname(udp_fd_, reinterpret_cast<sockaddr*>(&address), &address_size) != 0) {
-        fail(std::string("getsockname: ") + std::strerror(errno));
-        return false;
+        return fail_open(std::string("getsockname: ") + std::strerror(errno));
     }
     bound_port_ = ntohs(address.sin_port);
     log().dia("socket ready on udp/*:%u transparent=%d", bound_port_, transparent_);
@@ -233,6 +240,17 @@ bool listener_service::open_socket() {
 bool listener_service::prepare() {
 #if SMITHPROXY_OPENSSL_QUIC
     if (ready_) return true;
+    // A previous prepare may have opened the transport successfully and then
+    // failed while constructing the OpenSSL listener. Do not retain or
+    // overwrite those descriptors on a retry.
+    if (udp_fd_ >= 0) {
+        ::close(udp_fd_);
+        udp_fd_ = -1;
+    }
+    if (wake_fd_ >= 0) {
+        ::close(wake_fd_);
+        wake_fd_ = -1;
+    }
     stopping_ = false;
     context_ = make_openssl_quic_context(true);
     client_context_ = make_openssl_quic_context(false);
@@ -435,6 +453,12 @@ void listener_service::attach_staged_upstream(session& value) {
 
     if (!value.client_endpoint.valid()) value.client_endpoint = found->second.client;
     value.target_endpoint = found->second.destination;
+    // OpenSSL may publish the accepted connection before a suspended
+    // certificate callback has collected its asynchronous result. Keep the
+    // generation binding until that result has been installed and staged;
+    // otherwise the resumed callback observes generation zero and rejects the
+    // very handshake which owns this session.
+    dispatcher_bindings_.erase(key);
     value.upstream = transparent_
         ? connect_upstream(value.target_endpoint, found->second.server_name)
         : connect_upstream(found->second.server_name);
@@ -474,7 +498,6 @@ void listener_service::accept_connections() {
         if (auto binding = dispatcher_bindings_.find(ssl);
             binding != dispatcher_bindings_.end()) {
             incoming.capture_association = binding->second.association;
-            dispatcher_bindings_.erase(binding);
             if (capture_native_) {
                 if (auto pending = pending_captures_.find(incoming.capture_association);
                     pending != pending_captures_.end()) {
@@ -702,6 +725,21 @@ void listener_service::reap_expired(std::chrono::steady_clock::time_point now) {
         iterator = staged_upstreams_.erase(iterator);
     }
 
+    // OpenSSL need not invoke the suspended certificate callback again after
+    // its connection disappears. Completed futures are safe to destroy here;
+    // retain running jobs because std::future destruction could block the loop.
+    for (auto iterator = certificate_jobs_.begin(); iterator != certificate_jobs_.end();) {
+        auto const expired = now - iterator->second.created >= lifecycle_.handshake_timeout;
+        auto const ready = iterator->second.result.wait_for(std::chrono::milliseconds(0))
+            == std::future_status::ready;
+        if (!expired || !ready) {
+            ++iterator;
+            continue;
+        }
+        ++upstream_failures_;
+        iterator = certificate_jobs_.erase(iterator);
+    }
+
     // Failed or abandoned handshakes must not retain their pre-policy packet
     // journal indefinitely. Live accepted sessions own their journal directly.
     for (auto iterator = pending_captures_.begin(); iterator != pending_captures_.end();) {
@@ -811,6 +849,19 @@ void listener_service::cleanup_sessions() {
 }
 #endif
 
+bool detail::same_certificate_callback_identity(
+    std::string const& staged_server_name, std::uint64_t staged_generation,
+    std::string const& current_server_name, std::uint64_t current_generation) {
+    return staged_server_name == current_server_name
+        && staged_generation != 0
+        && staged_generation == current_generation;
+}
+
+bool detail::same_dispatcher_callback_association(
+    std::uint64_t staged_association, std::uint64_t current_association) {
+    return staged_association != 0 && staged_association == current_association;
+}
+
 #if SMITHPROXY_OPENSSL_QUIC
 int listener_service::client_hello_callback(SSL* ssl, int*, void* argument) {
     auto* service = static_cast<listener_service*>(argument);
@@ -823,17 +874,29 @@ int listener_service::client_hello_callback(SSL* ssl, int*, void* argument) {
 int listener_service::bind_capture_session(SSL* downstream) {
     if (!downstream || !listener_) return 0;
     auto const association = listener_->current_association();
+    auto const existing = dispatcher_bindings_.find(downstream);
+    if (existing != dispatcher_bindings_.end() &&
+        detail::same_dispatcher_callback_association(
+            existing->second.association, association)) {
+        // OpenSSL may report ClientHello more than once while the asynchronous
+        // certificate callback is suspended. It is still the same handshake;
+        // changing its generation here makes the resumed callback look like
+        // allocator reuse and fails every otherwise valid connection closed.
+        return 1;
+    }
+    if (dispatcher_bindings_.size() >= limits_.max_sessions &&
+        existing == dispatcher_bindings_.end()) {
+        log().war("QUIC dispatcher association limit %zu reached", limits_.max_sessions);
+        return 0;
+    }
+    auto const generation = next_dispatcher_binding_generation_++;
+    if (next_dispatcher_binding_generation_ == 0) ++next_dispatcher_binding_generation_;
+    dispatcher_bindings_[downstream] = dispatcher_binding {
+        association, generation, std::chrono::steady_clock::now()};
     if (association == 0) {
         log().war("downstream ClientHello has no QUIC dispatcher association");
         return 0;
     }
-    if (dispatcher_bindings_.size() >= limits_.max_sessions
-        && dispatcher_bindings_.find(downstream) == dispatcher_bindings_.end()) {
-        log().war("QUIC dispatcher association limit %zu reached", limits_.max_sessions);
-        return 0;
-    }
-    dispatcher_bindings_[downstream] = dispatcher_binding {
-        association, std::chrono::steady_clock::now()};
     return 1;
 }
 
@@ -844,49 +907,71 @@ int listener_service::certificate_callback(SSL* ssl, void* argument) {
 
 int listener_service::prepare_verified_certificate(SSL* downstream) {
     if (!downstream) return 0;
-    if (staged_upstreams_.find(downstream) != staged_upstreams_.end()) return 1;
+    auto const* raw_name = SSL_get_servername(downstream, TLSEXT_NAMETYPE_host_name);
+    std::string const server_name = raw_name ? raw_name : "";
+    auto const binding = dispatcher_bindings_.find(downstream);
+    auto const generation = binding == dispatcher_bindings_.end()
+        ? 0 : binding->second.generation;
+    if (auto staged = staged_upstreams_.find(downstream);
+        staged != staged_upstreams_.end()) {
+        if (detail::same_certificate_callback_identity(
+                staged->second.server_name, staged->second.callback_generation,
+                server_name, generation)) {
+            return 1;
+        }
+        staged_upstreams_.erase(staged);
+    }
 
     if (auto found = certificate_jobs_.find(downstream);
         found != certificate_jobs_.end()) {
-        if (found->second.result.wait_for(std::chrono::milliseconds(0))
-            != std::future_status::ready) {
-            log().deb("certificate job still pending");
-            return -1;
-        }
-        verified_certificate verified;
-        try {
-            verified = found->second.result.get();
-        } catch (...) {
-            log().err("certificate job raised an exception");
+        if (!detail::same_certificate_callback_identity(
+                found->second.server_name, found->second.callback_generation,
+                server_name, generation)) {
+            // Destroying a running std::future may block. Fail the new
+            // handshake closed and let reap_expired() collect the old job.
+            if (found->second.result.wait_for(std::chrono::milliseconds(0))
+                != std::future_status::ready) {
+                log().war("certificate job belongs to a reused OpenSSL handle");
+                return 0;
+            }
             certificate_jobs_.erase(found);
-            return 0;
-        }
-        auto const client = found->second.client;
-        auto const destination = found->second.destination;
-        certificate_jobs_.erase(found);
-        if (!install_verified_certificate(downstream, verified)) {
-            ++upstream_failures_;
-            log().war("verified certificate preparation failed for peer=%s target=%s",
-                      endpoint_text(client).c_str(), endpoint_text(destination).c_str());
-            return 0;
-        }
+        } else {
+            if (found->second.result.wait_for(std::chrono::milliseconds(0))
+                != std::future_status::ready) {
+                log().deb("certificate job still pending");
+                return -1;
+            }
+            verified_certificate verified;
+            try {
+                verified = found->second.result.get();
+            } catch (...) {
+                log().err("certificate job raised an exception");
+                certificate_jobs_.erase(found);
+                return 0;
+            }
+            auto const client = found->second.client;
+            auto const destination = found->second.destination;
+            certificate_jobs_.erase(found);
+            if (!install_verified_certificate(downstream, verified)) {
+                ++upstream_failures_;
+                log().war("verified certificate preparation failed for peer=%s target=%s",
+                          endpoint_text(client).c_str(), endpoint_text(destination).c_str());
+                return 0;
+            }
 
-        // Do not create another OpenSSL object reentrantly from this certificate
-        // callback. Save only immutable routing data; accept_connections()
-        // creates the forwarding connection in a normal listener-loop pass.
-        auto const* raw_name = SSL_get_servername(downstream, TLSEXT_NAMETYPE_host_name);
-        std::string const server_name = raw_name ? raw_name : "";
-        staged_upstreams_.emplace(downstream, staged_upstream {
-            client, destination, server_name });
-        return 1;
+            // Do not create another OpenSSL object reentrantly from this certificate
+            // callback. Save only immutable routing data; accept_connections()
+            // creates the forwarding connection in a normal listener-loop pass.
+            staged_upstreams_.emplace(downstream, staged_upstream {
+                client, destination, server_name, generation });
+            return 1;
+        }
     }
 
-    auto const* raw_name = SSL_get_servername(downstream, TLSEXT_NAMETYPE_host_name);
     if (!raw_name || *raw_name == '\0') {
         log().war("downstream handshake rejected: SNI is missing");
         return 0;
     }
-    std::string const server_name(raw_name);
     datagram_endpoint peer_endpoint;
     BIO_ADDR* peer_address = BIO_ADDR_new();
     if (peer_address) {
@@ -946,7 +1031,7 @@ int listener_service::prepare_verified_certificate(SSL* downstream) {
             certificate_job { std::async(std::launch::async,
                 [this, destination, server_name]() mutable {
                     return verify_and_spoof(std::move(destination), std::move(server_name));
-                }), peer_endpoint, destination });
+                }), peer_endpoint, destination, server_name, generation });
     } catch (...) {
         log().err("cannot start certificate job sni='%s'", server_name.c_str());
         return 0;
@@ -992,7 +1077,14 @@ listener_service::verified_certificate listener_service::verify_and_spoof(
         upstream->close(1);
         return verified;
     }
-    if (X509_check_host(certificate, server_name.c_str(), server_name.size(), 0, nullptr) != 1) {
+    std::array<unsigned char, sizeof(in6_addr)> binary_address {};
+    auto const numeric_identity =
+        ::inet_pton(AF_INET, server_name.c_str(), binary_address.data()) == 1
+        || ::inet_pton(AF_INET6, server_name.c_str(), binary_address.data()) == 1;
+    auto const identity_matches = numeric_identity
+        ? X509_check_ip_asc(certificate, server_name.c_str(), 0)
+        : X509_check_host(certificate, server_name.c_str(), server_name.size(), 0, nullptr);
+    if (identity_matches != 1) {
         log().war("upstream identity mismatch sni='%s'", server_name.c_str());
         X509_free(certificate);
         upstream->close(1);

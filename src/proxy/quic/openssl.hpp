@@ -5,6 +5,7 @@
 #include <openssl/ssl.h>
 
 #include <sys/socket.h>
+#include <netinet/in.h>
 
 #include <deque>
 #include <functional>
@@ -31,7 +32,13 @@ namespace sx::quic {
 struct datagram_endpoint {
     sockaddr_storage address {};
     socklen_t size = 0;
-    bool valid() const { return size != 0; }
+    bool valid() const {
+        if (address.ss_family == AF_INET)
+            return size == sizeof(sockaddr_in);
+        if (address.ss_family == AF_INET6)
+            return size == sizeof(sockaddr_in6);
+        return false;
+    }
 };
 
 #if SMITHPROXY_OPENSSL_QUIC
@@ -80,7 +87,8 @@ public:
 
     void remember(std::vector<std::uint8_t> const& connection_id,
                   datagram_route const& route);
-    void learn(unsigned char const* data, std::size_t size,
+    /** Learn long-header CIDs unless one is already owned by another tuple. */
+    bool learn(unsigned char const* data, std::size_t size,
                datagram_route const& route);
     std::optional<datagram_route> resolve(
         unsigned char const* data, std::size_t size) const;

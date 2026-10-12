@@ -2,6 +2,7 @@
 
 #include "proxy/multiflow/mfflowcom.hpp"
 #include "proxy/quic/openssl.hpp"
+#include "proxy/quic/socket_io_detail.hpp"
 #include "proxy/trafficcapture.hpp"
 #include <sslcertstore.hpp>
 
@@ -26,7 +27,98 @@
 namespace quic = sx::quic;
 namespace mf = sx::multiflow;
 
-TEST(OpenSslQuic, CapabilityMatchesBuildVersion) {
+TEST(OpenSslQuicSocketIo, TreatsKernelQueueExhaustionAsBackpressure) {
+    using result = quic::detail::datagram_send_result;
+    EXPECT_EQ(quic::detail::classify_datagram_send(-1, EAGAIN, 1200),
+              result::blocked);
+    EXPECT_EQ(quic::detail::classify_datagram_send(-1, EWOULDBLOCK, 1200),
+              result::blocked);
+    EXPECT_EQ(quic::detail::classify_datagram_send(-1, ENOBUFS, 1200),
+              result::blocked);
+    EXPECT_EQ(quic::detail::classify_datagram_send(-1, ENOMEM, 1200),
+              result::blocked);
+    EXPECT_EQ(quic::detail::classify_datagram_send(1200, 0, 1200),
+              result::sent);
+    EXPECT_EQ(quic::detail::classify_datagram_send(1199, 0, 1200),
+              result::failed);
+    EXPECT_EQ(quic::detail::classify_datagram_send(-1, EINVAL, 1200),
+              result::failed);
+
+    EXPECT_TRUE(quic::detail::datagram_receive_would_block(EAGAIN));
+    EXPECT_TRUE(quic::detail::datagram_receive_would_block(EWOULDBLOCK));
+    EXPECT_TRUE(quic::detail::datagram_receive_would_block(ENOBUFS));
+    EXPECT_TRUE(quic::detail::datagram_receive_would_block(ENOMEM));
+    EXPECT_FALSE(quic::detail::datagram_receive_would_block(EBADF));
+}
+
+TEST(OpenSslQuicSocketIo, RetriesInterruptedSocketOperations) {
+    int attempts = 0;
+    const auto result = quic::detail::retry_on_eintr([&]() -> ssize_t {
+        ++attempts;
+        if(attempts < 3) {
+            errno = EINTR;
+            return -1;
+        }
+        return 73;
+    });
+    EXPECT_EQ(result, 73);
+    EXPECT_EQ(attempts, 3);
+
+    attempts = 0;
+    EXPECT_EQ(quic::detail::retry_on_eintr([&]() -> ssize_t {
+        ++attempts;
+        errno = EINVAL;
+        return -1;
+    }), -1);
+    EXPECT_EQ(attempts, 1);
+}
+
+class OpenSslQuic : public ::testing::Test {
+protected:
+    static inline std::string saved_ca_file;
+    static inline std::string saved_ca_path;
+    static inline bool saved_initialized = false;
+
+    static void SetUpTestSuite() {
+        auto& factory = SSLFactory::factory();
+        saved_ca_file = factory.ca_file();
+        saved_ca_path = factory.ca_path();
+        saved_initialized = factory.is_initialized.load();
+        factory.destroy();
+        factory.ca_file() = "etc/certs/default/ca-cert.pem";
+        factory.ca_path().clear();
+        ASSERT_TRUE(factory.load_trust_store());
+    }
+
+    static void TearDownTestSuite() {
+        auto& factory = SSLFactory::factory();
+        factory.destroy();
+        factory.ca_file() = saved_ca_file;
+        factory.ca_path() = saved_ca_path;
+        if (saved_initialized) factory.init();
+    }
+};
+
+TEST(OpenSslQuicEndpoint, RequiresACompleteSupportedSocketAddress) {
+    quic::datagram_endpoint endpoint;
+    EXPECT_FALSE(endpoint.valid());
+
+    endpoint.address.ss_family = AF_INET;
+    endpoint.size = sizeof(sockaddr_in) - 1;
+    EXPECT_FALSE(endpoint.valid());
+    endpoint.size = sizeof(sockaddr_in);
+    EXPECT_TRUE(endpoint.valid());
+
+    endpoint.address.ss_family = AF_INET6;
+    EXPECT_FALSE(endpoint.valid());
+    endpoint.size = sizeof(sockaddr_in6);
+    EXPECT_TRUE(endpoint.valid());
+
+    endpoint.address.ss_family = AF_UNSPEC;
+    EXPECT_FALSE(endpoint.valid());
+}
+
+TEST_F(OpenSslQuic, CapabilityMatchesBuildVersion) {
 #if OPENSSL_VERSION_NUMBER >= 0x30500000L && !defined(OPENSSL_NO_QUIC)
     EXPECT_TRUE(quic::openssl_quic_available());
 #else
@@ -34,7 +126,7 @@ TEST(OpenSslQuic, CapabilityMatchesBuildVersion) {
 #endif
 }
 
-TEST(OpenSslQuic, CreatesClientAndServerContextsWhenAvailable) {
+TEST_F(OpenSslQuic, CreatesClientAndServerContextsWhenAvailable) {
     auto client = quic::make_openssl_quic_context(false);
     auto server = quic::make_openssl_quic_context(true);
 
@@ -57,6 +149,18 @@ TEST(OpenSslQuic, CreatesClientAndServerContextsWhenAvailable) {
 }
 
 #if SMITHPROXY_OPENSSL_QUIC
+TEST_F(OpenSslQuic, RejectsNonQuicConnectionObjectsAtConstruction) {
+    quic::unique_ssl_ctx context(SSL_CTX_new(TLS_method()));
+    ASSERT_NE(context, nullptr);
+    quic::unique_ssl ordinary_tls(SSL_new(context.get()));
+    ASSERT_NE(ordinary_tls, nullptr);
+
+    quic::openssl_connection connection(std::move(ordinary_tls));
+    EXPECT_TRUE(connection.closed());
+    EXPECT_FALSE(connection.contains(connection.open_flow(
+        sx::multiflow::direction::bidirectional)));
+}
+
 namespace {
 
 int select_h3(SSL*, const unsigned char** output, unsigned char* output_size,
@@ -105,20 +209,10 @@ buffer complete_udp_packet(quic::datagram_view const& datagram) {
 }
 
 bool flush_capture_writer(socle::traflog::PcapLog& capture) {
-    auto* writer = socle::threadedPoolFileWriter::instance();
-    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
-    while (std::chrono::steady_clock::now() < deadline) {
-        {
-            std::lock_guard lock(writer->queue_lock());
-            if (writer->queue().empty()) {
-                capture.writer_->flush(capture.FS.filename_full);
-                capture.writer_->close(capture.FS.filename_full);
-                return true;
-            }
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    return false;
+    // The threaded writer defines flush/close as completion barriers: both
+    // drain accepted writes before touching the backing stream.
+    return capture.writer_->flush(capture.FS.filename_full)
+        && capture.writer_->close(capture.FS.filename_full);
 }
 
 std::pair<int, std::string> tshark_quic_stream_data(std::string const& path) {
@@ -209,7 +303,33 @@ TEST(OpenSslQuicDispatcher, SeparatesCidFamiliesSharingOneUdpTuple) {
     EXPECT_FALSE(routes.resolve(packet.data(), packet.size()));
 }
 
-TEST(OpenSslQuic, CreatesNonBlockingServerListenerObject) {
+TEST(OpenSslQuicDispatcher, ExistingCidCannotBeReboundByAnotherTuple) {
+    quic::detail::datagram_route_table routes;
+    auto const original = quic::detail::datagram_route {
+        loopback_endpoint(10001), loopback_endpoint(443), 41,
+    };
+    auto const attacker = quic::detail::datagram_route {
+        loopback_endpoint(10002), loopback_endpoint(443), 41,
+    };
+    std::vector<unsigned char> initial {
+        0xc0, 0x00, 0x00, 0x00, 0x01,
+        0x02, 0xaa, 0xbb,
+        0x02, 0xcc, 0xdd,
+        0x00, 0x01, 0x00,
+    };
+
+    ASSERT_TRUE(routes.learn(initial.data(), initial.size(), original));
+    EXPECT_FALSE(routes.learn(initial.data(), initial.size(), attacker));
+
+    std::vector<unsigned char> short_packet {0x40, 0xaa, 0xbb, 0x01};
+    auto const resolved = routes.resolve(short_packet.data(), short_packet.size());
+    ASSERT_TRUE(resolved);
+    EXPECT_EQ(reinterpret_cast<sockaddr_in const*>(&resolved->peer.address)->sin_port,
+              htons(10001));
+    EXPECT_EQ(resolved->association, 41u);
+}
+
+TEST_F(OpenSslQuic, CreatesNonBlockingServerListenerObject) {
     auto context = quic::make_openssl_quic_context(true);
     ASSERT_NE(context, nullptr) << quic::openssl_error_stack();
 
@@ -220,7 +340,104 @@ TEST(OpenSslQuic, CreatesNonBlockingServerListenerObject) {
     EXPECT_EQ(SSL_get_blocking_mode(listener.get()), 0);
 }
 
-TEST(OpenSslQuic, OutgoingAdapterCompletesHandshake) {
+TEST_F(OpenSslQuic, EmptyUdpDatagramDoesNotFailTheSharedListener) {
+    auto server_context = quic::make_openssl_quic_context(true);
+    ASSERT_NE(server_context, nullptr) << quic::openssl_error_stack();
+    ASSERT_EQ(SSL_CTX_use_certificate_chain_file(server_context.get(),
+                                                 "etc/certs/default/srv-cert.pem"), 1);
+    ASSERT_EQ(SSL_CTX_use_PrivateKey_file(server_context.get(),
+                                         "etc/certs/default/srv-key.pem",
+                                         SSL_FILETYPE_PEM), 1);
+
+    auto const server_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    auto const client_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    ASSERT_GE(server_fd, 0);
+    ASSERT_GE(client_fd, 0);
+    ASSERT_TRUE(make_nonblocking(server_fd));
+    sockaddr_in server_address {};
+    server_address.sin_family = AF_INET;
+    server_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ASSERT_EQ(bind(server_fd, reinterpret_cast<sockaddr*>(&server_address),
+                   sizeof(server_address)), 0);
+    socklen_t address_size = sizeof(server_address);
+    ASSERT_EQ(getsockname(server_fd, reinterpret_cast<sockaddr*>(&server_address),
+                          &address_size), 0);
+
+    auto listener = quic::openssl_listener::create(server_context.get(), server_fd, true);
+    ASSERT_NE(listener, nullptr) << quic::openssl_error_stack();
+    ASSERT_EQ(sendto(client_fd, nullptr, 0, 0,
+                     reinterpret_cast<sockaddr*>(&server_address),
+                     sizeof(server_address)), 0);
+    EXPECT_TRUE(listener->handle_events()) << listener->last_error();
+    EXPECT_EQ(listener->accept(), nullptr);
+
+    close(client_fd);
+    close(server_fd);
+}
+
+TEST_F(OpenSslQuic, CreatesTransparentIpv6Listener) {
+    auto server_context = quic::make_openssl_quic_context(true);
+    ASSERT_NE(server_context, nullptr) << quic::openssl_error_stack();
+
+    auto const server_fd = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
+    if (server_fd < 0 && (errno == EAFNOSUPPORT || errno == EPROTONOSUPPORT)) {
+        GTEST_SKIP() << "IPv6 is unavailable";
+    }
+    ASSERT_GE(server_fd, 0);
+    ASSERT_TRUE(make_nonblocking(server_fd));
+    sockaddr_in6 server_address {};
+    server_address.sin6_family = AF_INET6;
+    server_address.sin6_addr = in6addr_loopback;
+    ASSERT_EQ(bind(server_fd, reinterpret_cast<sockaddr*>(&server_address),
+                   sizeof(server_address)), 0);
+    socklen_t address_size = sizeof(server_address);
+    ASSERT_EQ(getsockname(server_fd, reinterpret_cast<sockaddr*>(&server_address),
+                          &address_size), 0);
+
+    auto listener = quic::openssl_listener::create(server_context.get(), server_fd, true);
+    ASSERT_NE(listener, nullptr) << quic::openssl_error_stack();
+    auto const client_fd = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
+    ASSERT_GE(client_fd, 0);
+    unsigned char invalid_quic_packet = 0;
+    ASSERT_EQ(sendto(client_fd, &invalid_quic_packet, sizeof(invalid_quic_packet), 0,
+                     reinterpret_cast<sockaddr*>(&server_address),
+                     sizeof(server_address)), 1);
+    EXPECT_TRUE(listener->handle_events()) << listener->last_error();
+    close(client_fd);
+    close(server_fd);
+}
+
+TEST_F(OpenSslQuic, NumericPeerIdentityUsesIpVerificationWithoutSni) {
+    auto client_context = quic::make_openssl_quic_context(false);
+    ASSERT_NE(client_context, nullptr) << quic::openssl_error_stack();
+    SSL_CTX_set_verify(client_context.get(), SSL_VERIFY_NONE, nullptr);
+
+    auto peer_fd = std::unique_ptr<int, void(*)(int*)>(
+        new int(socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)),
+        [](int* fd) { if (fd && *fd >= 0) close(*fd); delete fd; });
+    ASSERT_GE(*peer_fd, 0);
+    sockaddr_in peer {};
+    peer.sin_family = AF_INET;
+    peer.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ASSERT_EQ(bind(*peer_fd, reinterpret_cast<sockaddr*>(&peer), sizeof(peer)), 0);
+    socklen_t peer_size = sizeof(peer);
+    ASSERT_EQ(getsockname(*peer_fd, reinterpret_cast<sockaddr*>(&peer), &peer_size), 0);
+
+    std::string error;
+    auto connection = quic::connect_openssl_quic(
+        client_context.get(), reinterpret_cast<sockaddr*>(&peer), sizeof(peer),
+        "127.0.0.1", &error);
+    ASSERT_NE(connection, nullptr) << error;
+    const int connection_fd = SSL_get_fd(connection->native_handle());
+    ASSERT_GE(connection_fd, 0);
+    EXPECT_NE(fcntl(connection_fd, F_GETFD, 0) & FD_CLOEXEC, 0);
+    EXPECT_EQ(SSL_get_servername(connection->native_handle(),
+                                 TLSEXT_NAMETYPE_host_name), nullptr);
+    EXPECT_EQ(X509_VERIFY_PARAM_get0_host(
+                  SSL_get0_param(connection->native_handle()), 0), nullptr);
+}
+
+TEST_F(OpenSslQuic, OutgoingAdapterCompletesHandshake) {
     auto server_context = quic::make_openssl_quic_context(true);
     auto client_context = quic::make_openssl_quic_context(false);
     ASSERT_NE(server_context, nullptr);
@@ -289,6 +506,21 @@ TEST(OpenSslQuic, OutgoingAdapterCompletesHandshake) {
     EXPECT_NE(ingress_association, 0U);
     EXPECT_EQ(egress_association, ingress_association);
 
+    auto const zero_flow = client->open_flow(mf::direction::bidirectional);
+    ASSERT_NE(zero_flow.generation, 0U);
+    auto const zero_write = client->write(zero_flow, nullptr, 0);
+    EXPECT_EQ(zero_write.size, 0U);
+    EXPECT_EQ(zero_write.status, mf::io_status::ok);
+    auto const zero_read = client->read(zero_flow, nullptr, 0);
+    EXPECT_EQ(zero_read.size, 0U);
+    EXPECT_EQ(zero_read.status, mf::io_status::ok);
+
+    unsigned char pending_byte = 0;
+    ERR_put_error(ERR_LIB_SSL, 0, SSL_R_BAD_DATA, __FILE__, __LINE__);
+    auto const pending_read = client->read(zero_flow, &pending_byte, 1);
+    EXPECT_EQ(pending_read.size, 0U);
+    EXPECT_EQ(pending_read.status, mf::io_status::would_block);
+
     std::string rejected_error;
     auto rejected = quic::connect_openssl_quic(
         client_context.get(), reinterpret_cast<sockaddr*>(&server_address),
@@ -314,7 +546,7 @@ TEST(OpenSslQuic, OutgoingAdapterCompletesHandshake) {
     close(server_fd);
 }
 
-TEST(OpenSslQuic, TransparentDispatcherKeepsConcurrentHandshakesIsolated) {
+TEST_F(OpenSslQuic, TransparentDispatcherKeepsConcurrentHandshakesIsolated) {
     auto server_context = quic::make_openssl_quic_context(true);
     auto client_context = quic::make_openssl_quic_context(false);
     ASSERT_NE(server_context, nullptr);
@@ -387,7 +619,7 @@ TEST(OpenSslQuic, TransparentDispatcherKeepsConcurrentHandshakesIsolated) {
     close(server_fd);
 }
 
-TEST(OpenSslQuic, OutgoingAdapterVerifiesChainAndServerName) {
+TEST_F(OpenSslQuic, OutgoingAdapterVerifiesChainAndServerName) {
     auto server_context = quic::make_openssl_quic_context(true);
     auto client_context = quic::make_openssl_quic_context(false);
     ASSERT_NE(server_context, nullptr);
@@ -440,7 +672,7 @@ TEST(OpenSslQuic, OutgoingAdapterVerifiesChainAndServerName) {
     close(server_fd);
 }
 
-TEST(OpenSslQuic, LoopbackStreamProducesSelfDecryptingPcapng) {
+TEST_F(OpenSslQuic, LoopbackStreamProducesSelfDecryptingPcapng) {
     if (::system("command -v tshark >/dev/null 2>&1") != 0) {
         GTEST_SKIP() << "tshark is required to verify embedded QUIC secrets";
     }
@@ -640,6 +872,8 @@ TEST(OpenSslQuic, LoopbackStreamProducesSelfDecryptingPcapng) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     EXPECT_TRUE(saw_reset);
+    EXPECT_FALSE(client_connection->contains(reset_flow));
+    EXPECT_FALSE(server_connection->contains(reset_peer_flow));
 
     // tshark receives no external keylog file, so finding the encrypted
     // STREAM marker proves decryption from the PCAPNG DSB itself.

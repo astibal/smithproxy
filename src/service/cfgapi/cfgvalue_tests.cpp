@@ -1,6 +1,11 @@
 #include <gtest/gtest.h>
 
 #include <service/cfgapi/cfgvalue.hpp>
+#include <service/cfgapi/cfg_serialization.hpp>
+
+#include <cstdlib>
+#include <cstdio>
+#include <string_view>
 
 TEST(CfgValue, UnsignedFiltersRequireTheCompleteCanonicalNumber) {
     for (auto const* accepted : {"0", "1", "65535", "9223372036854775807"})
@@ -36,4 +41,28 @@ TEST(CfgValue, CopyAssignmentPreservesValidationAndSuggestionPolicy) {
               (std::vector<std::string>{"true", "false"}));
     ASSERT_EQ(copy.value_filter().size(), 2U);
     EXPECT_FALSE(copy.value_filter().back()("12x").accepted());
+}
+
+TEST(CfgFactorySerialization, LargeConfigurationCannotBlockOnPipeCapacity) {
+    libconfig::Config config;
+    auto& entries = config.getRoot().add("entries", libconfig::Setting::TypeList);
+    std::string const value(256, 'x');
+    for(int i = 0; i < 8192; ++i)
+        entries.add(libconfig::Setting::TypeString) = value;
+
+    char* output = nullptr;
+    std::size_t output_size = 0;
+    FILE* destination = open_memstream(&output, &output_size);
+    ASSERT_NE(destination, nullptr);
+    ASSERT_EQ(cfgapi_detail::write_config_crlf(config, destination), 0);
+    ASSERT_EQ(fclose(destination), 0);
+
+    ASSERT_GT(output_size, 2U * 1024U * 1024U);
+    std::string_view serialized(output, output_size);
+    for(std::size_t newline = serialized.find('\n'); newline != std::string_view::npos;
+        newline = serialized.find('\n', newline + 1)) {
+        ASSERT_GT(newline, 0U);
+        EXPECT_EQ(serialized[newline - 1], '\r');
+    }
+    free(output);
 }

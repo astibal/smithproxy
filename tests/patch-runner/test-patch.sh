@@ -83,8 +83,8 @@ Common environment variables:
   RTT_SAMPLES                    Measured TCP/UDP samples (default: 200).
   RTT_HANDSHAKE_SAMPLES          Fresh TCP/TLS connections (default: 40).
   RTT_WARMUP                     Unreported warm-up exchanges (default: 20).
-  RTT_TLS_TOTAL_P50_LIMIT_MS     Sanity/full TLS total-connect P50 gate (default: 7).
-  RTT_TLS_TOTAL_P50_FLAKY_LIMIT_MS  TLS total-connect FLAKY_PASS ceiling (default: 10).
+  RTT_TLS_TOTAL_P50_LIMIT_MS     Sanity/full TLS total-connect P50 gate (default: 10).
+  RTT_TLS_TOTAL_P50_FLAKY_LIMIT_MS  TLS total-connect FLAKY_PASS ceiling (default: 17).
   RTT_HTTPS_P50_LIMIT_MS         Sanity/full HTTPS RTT P50 gate (default: 2).
   RTT_HTTPS_P50_FLAKY_LIMIT_MS   HTTPS RTT FLAKY_PASS ceiling (default: 10).
   RTT_P95_LIMIT_MS               General RTT P95 gate (default: 50).

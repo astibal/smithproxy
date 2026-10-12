@@ -91,4 +91,18 @@ TEST(HttpConnectRequest, DoesNotTruncateEmbeddedNul) {
     line.push_back('\0');
     line += "ignored";
     EXPECT_FALSE(HttpConnectRequest::parse(line));
+
+    line = "CONNECT allowed";
+    line.push_back('\0');
+    line += ".attacker:443 HTTP/1.1";
+    EXPECT_FALSE(HttpConnectRequest::parse(line));
+}
+
+TEST(HttpConnectRequest, RejectsAmbiguousHostIdentity) {
+    EXPECT_FALSE(HttpConnectRequest::parse(
+        "CONNECT bad\thost:443 HTTP/1.1"));
+    EXPECT_FALSE(HttpConnectRequest::parse(
+        "CONNECT [not-an-ipv6-address]:443 HTTP/1.1"));
+    EXPECT_TRUE(HttpConnectRequest::parse(
+        "CONNECT [2001:db8::7]:443 HTTP/1.1"));
 }

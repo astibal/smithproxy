@@ -51,13 +51,16 @@ class ProfileDetection : public CfgElement {
 public:
     /*
      *  0   NONE
-     *  1   POST -- works in all scenarios, but sometimes we can read data, which should
-     *                   have been processed by upgraded com. Use PRE if possible.
-     *  2   PRE  -- should be default, but not safe when cannot peek()
+     *  1   PRE  -- detect from data before it is consumed by an upgraded transport.
+     *  2   POST -- detect from already received/sent data when peeking is unavailable.
      */
     int mode = 0;
     bool engines_enabled = true;
     bool kb_enabled = true;
+
+    [[nodiscard]] static constexpr bool valid_mode(int candidate) noexcept {
+        return candidate >= 0 && candidate <= 2;
+    }
 
     std::string to_string(int verbosity) const override {
         return string_format("ProfileDetection: name=%s mode=%d", element_name().c_str(), mode);
@@ -206,6 +209,10 @@ class CidrAddress;
 
 class ProfileTls : public CfgElement {
 public:
+    static constexpr bool valid_revocation_mode(int mode) {
+        return mode >= 0 && mode <= 2;
+    }
+
     static constexpr std::string_view client_cert_action_name(int action) {
         switch(action) {
             case 0: return "block_or_replacement";
@@ -410,6 +417,19 @@ struct ProfileRouting: public CfgElement {
 
     using dnat_lb_method_t = enum class lb_method { LB_RR, LB_L3, LB_L4 };
     dnat_lb_method_t dnat_lb_method = dnat_lb_method_t::LB_RR;
+
+    static constexpr std::optional<dnat_lb_method_t>
+    parse_lb_method(std::string_view method) {
+        if(method == "round-robin") return dnat_lb_method_t::LB_RR;
+        if(method == "sticky-l3") return dnat_lb_method_t::LB_L3;
+        if(method == "sticky-l4") return dnat_lb_method_t::LB_L4;
+        return std::nullopt;
+    }
+
+    static constexpr bool valid_sni_rewrite_pair(
+            std::string_view match, std::string_view replacement) {
+        return match.empty() == replacement.empty();
+    }
 
     // update internal state - run once per one request
     void update();

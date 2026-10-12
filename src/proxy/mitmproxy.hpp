@@ -103,6 +103,7 @@ class MitmProxy : public baseProxy, public IOController {
     std::string replacement_msg;
     static inline long half_timeout_ = 5;
     std::time_t created_at_ = std::time(nullptr);
+    std::uint64_t session_id_ = 0;
 public:
     using whitelist_verify_entry_t = expiring<whitelist_verify_entry> ;
     using whitelist_map_t = ptr_cache<std::string,whitelist_verify_entry_t>;

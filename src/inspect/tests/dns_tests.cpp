@@ -380,7 +380,7 @@ TEST(DNS_Inspector, rejects_response_without_matching_request) {
     host.flow().append('w', dns_response1, sizeof(dns_response1));
     inspector.update(&host);
 
-    EXPECT_TRUE(host.error());
+    EXPECT_FALSE(host.error());
     EXPECT_TRUE(host.writebuf()->empty());
 }
 
@@ -489,12 +489,10 @@ TEST(DNS_Inspector, waits_for_complete_tcp_frames_and_parses_each_length_prefix)
     ASSERT_NE(inspector.find_request(0x2222), nullptr);
     EXPECT_NE(inspector.to_string(iINF).find("tcp: 1 requests: 2"), std::string::npos);
 
-    buffer first_response;
-    first_response.append(dns_response1, sizeof(dns_response1));
-    first_response.set_at<uint16_t>(0, htons(0x1111));
-    buffer second_response;
-    second_response.append(dns_response1, sizeof(dns_response1));
-    second_response.set_at<uint16_t>(0, htons(0x2222));
+    buffer first_response = first;
+    first_response.set_at<uint16_t>(2, htons(0x8180));
+    buffer second_response = second;
+    second_response.set_at<uint16_t>(2, htons(0x8180));
     buffer responses;
     responses.append(dns_tcp_frame(first_response));
     responses.append(dns_tcp_frame(second_response));
