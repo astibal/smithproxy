@@ -10,3 +10,4 @@ For help visit:
 Feature documentation:
 
   * [SSH MITM configuration and diagnostics](ssh-mitm.md)
+  * [Privilege separation](privilege-separation.md)

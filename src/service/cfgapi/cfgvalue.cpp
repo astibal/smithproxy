@@ -171,6 +171,11 @@ void CfgValueHelp::init() {
             .may_be_empty(false)
             .value_filter(VALUE_UINT_RANGE<1024, 65535>);
 
+    add("settings.http_connect_port", "base HTTP CONNECT proxy listening port")
+            .help_quick("<number>: a high port number")
+            .may_be_empty(false)
+            .value_filter(VALUE_UINT_RANGE<1024, 65535>);
+
 
     // worker setup
 
@@ -675,10 +680,10 @@ void CfgValueHelp::init() {
             .suggestion_generator([](std::string const& section, std::string const& variable) -> std::vector<std::string> {  return {"smcap", "pcap", "pcap_single"};   });
 
 
-    add("detection_profiles.[x].mode", "0 = disabled, 1 = enabled")
-            .help_quick("<integer>: 0-1")
+    add("detection_profiles.[x].mode", "0 = disabled, 1 = pre-read detection, 2 = post-read detection")
+            .help_quick("<integer>: 0-2")
             .may_be_empty(false)
-            .value_filter(VALUE_UINT_RANGE<0,1>);
+            .value_filter(VALUE_UINT_RANGE<0,2>);
 
 
     add("detection_profiles.[x].engines_enabled", "enable/disable L7 engines")
@@ -701,6 +706,27 @@ void CfgValueHelp::init() {
             .suggestion_generator(CfgValue::SUGGESTION_BOOL);
 
     add("tls_profiles.[x].ip_based_cert", "enable/disable loading custom, address based certificates (no mitm)")
+            .help_quick(CfgValue::HELP_BOOL)
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_BOOL)
+            .suggestion_generator(CfgValue::SUGGESTION_BOOL);
+
+    add("tls_profiles.[x].sni_filter_use_dns_cache",
+        "allow SNI bypass filters to match destination addresses from the DNS cache")
+            .help_quick(CfgValue::HELP_BOOL)
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_BOOL)
+            .suggestion_generator(CfgValue::SUGGESTION_BOOL);
+
+    add("tls_profiles.[x].sni_filter_use_dns_domain_tree",
+        "allow wildcard SNI bypass filters to match the DNS domain tree")
+            .help_quick(CfgValue::HELP_BOOL)
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_BOOL)
+            .suggestion_generator(CfgValue::SUGGESTION_BOOL);
+
+    add("tls_profiles.[x].alpn_block",
+        "reject ALPN negotiation instead of accepting the offered application protocol")
             .help_quick(CfgValue::HELP_BOOL)
             .may_be_empty(false)
             .value_filter(CfgValue::VALUE_BOOL)

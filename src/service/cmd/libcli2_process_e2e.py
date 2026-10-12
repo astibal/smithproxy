@@ -187,6 +187,21 @@ def wait_for_port(process: subprocess.Popen[str], port: int) -> None:
     raise AssertionError("Smithproxy CLI port did not open")
 
 
+def require_oversized_cli_line_disconnect(port: int) -> None:
+    """A pre-authentication partial line must have a finite retention bound."""
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
+        sock.settimeout(0.05)
+        sock.sendall(b"X" * 4097)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            try:
+                if not sock.recv(65536):
+                    return
+            except TimeoutError:
+                continue
+        raise AssertionError("oversized CLI line did not close the session")
+
+
 def free_port() -> int:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
@@ -299,7 +314,18 @@ auth_profiles = {
         };
     };
 };
+script_profiles = {
+    libcli2_e2e_script = {
+        type = 0;
+        script-file = "/nonexistent/libcli2-e2e-script.py";
+    };
+};
 '''
+        text = text.replace(
+            'tls_profile = "default";',
+            'tls_profile = "default";\n        script_profile = "libcli2_e2e_script";',
+            1,
+        )
         text = re.sub(r"(?m)^(\s*port\s*=\s*)50000;", rf"\g<1>{args.port};", text, count=1)
         config.write_text(text)
 
@@ -326,6 +352,7 @@ auth_profiles = {
         try:
             wait_for_port(process, args.port)
             wait_for_port(process, socks_port)
+            require_oversized_cli_line_disconnect(args.port)
             cli = Cli(args.port, args.verbose)
             require(cli.tab("en"), "enable")
             require(cli.command("enable"), "#")
@@ -357,6 +384,10 @@ auth_profiles = {
             cli.command_ok("debug file 4")
             cli.command_ok("debug file reset")
             cli.command_failed("debug file invalid")
+            require(cli.command_ok("show config full"),
+                    "libcli2_e2e_script")
+            require(cli.command_ok("diag proxy policy list"),
+                    "script=libcli2_e2e_script")
             require(cli.command_ok("debug set"), "Variable list:")
             require(cli.command_ok("debug set filter integration"),
                     "Logging context filter set")
@@ -526,11 +557,23 @@ auth_profiles = {
             cli.command_ok("end")
 
             cli.command_ok("edit tls_profiles")
+            cli.command_ok("edit default")
+            cli.command_failed(
+                "set redirect_warning_ports 8443 999999999999999999999")
+            tls_after_failed_array = cli.command_ok("show")
+            require(tls_after_failed_array, "443")
+            require(tls_after_failed_array, "44443")
+            reject(tls_after_failed_array, "8443")
+            cli.command_ok("end")
             cli.command_ok("add libcli2_e2e_tls")
             cli.command_ok("edit libcli2_e2e_tls")
             cli.command_ok("set inspect true")
             cli.command_ok("set client_hello_timeout 1234")
             cli.command_ok("set handshake_timeout 5678")
+            cli.command_ok("set alpn_block true")
+            cli.command_ok("set sni_filter_use_dns_cache false")
+            cli.command_ok("set sni_filter_use_dns_domain_tree false")
+            cli.command_ok("set redirect_warning_ports 8443 9443")
             cli.command_ok("end")
             cli.command_ok("end")
 
@@ -555,6 +598,11 @@ auth_profiles = {
             # supported by the CLI, then keep the objects through the real
             # save/reload below.  This catches serializer/loader drift which a
             # simple in-memory edit cannot expose.
+            #
+            # SNI rewrite is deliberately covered by the routing suite rather
+            # than here: its two fields form one invariant, while each CLI
+            # `set` is live-applied independently and cannot express the pair
+            # atomically.
             named_objects = (
                 ("proto_objects", "libcli2_e2e_proto", ("set id 253",)),
                 ("detection_profiles", "libcli2_e2e_detection", ("set mode 0",)),
@@ -566,8 +614,7 @@ auth_profiles = {
                  ("set authenticate true", "set resolve false")),
                 ("routing", "libcli2_e2e_route",
                  ("toggle dnat_address any", "toggle dnat_port all",
-                  "set dnat_lb_method sticky-l4", "set rewrite_sni old.example",
-                  "set rewrite_sni_to new.example")),
+                  "set dnat_lb_method sticky-l4",)),
             )
             for section, name, commands in named_objects:
                 cli.command_ok(f"edit {section}")
@@ -603,16 +650,26 @@ auth_profiles = {
                 raise AssertionError("saved configuration lost the TLS profile")
             require(tls_profile.group("body"), "client_hello_timeout = 1234")
             require(tls_profile.group("body"), "handshake_timeout = 5678")
+            require(tls_profile.group("body"), "alpn_block = true")
+            require(tls_profile.group("body"), "failed_certcheck_override = false")
+            require(tls_profile.group("body"), "sni_filter_use_dns_cache = false")
+            require(tls_profile.group("body"), "sni_filter_use_dns_domain_tree = false")
             require(cli.command_ok("execute reload"), "Configuration file reloaded")
+            require(cli.command_ok("diag proxy policy list"),
+                    "script=libcli2_e2e_script")
             for section, name, _ in named_objects:
                 require(cli.command_ok(f"show config {section}"), name)
             require(cli.command_ok("show status"), "Total sessions:")
             cli.command_ok(f"test webhook http://127.0.0.1:{webhook_port}/stall")
             if not WebhookHandler.stall_started.wait(timeout=3):
                 raise AssertionError("stalled webhook request did not start")
+            partial_control = socket.create_connection(("127.0.0.1", args.port), timeout=5)
+            partial_control.recv(65536)
+            partial_control.sendall(b"\x1b")
             shutdown_started = time.monotonic()
             require(cli.command_ok("execute shutdown"), "terminating smithproxy")
             process.wait(timeout=4)
+            partial_control.close()
             if time.monotonic() - shutdown_started >= 4:
                 raise AssertionError("active webhook delayed Smithproxy shutdown")
 

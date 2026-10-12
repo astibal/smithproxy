@@ -18,6 +18,14 @@ TEST(ProfileContent, CompilesValidSessionFilterAndRejectsInvalidRegex) {
     EXPECT_FALSE(profile.rules_session_filter_rx.has_value());
 }
 
+TEST(ProfileDetection, RejectsModesOutsideTheRuntimeDomain) {
+    EXPECT_TRUE(ProfileDetection::valid_mode(0));
+    EXPECT_TRUE(ProfileDetection::valid_mode(1));
+    EXPECT_TRUE(ProfileDetection::valid_mode(2));
+    EXPECT_FALSE(ProfileDetection::valid_mode(-1));
+    EXPECT_FALSE(ProfileDetection::valid_mode(3));
+}
+
 TEST(ProfileContentRule, ReplacementCadenceTriggersEveryNthCall) {
     ProfileContentRule rule;
     rule.replace_each_nth = 3;

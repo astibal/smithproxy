@@ -1,11 +1,13 @@
 #include "proxy/quic/openssl.hpp"
+#include "proxy/quic/socket_io_detail.hpp"
 #include "proxy/quic/wire.hpp"
 #include <sslcertstore.hpp>
-#include <privileged_socket.hpp>
+#include <ancillary_address.hpp>
 
 #include <openssl/err.h>
 
 #include <algorithm>
+#include <arpa/inet.h>
 #include <array>
 #include <cerrno>
 #include <cstdlib>
@@ -152,7 +154,9 @@ unique_ssl_ctx make_openssl_quic_context(bool server) {
 struct openssl_connection::stream_state {
     stream_state(multiflow::flow_handle flow_handle, unique_ssl ssl_stream,
                  multiflow::direction stream_direction)
-        : handle(flow_handle), stream(std::move(ssl_stream)), direction(stream_direction) {}
+        : handle(flow_handle), stream(std::move(ssl_stream)), direction(stream_direction),
+          read_terminal_reported(stream_direction == multiflow::direction::send_only),
+          write_terminal_reported(stream_direction == multiflow::direction::receive_only) {}
 
     multiflow::flow_handle handle;       // Stable public identity for this SSL stream.
     unique_ssl stream;                   // Must be destroyed before the parent connection.
@@ -268,13 +272,27 @@ void detail::datagram_route_table::remember(
     }
 }
 
-void detail::datagram_route_table::learn(
+bool detail::datagram_route_table::learn(
     unsigned char const* data, std::size_t size, datagram_route const& route) {
     auto const parsed = parse_header(data, size);
-    if (!parsed || parsed.value.form != packet_form::long_header) return;
+    if (!parsed || parsed.value.form != packet_form::long_header) return false;
+
+    auto const conflicts = [&](std::vector<std::uint8_t> const& id) {
+        if(id.empty()) return false;
+        auto const existing = routes_.find(id);
+        return existing != routes_.end() &&
+            (!same_endpoint(existing->second.peer, route.peer) ||
+             !same_endpoint(existing->second.local, route.local) ||
+             existing->second.association != route.association);
+    };
+    if(conflicts(parsed.value.destination_connection_id) ||
+       conflicts(parsed.value.source_connection_id)) {
+        return false;
+    }
 
     remember(parsed.value.destination_connection_id, route);
     remember(parsed.value.source_connection_id, route);
+    return true;
 }
 
 std::optional<detail::datagram_route> detail::datagram_route_table::resolve(
@@ -313,17 +331,19 @@ void learn_packet_route(openssl_listener::dispatcher_state& state,
                        {packet.peer, packet.local, packet.association});
 }
 
-void associate_input_packet(openssl_listener::dispatcher_state& state,
+bool associate_input_packet(openssl_listener::dispatcher_state& state,
                             openssl_listener::dispatcher_state::packet& packet) {
     // Only a valid long header can introduce a new CID family. Unknown short
     // headers and non-QUIC datagrams must never acquire somebody else's state.
     auto const parsed = parse_header(packet.data.data(), packet.data.size());
-    if (!parsed) return;
+    if (!parsed) return true;
     auto const route = state.routes.resolve(packet.data.data(), packet.data.size());
-    if (!route && parsed.value.form != packet_form::long_header) return;
+    if (!route && parsed.value.form != packet_form::long_header) return true;
     packet.association = route ? route->association : state.next_association++;
     if (packet.association == 0) packet.association = state.next_association++;
-    learn_packet_route(state, packet);
+    if(parsed.value.form != packet_form::long_header) return true;
+    return state.routes.learn(packet.data.data(), packet.data.size(),
+                              {packet.peer, packet.local, packet.association});
 }
 
 bool receive_socket_datagram(int fd, openssl_listener::dispatcher_state::packet& packet) {
@@ -338,22 +358,39 @@ bool receive_socket_datagram(int fd, openssl_listener::dispatcher_state::packet&
     message.msg_iovlen = 1;
     message.msg_control = control.data();
     message.msg_controllen = control.size();
-    auto const received = ::recvmsg(fd, &message, MSG_DONTWAIT);
+    auto const received = detail::retry_on_eintr(
+        [&] { return ::recvmsg(fd, &message, MSG_DONTWAIT); });
     if (received < 0) return false;
+    if ((message.msg_flags & (MSG_TRUNC | MSG_CTRUNC)) != 0) {
+        errno = EMSGSIZE;
+        return false;
+    }
     packet.data.resize(static_cast<std::size_t>(received));
-    std::memcpy(&packet.peer.address, &peer, message.msg_namelen);
-    packet.peer.size = message.msg_namelen;
+    if (!socle_detail::copy_socket_address(
+            packet.peer.address, &peer, message.msg_namelen)) {
+        errno = EPROTO;
+        return false;
+    }
+    packet.peer.size = packet.peer.address.ss_family == AF_INET
+        ? sizeof(sockaddr_in) : sizeof(sockaddr_in6);
     for (auto* item = CMSG_FIRSTHDR(&message); item; item = CMSG_NXTHDR(&message, item)) {
         if (item->cmsg_level == SOL_IP && item->cmsg_type == IP_ORIGDSTADDR) {
-            auto const* address = reinterpret_cast<sockaddr_in*>(CMSG_DATA(item));
-            std::memcpy(&packet.local.address, address, sizeof(*address));
-            packet.local.size = sizeof(*address);
+            if (!socle_detail::copy_original_destination(packet.local.address, item)) {
+                errno = EPROTO;
+                return false;
+            }
+            packet.local.size = sizeof(sockaddr_in);
         } else if (item->cmsg_level == SOL_IP && item->cmsg_type == IP_PKTINFO
                    && !packet.local.valid()) {
-            auto const* info = reinterpret_cast<in_pktinfo*>(CMSG_DATA(item));
+            if (item->cmsg_len < CMSG_LEN(sizeof(in_pktinfo))) {
+                errno = EPROTO;
+                return false;
+            }
+            in_pktinfo info{};
+            std::memcpy(&info, CMSG_DATA(item), sizeof(info));
             sockaddr_in address {};
             address.sin_family = AF_INET;
-            address.sin_addr = info->ipi_addr;
+            address.sin_addr = info.ipi_addr;
             sockaddr_in bound {};
             socklen_t size = sizeof(bound);
             if (::getsockname(fd, reinterpret_cast<sockaddr*>(&bound), &size) == 0) {
@@ -364,9 +401,11 @@ bool receive_socket_datagram(int fd, openssl_listener::dispatcher_state::packet&
         }
 #ifdef IPV6_ORIGDSTADDR
         if (item->cmsg_level == SOL_IPV6 && item->cmsg_type == IPV6_ORIGDSTADDR) {
-            auto const* address = reinterpret_cast<sockaddr_in6*>(CMSG_DATA(item));
-            std::memcpy(&packet.local.address, address, sizeof(*address));
-            packet.local.size = sizeof(*address);
+            if (!socle_detail::copy_original_destination(packet.local.address, item)) {
+                errno = EPROTO;
+                return false;
+            }
+            packet.local.size = sizeof(sockaddr_in6);
         }
 #endif
     }
@@ -393,7 +432,7 @@ bool inject_bio_datagram(BIO* bio, openssl_listener::dispatcher_state::packet co
     return false;
 }
 
-enum class send_result { sent, blocked, failed };
+using send_result = detail::datagram_send_result;
 
 void observe_datagram(openssl_listener::observer_state const* state,
                       datagram_direction direction,
@@ -441,10 +480,9 @@ send_result send_socket_datagram(int fd,
     } else {
         return send_result::failed;
     }
-    auto const sent = ::sendmsg(fd, &message, MSG_DONTWAIT);
-    if (sent == static_cast<ssize_t>(packet.data.size())) return send_result::sent;
-    if (sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return send_result::blocked;
-    return send_result::failed;
+    auto const sent = detail::retry_on_eintr(
+        [&] { return ::sendmsg(fd, &message, MSG_DONTWAIT); });
+    return detail::classify_datagram_send(sent, errno, packet.data.size());
 }
 
 bool drain_bio_output(openssl_listener::dispatcher_state& state) {
@@ -516,10 +554,14 @@ datagram_endpoint endpoint_from_bio_address(const BIO_ADDR* address) {
 openssl_connection::openssl_connection(unique_ssl connection, int owned_udp_fd)
     : connection_(std::move(connection)), owned_udp_fd_(owned_udp_fd) {
     if (connection_) {
-        SSL_set_blocking_mode(connection_.get(), 0);
-        SSL_set_default_stream_mode(connection_.get(), SSL_DEFAULT_STREAM_MODE_NONE);
-        SSL_set_incoming_stream_policy(connection_.get(),
-                                       SSL_INCOMING_STREAM_POLICY_ACCEPT, 0);
+        ERR_clear_error();
+        if(SSL_set_blocking_mode(connection_.get(), 0) != 1 ||
+           SSL_set_default_stream_mode(
+               connection_.get(), SSL_DEFAULT_STREAM_MODE_NONE) != 1 ||
+           SSL_set_incoming_stream_policy(
+               connection_.get(), SSL_INCOMING_STREAM_POLICY_ACCEPT, 0) != 1) {
+            closed_ = true;
+        }
     } else {
         closed_ = true;
     }
@@ -603,8 +645,13 @@ multiflow::io_result openssl_connection::read(multiflow::flow_handle flow,
     if (state->direction == multiflow::direction::send_only) {
         return { 0, multiflow::io_status::eof };
     }
+    // Match read(2): a zero-length operation on a valid readable flow is a
+    // successful no-op. Entering OpenSSL here can otherwise advance QUIC
+    // state or surface WANT_READ/WANT_WRITE for an operation with no payload.
+    if (size == 0) return { 0, multiflow::io_status::ok };
 
     std::size_t read_size = 0;
+    ERR_clear_error();
     auto const result = SSL_read_ex(state->stream.get(), destination, size, &read_size);
     if (result == 1) return { read_size, multiflow::io_status::ok };
 
@@ -656,8 +703,12 @@ multiflow::io_result openssl_connection::write(multiflow::flow_handle flow,
     if (state->write_terminal_reported) {
         return { 0, multiflow::io_status::eof };
     }
+    // Match write(2) and the other transport adapters. In particular, do not
+    // publish a stream or perturb flow-control state for an empty probe.
+    if (size == 0) return { 0, multiflow::io_status::ok };
 
     std::size_t written_size = 0;
+    ERR_clear_error();
     auto const result = SSL_write_ex(state->stream.get(), source, size, &written_size);
     if (result == 1) return { written_size, multiflow::io_status::ok };
     auto const ssl_error = SSL_get_error(state->stream.get(), result);
@@ -695,6 +746,7 @@ multiflow::io_status openssl_connection::finish(multiflow::flow_handle flow) {
         || state->write_terminal_reported) {
         return multiflow::io_status::ok;
     }
+    ERR_clear_error();
     auto const result = SSL_stream_conclude(state->stream.get(), 0);
     if (result == 1) {
         state->write_terminal_reported = true;
@@ -761,6 +813,7 @@ void openssl_connection::progress_transport() {
         }
         return;
     } else if (!SSL_is_init_finished(connection_.get())) {
+        ERR_clear_error();
         auto const result = SSL_do_handshake(connection_.get());
         if (result != 1) {
             auto const error = SSL_get_error(connection_.get(), result);
@@ -843,6 +896,21 @@ std::vector<multiflow::event> openssl_connection::drain_events() {
     result.reserve(events_.size());
     for (auto const& pending : events_) result.push_back(pending.second);
     events_.clear();
+
+    // Once both halves are terminal, the returned lifecycle event is the last
+    // externally observable use of this handle.  Keeping the child SSL object
+    // until the whole QUIC connection closes lets a peer grow this map with a
+    // long sequence of reset or completed streams despite the bridge's live
+    // stream limit.  Erase only after copying pending events so reset/FIN is
+    // still delivered exactly once.
+    for (auto current = streams_.begin(); current != streams_.end();) {
+        auto const& state = *current->second;
+        if (state.read_terminal_reported && state.write_terminal_reported) {
+            current = streams_.erase(current);
+        } else {
+            ++current;
+        }
+    }
     return result;
 }
 
@@ -869,25 +937,37 @@ std::unique_ptr<openssl_connection> connect_openssl_quic(
         return fail("invalid QUIC peer or ALPN");
     }
 
-    auto const fd = socle::socket(peer->sa_family, SOCK_DGRAM, IPPROTO_UDP);
+    auto const fd = ::socket(peer->sa_family, SOCK_DGRAM | SOCK_CLOEXEC,
+                             IPPROTO_UDP);
     if (fd < 0) return fail(std::string("socket: ") + std::strerror(errno));
     auto close_and_fail = [fd, &fail](std::string message) {
         ::close(fd);
         return fail(std::move(message));
     };
-    auto const flags = ::fcntl(fd, F_GETFL, 0);
-    if (flags < 0 || ::fcntl(fd, F_SETFL, flags | O_NONBLOCK) != 0) {
+    auto const flags = sx::quic::detail::retry_on_eintr(
+        [&] { return ::fcntl(fd, F_GETFL, 0); });
+    if (flags < 0 || sx::quic::detail::retry_on_eintr(
+            [&] { return ::fcntl(fd, F_SETFL,
+                                 static_cast<int>(flags) | O_NONBLOCK); }) != 0) {
         return close_and_fail(std::string("O_NONBLOCK: ") + std::strerror(errno));
     }
-    if (::connect(fd, peer, peer_size) != 0) {
+    if (sx::quic::detail::retry_on_eintr(
+            [&] { return ::connect(fd, peer, peer_size); }) != 0) {
         return close_and_fail(std::string("connect: ") + std::strerror(errno));
     }
 
     unique_ssl ssl(SSL_new(context));
     if (!ssl) return close_and_fail("SSL_new: " + openssl_error_stack());
+    std::array<unsigned char, sizeof(in6_addr)> binary_address {};
+    auto const numeric_identity = !server_name.empty()
+        && (::inet_pton(AF_INET, server_name.c_str(), binary_address.data()) == 1
+            || ::inet_pton(AF_INET6, server_name.c_str(), binary_address.data()) == 1);
     if (SSL_set_fd(ssl.get(), fd) != 1
         || SSL_set_blocking_mode(ssl.get(), 0) != 1
-        || (!server_name.empty()
+        || (!server_name.empty() && numeric_identity
+            && X509_VERIFY_PARAM_set1_ip_asc(
+                   SSL_get0_param(ssl.get()), server_name.c_str()) != 1)
+        || (!server_name.empty() && !numeric_identity
             && (SSL_set_tlsext_host_name(ssl.get(), server_name.c_str()) != 1
                 || SSL_set1_host(ssl.get(), server_name.c_str()) != 1))) {
         return close_and_fail("configure outgoing QUIC: " + openssl_error_stack());
@@ -958,9 +1038,21 @@ std::unique_ptr<openssl_listener> openssl_listener::create(SSL_CTX* context, int
     // address. Configure its socket contract here so standalone users cannot
     // accidentally create a transparent listener without tuple metadata.
     if (enable_local_address) {
+        sockaddr_storage bound {};
+        socklen_t bound_size = sizeof(bound);
+        if (sx::quic::detail::retry_on_eintr([&] {
+                return ::getsockname(udp_fd, reinterpret_cast<sockaddr*>(&bound),
+                                     &bound_size);
+            }) != 0) return nullptr;
         int enabled = 1;
-        if (socle::setsockopt(udp_fd, SOL_IP, IP_RECVORIGDSTADDR,
-                         &enabled, sizeof(enabled)) != 0) return nullptr;
+        int const level = bound.ss_family == AF_INET ? SOL_IP : SOL_IPV6;
+        int const option = bound.ss_family == AF_INET
+            ? IP_RECVORIGDSTADDR : IPV6_RECVORIGDSTADDR;
+        if ((bound.ss_family != AF_INET && bound.ss_family != AF_INET6)
+            || sx::quic::detail::retry_on_eintr([&] {
+                return ::setsockopt(udp_fd, level, option, &enabled,
+                                    sizeof(enabled));
+            }) != 0) return nullptr;
     }
 
     BIO* network_bio = nullptr;
@@ -1104,7 +1196,7 @@ bool openssl_listener::receive_input_batch() {
     for (std::size_t count = 0; count < 64; ++count) {
         dispatcher_state::packet packet;
         if (!receive_socket_datagram(dispatcher.socket_fd, packet)) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) break;
+            if (detail::datagram_receive_would_block(errno)) break;
             last_error_ = std::string("recvmsg: ") + std::strerror(errno);
             return false;
         }
@@ -1113,7 +1205,12 @@ bool openssl_listener::receive_input_batch() {
             return false;
         }
 
-        associate_input_packet(dispatcher, packet);
+        if(!associate_input_packet(dispatcher, packet)) {
+            // CID ownership is established before this unauthenticated packet
+            // reaches OpenSSL. Never let a spoofed tuple redirect subsequent
+            // listener output for an existing connection.
+            continue;
+        }
         observe_datagram(observer_state_.get(), datagram_direction::ingress, packet);
 
         dispatcher.pending_input.push_back(std::move(packet));

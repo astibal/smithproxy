@@ -132,5 +132,20 @@ public:
         logan_lite log {"proxy.policy"};
 };
 
+namespace sx::policy {
+
+inline bool authorized_snapshot_is_current(
+        std::shared_ptr<PolicyRule> const& authorized,
+        std::shared_ptr<PolicyRule> const& current) {
+    return authorized && authorized == current;
+}
+
+inline bool implicit_pass_is_current(bool implicit_pass,
+                                     bool policy_fail_open) noexcept {
+    return !implicit_pass || policy_fail_open;
+}
+
+}
+
 
 #endif

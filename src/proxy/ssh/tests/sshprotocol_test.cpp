@@ -1,8 +1,36 @@
 #include <gtest/gtest.h>
 
 #include <proxy/ssh/sshprotocol.hpp>
+#include <proxy/ssh/ssh_runtime_detail.hpp>
+#include <proxy/ssh/ssh_channel_budget.hpp>
 
 using namespace sx::ssh;
+
+TEST(SshTransport, RejectsAmbiguousUpstreamPorts) {
+    EXPECT_EQ(detail::parse_port("22"), 22U);
+    EXPECT_EQ(detail::parse_port("65535"), 65535U);
+    EXPECT_FALSE(detail::parse_port("22junk").has_value());
+    EXPECT_FALSE(detail::parse_port(" 22").has_value());
+    EXPECT_FALSE(detail::parse_port("-1").has_value());
+    EXPECT_FALSE(detail::parse_port("0").has_value());
+    EXPECT_FALSE(detail::parse_port("65536").has_value());
+    EXPECT_FALSE(detail::parse_port("").has_value());
+}
+
+TEST(SshTransport, BoundsLifetimeChannelRetention) {
+    using sx::ssh::detail::channel_budget_available;
+    using sx::ssh::detail::maximum_channels_per_session;
+
+    EXPECT_TRUE(channel_budget_available(1, 2, 3, false));
+    EXPECT_TRUE(channel_budget_available(
+        0, maximum_channels_per_session - 1, 0, false));
+    EXPECT_FALSE(channel_budget_available(
+        0, maximum_channels_per_session, 0, false));
+    EXPECT_FALSE(channel_budget_available(
+        1, maximum_channels_per_session, 0, false));
+    EXPECT_FALSE(channel_budget_available(
+        0, maximum_channels_per_session - 1, 0, true));
+}
 
 TEST(SshIdentification, ParsesSsh2ServerBannerIncrementally) {
     identification_parser parser(true);

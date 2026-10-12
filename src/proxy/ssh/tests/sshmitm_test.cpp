@@ -1,10 +1,16 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <algorithm>
+#include <cstdlib>
+#include <filesystem>
+#include <iterator>
+#include <set>
 #include <string>
 #include <utility>
 
 #include <sys/socket.h>
+#include <fcntl.h>
 #include <unistd.h>
 
 #include <libssh/libssh.h>
@@ -13,6 +19,21 @@
 #include <proxy/ssh/sshmitm.hpp>
 
 namespace {
+
+std::set<int> open_descriptors() {
+    std::set<int> result;
+    for (auto const& entry : std::filesystem::directory_iterator("/proc/self/fd")) {
+        auto const name = entry.path().filename().string();
+        char* end = nullptr;
+        auto const value = std::strtol(name.c_str(), &end, 10);
+        if (end != name.c_str() && *end == '\0') result.insert(static_cast<int>(value));
+    }
+    for (auto it = result.begin(); it != result.end();) {
+        if (::fcntl(*it, F_GETFD) < 0) it = result.erase(it);
+        else ++it;
+    }
+    return result;
+}
 
 class socket_pair {
 public:
@@ -40,6 +61,29 @@ private:
 };
 
 } // namespace
+
+TEST(SshMitmTransport, DuplicatedTransportDescriptorsAreCloseOnExec) {
+    socket_pair client;
+    socket_pair server;
+    ASSERT_TRUE(client.valid());
+    ASSERT_TRUE(server.valid());
+
+    auto const before = open_descriptors();
+    auto options = sx::ssh::transport_options{};
+    sx::ssh::mitm_transport transport(std::move(options));
+    ASSERT_TRUE(transport.attach(client.proxy_end(), server.proxy_end()));
+    auto const after = open_descriptors();
+
+    std::vector<int> added;
+    std::set_difference(after.begin(), after.end(), before.begin(), before.end(),
+                        std::back_inserter(added));
+    ASSERT_EQ(added.size(), 2U);
+    for (auto const descriptor : added) {
+        auto const flags = ::fcntl(descriptor, F_GETFD);
+        ASSERT_GE(flags, 0);
+        EXPECT_NE(flags & FD_CLOEXEC, 0);
+    }
+}
 
 TEST(SshMitmTransport, PeeksAndPreservesBothIdentifications) {
     socket_pair client;

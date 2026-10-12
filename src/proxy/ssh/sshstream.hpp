@@ -28,6 +28,7 @@ public:
     [[nodiscard]] std::string_view session_protocol() const noexcept override { return "ssh"; }
     [[nodiscard]] std::uint64_t bytes_up() const noexcept override;
     [[nodiscard]] std::uint64_t bytes_down() const noexcept override;
+    [[nodiscard]] bool write_event_pending(stream_direction direction) const noexcept override;
     [[nodiscard]] std::string state() const override;
     [[nodiscard]] std::string error() const override;
     [[nodiscard]] std::string diagnostics() const override;

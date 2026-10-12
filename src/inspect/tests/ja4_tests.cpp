@@ -132,6 +132,212 @@ TEST(JA4_CH, random_buffers) {
     s.test_random(1000);
 }
 
+TEST(JA4_CH, NonAsciiAlpnBytesAreClassifiedAsUnsigned) {
+    std::vector<uint8_t> hello(4 + 2 + 32, 0);
+    hello[4] = 0x03;
+    hello[5] = 0x03;
+
+    const std::vector<uint8_t> suffix {
+        0x00,                   // session id length
+        0x00, 0x02, 0x13, 0x01, // one cipher suite
+        0x01, 0x00,             // null compression
+        0x00, 0x09,             // extensions length
+        0x00, 0x10, 0x00, 0x05, // ALPN extension
+        0x00, 0x03, 0x02, 0x80, 0x81
+    };
+    hello.insert(hello.end(), suffix.begin(), suffix.end());
+
+    TLSClientHello parsed;
+    ASSERT_EQ(parsed.from_buffer(hello), 0);
+    EXPECT_NE(parsed.ja4_raw().find("81"), std::string::npos);
+}
+
+TEST(JA4_CH, RejectsMalformedTlsExtensionVectors) {
+    auto hello_with_extension = [](uint16_t type,
+                                   std::initializer_list<uint8_t> payload) {
+        std::vector<uint8_t> hello(4 + 2 + 32, 0);
+        hello[4] = 0x03;
+        hello[5] = 0x03;
+        hello.insert(hello.end(), {
+            0x00,                    // session id length
+            0x00, 0x02, 0x13, 0x01, // one cipher suite
+            0x01, 0x00,              // null compression
+            0x00, static_cast<uint8_t>(4 + payload.size()),
+            static_cast<uint8_t>(type >> 8), static_cast<uint8_t>(type),
+            0x00, static_cast<uint8_t>(payload.size()),
+        });
+        hello.insert(hello.end(), payload);
+        return hello;
+    };
+
+    TLSClientHello parsed;
+    EXPECT_NE(parsed.from_buffer(hello_with_extension(
+                  0x0010, {0x00, 0x03, 0x02, 'h', '2', 0xff})), 0);
+    EXPECT_NE(parsed.from_buffer(hello_with_extension(
+                  0x000d, {0x00, 0x02, 0x04, 0x03, 0xff})), 0);
+    EXPECT_NE(parsed.from_buffer(hello_with_extension(
+                  0x0000, {0x00, 0x03, 0x00, 0x00, 0x00})), 0);
+    EXPECT_NE(parsed.from_buffer(hello_with_extension(
+                  0x002b, {0x03, 0x03, 0x04, 0x03})), 0);
+    EXPECT_NE(parsed.from_buffer(hello_with_extension(
+                  0x0033, {0x00, 0x04, 0x00, 0x1d, 0x00, 0x00})), 0);
+
+    auto duplicate = hello_with_extension(0x1234, {});
+    duplicate[46] = 0x08;
+    duplicate.insert(duplicate.end(), {0x12, 0x34, 0x00, 0x00});
+    EXPECT_NE(parsed.from_buffer(duplicate), 0);
+}
+
+TEST(JA4_CH, ReuseDoesNotRetainKeyShareState) {
+    auto hello = [](bool key_share) {
+        std::vector<uint8_t> value(4 + 2 + 32, 0);
+        value[0] = 0x01;
+        value[4] = 0x03;
+        value[5] = 0x03;
+        value.insert(value.end(), {
+            0x00,                    // session id length
+            0x00, 0x02, 0x13, 0x01, // one cipher suite
+            0x01, 0x00,              // null compression
+        });
+        if (key_share) {
+            value.insert(value.end(), {
+                0x00, 0x06,             // extensions length
+                0x00, 0x33, 0x00, 0x02, // empty key-share vector
+                0x00, 0x00,
+            });
+        } else {
+            value.insert(value.end(), {0x00, 0x00});
+        }
+        return value;
+    };
+
+    TLSClientHello parsed;
+    ASSERT_EQ(parsed.from_buffer(hello(true)), 0);
+    EXPECT_TRUE(parsed.have_key_share);
+    ASSERT_EQ(parsed.from_buffer(hello(false)), 0);
+    EXPECT_FALSE(parsed.have_key_share);
+    EXPECT_EQ(parsed.ja4_raw().substr(0, 3), "t12");
+}
+
+TEST(JA4_CH, AcceptsLegacyHelloWithoutExtensions) {
+    std::vector<uint8_t> hello(4 + 2 + 32, 0);
+    hello[0] = 0x01;
+    hello[4] = 0x03;
+    hello[5] = 0x03;
+    hello.insert(hello.end(), {
+        0x00,                    // session id length
+        0x00, 0x02, 0x13, 0x01, // one cipher suite
+        0x01, 0x00,              // null compression, no extensions field
+    });
+
+    TLSClientHello parsed;
+    ASSERT_EQ(parsed.from_buffer(hello), 0);
+    EXPECT_EQ(parsed.ja4_raw().substr(0, 3), "t12");
+}
+
+TEST(JA4_CH, IgnoreSniKeepsFingerprintIndependentOfHostnamePresence) {
+    auto hello = [](bool with_sni) {
+        std::vector<uint8_t> value(4 + 2 + 32, 0);
+        value[0] = 0x01;
+        value[4] = 0x03;
+        value[5] = 0x03;
+        value.insert(value.end(), {
+            0x00,                    // session id length
+            0x00, 0x02, 0x13, 0x01, // one cipher suite
+            0x01, 0x00,              // null compression
+        });
+        if (with_sni) {
+            value.insert(value.end(), {
+                0x00, 0x0a,             // extensions length
+                0x00, 0x00, 0x00, 0x06, // server_name extension
+                0x00, 0x04,             // ServerNameList length
+                0x00, 0x00, 0x01, 'x',  // host_name "x"
+            });
+        } else {
+            value.insert(value.end(), {0x00, 0x00});
+        }
+        return value;
+    };
+
+    TLSClientHello with_sni;
+    with_sni.ignore_sni = true;
+    ASSERT_EQ(with_sni.from_buffer(hello(true)), 0);
+
+    TLSClientHello without_sni;
+    without_sni.ignore_sni = true;
+    ASSERT_EQ(without_sni.from_buffer(hello(false)), 0);
+
+    EXPECT_EQ(with_sni.ja4_raw(), without_sni.ja4_raw());
+    EXPECT_EQ(with_sni.ja4(), without_sni.ja4());
+    EXPECT_EQ(with_sni.ja4_raw()[3], 'i');
+
+    TLSClientHello standard;
+    ASSERT_EQ(standard.from_buffer(hello(true)), 0);
+    EXPECT_EQ(standard.ja4_raw()[3], 'd');
+    EXPECT_NE(standard.ja4_raw(), without_sni.ja4_raw());
+}
+
+TEST(JA4_CH, CountsSniExtensionWithUnknownNameType) {
+    std::vector<uint8_t> hello(4 + 2 + 32, 0);
+    hello[0] = 0x01;
+    hello[4] = 0x03;
+    hello[5] = 0x03;
+    hello.insert(hello.end(), {
+        0x00,                    // session id length
+        0x00, 0x02, 0x13, 0x01, // one cipher suite
+        0x01, 0x00,              // null compression
+        0x00, 0x0a,              // extensions length
+        0x00, 0x00, 0x00, 0x06, // server_name extension
+        0x00, 0x04,              // ServerNameList length
+        0x01, 0x00, 0x01, 'x',  // registered/unknown name type
+    });
+
+    TLSClientHello parsed;
+    ASSERT_EQ(parsed.from_buffer(hello), 0);
+    EXPECT_TRUE(parsed.sni);
+    EXPECT_EQ(parsed.ja4_raw()[3], 'd');
+}
+
+TEST(JA4_CH, UsesSupportedVersionWithoutKeyShare) {
+    std::vector<uint8_t> hello(4 + 2 + 32, 0);
+    hello[0] = 0x01;
+    hello[4] = 0x03;
+    hello[5] = 0x03;
+    hello.insert(hello.end(), {
+        0x00,                    // session id length
+        0x00, 0x02, 0x13, 0x01, // one cipher suite
+        0x01, 0x00,              // null compression
+        0x00, 0x07,              // extensions length
+        0x00, 0x2b, 0x00, 0x03, // supported_versions
+        0x02, 0x03, 0x04,        // TLS 1.3 only
+    });
+
+    TLSClientHello parsed;
+    ASSERT_EQ(parsed.from_buffer(hello), 0);
+    EXPECT_EQ(parsed.ja4_raw().substr(0, 3), "t13");
+}
+
+TEST(JA4_CH, RejectsEmptyCompressionVectorAndTrailingHandshakeBytes) {
+    std::vector<uint8_t> hello(4 + 2 + 32, 0);
+    hello[0] = 0x01;
+    hello[4] = 0x03;
+    hello[5] = 0x03;
+    hello.insert(hello.end(), {
+        0x00,                    // session id length
+        0x00, 0x02, 0x13, 0x01, // one cipher suite
+        0x00,                    // invalid empty compression vector
+        0x00, 0x00,              // empty extensions
+    });
+
+    TLSClientHello parsed;
+    EXPECT_NE(parsed.from_buffer(hello), 0);
+
+    hello[43] = 0x01;
+    hello.insert(hello.begin() + 44, 0x00);
+    hello.push_back(0xff);
+    EXPECT_NE(parsed.from_buffer(hello), 0);
+}
+
 TEST(JA4_CH, sample1_fuzzing) {
     auto s = Samples();
     Samples::DEBUG = false;
@@ -168,6 +374,76 @@ TEST(JA4_SH, sample1) {
         std::cout << " => INCORRECT\n";
     }
     ASSERT_TRUE(my_ja4s == JA4S_1);
+}
+
+TEST(JA4_SH, RejectsMalformedVersionAndKeyShareExtensions) {
+    auto server_hello_with_extension = [](uint16_t type,
+                                          std::initializer_list<uint8_t> payload) {
+        std::vector<uint8_t> hello(4 + 2 + 32, 0);
+        hello[0] = 0x02;
+        hello[4] = 0x03;
+        hello[5] = 0x03;
+        hello.insert(hello.end(), {
+            0x00,              // session id length
+            0x13, 0x01,        // cipher suite
+            0x00,              // null compression
+            0x00, static_cast<uint8_t>(4 + payload.size()),
+            static_cast<uint8_t>(type >> 8), static_cast<uint8_t>(type),
+            0x00, static_cast<uint8_t>(payload.size()),
+        });
+        hello.insert(hello.end(), payload);
+        return hello;
+    };
+
+    TLSServerHello parsed;
+    EXPECT_NE(parsed.from_buffer(server_hello_with_extension(
+                  0x002b, {0x03})), 0);
+    EXPECT_NE(parsed.from_buffer(server_hello_with_extension(
+                  0x0033, {0x00, 0x1d, 0x00, 0x02, 0xaa})), 0);
+
+    auto duplicate = server_hello_with_extension(0x1234, {});
+    duplicate[43] = 0x08;
+    duplicate.insert(duplicate.end(), {0x12, 0x34, 0x00, 0x00});
+    EXPECT_NE(parsed.from_buffer(duplicate), 0);
+
+    auto trailing = server_hello_with_extension(0x1234, {});
+    trailing.push_back(0xff);
+    EXPECT_NE(parsed.from_buffer(trailing), 0);
+}
+
+TEST(JA4_SH, AcceptsLegacyServerHelloWithoutExtensions) {
+    std::vector<uint8_t> hello(4 + 2 + 32, 0);
+    hello[0] = 0x02;
+    hello[4] = 0x03;
+    hello[5] = 0x03;
+    hello.insert(hello.end(), {
+        0x00,       // session id length
+        0xc0, 0x2f, // cipher suite
+        0x00,       // null compression, no extensions field
+    });
+
+    TLSServerHello parsed;
+    ASSERT_EQ(parsed.from_buffer(hello), 0);
+    EXPECT_EQ(parsed.ja4_raw().substr(0, 3), "t12");
+}
+
+TEST(JA4_SH, UsesSelectedSupportedVersionWithoutKeyShare) {
+    std::vector<uint8_t> hello(4 + 2 + 32, 0);
+    hello[0] = 0x02;
+    hello[4] = 0x03;
+    hello[5] = 0x03;
+    hello.insert(hello.end(), {
+        0x00,              // session id length
+        0x13, 0x01,        // cipher suite
+        0x00,              // null compression
+        0x00, 0x06,        // extensions length
+        0x00, 0x2b, 0x00, 0x02,
+        0x03, 0x04,        // selected TLS 1.3
+    });
+
+    TLSServerHello parsed;
+    ASSERT_EQ(parsed.from_buffer(hello), 0);
+    EXPECT_EQ(parsed.ja4_raw().substr(0, 3), "t13");
 }
 
 TEST(JA4_SH, sample1_fuzzing) {

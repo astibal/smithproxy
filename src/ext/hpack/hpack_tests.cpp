@@ -516,11 +516,12 @@ TEST(HPack, RejectsMissingLiteralValue) {
     EXPECT_THROW(decoder.decode(data), std::invalid_argument);
 }
 
-TEST(HPack, AcceptsEmptyLiteralNameAndValue) {
+TEST(HPack, RejectsEmptyLiteralName) {
     std::vector<uint8_t> data{0x00, 0x00, 0x00};
     HPACK::decoder_t decoder;
 
-    EXPECT_TRUE(decoder.decode(data));
+    EXPECT_FALSE(decoder.decode(data));
+    EXPECT_EQ(decoder.failure(), HPACK::decoder_t::failure_t::header_semantics);
 }
 
 TEST(HPack, RejectsMalformedGeneratedHeaderBlock) {
@@ -591,6 +592,26 @@ TEST(HPack, DecoderMaintainsDynamicTableAcrossHeaderBlocks) {
     EXPECT_EQ(decoder.headers().at("x").back(), "y");
 }
 
+TEST(HPack, CopiedDecoderOwnsAnIndependentHuffmanTree) {
+    HPACK::encoder_t encoder;
+    encoder.add("x-copy-state", "value", false);
+    auto first = encoder.data();
+
+    HPACK::decoder_t original;
+    ASSERT_TRUE(original.decode(first));
+    HPACK::decoder_t copied(original);
+
+    const auto previous_size = encoder.data().size();
+    encoder.add("x-copy-state", "value", false);
+    std::vector<uint8_t> indexed(encoder.data().begin() + previous_size,
+                                 encoder.data().end());
+    auto indexed_copy = indexed;
+    ASSERT_TRUE(original.decode(indexed));
+    ASSERT_TRUE(copied.decode(indexed_copy));
+    EXPECT_EQ(original.headers().at("x-copy-state").back(), "value");
+    EXPECT_EQ(copied.headers().at("x-copy-state").back(), "value");
+}
+
 TEST(HPack, FailedBlockDoesNotPartiallyChangeConnectionTable) {
     HPACK::decoder_t decoder;
     std::vector<uint8_t> literal{0x40, 0x01, 'x', 0x01, 'y'};
@@ -622,10 +643,10 @@ TEST(HPack, DecoderRejectsInvalidIndexesAndTableUpdates) {
 }
 
 TEST(HPack, DecoderDoesNotSilentlyTruncateLargeHeaderBlocks) {
-    std::vector<uint8_t> data(101, 0x82); // indexed :method GET
+    std::vector<uint8_t> data(101, 0x8f); // indexed accept-charset
     HPACK::decoder_t decoder;
     ASSERT_TRUE(decoder.decode(data));
-    ASSERT_EQ(decoder.headers().at(":method").size(), 101u);
+    ASSERT_EQ(decoder.headers().at("accept-charset").size(), 101u);
 }
 
 TEST(HPack, HuffmanRoundTripsOctetsAndRejectsEosAndLongPadding) {
@@ -688,11 +709,15 @@ TEST(HPack, PublicOverloadsAndRingLookupRespectBoundaries) {
     EXPECT_EQ(table.at(0).first, "name");
     EXPECT_EQ(table.at(HPACK::predefined_headers.size()).first, "name");
     EXPECT_THROW(table.at(HPACK::predefined_headers.size() - 1), std::invalid_argument);
+    EXPECT_THROW(table.at(1), std::invalid_argument);
+    EXPECT_THROW(table.at(HPACK::predefined_headers.size() + 1), std::invalid_argument);
     EXPECT_THROW(table.at(HPACK::predefined_headers.size() + 2), std::invalid_argument);
     EXPECT_EQ(table.get_header(9999), nullptr);
     EXPECT_THROW(table.add("name", nullptr), std::runtime_error);
     table.max(0);
     EXPECT_EQ(table.entries_count(), 0u);
+    EXPECT_THROW(table.at(0), std::invalid_argument);
+    EXPECT_THROW(table.at(HPACK::predefined_headers.size()), std::invalid_argument);
 
     HPACK::huffman_encoder_t huffman;
     std::vector<uint8_t> octets{'o', 'k'};

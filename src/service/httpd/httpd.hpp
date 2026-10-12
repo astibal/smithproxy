@@ -198,6 +198,16 @@ struct HttpSessions {
         return !api_keys.empty();
     }
 
+    static bool api_header_allowed() {
+        auto lc_ = std::scoped_lock(lock);
+        return allow_api_header;
+    }
+
+    static bool pam_login_enabled() {
+        auto lc_ = std::scoped_lock(lock);
+        return pam_login;
+    }
+
     static std::set<std::string> api_keys_snapshot() {
         auto lc_ = std::scoped_lock(lock);
         return api_keys;
@@ -234,7 +244,7 @@ struct HttpSessions {
     }
 };
 
-std::thread* create_httpd_thread(unsigned short port);
+std::thread* create_httpd_thread(unsigned short port, int listener_fd = -1);
 
 struct Http_JsonResponseParams : public lmh::ResponseParams {
     nlohmann::json response;

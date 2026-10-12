@@ -45,6 +45,7 @@
 #include <cstdio>
 #include <ctime>
 #include <memory>
+#include <sstream>
 #include <pwd.h>
 #include <sys/ioctl.h>
 #include <linux/sockios.h>
@@ -61,6 +62,11 @@
 #include <service/httpd/httpd.hpp>
 #include <service/cfgapi/cfgapi.hpp>
 #include <service/tpool.hpp>
+#include <service/gre_broker.hpp>
+#include <service/cli/cli_broker.hpp>
+#include <service/api/api_broker.hpp>
+#include <service/webhook/webhook_broker.hpp>
+#include <service/http/async_request.hpp>
 #include <inspect/engine/http.hpp>
 
 
@@ -1075,7 +1081,7 @@ int cli_diag_writer_stats(DiagCli *cli, const char *command, char *argv[], int a
     return CLI_OK;
 }
 
-int cli_diag_priv_stats(DiagCli* cli, const char* command, char* argv[], int argc) {
+int cli_diag_sys_priv_stats(DiagCli* cli, const char* command, char* argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
 
     const uid_t uid = ::geteuid();
@@ -1128,6 +1134,116 @@ int cli_diag_priv_stats(DiagCli* cli, const char* command, char* argv[], int arg
               static_cast<unsigned long long>(stats.transport_errors),
               static_cast<unsigned long long>(stats.drains),
               static_cast<unsigned long long>(stats.max_ops_per_drain));
+    return CLI_OK;
+}
+
+int cli_diag_sys_gre_stats(DiagCli* cli, const char* command,
+                           char* argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+    using sx::comm::gre::Mode;
+    const auto mode = sx::comm::gre::mode();
+    const auto local = sx::comm::gre::stats();
+    const char* mode_name = mode == Mode::internal ? "internal"
+        : mode == Mode::external ? "external" : "disabled";
+    std::ostringstream output;
+    output << "GRE communication worker:\n"
+           << "  mode: " << mode_name << "\n";
+    if(mode == Mode::internal) output << "  pid: " << sx::comm::gre::owned_broker_pid() << "\n";
+    if(mode == Mode::external) output << "  socket: " << sx::comm::gre::external_path() << "\n";
+    output << "  connected: " << (local.connected ? "yes" : "no") << "\n"
+           << "  submitted: " << local.submitted << "\n"
+           << "  dropped: " << local.dropped << "\n"
+           << "  reconnects: " << local.reconnects;
+
+    if(mode == Mode::disabled) {
+        cli_print(cli, "%s", output.str().c_str());
+        return CLI_OK;
+    }
+
+    sx::comm::gre::Stats broker;
+    if(sx::comm::gre::broker_stats(broker) != 0) {
+        const int saved_errno = errno;
+        output << "\nGRE broker stats unavailable: " << string_error(saved_errno);
+        cli_print(cli, "%s", output.str().c_str());
+        return CLI_ERROR;
+    }
+    output << "\nGRE broker:\n"
+           << "  received: " << broker.received << "\n"
+           << "  exported: " << broker.exported << "\n"
+           << "  errors: " << broker.errors;
+    cli_print(cli, "%s", output.str().c_str());
+    return CLI_OK;
+}
+
+void append_stream_broker_stats(std::ostringstream& output,
+                                const sx::comm::stream::Stats& stats) {
+    output << "  accepted: " << stats.accepted << "\n"
+           << "  rejected: " << stats.rejected << "\n"
+           << "  core connect errors: " << stats.core_connect_errors << "\n"
+           << "  active: " << stats.active << "\n"
+           << "  peak active: " << stats.peak_active << "\n"
+           << "  completed: " << stats.completed << "\n"
+           << "  relay errors: " << stats.relay_errors << "\n"
+           << "  bytes to core: " << stats.bytes_to_core << "\n"
+           << "  bytes from core: " << stats.bytes_from_core;
+}
+
+int cli_diag_sys_cli_stats(DiagCli* cli, const char* command,
+                           char* argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+    const bool external = sx::comm::cli::uses_external_broker();
+    std::ostringstream output;
+    output << "CLI communication worker:\n"
+           << "  mode: " << (external ? "external" : "internal") << "\n";
+    if(external) {
+        output << "  socket: " << sx::comm::cli::external_path()
+               << "\n  broker stats: unavailable (external process)";
+    } else {
+        output << "  pid: " << sx::comm::cli::internal_broker_pid() << "\n";
+        append_stream_broker_stats(output, sx::comm::cli::stats());
+    }
+    cli_print(cli, "%s", output.str().c_str());
+    return CLI_OK;
+}
+
+int cli_diag_sys_api_stats(DiagCli* cli, const char* command,
+                           char* argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+    const bool external = sx::comm::api::uses_external_broker();
+    const auto pid = sx::comm::api::internal_broker_pid();
+    std::ostringstream output;
+    output << "API communication worker:\n";
+    if(external) {
+        output << "  mode: external\n"
+               << "  socket: " << sx::comm::api::external_path()
+               << "\n  broker stats: unavailable (external process)";
+    } else if(pid > 0) {
+        output << "  mode: internal\n  pid: " << pid << "\n";
+        append_stream_broker_stats(output, sx::comm::api::stats());
+    } else {
+        output << "  mode: disabled";
+    }
+    cli_print(cli, "%s", output.str().c_str());
+    return CLI_OK;
+}
+
+int cli_diag_sys_webhook_stats(DiagCli* cli, const char* command,
+                               char* argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+    std::ostringstream output;
+    output << "Webhook communication worker:\n";
+    if(sx::comm::webhook::enabled()) {
+        output << "  mode: external\n"
+               << "  socket: " << sx::comm::webhook::transport_path() << "\n"
+               << "  broker stats: unavailable (external process)\n";
+    } else {
+        output << "  mode: direct\n";
+    }
+    output << "  pending requests: "
+           << sx::http::AsyncRequest::pending_requests.load(std::memory_order_relaxed) << "\n"
+           << "  dropped requests: "
+           << sx::http::AsyncRequest::dropped_requests.load(std::memory_order_relaxed);
+    cli_print(cli, "%s", output.str().c_str());
     return CLI_OK;
 }
 
@@ -2431,7 +2547,7 @@ int cli_diag_worker_pool_list(DiagCli *cli, const char *command, char *argv[], i
                     if(not info.is_finished[i] or (info.is_finished[i] and verbosity >iDEB))
                     ss << "\n[#" << i << (info.is_finished[i] ? " (finished)" : " (running)") << "]: " << s << "\n";
 
-                    if(not info.is_finished[i] or verbosity > iDEB) {
+                    if(info.is_finished[i] and verbosity > iDEB) {
                         auto lb = info.log_buffer[i].str();
                         if(not lb.empty()) {
                             ss << "[#"  << i << " (log)] \n";
@@ -2660,10 +2776,18 @@ void register_diags(libcli2::Cli& native) {
     auto* cli = &registry;
     auto* diag = diag_register_command(cli, nullptr, "diag", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC,
                                       "diagnose commands helping to troubleshoot");
-    auto diag_priv = diag_register_command(cli, diag, "priv", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC,
-                                           "privileged helper diagnostics");
-    diag_register_command(cli, diag_priv, "stats", cli_diag_priv_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC,
-                          "display effective identity and privileged helper statistics");
+    auto diag_sys = diag_register_command(cli, diag, "sys", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC,
+                                          "system service diagnostics");
+        auto diag_sys_priv = diag_register_command(cli, diag_sys, "priv", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "privileged helper diagnostics");
+            diag_register_command(cli, diag_sys_priv, "stats", cli_diag_sys_priv_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display effective identity and privileged helper statistics");
+        auto diag_sys_gre = diag_register_command(cli, diag_sys, "gre", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "GRE communication broker diagnostics");
+            diag_register_command(cli, diag_sys_gre, "stats", cli_diag_sys_gre_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display GRE transport and broker statistics");
+        auto diag_sys_cli = diag_register_command(cli, diag_sys, "cli", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "CLI communication broker diagnostics");
+            diag_register_command(cli, diag_sys_cli, "stats", cli_diag_sys_cli_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display CLI broker statistics");
+        auto diag_sys_api = diag_register_command(cli, diag_sys, "api", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "API communication broker diagnostics");
+            diag_register_command(cli, diag_sys_api, "stats", cli_diag_sys_api_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display API broker statistics");
+        auto diag_sys_webhook = diag_register_command(cli, diag_sys, "webhook", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "webhook communication broker diagnostics");
+            diag_register_command(cli, diag_sys_webhook, "stats", cli_diag_sys_webhook_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display webhook transport statistics");
     auto diag_ssl = diag_register_command(cli, diag, "tls", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "ssl related troubleshooting commands");
     auto diag_ssl_cache = diag_register_command(cli, diag_ssl, "cache", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl certificate cache");
     diag_register_command(cli, diag_ssl_cache, "stats", cli_diag_ssl_cache_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "display ssl cert cache statistics");
@@ -2703,9 +2827,6 @@ void register_diags(libcli2::Cli& native) {
             diag_register_command(cli, diag_workers_proxy, "list", cli_diag_worker_proxy_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,  "list worker threads");
         auto diag_workers_pool = diag_register_command(cli, diag_workers, "pool", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "misc task worker and threads diagnostics");
             diag_register_command(cli, diag_workers_pool, "list", cli_diag_worker_pool_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,  "list misc pool worker threads");
-
-
-
 #ifndef USE_OPENSSL11
         auto diag_ssl_memcheck = diag_register_command(cli, diag_ssl, "memcheck", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose openssl memcheck");
             diag_register_command(cli, diag_ssl_memcheck, "list", cli_diag_ssl_memcheck_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "print out OpenSSL memcheck status");

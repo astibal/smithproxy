@@ -17,6 +17,17 @@
 
 namespace sx::quic {
 
+namespace detail {
+/** Internal guard against allocator reuse of a borrowed OpenSSL handle. */
+bool same_certificate_callback_identity(std::string const& staged_server_name,
+                                        std::uint64_t staged_generation,
+                                        std::string const& current_server_name,
+                                        std::uint64_t current_generation);
+/** True only when callback re-entry still belongs to the same live QUIC tuple. */
+bool same_dispatcher_callback_association(std::uint64_t staged_association,
+                                          std::uint64_t current_association);
+}
+
 using flow_proxy_factory = std::function<std::unique_ptr<multiflow::flow_proxy>(
     std::shared_ptr<multiflow::connection>, std::shared_ptr<multiflow::connection>,
     multiflow::proxy_limits, multiflow::flow_proxy_context)>;
@@ -208,6 +219,7 @@ private:
         datagram_endpoint client;
         datagram_endpoint destination;
         std::string server_name;
+        std::uint64_t callback_generation = 0;
         std::chrono::steady_clock::time_point created = std::chrono::steady_clock::now();
     };
     std::map<SSL*, staged_upstream> staged_upstreams_; ///< Key is borrowed downstream SSL.
@@ -221,6 +233,8 @@ private:
         std::future<verified_certificate> result;
         datagram_endpoint client;
         datagram_endpoint destination;
+        std::string server_name;
+        std::uint64_t callback_generation = 0;
         std::chrono::steady_clock::time_point created = std::chrono::steady_clock::now();
     };
     std::map<SSL*, certificate_job> certificate_jobs_; ///< Bounded pending verifications.
@@ -233,9 +247,11 @@ private:
     std::map<std::uint64_t, std::weak_ptr<sx::session_traffic_log>> capture_routes_;
     struct dispatcher_binding {
         std::uint64_t association = 0;
+        std::uint64_t generation = 0;
         std::chrono::steady_clock::time_point updated = std::chrono::steady_clock::now();
     };
     std::map<SSL*, dispatcher_binding> dispatcher_bindings_; ///< ClientHello until accept.
+    std::uint64_t next_dispatcher_binding_generation_ = 1;
 
     /** Transfer certificate-worker results to the matching accepted session. */
     void attach_staged_upstream(session& value);

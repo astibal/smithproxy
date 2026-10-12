@@ -39,13 +39,17 @@
 
 #include <arpa/inet.h>
 #include <openssl/rand.h>
+#include <algorithm>
 #include <cctype>
+#include <fcntl.h>
+#include <unordered_set>
 #include <unistd.h>
 
 #include <epoll.hpp>
 #include <socketinfo.hpp>
 #include <privileged_socket.hpp>
 #include <inspect/dns.hpp>
+#include <inspect/dns_socket_io.hpp>
 #include <log/logger.hpp>
 
 
@@ -90,35 +94,75 @@ unsigned int DNSFactory::skip_qname(const unsigned char* ptr, unsigned long maxl
 }
 
 
-std::string DNSFactory::construct_qname(const unsigned char* qname_start, const unsigned char* packet_start, size_t packet_size, unsigned int loopmax) {
+namespace {
+
+void append_dns_presentation_label(std::string& output,
+                                   const unsigned char* label,
+                                   std::size_t size) {
+    for(std::size_t index = 0; index < size; ++index) {
+        const auto ch = label[index];
+        if(ch == '.' || ch == '\\') {
+            output.push_back('\\');
+            output.push_back(static_cast<char>(ch));
+        } else if(ch >= 0x21U && ch <= 0x7eU) {
+            output.push_back(static_cast<char>(ch));
+        } else {
+            // DNS labels are arbitrary octets.  Keep their textual identity
+            // injective instead of letting controls/NUL truncate consumers or
+            // making an octet dot indistinguishable from a label separator.
+            output.push_back('\\');
+            output.push_back(static_cast<char>('0' + ch / 100U));
+            output.push_back(static_cast<char>('0' + (ch / 10U) % 10U));
+            output.push_back(static_cast<char>('0' + ch % 10U));
+        }
+    }
+}
+
+std::optional<std::string> decode_qname(const unsigned char* qname_start,
+                                        const unsigned char* packet_start,
+                                        size_t packet_size,
+                                        unsigned int loopmax) {
     if(qname_start == nullptr || packet_start == nullptr || packet_size == 0 || loopmax == 0 ||
-       qname_start < packet_start || qname_start >= packet_start + packet_size) return {};
+       qname_start < packet_start || qname_start >= packet_start + packet_size) return std::nullopt;
 
     std::string result;
     size_t pos = static_cast<size_t>(qname_start - packet_start);
+    size_t expanded_wire_size = 0;
+    std::unordered_set<size_t> visited;
 
     for(unsigned int steps = 0; steps < loopmax; ++steps) {
-        if(pos >= packet_size) return {};
+        if(pos >= packet_size || !visited.insert(pos).second) return std::nullopt;
         const uint8_t label_len = packet_start[pos];
 
-        if(label_len == 0) return result;
+        if(label_len == 0) {
+            if(++expanded_wire_size > 255) return std::nullopt;
+            return result;
+        }
 
         if((label_len & 0xc0U) == 0xc0U) {
-            if(pos + 1 >= packet_size) return {};
+            if(pos + 1 >= packet_size) return std::nullopt;
             const size_t target = (static_cast<size_t>(label_len & 0x3fU) << 8U) |
                                   packet_start[pos + 1];
-            if(target >= packet_size) return {};
+            if(target >= packet_size) return std::nullopt;
             pos = target;
             continue;
         }
 
-        if((label_len & 0xc0U) != 0 || label_len > 63 || pos + 1 + label_len >= packet_size) return {};
+        if((label_len & 0xc0U) != 0 || label_len > 63 || pos + 1 + label_len >= packet_size ||
+           expanded_wire_size + 1 + label_len > 254) return std::nullopt;
+        expanded_wire_size += 1 + label_len;
         if(!result.empty()) result.push_back('.');
-        result.append(reinterpret_cast<const char*>(packet_start + pos + 1), label_len);
+        append_dns_presentation_label(result, packet_start + pos + 1, label_len);
         pos += 1 + label_len;
     }
 
-    return {};
+    return std::nullopt;
+}
+
+} // namespace
+
+std::string DNSFactory::construct_qname(const unsigned char* qname_start, const unsigned char* packet_start, size_t packet_size, unsigned int loopmax) {
+    return decode_qname(qname_start, packet_start, packet_size, loopmax).value_or(std::string{});
 }
 
 std::size_t DNSFactory::generate_dns_request(unsigned short id, buffer& b, std::string const& h, DNS_Record_Type t) {
@@ -259,7 +303,7 @@ std::pair<DNS_Response *, ssize_t> DNSFactory::recv_dns_response(
     DNS_Response *ret = nullptr;
     ssize_t l = 0;
 
-    if(send_socket <= 0) {
+    if(send_socket < 0) {
 
         // return negative response immediately
         return { nullptr, -1 };
@@ -279,8 +323,15 @@ std::pair<DNS_Response *, ssize_t> DNSFactory::recv_dns_response(
 
     // e.wait returns number of successful elements from which we added
     if(poll_result >= 1) {
-        buffer recv_buffer(1500);
-        l = ::recv(send_socket, recv_buffer.data(), recv_buffer.capacity(), timeout_sec > 0 ? 0 : MSG_DONTWAIT);
+        // EDNS permits replies well above the Ethernet MTU. recv() truncates
+        // a datagram irreversibly when the supplied buffer is short, so keep
+        // enough space for the complete UDP payload and let the DNS parser
+        // enforce its own structural bounds.
+        buffer recv_buffer(65536);
+        l = sx::dns::io_detail::retry_on_eintr([&] {
+            return ::recv(send_socket, recv_buffer.data(), recv_buffer.capacity(),
+                          timeout_sec > 0 ? 0 : MSG_DONTWAIT);
+        });
         _deb("recv_dns_response(%d,%u): recv() returned %zd", send_socket, timeout_sec, l);
 
         _deb("buffer: ptr=%p, size=%zu, capacity=%zu",
@@ -298,7 +349,7 @@ std::pair<DNS_Response *, ssize_t> DNSFactory::recv_dns_response(
             _dia("parsed %zu bytes", parsed.value_or(0));
             _dia("DNS response: \n %s", resp->to_string(iINF).c_str());
 
-            if(not parsed) {
+            if(not parsed || *parsed != recv_buffer.size()) {
                 _err("discarding malformed DNS response");
                 delete resp;
             } else if (!(resp->flags() & 0x8000U)) {
@@ -351,7 +402,7 @@ DNS_Response* DNSFactory::resolve_dns_s (std::string const& hostname, DNS_Record
     const int send_socket = send_dns_request(hostname, t, nameserver, &request_id);
     auto resp = recv_dns_response(send_socket, timeout_s, request_id, hostname, t);
 
-    if(send_socket > 0) {
+    if(send_socket >= 0) {
         ::close(send_socket);
     }
     return resp.first;
@@ -364,11 +415,21 @@ DNS_Response* DNSFactory::resolve_dns_s (std::string const& hostname, DNS_Record
  */
 std::optional<size_t> DNS_Packet::load(const buffer *src) {
 
+    if(!src) return std::nullopt;
+
+    // A packet object is reusable. Never merge a new wire transaction with
+    // semantic or TTL-offset state retained by an earlier load().
+    id_ = flags_ = questions_ = answers_ = authorities_ = additionals_ = 0;
+    questions_list_.clear();
+    answers_list_.clear();
+    authorities_list_.clear();
+    additionals_list_.clear();
+    answer_ttl_idx.clear();
     loaded_at = ::time(nullptr);
 
     try {
 
-        if (src->size() > DNS_HEADER_SZ) {
+        if (src->size() >= DNS_HEADER_SZ) {
             id_ = ntohs(src->get_at<unsigned short>(0));
             flags_ = ntohs(src->get_at<unsigned short>(2));
             questions_ = ntohs(src->get_at<unsigned short>(4));
@@ -489,7 +550,9 @@ std::optional<size_t> DNS_Packet::load(const buffer *src) {
                 for (unsigned int i = mem_counter; i < src->size() && answers_togo > 0;) {
                     DNS_Answer answer_temp;
                     const auto qname_len = DNSFactory::get().skip_qname(src->data() + i, src->size() - i);
-                    if(qname_len == 0) {
+                    const auto qname = decode_qname(
+                        src->data() + i, src->data(), src->size(), 128);
+                    if(qname_len == 0 || !qname) {
                         failure = true;
                         break;
                     }
@@ -499,7 +562,7 @@ std::optional<size_t> DNS_Packet::load(const buffer *src) {
                         break;
                     }
 
-                    answer_temp.qname_ = DNSFactory::get().construct_qname(src->data() + i, src->data(), src->size());
+                    answer_temp.qname_ = *qname;
                     answer_temp.type_ = ntohs(src->get_at<unsigned short>(fields));
                     answer_temp.class_ = ntohs(src->get_at<unsigned short>(fields + 2));
                     answer_ttl_idx.push_back(fields + 4);
@@ -507,8 +570,22 @@ std::optional<size_t> DNS_Packet::load(const buffer *src) {
                     answer_temp.datalen_ = ntohs(src->get_at<uint16_t>(fields + 8));
                     const size_t record_end = fields + 10 + answer_temp.datalen_;
                     if (record_end <= src->size()) {
-                        if(answer_temp.datalen_ > 0)
+                        if(answer_temp.datalen_ > 0) {
                             answer_temp.data_.append(src->view(fields + 10, answer_temp.datalen_));
+                            if(answer_temp.type_ == CNAME) {
+                                const auto cname_encoded = DNSFactory::get().skip_qname(
+                                    src->data() + fields + 10,
+                                    answer_temp.datalen_);
+                                const auto cname = decode_qname(
+                                    src->data() + fields + 10,
+                                    src->data(), src->size(), 128);
+                                if(cname_encoded != answer_temp.datalen_ || !cname) {
+                                    failure = true;
+                                    break;
+                                }
+                                answer_temp.rdata_name_ = *cname;
+                            }
+                        }
                     } else {
                         _err("DNS_Packet::load: answer[%d]: malformed packet: data boundary check failed", answers_togo);
                         failure = true;
@@ -535,8 +612,10 @@ std::optional<size_t> DNS_Packet::load(const buffer *src) {
                     DNS_Answer answer_temp;
 
                     auto xi = DNSFactory::get().skip_qname(src->data() + i, src->size() - i);
+                    auto qname = decode_qname(
+                        src->data() + i, src->data(), src->size(), 128);
 
-                    if(xi == 0) {
+                    if(xi == 0 || !qname) {
                         failure = true;
                         break;
                     }
@@ -549,7 +628,7 @@ std::optional<size_t> DNS_Packet::load(const buffer *src) {
 
                     if (pre_type == SOA or pre_type == NS) {
                         //answer_temp.name_ = ntohs(src->get_at<unsigned short>(i));
-                        answer_temp.qname_ = DNSFactory::get().construct_qname(src->data() + mem_counter, src->data(), src->size());
+                        answer_temp.qname_ = *qname;
                         answer_temp.type_ = pre_type;//ntohs(src->get_at<unsigned short>(i+1));
                         answer_temp.class_ = ntohs(src->get_at<unsigned short>(i));
                         answer_temp.ttl_ = ntohl(src->get_at<uint32_t>(i + 2));
@@ -597,8 +676,10 @@ std::optional<size_t> DNS_Packet::load(const buffer *src) {
 
 
                     auto xi = DNSFactory::get().skip_qname(src->data() + i, src->size() - i);
+                    auto qname = decode_qname(
+                        src->data() + i, src->data(), src->size(), 128);
 
-                    if(xi == 0) {
+                    if(xi == 0 || !qname) {
                         failure = true;
                         break;
                     }
@@ -634,10 +715,6 @@ std::optional<size_t> DNS_Packet::load(const buffer *src) {
 
                             if (answer_temp.datalen_ > 0 and i + answer_temp.datalen_ <= src->size()) {
                                 answer_temp.data_.append(src->view(i, answer_temp.datalen_));
-
-                                auto option_type = ntohs(src->get_at<uint16_t>(i+2));
-                                auto option_len = ntohs(src->get_at<uint16_t>(i+4));
-
                                 i += answer_temp.datalen_;
                             }
 
@@ -660,7 +737,7 @@ std::optional<size_t> DNS_Packet::load(const buffer *src) {
                         //answer_temp.name_ = ntohs(src->get_at<unsigned short>(i));
 
                         // i is shifted already, use memcounter
-                        answer_temp.qname_ = DNSFactory::get().construct_qname(src->data() + mem_counter, src->data(), src->size());
+                        answer_temp.qname_ = *qname;
 
                         answer_temp.type_ = pre_type;
                         answer_temp.class_ = ntohs(src->get_at<unsigned short>(i));
@@ -796,10 +873,52 @@ std::string DNS_Packet::answer_hex_dump() const {
 std::vector<std::unique_ptr<CidrAddress>> DNS_Packet::get_a_anwsers() const {
     std::vector<std::unique_ptr<CidrAddress>> ret;
 
-    for(auto const& x: answers_list_) {
-        if(x.type_ == A || x.type_ == AAAA) {
-            ret.emplace_back(std::make_unique<CidrAddress>(x.cidr()));
+    // Address policy and the shared cache represent Internet-class DNS only.
+    // The compact cache key does not carry QCLASS, so accepting another
+    // class here would alias distinct DNS namespaces.
+    if(questions_list_.empty() || questions_list_.front().rec_class != 1)
+        return ret;
+    auto normalize = [](std::string_view value) {
+        while(!value.empty() && value.back() == '.') value.remove_suffix(1);
+        std::string result(value);
+        std::transform(result.begin(), result.end(), result.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return result;
+    };
+    const auto now = time(nullptr);
+    auto is_live = [this, now](DNS_Answer const& answer) {
+        if(answer.ttl_ == 0) return false;
+        if(now < loaded_at) return true;
+        return static_cast<std::uint64_t>(now - loaded_at) < answer.ttl_;
+    };
+
+    std::unordered_set<std::string> permitted_names;
+    permitted_names.insert(normalize(questions_list_.front().rec_str));
+    // Resolve only CNAME edges rooted in the actual question. Iterate to a
+    // fixed point so wire ordering cannot make an unrelated address trusted.
+    for(std::size_t pass = 0; pass < answers_list_.size(); ++pass) {
+        bool changed = false;
+        for(auto const& answer: answers_list_) {
+            if(answer.class_ != 1 || answer.type_ != CNAME || !is_live(answer) ||
+               answer.rdata_name_.empty() ||
+               permitted_names.count(normalize(answer.qname_)) == 0) {
+                continue;
+            }
+            changed |= permitted_names.insert(normalize(answer.rdata_name_)).second;
         }
+        if(!changed) break;
+    }
+
+    const auto requested_type = questions_list_.front().rec_type;
+    for(auto const& answer: answers_list_) {
+        if(answer.class_ != 1 || answer.type_ != requested_type ||
+           !is_live(answer) ||
+           (answer.type_ != A && answer.type_ != AAAA) ||
+           permitted_names.count(normalize(answer.qname_)) == 0) {
+            continue;
+        }
+        if(auto* address = answer.cidr(); address)
+            ret.emplace_back(std::make_unique<CidrAddress>(address));
     }
 
     return ret;
