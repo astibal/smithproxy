@@ -1321,6 +1321,22 @@ namespace sx::engine::http {
 
                 // end of preamble
 
+                auto& first_seen = side == side_t::LEFT
+                    ? connection->left_first_frame_seen
+                    : connection->right_first_frame_seen;
+                auto& first_is_settings = side == side_t::LEFT
+                    ? connection->left_first_frame_is_settings
+                    : connection->right_first_frame_is_settings;
+                if(!first_seen) {
+                    first_seen = true;
+                    first_is_settings = typ == 4 && (flg & 0x01U) == 0;
+                }
+                if(connection->client_preface_complete && !first_is_settings) {
+                    _err("Frame: first HTTP/2 frame is not non-ACK SETTINGS");
+                    connection->connection_invalid = true;
+                    return preamble_sz + frame_sz;
+                }
+
                 // These frame-shape violations are connection errors. Do not
                 // let later bytes regain HTTP semantics after mandatory close.
                 const bool invalid_frame_shape =

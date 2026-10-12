@@ -882,6 +882,71 @@ TEST(HTTP2, ClientPrefaceValidationHasNoFlowBlockCutoff) {
               "/many-blocks");
 }
 
+TEST(HTTP2, RequiresNonAckSettingsAsEachEndpointsFirstFrame) {
+    auto frame = [](uint8_t type, uint8_t flags, uint32_t stream,
+                    std::vector<uint8_t> const& payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), type, flags,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        return bytes;
+    };
+    auto feed_preface = [](sx::engine::EngineCtx& ctx,
+                           std::vector<uint8_t> const& tail) {
+        std::vector<unsigned char> bytes(
+            reinterpret_cast<unsigned char const*>(v2::txt::magic),
+            reinterpret_cast<unsigned char const*>(v2::txt::magic) +
+                v2::txt::magic_sz);
+        bytes.insert(bytes.end(), tail.begin(), tail.end());
+        buffer input;
+        input.assign(bytes.data(), bytes.size());
+        v2::process_client_prefaced_bytes(ctx, input);
+    };
+
+    const auto settings = frame(4, 0, 0, {});
+    const auto settings_ack = frame(4, 1, 0, {});
+    const auto ping = frame(6, 0, 0, std::vector<uint8_t>(8, 0x2a));
+
+    sx::engine::EngineCtx client_ping_first;
+    feed_preface(client_ping_first, ping);
+    auto* state = std::any_cast<v2::Http2Connection>(
+        &client_ping_first.state_data);
+    ASSERT_NE(state, nullptr);
+    EXPECT_TRUE(state->connection_invalid);
+
+    sx::engine::EngineCtx client_ack_first;
+    feed_preface(client_ack_first, settings_ack);
+    state = std::any_cast<v2::Http2Connection>(&client_ack_first.state_data);
+    ASSERT_NE(state, nullptr);
+    EXPECT_TRUE(state->connection_invalid);
+
+    sx::engine::EngineCtx server_ping_first;
+    buffer server_ping;
+    server_ping.assign(ping.data(), ping.size());
+    v2::process_directional_bytes(
+        server_ping_first, socle::side_t::RIGHT, server_ping);
+    feed_preface(server_ping_first, settings);
+    state = std::any_cast<v2::Http2Connection>(&server_ping_first.state_data);
+    ASSERT_NE(state, nullptr);
+    EXPECT_TRUE(state->connection_invalid);
+
+    sx::engine::EngineCtx valid;
+    buffer server_settings;
+    server_settings.assign(settings.data(), settings.size());
+    v2::process_directional_bytes(
+        valid, socle::side_t::RIGHT, server_settings);
+    feed_preface(valid, settings);
+    state = std::any_cast<v2::Http2Connection>(&valid.state_data);
+    ASSERT_NE(state, nullptr);
+    EXPECT_FALSE(state->connection_invalid);
+}
+
 TEST(HTTP2, DecodesHpackHeadersWithoutRequiringAttachedOrigin) {
     sx::engine::EngineCtx ctx;
     ctx.state_data = std::make_any<v2::Http2Connection>();
