@@ -946,8 +946,32 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
     if(auto* right = first_right(); right != nullptr) {
         if(auto* tls = dynamic_cast<SSLCom*>(right->com()); tls != nullptr) {
             if(auto const& sni = tls->get_sni(); !sni.empty()) {
-                j["info"]["sni"] = sni;
+                j["info"]["flow.tls.sni"] = sni;
             }
+        }
+    }
+    if(auto const* left = first_left(); left != nullptr) {
+        auto const app = std::dynamic_pointer_cast<sx::engine::http::app_HttpRequest>(
+            left->engine_ctx.application_data);
+        if(app && app->populated()) {
+            auto const http2 = app->version == sx::engine::http::app_HttpRequest::HTTP_VER::HTTP2;
+            auto const prefix = http2 ? "flow.http2." : "flow.http1.";
+            j["info"][http2 ? "flow.http2" : "flow.http1"] = true;
+
+            auto put = [&](std::string const& field, std::string const& value) {
+                if(!value.empty()) j["info"][prefix + field] = value;
+            };
+            auto path = app->http_data.uri;
+            if(!app->http_data.params.empty()) path += "?" + app->http_data.params;
+            auto scheme = app->http_data.proto;
+            if(scheme.size() >= 3 && scheme.compare(scheme.size() - 3, 3, "://") == 0)
+                scheme.resize(scheme.size() - 3);
+
+            put("method", app->http_data.method);
+            put(http2 ? "authority" : "host", app->http_data.host);
+            put("path", path);
+            put("scheme", scheme);
+            put("url", app->request());
         }
     }
 

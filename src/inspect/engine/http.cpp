@@ -921,6 +921,12 @@ namespace sx::engine::http {
                             load_from_props(":authority", app_data->http_data.host);
                             load_from_props(":method", app_data->http_data.method);
                             load_from_props(":referer", app_data->http_data.referer);
+                            if(app_data->http_data.proto.empty()) {
+                                if(auto const scheme = app_data->properties().find(":scheme");
+                                   scheme != app_data->properties().end()) {
+                                    app_data->http_data.proto = scheme->second + "://";
+                                }
+                            }
                         }
 
                     } else if (hdr == ":method") {
