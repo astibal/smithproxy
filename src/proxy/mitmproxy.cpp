@@ -316,12 +316,15 @@ std::string MitmProxy::to_connection_ID() const {
 }
 
 void MitmProxy::webhook_session_start() const {
-    if(not sx::http::webhooks::is_enabled() or wh_start) return;
+    if(wh_start or (not sx::http::webhooks::is_enabled() and
+                    not sx::http::webhooks::spider_engine_enabled())) return;
 
     nlohmann::json j;
     auto cl = to_connection_label();
     j["info"] = { {"session", cl } };
-    sx::http::webhooks::send_action("connection-start", to_connection_ID(), j);
+    if(sx::http::webhooks::is_enabled())
+        sx::http::webhooks::send_action("connection-start", to_connection_ID(), j);
+    sx::http::webhooks::send_engine_action("connection-start", to_connection_ID(), j);
 
     wh_start = true;
 }
@@ -342,7 +345,8 @@ std::optional<std::string> MitmProxy::get_application() const {
 }
 
 void MitmProxy::webhook_session_stop() const {
-    if(not sx::http::webhooks::is_enabled() or wh_stop) return;
+    if(wh_stop or (not sx::http::webhooks::is_enabled() and
+                   not sx::http::webhooks::spider_engine_enabled())) return;
 
     nlohmann::json j;
     auto cl = to_connection_label();
@@ -391,7 +395,9 @@ void MitmProxy::webhook_session_stop() const {
 
 
 
-    sx::http::webhooks::send_action("connection-stop", to_connection_ID(), j);
+    if(sx::http::webhooks::is_enabled())
+        sx::http::webhooks::send_action("connection-stop", to_connection_ID(), j);
+    sx::http::webhooks::send_engine_action("connection-stop", to_connection_ID(), j);
 
     wh_stop = true;
 }
@@ -910,10 +916,11 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
 
     auto& log = log_content;
 
-    if(not sx::http::webhooks::is_enabled()) return false;
+    const auto regular_webhook = sx::http::webhooks::is_enabled() and
+                                 writer_opts()->webhook_enable;
+    const auto spider_engine = sx::http::webhooks::spider_engine_enabled();
+    if(not regular_webhook and not spider_engine) return false;
     if(not cx or buffer.empty()) return false;
-
-    if(not writer_opts()->webhook_enable) return false;
 
     bool was_modified = false;
 
@@ -967,13 +974,21 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
             }
         }
     };
-    const auto binary_sent = sx::http::webhooks::send_content_wait(
-        to_connection_ID(), j,
-        std::string_view(reinterpret_cast<const char*>(buffer.data()), buffer.size()), response_hook);
-    if(!binary_sent) {
+    if(spider_engine) {
+        sx::http::webhooks::send_engine_content_wait(
+            to_connection_ID(), j,
+            std::string_view(reinterpret_cast<const char*>(buffer.data()), buffer.size()),
+            response_hook);
+    }
+    if(regular_webhook) {
+        const auto binary_sent = sx::http::webhooks::send_content_wait(
+            to_connection_ID(), j,
+            std::string_view(reinterpret_cast<const char*>(buffer.data()), buffer.size()), response_hook);
+        if(!binary_sent) {
         j["info"]["content"] = b64_encode(buffer);
         sx::http::webhooks::send_action_wait(
             "connection-content", to_connection_ID(), j, response_hook);
+        }
     }
 
     return was_modified;

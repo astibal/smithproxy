@@ -63,6 +63,77 @@ namespace sx::http::webhooks {
         return hostid.empty() ? SmithProxy::instance().hostname : hostid;
     }
 
+    bool spider_engine_enabled() {
+        auto lock = std::scoped_lock(CfgFactory::lock());
+        return CfgFactory::get()->settings_webhook.spider_engine;
+    }
+
+    static sx::http::AsyncRequest::request_settings engine_settings() {
+        sx::http::AsyncRequest::request_settings settings;
+        auto lock = std::scoped_lock(CfgFactory::lock());
+        auto const& factory = CfgFactory::get();
+        settings.enabled = factory->settings_webhook.spider_engine;
+        settings.url = factory->settings_webhook.spider_engine_url;
+        settings.verify_tls = true;
+        settings.bind_interface = factory->settings_webhook.bind_interface;
+        std::ostringstream dns;
+        for(size_t i = 0; i < factory->db_nameservers.size(); ++i) {
+            dns << factory->db_nameservers[i].str_host;
+            if(i + 1 < factory->db_nameservers.size()) dns << ',';
+        }
+        settings.dns_servers = dns.str();
+        return settings;
+    }
+
+    bool send_engine_action(
+        std::string const& action, std::string const& action_id,
+        nlohmann::json const& details) {
+        auto settings = engine_settings();
+        if(not settings.enabled or settings.url.empty()) return false;
+        nlohmann::json message = {
+            {"action", action}, {"id", action_id}, {"source", get_hostid()},
+            {"type", "proxy"}, {"details", details}
+        };
+        return sx::http::AsyncRequest::enqueue(
+            std::move(settings), to_string(message), [](auto const&) {});
+    }
+
+    static std::string encode_content(
+        std::string const& action_id, nlohmann::json details,
+        std::string_view payload) {
+        auto& info = details["info"];
+        info["payload_encoding"] = "sxbn-001";
+        info["payload_length"] = payload.size();
+        info.erase("content");
+        nlohmann::json metadata = {
+            {"action", "connection-content"}, {"id", action_id},
+            {"source", get_hostid()}, {"type", "proxy"}, {"details", std::move(details)}
+        };
+        const auto encoded = to_string(metadata);
+        if(encoded.size() > std::numeric_limits<std::uint32_t>::max() ||
+           payload.size() > std::numeric_limits<std::uint32_t>::max()) return {};
+        char prefix[26]{};
+        std::snprintf(prefix, sizeof(prefix), "SXBN001:%08X:%08X",
+                      static_cast<unsigned>(encoded.size()),
+                      static_cast<unsigned>(payload.size()));
+        std::string message(prefix, 25);
+        message.append(encoded);
+        message.append(payload.data(), payload.size());
+        return message;
+    }
+
+    bool send_engine_content_wait(
+        std::string const& action_id, nlohmann::json details,
+        std::string_view payload, sx::http::AsyncRequest::reply_hook hook) {
+        auto settings = engine_settings();
+        if(not settings.enabled or settings.url.empty() or not hook) return false;
+        auto message = encode_content(action_id, std::move(details), payload);
+        if(message.empty()) return false;
+        std::stringstream log;
+        sx::http::AsyncRequest::emit_url_wait_log(settings, message, log, std::move(hook));
+        return true;
+    }
+
     struct default_callback {
         default_callback() = default;
         virtual ~default_callback() = default;
@@ -393,24 +464,8 @@ namespace sx::http::webhooks {
     bool send_content_wait(std::string const& action_id, nlohmann::json details,
                            std::string_view payload, sx::http::AsyncRequest::reply_hook hook) {
         if(!enabled or !hook or !binary_content_enabled()) return false;
-        auto& info = details["info"];
-        info["payload_encoding"] = "sxbn-001";
-        info["payload_length"] = payload.size();
-        info.erase("content");
-        nlohmann::json metadata = {
-            {"action", "connection-content"}, {"id", action_id},
-            {"source", get_hostid()}, {"type", "proxy"}, {"details", std::move(details)}
-        };
-        const auto encoded = to_string(metadata);
-        if(encoded.size() > std::numeric_limits<std::uint32_t>::max() ||
-           payload.size() > std::numeric_limits<std::uint32_t>::max()) return false;
-        char prefix[26]{};
-        std::snprintf(prefix, sizeof(prefix), "SXBN001:%08X:%08X",
-                      static_cast<unsigned>(encoded.size()),
-                      static_cast<unsigned>(payload.size()));
-        std::string message(prefix, 25);
-        message.append(encoded);
-        message.append(payload.data(), payload.size());
+        auto message = encode_content(action_id, std::move(details), payload);
+        if(message.empty()) return false;
         sx::http::AsyncRequest::emit_wait(message,
             [hook = std::move(hook)](sx::http::expected_reply const& reply) {
                 if(!reply || reply->response.first > 0) hook(reply);
