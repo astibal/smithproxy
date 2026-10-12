@@ -1108,6 +1108,79 @@ TEST(HTTP2, BoundsUnacknowledgedSettingsState) {
 #endif
 }
 
+TEST(HTTP2, BoundsUnfinishedContinuationHeaderBlocks) {
+    auto frame = [](uint8_t type, uint8_t flags, uint32_t stream,
+                    std::vector<uint8_t> const& payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), type, flags,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+
+    sx::engine::EngineCtx ctx;
+    std::vector<uint8_t> fragment(16384, 0x82);
+    auto headers = frame(1, 0, 51, fragment);
+    ASSERT_EQ(v2::process_frame(ctx, socle::side_t::LEFT, headers), headers.size());
+
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    ASSERT_TRUE(connection->request_headers_pending.active());
+
+    // Exactly 1 MiB remains bounded and pending. The next byte invalidates
+    // the capture instead of growing it indefinitely.
+    for(unsigned i = 1; i < 64; ++i) {
+        auto continuation = frame(9, 0, 51, fragment);
+        ASSERT_EQ(v2::process_frame(ctx, socle::side_t::LEFT, continuation),
+                  continuation.size());
+        ASSERT_TRUE(connection->request_headers_pending.active());
+    }
+    EXPECT_EQ(connection->request_headers_pending.bytes.size(), 1024u * 1024u);
+
+    auto overflow = frame(9, 0, 51, {0x82});
+    EXPECT_EQ(v2::process_frame(ctx, socle::side_t::LEFT, overflow), overflow.size());
+    EXPECT_FALSE(connection->request_headers_pending.active());
+    EXPECT_TRUE(connection->request_headers_pending.bytes.empty());
+    EXPECT_EQ(connection->streams.count(51), 0u);
+    EXPECT_TRUE(connection->connection_invalid);
+
+    HPACK::encoder_t clean;
+    clean.add(":method", "GET", false);
+    clean.add(":scheme", "https", false);
+    clean.add(":authority", "fixture.example", false);
+    clean.add(":path", "/must-not-recover", false);
+    auto after_overflow = frame(1, 0x04, 53, clean.data());
+    v2::process_frame(ctx, socle::side_t::LEFT, after_overflow);
+    EXPECT_EQ(connection->streams.count(53), 0u);
+
+    // A peer may advertise frames larger than the local semantic-capture
+    // budget. The initial fragment must be just as terminal as a continuation
+    // which crosses that budget.
+    sx::engine::EngineCtx initial_ctx;
+    std::vector<uint8_t> max_frame_setting{
+        0x00, 0x05, 0x00, 0x20, 0x00, 0x00, // 2 MiB
+    };
+    auto setting = frame(4, 0, 0, max_frame_setting);
+    v2::process_frame(initial_ctx, socle::side_t::RIGHT, setting);
+    std::vector<uint8_t> oversized_initial(1024u * 1024u + 1u, 0x82);
+    auto initial = frame(1, 0, 55, oversized_initial);
+    v2::process_frame(initial_ctx, socle::side_t::LEFT, initial);
+    auto* initial_connection =
+        std::any_cast<v2::Http2Connection>(&initial_ctx.state_data);
+    ASSERT_NE(initial_connection, nullptr);
+    EXPECT_TRUE(initial_connection->connection_invalid);
+    EXPECT_FALSE(initial_connection->request_headers_pending.active());
+    EXPECT_EQ(initial_connection->streams.count(55), 0u);
+}
+
 TEST(HTTP2, DecodesHpackHeadersWithoutRequiringAttachedOrigin) {
     sx::engine::EngineCtx ctx;
     ctx.state_data = std::make_any<v2::Http2Connection>();
