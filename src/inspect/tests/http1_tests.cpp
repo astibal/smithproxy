@@ -947,6 +947,49 @@ TEST(HTTP2, RequiresNonAckSettingsAsEachEndpointsFirstFrame) {
     EXPECT_FALSE(state->connection_invalid);
 }
 
+TEST(HTTP2, MalformedCoreFramesTerminateConnectionSemantics) {
+    auto frame = [](uint8_t type, uint8_t flags, uint32_t stream,
+                    std::vector<uint8_t> payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), type, flags,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+    HPACK::encoder_t encoder;
+    encoder.add(":method", "GET", false);
+    encoder.add(":scheme", "https", false);
+    encoder.add(":authority", "fixture.example", false);
+    encoder.add(":path", "/", false);
+    auto clean_request = frame(1, 0x04, 1, encoder.data());
+    struct invalid_frame { uint8_t type; uint8_t flags; uint32_t stream; std::vector<uint8_t> payload; };
+    const std::vector<invalid_frame> malformed {
+        {0, 0, 0, {}}, {2, 0, 0, std::vector<uint8_t>(5)},
+        {2, 0, 1, {0, 0, 0, 1, 0}}, {3, 0, 1, std::vector<uint8_t>(3)},
+        {6, 0, 1, std::vector<uint8_t>(8)}, {7, 0, 1, std::vector<uint8_t>(8)},
+        {8, 0, 0, std::vector<uint8_t>(3)}, {1, 0x08, 1, {}},
+        {1, 0x20, 1, std::vector<uint8_t>(4)}, {1, 0x0c, 1, {5}},
+    };
+    for(auto const& invalid: malformed) {
+        sx::engine::EngineCtx ctx;
+        auto bad = frame(invalid.type, invalid.flags, invalid.stream, invalid.payload);
+        EXPECT_EQ(v2::process_frame(ctx, socle::side_t::LEFT, bad), bad.size());
+        auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+        ASSERT_NE(connection, nullptr);
+        EXPECT_TRUE(connection->connection_invalid);
+        v2::process_frame(ctx, socle::side_t::LEFT, clean_request);
+        EXPECT_EQ(connection->streams.count(1), 0u);
+    }
+}
+
 TEST(HTTP2, DecodesHpackHeadersWithoutRequiringAttachedOrigin) {
     sx::engine::EngineCtx ctx;
     ctx.state_data = std::make_any<v2::Http2Connection>();
@@ -1064,17 +1107,22 @@ TEST(HTTP2, ReassemblesContinuationOnlyOnTheMatchingStream) {
     EXPECT_FALSE(connection->request_headers_pending.active());
     EXPECT_EQ(connection->streams.count(31), 0u);
 
-    // Any interleaved frame invalidates the unfinished header block in this
-    // direction. A later CONTINUATION must not resurrect it.
+    // Use an independent connection: the wrong-stream CONTINUATION above
+    // already terminated its connection.
+    sx::engine::EngineCtx interleaved_ctx;
     headers = frame(1, 0, 31, first);
-    v2::process_frame(ctx, socle::side_t::LEFT, headers);
-    ASSERT_TRUE(connection->request_headers_pending.active());
+    v2::process_frame(interleaved_ctx, socle::side_t::LEFT, headers);
+    auto* interleaved_connection =
+        std::any_cast<v2::Http2Connection>(&interleaved_ctx.state_data);
+    ASSERT_NE(interleaved_connection, nullptr);
+    ASSERT_TRUE(interleaved_connection->request_headers_pending.active());
     auto interleaved = frame(6, 0, 0, {0});
-    v2::process_frame(ctx, socle::side_t::LEFT, interleaved);
-    EXPECT_FALSE(connection->request_headers_pending.active());
+    v2::process_frame(interleaved_ctx, socle::side_t::LEFT, interleaved);
+    EXPECT_FALSE(interleaved_connection->request_headers_pending.active());
     auto stale_continuation = frame(9, 0x04, 31, second);
-    v2::process_frame(ctx, socle::side_t::LEFT, stale_continuation);
-    EXPECT_EQ(connection->streams.count(31), 0u);
+    v2::process_frame(
+        interleaved_ctx, socle::side_t::LEFT, stale_continuation);
+    EXPECT_EQ(interleaved_connection->streams.count(31), 0u);
 
     sx::engine::EngineCtx valid_ctx;
     headers = frame(1, 0, 37, first);

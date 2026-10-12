@@ -1337,6 +1337,9 @@ namespace sx::engine::http {
                     return preamble_sz + frame_sz;
                 }
 
+                if(connection->connection_invalid)
+                    return preamble_sz + frame_sz;
+
                 // These frame-shape violations are connection errors. Do not
                 // let later bytes regain HTTP semantics after mandatory close.
                 const bool invalid_frame_shape =
@@ -1353,6 +1356,18 @@ namespace sx::engine::http {
                     connection->request_headers_pending.clear();
                     connection->response_headers_pending.clear();
                     return preamble_sz + frame_sz;
+                }
+
+                if(typ == 2) {
+                    const auto dependency = ntohl(
+                        frame.get_at<uint32_t>(preamble_sz)) & 0x7fffffffU;
+                    if(dependency == static_cast<uint32_t>(stream_id)) {
+                        _err("Frame: HTTP/2 PRIORITY stream depends on itself");
+                        connection->connection_invalid = true;
+                        connection->request_headers_pending.clear();
+                        connection->response_headers_pending.clear();
+                        return preamble_sz + frame_sz;
+                    }
                 }
 
                 if(typ == 4) {
@@ -1626,15 +1641,19 @@ namespace sx::engine::http {
                 std::size_t padding_size = 0;
 
                 if ((typ == 0 || typ == 1 || typ == 5) && (flg & 0x08)) {
-                    if (payload_size < 1)
+                    if (payload_size < 1) {
+                        connection->connection_invalid = true;
                         return preamble_sz + frame_sz;
+                    }
                     padding_size = frame.get_at<uint8_t>(payload_offset++);
                     --payload_size;
                 }
 
                 if(typ == 1 && (flg & 0x20)) {
-                    if (payload_size < 5)
+                    if (payload_size < 5) {
+                        connection->connection_invalid = true;
                         return preamble_sz + frame_sz;
+                    }
                     stream_dep = ntohl(frame.get_at<uint32_t>(payload_offset));
                     payload_offset += sizeof(uint32_t);
                     wgh = frame.get_at<uint8_t>(payload_offset++);
