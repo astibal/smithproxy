@@ -51,6 +51,8 @@ public:
     using ExplicitProxy::ExplicitProxy;
     ~SocksProxy() override = default;
     void on_left_message(baseHostCX* cx) override;
+    void on_left_bytes(baseHostCX* cx) override;
+    void on_left_error(baseHostCX* cx) override;
 
     virtual void socks5_handoff_udp(socksServerCX* cx);
 

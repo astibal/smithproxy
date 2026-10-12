@@ -48,7 +48,9 @@
 #include <inspect/sigfactory.hpp>
 
 #include <service/core/smithproxy.hpp>
+#include <service/api/api_broker.hpp>
 #include <service/cmd/cmdserver.hpp>
+#include <service/cli/cli_broker.hpp>
 #include <service/httpd/httpd.hpp>
 #include <service/cfgapi/cfgapi.hpp>
 #include "service/http/webhooks.hpp"
@@ -100,8 +102,15 @@ void SmithProxy::create_dns_thread() {
 
 void SmithProxy::create_api_thread() {
 #ifdef USE_LMHPP
-
-    api_thread = std::shared_ptr<std::thread>(sx::webserver::create_httpd_thread(sx::webserver::HttpSessions::api_port + tenant_index()));
+    const int listener = sx::comm::api::ingress_fd();
+    if(listener < 0) {
+        Log::get()->events().insert(CRI, "cannot obtain API communication listener: %s",
+                                    string_error().c_str());
+        terminate_flag = true;
+        return;
+    }
+    api_thread = std::shared_ptr<std::thread>(sx::webserver::create_httpd_thread(
+        sx::webserver::HttpSessions::api_port + tenant_index(), listener));
     if(api_thread) {
         pthread_setname_np( api_thread->native_handle(),
                             string_format("sxy_api_%d",tenant_index()).c_str());
@@ -358,7 +367,7 @@ void SmithProxy::run() {
         DaemonFactory::set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
         _dia("smithproxy_cli: max file descriptors: %d", this_daemon->get_limit_fd());
 
-        cli_loop(CfgFactory::get()->cli_port + CfgFactory::get()->tenant_index);
+        cli_loop(sx::comm::cli::ingress_fd());
         _dia("cli workers torn down.");
     } );
     pthread_setname_np(cli_thread->native_handle(),friendly_thread_name_cli.c_str());
@@ -519,6 +528,23 @@ void SmithProxy::run() {
             }
             ++wh_nbr_seconds;
         }
+
+        static unsigned int ct_warning_seconds = 5 * 60;
+        if(ct_warning_seconds >= 5 * 60) {
+            bool ct_unavailable = false;
+            {
+                const auto lock = std::scoped_lock(CfgFactory::lock());
+                ct_unavailable = CfgFactory::get()->ct_requested() &&
+                    !SSLFactory::factory().is_ct_available();
+            }
+            if(ct_unavailable) {
+                _war("%s", CfgFactory::CT_UNAVAILABLE_WARNING.data());
+                Log::get()->events().insert(
+                    WAR, "%s", CfgFactory::CT_UNAVAILABLE_WARNING.data());
+            }
+            ct_warning_seconds = 0;
+        }
+        ++ct_warning_seconds;
 
         // Keep the housekeeping loop paced even when webhooks are disabled.
         std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -809,16 +835,26 @@ bool SmithProxy::init_syslog() {
 
     AddressInfo ai;
     ai.str_host = CfgFactory::get()->syslog_server;
-    ai.port = htons(raw::down_cast_signed<unsigned short>(CfgFactory::get()->syslog_port).value_or(514));
+    ai.port = raw::down_cast_signed<unsigned short>(CfgFactory::get()->syslog_port).value_or(514);
     ai.family = CfgFactory::get()->syslog_family == 6 ? AF_INET6 : AF_INET;
-    ai.pack();
+    if(!ai.pack()) {
+        _err("cannot parse syslog server address '%s'", CfgFactory::get()->syslog_server.c_str());
+        return false;
+    }
 
     // create UDP socket
-    int syslog_socket = socle::socket(ai.family, SOCK_DGRAM, IPPROTO_UDP);
+    int syslog_socket = socle::socket(ai.family,
+                                      SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
+    if(syslog_socket < 0) {
+        _err("cannot create syslog socket: %s", string_error().c_str());
+        return false;
+    }
 
-    if(0 != ::connect(syslog_socket,(sockaddr*) ai.as_ss(),sizeof(sockaddr_storage))) {
+    const socklen_t address_size = ai.family == AF_INET ? sizeof(sockaddr_in) : sizeof(sockaddr_in6);
+    if(0 != ::connect(syslog_socket, reinterpret_cast<sockaddr*>(ai.as_ss()), address_size)) {
         _err("cannot connect syslog socket %d: %s", syslog_socket, string_error().c_str());
         ::close(syslog_socket);
+        return false;
     } else {
 
         Log::get()->remote_targets(string_format("syslog-udp%d-%d", CfgFactory::get()->syslog_family, syslog_socket),
@@ -879,6 +915,7 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
         CfgFactory::get()->load_db_prof_tls();
         CfgFactory::get()->load_db_prof_ssh();
         CfgFactory::get()->load_db_prof_alg_dns();
+        CfgFactory::get()->load_db_prof_script();
         CfgFactory::get()->load_db_prof_auth();
         CfgFactory::get()->load_db_routing();
 

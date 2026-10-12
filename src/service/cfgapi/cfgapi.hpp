@@ -204,6 +204,9 @@ public:
     constexpr static inline const int SCHEMA_VERSION  = 1047;
 
     static inline std::atomic_bool LOAD_ERRORS = false;
+    static constexpr std::string_view CT_UNAVAILABLE_WARNING =
+        "Certificate Transparency is enabled by policy, but the CT log list is "
+        "unavailable. CT validation remains FAIL-CLOSED.";
 
     CfgFactory() = default;
     CfgFactory(CfgFactory const &) = delete;
@@ -227,6 +230,8 @@ public:
     static std::recursive_mutex& lock() { return get()->lock_; }
     static libconfig::Setting& cfg_root() { return get()->cfgapi.getRoot(); }
     static libconfig::Config&  cfg_obj() { return get()->cfgapi; }
+
+    [[nodiscard]] bool ct_requested() const;
 
     loglevel args_debug_flag = NON;
 
@@ -535,7 +540,10 @@ public:
     bool apply_config_change(std::string_view section);
     int policy_apply (baseHostCX *originator, MitmProxy *proxy, int matched_policy=-1);
     void policy_apply_features(std::shared_ptr<PolicyRule> const& policy_rule, MitmProxy *mitm_proxy);
-    std::shared_ptr<PolicyRule> lookup_policy(std::size_t i) { if(i < db_policy_list.size()) return db_policy_list.at(i); else return nullptr; }
+    std::shared_ptr<PolicyRule> lookup_policy(std::size_t i) {
+        std::scoped_lock<std::recursive_mutex> guard(lock_);
+        return i < db_policy_list.size() ? db_policy_list.at(i) : nullptr;
+    }
 
     bool policy_apply_tls (int policy_num, baseCom *xcom);
     bool policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCom *xcom);

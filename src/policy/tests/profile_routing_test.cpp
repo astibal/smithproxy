@@ -18,6 +18,25 @@ TEST(ProfileRouting, RoundRobinStartsAtZeroAndEmptySetDoesNotAdvance) {
     EXPECT_EQ(routing.lb_index_rr(3), 0U);
 }
 
+TEST(ProfileRouting, LoadBalancingMethodNamesRejectTypos) {
+    using method = ProfileRouting::lb_method;
+
+    EXPECT_EQ(ProfileRouting::parse_lb_method("round-robin"), method::LB_RR);
+    EXPECT_EQ(ProfileRouting::parse_lb_method("sticky-l3"), method::LB_L3);
+    EXPECT_EQ(ProfileRouting::parse_lb_method("sticky-l4"), method::LB_L4);
+    EXPECT_FALSE(ProfileRouting::parse_lb_method("round_robin"));
+    EXPECT_FALSE(ProfileRouting::parse_lb_method("Sticky-L3"));
+    EXPECT_FALSE(ProfileRouting::parse_lb_method(""));
+}
+
+TEST(ProfileRouting, SniRewriteRequiresBothSides) {
+    EXPECT_TRUE(ProfileRouting::valid_sni_rewrite_pair("", ""));
+    EXPECT_TRUE(ProfileRouting::valid_sni_rewrite_pair(
+        "client.example", "origin.internal"));
+    EXPECT_FALSE(ProfileRouting::valid_sni_rewrite_pair("client.example", ""));
+    EXPECT_FALSE(ProfileRouting::valid_sni_rewrite_pair("", "origin.internal"));
+}
+
 TEST(ProfileRouting, ConcurrentRoundRobinRemainsEvenlyDistributed) {
     ProfileRouting routing;
     constexpr std::size_t workers = 8;

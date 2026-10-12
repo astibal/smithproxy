@@ -8,7 +8,9 @@ Usage: native-tests.sh --root DIR --build-dir DIR --report-dir DIR [OPTIONS]
 Build and run Smithproxy's hermetic CTest, integration and patch-runner tests.
 
 Options:
-  --jobs N              Parallel build/test jobs (default: nproc).
+  --jobs N              Parallel build jobs (default: nproc).
+  --test-jobs N         Concurrent CTest jobs (default: PATCH_TEST_CTEST_JOBS,
+                        then build jobs; coverage defaults to 1).
   --coverage            Enable GCC/gcov line instrumentation and report it.
   --include-external    Include public-network and privileged tests.
   --include-benchmarks  Include benchmark-shaped tests.
@@ -21,6 +23,7 @@ ROOT=
 BUILD_DIR=
 REPORT_DIR=
 JOBS=$(nproc)
+TEST_JOBS=${PATCH_TEST_CTEST_JOBS:-}
 COVERAGE=0
 INCLUDE_EXTERNAL=0
 INCLUDE_BENCHMARKS=0
@@ -32,6 +35,7 @@ while (($#)); do
         --build-dir) BUILD_DIR=${2:?missing build directory}; shift 2 ;;
         --report-dir) REPORT_DIR=${2:?missing report directory}; shift 2 ;;
         --jobs) JOBS=${2:?missing jobs}; shift 2 ;;
+        --test-jobs) TEST_JOBS=${2:?missing test jobs}; shift 2 ;;
         --coverage) COVERAGE=1; shift ;;
         --include-external) INCLUDE_EXTERNAL=1; shift ;;
         --include-benchmarks) INCLUDE_BENCHMARKS=1; shift ;;
@@ -49,15 +53,15 @@ done
 [[ $JOBS =~ ^[1-9][0-9]*$ ]] || { echo 'jobs must be positive' >&2; exit 2; }
 [[ -f $ROOT/CMakeLists.txt ]] || { echo "Not a Smithproxy source root: $ROOT" >&2; exit 2; }
 
-CTEST_JOBS=${PATCH_TEST_CTEST_JOBS:-$JOBS}
-if ((COVERAGE)) && [[ -z ${PATCH_TEST_CTEST_JOBS:-} ]]; then
+CTEST_JOBS=${TEST_JOBS:-$JOBS}
+if ((COVERAGE)) && [[ -z $TEST_JOBS ]]; then
     # gcov makes the core mempool and large QUIC executables dramatically
     # slower. Running them concurrently has caused resource-driven crashes and
     # timing failures which disappear in isolation.
     CTEST_JOBS=1
 fi
 [[ $CTEST_JOBS =~ ^[1-9][0-9]*$ ]] || {
-    echo 'PATCH_TEST_CTEST_JOBS must be positive' >&2
+    echo 'CTest jobs must be positive' >&2
     exit 2
 }
 

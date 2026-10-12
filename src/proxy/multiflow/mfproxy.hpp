@@ -60,6 +60,8 @@ private:
         std::unique_ptr<MFFlowCom> right;
         std::deque<unsigned char> left_to_right; ///< Bytes blocked by the right side.
         std::deque<unsigned char> right_to_left; ///< Bytes blocked by the left side.
+        bool left_expects_fin = true;
+        bool right_expects_fin = true;
         bool left_peer_fin = false;
         bool right_peer_fin = false;
         bool left_finish_sent = false;

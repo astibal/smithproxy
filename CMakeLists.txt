@@ -336,7 +336,13 @@ add_executable(smithproxy
         src/async/asyncdns.hpp
 
         src/service/daemon.cpp
+        src/service/comm.cpp
         src/service/privileged_file.cpp
+        src/service/gre_broker.cpp
+        src/service/cli/cli_broker.cpp
+        src/service/api/api_broker.cpp
+        src/service/stream/tcp_relay.cpp
+        src/service/webhook/webhook_broker.cpp
         src/service/netservice.cpp
         src/service/dnsupd/smithdnsupd.cpp
         src/service/core/smithproxy.hpp
@@ -409,6 +415,37 @@ add_executable(smithproxy
         src/proxy/filters/access_filter.cpp
 )
 
+add_executable(smithproxy-gre-broker
+        src/service/gre_broker_main.cpp
+        src/service/gre_broker.cpp
+        src/service/comm.cpp
+)
+target_include_directories(smithproxy-gre-broker PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(smithproxy-gre-broker socle_lib pthread ssl crypto)
+
+add_executable(smithproxy-cli-broker
+        src/service/cli/cli_broker_main.cpp
+        src/service/cli/cli_broker.cpp
+)
+target_include_directories(smithproxy-cli-broker PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(smithproxy-cli-broker pthread)
+
+add_executable(smithproxy-api-broker
+        src/service/api/api_broker_main.cpp
+        src/service/cli/cli_broker.cpp
+)
+target_include_directories(smithproxy-api-broker PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(smithproxy-api-broker pthread)
+
+add_executable(smithproxy-webhook-broker
+        src/service/webhook/webhook_broker_main.cpp
+        src/service/webhook/webhook_broker.cpp
+        src/service/stream/tcp_relay.cpp
+        src/service/cli/cli_broker.cpp
+)
+target_include_directories(smithproxy-webhook-broker PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(smithproxy-webhook-broker pthread)
+
 
 IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
     find_package(GTest)
@@ -422,7 +459,10 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/ext/nltemplate/nltemplate.cpp
                 src/smithlog.cpp
                 src/service/daemon.cpp
+                src/service/comm.cpp
                 src/service/privileged_file.cpp
+                src/service/gre_broker.cpp
+                src/service/cli/cli_broker.cpp
                 src/service/netservice.cpp
                 src/service/core/authpam.cpp
 
@@ -560,9 +600,34 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
         )
 
         add_executable(sx_gtests_file_privsep
+                src/service/comm.cpp
                 src/service/privileged_file.cpp
+                src/service/tests/comm_tests.cpp
                 src/service/tests/privileged_file_tests.cpp
         )
+
+        add_executable(sx_gtests_gre_broker
+                src/service/comm.cpp
+                src/service/gre_broker.cpp
+                src/service/tests/gre_broker_tests.cpp
+        )
+        add_executable(sx_gtests_cli_broker
+                src/service/cli/cli_broker.cpp
+                src/service/tests/cli_broker_tests.cpp
+        )
+        add_executable(sx_gtests_api_broker
+                src/service/cli/cli_broker.cpp
+                src/service/api/api_broker.cpp
+                src/service/tests/api_broker_tests.cpp
+        )
+        add_executable(sx_gtests_webhook_broker
+                src/service/cli/cli_broker.cpp
+                src/service/stream/tcp_relay.cpp
+                src/service/webhook/webhook_broker.cpp
+                src/service/tests/webhook_broker_tests.cpp
+        )
+        target_compile_definitions(sx_gtests_webhook_broker PRIVATE
+                SMITHPROXY_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
         add_executable(tls_testbed
                 tests/tls/tls_testbed.cpp)
@@ -584,6 +649,13 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_link_libraries(sx_gtests_reloadable gtest gtest_main pthread)
         target_link_libraries(sx_gtests_privsep gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(sx_gtests_file_privsep gtest gtest_main socle_lib pthread crypto ssl)
+        target_link_libraries(sx_gtests_gre_broker gtest gtest_main socle_lib pthread crypto ssl)
+        target_link_libraries(sx_gtests_cli_broker gtest gtest_main pthread)
+        target_link_libraries(sx_gtests_api_broker gtest gtest_main pthread)
+        target_link_libraries(sx_gtests_webhook_broker gtest gtest_main pthread curl crypto ssl)
+        if("${USE_LMHPP}" STREQUAL "Y")
+            target_link_libraries(sx_gtests_api_broker microhttpd)
+        endif()
         target_link_libraries(tls_testbed gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(transfer_testbed gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries (sx_gtests nlohmann_json::nlohmann_json)
@@ -633,6 +705,10 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
             add_test(NAME unit.reloadable COMMAND sx_gtests_reloadable)
             add_test(NAME unit.privsep COMMAND sx_gtests_privsep)
             add_test(NAME unit.file_privsep COMMAND sx_gtests_file_privsep)
+            add_test(NAME unit.gre_broker COMMAND sx_gtests_gre_broker)
+            add_test(NAME unit.cli_broker COMMAND sx_gtests_cli_broker)
+            add_test(NAME unit.api_broker COMMAND sx_gtests_api_broker)
+            add_test(NAME unit.webhook_broker COMMAND sx_gtests_webhook_broker)
             add_test(NAME integration.tls_testbed COMMAND tls_testbed)
             add_test(NAME integration.transfer_testbed COMMAND transfer_testbed)
             add_test(NAME integration.quic_testbed COMMAND quic_testbed)
@@ -657,6 +733,10 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                     unit.core unit.http1 unit.startstoptls unit.httpconnect unit.reloadable
                     PROPERTIES LABELS "native;unit")
             set_tests_properties(
+                    unit.privsep unit.file_privsep unit.gre_broker unit.cli_broker unit.api_broker
+                    unit.webhook_broker
+                    PROPERTIES LABELS "native;unit;security;privsep")
+            set_tests_properties(
                     integration.tls_testbed integration.transfer_testbed integration.quic_testbed
                     PROPERTIES LABELS "native;integration")
             set_tests_properties(benchmark.http1 PROPERTIES LABELS "benchmark")
@@ -677,7 +757,13 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
             set_tests_properties(unit.core integration.quic_testbed
                     external.inet external.pcap_experiments external.dns PROPERTIES
                     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
-            set_tests_properties(unit.core PROPERTIES TIMEOUT 600)
+            if(SMITHPROXY_COVERAGE)
+                # The TLS/revocation corpus is intentionally broad and gcov
+                # makes it several times slower than the normal unit run.
+                set_tests_properties(unit.core PROPERTIES TIMEOUT 1800)
+            else()
+                set_tests_properties(unit.core PROPERTIES TIMEOUT 600)
+            endif()
             set_tests_properties(integration.quic_testbed PROPERTIES TIMEOUT 180)
             set_tests_properties(external.inet external.pcap_experiments external.dns
                     PROPERTIES TIMEOUT 180)
@@ -687,6 +773,21 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
 
             find_package(Python3 COMPONENTS Interpreter)
             if(Python3_Interpreter_FOUND)
+                if(USE_LIBSSH)
+                    execute_process(
+                            COMMAND ${Python3_EXECUTABLE} -c "import paramiko"
+                            RESULT_VARIABLE PARAMIKO_IMPORT_RESULT
+                            OUTPUT_QUIET ERROR_QUIET)
+                    if(PARAMIKO_IMPORT_RESULT EQUAL 0)
+                        add_test(NAME integration.ssh_mitm
+                                COMMAND ${Python3_EXECUTABLE}
+                                ${PROJECT_SOURCE_DIR}/tests/ssh/ssh_mitm_e2e.py
+                                $<TARGET_FILE:smithproxy>
+                                --source ${PROJECT_SOURCE_DIR})
+                        set_tests_properties(integration.ssh_mitm PROPERTIES
+                                LABELS "native;integration;ssh" TIMEOUT 180)
+                    endif()
+                endif()
                 add_test(NAME integration.httpconnect
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/tests/httpconnect/http_connect_integration.py
@@ -738,6 +839,11 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 add_test(NAME unit.patch_runner_pplay
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-pplay-fuzz.py)
+                add_test(NAME unit.patch_runner_session_list_probe
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-session-list-probe.py)
+                add_test(NAME unit.patch_runner_native_parallel
+                        COMMAND ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-native-parallel.sh)
                 add_test(NAME integration.wireshark_spq1
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/tools/wireshark/test_spquic.py)
@@ -751,7 +857,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                         integration.libcli2_process integration.main_process integration.redirect PROPERTIES TIMEOUT 120)
                 set_tests_properties(
                         unit.patch_runner_fuzz_areas unit.patch_runner_fuzz_seeds
-                        unit.patch_runner_pplay PROPERTIES LABELS "native;unit")
+                        unit.patch_runner_pplay unit.patch_runner_native_parallel
+                        PROPERTIES LABELS "native;unit")
             endif()
         endif()
     endif()
@@ -796,6 +903,7 @@ if(SMITHPROXY_FUZZING)
 
     add_executable(quic_lifecycle_fuzzer
             src/proxy/quic/openssl.cpp
+            src/proxy/quic/wire.cpp
             src/proxy/quic/fuzz/lifecycle_fuzzer.cpp)
     target_link_libraries(quic_lifecycle_fuzzer socle_lib pthread crypto ssl)
     smithproxy_fuzzer(quic_lifecycle_fuzzer)
@@ -849,12 +957,14 @@ if(SMITHPROXY_TLS_SANITIZERS)
                 -fsanitize=address,undefined
                 -fno-omit-frame-pointer)
     endforeach()
-    # sx_gtests deliberately links inspector helpers without the full
+    # These reduced unit targets deliberately link inspector helpers without the full
     # MitmHostCX implementation. UBSan's vptr instrumentation would add an
     # otherwise unused RTTI reference and make this reduced unit target fail
     # to link. ASan and all other UBSan checks stay enabled.
-    target_compile_options(sx_gtests PRIVATE -fno-sanitize=vptr)
-    target_link_options(sx_gtests PRIVATE -fno-sanitize=vptr)
+    foreach(reduced_inspector_target sx_gtests sx_gtests_http1)
+        target_compile_options(${reduced_inspector_target} PRIVATE -fno-sanitize=vptr)
+        target_link_options(${reduced_inspector_target} PRIVATE -fno-sanitize=vptr)
+    endforeach()
     # LeakSanitizer cannot operate under ptrace-based CI/sandbox runners.
     # Keep ASan bounds/UAF checks and UBSan enabled there.
     get_property(sanitized_tests DIRECTORY PROPERTY TESTS)
@@ -896,6 +1006,9 @@ endif()
 
 if("${USE_LMHPP}" STREQUAL "Y")
     target_link_libraries(smithproxy microhttpd)
+    if(TARGET sx_gtests)
+        target_link_libraries(sx_gtests microhttpd)
+    endif()
 else()
     message(">> libmicrohttpd not used")
 endif()

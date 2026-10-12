@@ -1,4 +1,5 @@
 #include "cmdserver.hpp"
+#include "cli_client_tasks.hpp"
 
 #include "cli_debug_state.hpp"
 #include "config_cli2_smithproxy.hpp"
@@ -8,6 +9,7 @@
 #include <service/cfgapi/cfgapi.hpp>
 #include <service/core/authpam.hpp>
 #include <service/core/smithproxy.hpp>
+#include <service/cli/cli_broker.hpp>
 
 #include <inspect/dnsinspector.hpp>
 #include <log/logger.hpp>
@@ -20,6 +22,8 @@
 
 #include <algorithm>
 #include <arpa/inet.h>
+#include <chrono>
+#include <cerrno>
 #include <cstring>
 #include <sstream>
 #include <sys/socket.h>
@@ -39,9 +43,17 @@ struct CliGlobals {
         static const std::string value = create_hostname();
         return value;
     }
-    static thread_local inline bool ct_warning_flag = false;
+    static thread_local inline std::chrono::steady_clock::time_point
+        ct_warning_next{};
     static thread_local inline bool cfg_error_flag = false;
 };
+
+constexpr auto ct_warning_interval = std::chrono::minutes(5);
+
+bool ct_is_requested() {
+    const auto lock = std::scoped_lock(CfgFactory::lock());
+    return CfgFactory::get()->ct_requested();
+}
 
 std::string prompt(const libcli2::Context& context) {
     const auto d = context.decor();
@@ -101,16 +113,23 @@ int regular(libcli2::Context& context) {
                       d.command("show event list") + " to see more details");
         CliGlobals::cfg_error_flag = true;
     }
-    if (!SSLFactory::factory().is_ct_available() && !CliGlobals::ct_warning_flag) {
+    const bool ct_unavailable = ct_is_requested() &&
+                                !SSLFactory::factory().is_ct_available();
+    const auto now = std::chrono::steady_clock::now();
+    if(ct_unavailable && now >= CliGlobals::ct_warning_next) {
         const auto d = context.decor();
-        context.print(d.warning("Warning: Certificate Transparency checks not available") + "\n    - download it using " +
+        context.print(d.warning(std::string("Warning: ") +
+                      CfgFactory::CT_UNAVAILABLE_WARNING.data()) +
+                      "\n    - download it using " +
                       d.command("sx_download_ctlog") + " and restart service");
-        CliGlobals::ct_warning_flag = true;
+        CliGlobals::ct_warning_next = now + ct_warning_interval;
+    } else if(!ct_unavailable) {
+        CliGlobals::ct_warning_next = {};
     }
     return 0;
 }
 
-void client_thread(int client_socket) {
+void run_cli_session(int client_socket, const CliSessionMetadata& metadata) {
     libcli2::FdTransport transport(libcli2::FdPair(client_socket, client_socket));
     std::string admin_group;
     std::string enable_password;
@@ -120,7 +139,9 @@ void client_thread(int client_socket) {
         enable_password = CfgFactory::get()->cli_enable_password;
     }
     UpdateBoardSubscriber subscriber(cli_id(), CfgFactory::board());
-    Log::get()->events().insert(NOT, "admin CLI access");
+    Log::get()->events().insert(NOT, "admin CLI access via %s",
+                                metadata.broker.empty() ? "unknown transport"
+                                                        : metadata.broker.c_str());
     Log::get()->remote_targets(string_format("cli-%d", client_socket), client_socket);
     auto profile = std::make_unique<logger_profile>();
     profile->level_ = CfgFactory::get()->cli_init_level;
@@ -160,32 +181,46 @@ std::string cli_id() {
     return value.str();
 }
 
-void cli_loop(unsigned short port) {
+CliSession::CliSession(int fd, CliSessionMetadata metadata)
+    : fd_(fd), metadata_(std::move(metadata)) {}
+
+void CliSession::run() { run_cli_session(fd_, metadata_); }
+
+void cli_loop(int server) {
     static auto log = logan::create("service");
-    sockaddr_in address{};
-    int reuse = 1;
-    const int server = socle::socket(AF_INET, SOCK_STREAM, 0);
-    socle::setsockopt(server, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    address.sin_port = htons(port);
-    while (socle::bind(server, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
-        if (SmithProxy::instance().terminate_flag) { close(server); return; }
-        _err("cli main thread - cannot bind %d port: %s", port, string_error().c_str());
-        sleep(1);
-    }
-    socle::listen(server, 50);
+    if(server < 0) { _err("CLI ingress is unavailable"); return; }
     epoll poller;
-    if (poller.init() <= 0) { _err("cli main thread: Can't initialize epoll"); close(server); return; }
-    poller.add(server, EPOLLIN);
-    std::vector<std::thread> clients;
+    if (poller.init() < 0) { _err("cli main thread: Can't initialize epoll"); close(server); return; }
+    if (!poller.add(server, EPOLLIN)) {
+        _err("cli main thread: Can't monitor listener");
+        close(server);
+        return;
+    }
+    std::vector<sx::cli::client_task> clients;
     while (!SmithProxy::instance().terminate_flag) {
+        sx::cli::reap_finished_client_tasks(clients);
         if (poller.wait(1000) <= 0) continue;
-        sockaddr_storage peer{};
-        socklen_t length = sizeof(peer);
-        const int client = accept(server, reinterpret_cast<sockaddr*>(&peer), &length);
-        if (client >= 0) clients.emplace_back(client_thread, client);
+        const int client = accept4(server, nullptr, nullptr, SOCK_CLOEXEC);
+        if (client >= 0) {
+            auto finished = std::make_shared<std::atomic_bool>(false);
+            clients.push_back({
+                std::thread([client, finished] {
+                    try {
+                        if(sx::comm::cli::receive_handshake(client))
+                            CliSession(client, CliSessionMetadata{{}, {}, "comm broker"}).run();
+                        else
+                            ::close(client);
+                    } catch(std::exception const& error) {
+                        _err("CLI client thread failed: %s", error.what());
+                    } catch(...) {
+                        _err("CLI client thread failed with an unknown exception");
+                    }
+                    finished->store(true, std::memory_order_release);
+                }),
+                std::move(finished),
+            });
+        }
     }
     close(server);
-    for (auto& client : clients) if (client.joinable()) client.join();
+    for (auto& client : clients) if (client.worker.joinable()) client.worker.join();
 }

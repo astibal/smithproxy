@@ -8,6 +8,7 @@
 #include <array>
 #include <deque>
 #include <map>
+#include <unordered_set>
 #include <limits>
 #include <string>
 
@@ -419,6 +420,14 @@ namespace HPACK
                 current->code(static_cast< int16_t >( idx ));
             }
         }
+
+        // The decoding tree is immutable after construction and identical for
+        // every instance. The compiler-generated copy would alias m_root and
+        // double-free it; rebuild the canonical tree instead. Assignment has
+        // no observable work because both operands already contain that tree.
+        huffman_tree_t(huffman_tree_t const&) : huffman_tree_t() {}
+        huffman_tree_t& operator=(huffman_tree_t const&) noexcept { return *this; }
+
         ~huffman_tree_t()  {
             delete_node(m_root);
         }
@@ -562,7 +571,7 @@ namespace HPACK
 
         header_t const& at(uint64_t idx) {
 
-            if ( idx > m_queue.size() ) {
+            if ( idx >= m_queue.size() ) {
                 // It's not clear these checks even entirely make sense
                 // the concern was that someone passes in an out-of-bounds
                 // index, but that's because the static and dynamic
@@ -577,7 +586,7 @@ namespace HPACK
 
                 idx -= predefined_headers.size();
 
-                if ( idx > m_queue.size() )
+                if ( idx >= m_queue.size() )
                     throw std::invalid_argument("HPACK::ringtable_t::at(): Invalid/out-of-bounds index specified");
 
             }
@@ -699,6 +708,15 @@ namespace HPACK
      */
     class decoder_t
     {
+    public:
+        enum class failure_t {
+            none,
+            compression,
+            header_semantics,
+            resource_limit,
+        };
+
+    private:
         using header_map_type = std::map< std::string, std::vector<std::string>, std::less<>>;
         using dec_vec_itr_t = std::vector< uint8_t >::iterator;
 
@@ -706,6 +724,19 @@ namespace HPACK
         ringtable_t		m_dynamic;
         huffman_tree_t	m_huffman;
         uint64_t            m_maximum_table_size;
+        uint64_t            m_required_minimum_table_size = 0;
+        bool                m_table_size_update_required = false;
+        failure_t           m_failure = failure_t::none;
+
+        // Keep semantic capture bounded independently of the compressed
+        // block size. Indexed fields can otherwise amplify a small block
+        // into a much larger collection of allocated strings.
+        static constexpr std::size_t maximum_header_list_size = 1024 * 1024;
+        // A peer may advertise a much larger protocol table, but retaining it
+        // would let many individually bounded blocks accumulate unbounded
+        // connection memory. Crossing the local inspection budget is
+        // terminal, because dropping entries would desynchronize HPACK.
+        static constexpr std::size_t maximum_dynamic_table_storage = 1024 * 1024;
 
 
     public:
@@ -827,6 +858,7 @@ namespace HPACK
         bool decode(std::vector< uint8_t >& data) {
 
             m_headers.clear();
+            m_failure = failure_t::none;
             if ( data.empty() )
                 return false;
 
@@ -835,6 +867,87 @@ namespace HPACK
             header_map_type decoded_headers;
             ringtable_t decoded_dynamic = m_dynamic;
             bool allow_table_update = true;
+            bool required_table_update_seen = !m_table_size_update_required;
+            bool regular_header_seen = false;
+            std::size_t table_update_count = 0;
+            uint32_t first_table_update = 0;
+            std::unordered_set<std::string> pseudo_headers;
+            std::size_t header_list_size = 0;
+
+            auto publish_header = [&](std::string const& name,
+                                      std::string const& value) {
+                bool valid = !name.empty();
+                auto const ascii_equal_ci = [](std::string_view left,
+                                               std::string_view right) {
+                    if(left.size() != right.size()) return false;
+                    for(std::size_t index = 0; index < left.size(); ++index) {
+                        unsigned char l = left[index];
+                        unsigned char r = right[index];
+                        if(l >= 'A' && l <= 'Z') l += 'a' - 'A';
+                        if(r >= 'A' && r <= 'Z') r += 'a' - 'A';
+                        if(l != r) return false;
+                    }
+                    return true;
+                };
+
+                const bool pseudo = !name.empty() && name.front() == ':';
+                const std::size_t token_begin = pseudo ? 1 : 0;
+                if(token_begin == name.size()) valid = false;
+                for(std::size_t i = token_begin; i < name.size(); ++i) {
+                    const unsigned char ch = name[i];
+                    const bool token = (ch >= 'a' && ch <= 'z') ||
+                                       (ch >= '0' && ch <= '9') ||
+                                       ch == '!' || ch == '#' || ch == '$' ||
+                                       ch == '%' || ch == '&' || ch == '\'' ||
+                                       ch == '*' || ch == '+' || ch == '-' ||
+                                       ch == '.' || ch == '^' || ch == '_' ||
+                                       ch == '`' || ch == '|' || ch == '~';
+                    if(!token) valid = false;
+                }
+
+                if(pseudo) {
+                    if(regular_header_seen || !pseudo_headers.insert(name).second)
+                        valid = false;
+                } else {
+                    regular_header_seen = true;
+                }
+
+                if(name == "connection" || name == "proxy-connection" ||
+                   name == "keep-alive" || name == "transfer-encoding" ||
+                   name == "upgrade") {
+                    valid = false;
+                }
+                if(name == "te" && !ascii_equal_ci(value, "trailers"))
+                    valid = false;
+
+                for(unsigned char ch: value) {
+                    if((ch < 0x20U && ch != '\t') || ch == 0x7fU)
+                        valid = false;
+                }
+                if(!value.empty() && (value.front() == ' ' || value.front() == '\t' ||
+                                      value.back() == ' ' || value.back() == '\t')) {
+                    valid = false;
+                }
+
+                constexpr std::size_t field_overhead = 32;
+                bool within_limit = name.size() <= maximum_header_list_size - field_overhead;
+                std::size_t field_size = 0;
+                if(within_limit) {
+                    field_size = field_overhead + name.size();
+                    within_limit = value.size() <= maximum_header_list_size - field_size &&
+                        header_list_size <= maximum_header_list_size - field_size - value.size();
+                }
+                if(within_limit)
+                    header_list_size += field_size + value.size();
+                else
+                    m_failure = failure_t::resource_limit;
+
+                if(!valid && m_failure == failure_t::none)
+                    m_failure = failure_t::header_semantics;
+
+                if(valid && within_limit && m_failure == failure_t::none)
+                    decoded_headers[name].emplace_back(value);
+            };
 
             while (itr != end) {
 
@@ -842,14 +955,37 @@ namespace HPACK
 
                 if ( 0x20 == ( byte_value & 0xE0 ) ) { // 6.3 Dynamic Table update
                     if (!allow_table_update)
+                    {
+                        m_failure = failure_t::compression;
                         return false;
+                    }
 
                     uint32_t size(0);
 
                     decode_integer(itr, end, size, 5);
 
-                    if ( size > m_maximum_table_size )
+                    ++table_update_count;
+                    if(table_update_count > 2 ||
+                       (table_update_count == 2 && size < first_table_update)) {
+                        m_failure = failure_t::compression;
                         return false;
+                    }
+                    if(table_update_count == 1)
+                        first_table_update = size;
+
+                    if (!required_table_update_seen) {
+                        if (size > m_required_minimum_table_size) {
+                            m_failure = failure_t::compression;
+                            return false;
+                        }
+                        required_table_update_seen = true;
+                    }
+
+                    if ( size > m_maximum_table_size )
+                    {
+                        m_failure = failure_t::compression;
+                        return false;
+                    }
 
                     decoded_dynamic.max(size);
                 } else if ( ( byte_value & 0x80 ) ) { // 6.1 Indexed Header Field Representation
@@ -862,13 +998,15 @@ namespace HPACK
                         // decoding error
 
                         // report index zero error
+                        m_failure = failure_t::compression;
                         return false;
                     }
 
                     auto const* hdr_ptr = decoded_dynamic.get_header(index);
                     if(hdr_ptr) {
-                        decoded_headers[hdr_ptr->first].emplace_back(hdr_ptr->second);
+                        publish_header(hdr_ptr->first, hdr_ptr->second);
                     } else {
+                        m_failure = failure_t::compression;
                         return false;
                     }
                 } else {
@@ -888,6 +1026,7 @@ namespace HPACK
                         if(h) {
                             n = h->first;
                         } else {
+                            m_failure = failure_t::compression;
                             return false;
                         }
                     } else {
@@ -895,15 +1034,51 @@ namespace HPACK
                     }
 
                     auto val = parse_string(itr, end);
-                    decoded_headers[ n ].emplace_back(val);
-                    if (incremental)
+                    publish_header(n, val);
+                    if (incremental) {
                         decoded_dynamic.add(n, val);
+                        if(decoded_dynamic.length() > maximum_dynamic_table_storage) {
+                            m_failure = failure_t::resource_limit;
+                            return false;
+                        }
+                    }
                 }
             }
 
+            if (!required_table_update_seen) {
+                m_failure = failure_t::compression;
+                return false;
+            }
+
             m_dynamic.swap(decoded_dynamic);
+            m_table_size_update_required = false;
+            if(m_failure != failure_t::none) {
+                m_headers.clear();
+                return false;
+            }
             m_headers = std::move(decoded_headers);
             return true;
+        }
+
+        [[nodiscard]] failure_t failure() const noexcept { return m_failure; }
+
+        /*! Update the protocol-advertised upper bound for dynamic table size.
+         *  A reduction is applied transactionally when the peer emits the
+         *  mandatory HPACK table-size update at the start of its next block.
+         */
+        void maximum_table_size(uint64_t maximum) noexcept {
+            if(maximum < m_dynamic.max()) {
+                if(!m_table_size_update_required ||
+                   maximum < m_required_minimum_table_size) {
+                    m_required_minimum_table_size = maximum;
+                }
+                m_table_size_update_required = true;
+            }
+            m_maximum_table_size = maximum;
+        }
+
+        [[nodiscard]] uint64_t maximum_table_size() const noexcept {
+            return m_maximum_table_size;
         }
 
 

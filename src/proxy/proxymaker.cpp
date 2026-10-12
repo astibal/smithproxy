@@ -144,6 +144,7 @@ namespace sx::proxymaker {
 
         // apply policy and get result
         int policy_num = -1;
+        std::unique_lock config_lock(CfgFactory::lock(), std::defer_lock);
 
         if (implicit_allow) {
             // bypass ssl com to VIP
@@ -151,6 +152,10 @@ namespace sx::proxymaker {
             bypass_cx(proxy->first_right());
             policy_num = PolicyRule::POLICY_IMPLICIT_PASS;
         } else {
+            // Keep selection, profile application and routing bound to one
+            // configuration generation.  A reload must not reuse the numeric
+            // slot between authorization and routing.
+            config_lock.lock();
             policy_num = CfgFactory::get()->policy_apply(proxy->first_left(), proxy.get());
         }
 
@@ -178,6 +183,8 @@ namespace sx::proxymaker {
         if(proxy and not implicit_allow) {
             proxy->update_neighbors();
         }
+
+        if(config_lock.owns_lock()) config_lock.unlock();
 
         return true;
     }
@@ -327,26 +334,19 @@ namespace sx::proxymaker {
 
         // setup NAT
         if (not enforce_nat) {
-            try {
-                if (CfgFactory::get()->db_policy_list.at(proxy->matched_policy())->nat == PolicyRule::POLICY_NAT_NONE) {
-                    const auto parsed_port = parse_source_port(source_port);
-                    if(!parsed_port) return false;
-                    target_cx->com()->nonlocal_src_port() = *parsed_port;
-                    target_cx->com()->nonlocal_src_host() = source_host;
-                    target_cx->com()->nonlocal_src(true);
-                }
-            }
-            catch (std::invalid_argument const &e) {
-                _err("proxy_setup_snat (nonat)[%s]: policy #%d: error %s", proxy->to_string(iINF).c_str(),
-                     proxy->matched_policy(), e.what());
+            auto policy = CfgFactory::get()->policy_rule(proxy->matched_policy());
+            if(not policy) {
+                _err("proxy_setup_snat (nonat)[%s]: policy #%d disappeared",
+                     proxy->to_string(iINF).c_str(), proxy->matched_policy());
                 return false;
             }
-            catch (std::out_of_range const &e) {
-                _err("proxy_setup_snat (nonat)[%s]: policy #%d: error %s", proxy->to_string(iINF).c_str(),
-                     proxy->matched_policy(), e.what());
-                return false;
+            if(policy->nat == PolicyRule::POLICY_NAT_NONE) {
+                const auto parsed_port = parse_source_port(source_port);
+                if(!parsed_port) return false;
+                target_cx->com()->nonlocal_src_port() = *parsed_port;
+                target_cx->com()->nonlocal_src_host() = source_host;
+                target_cx->com()->nonlocal_src(true);
             }
-
         }
 
         return true;
