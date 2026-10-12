@@ -83,6 +83,19 @@ TEST(CliBrokerTest, InternalBrokerRelaysBothDirections) {
     EXPECT_EQ(sx::comm::cli::stop_broker(), 0);
 }
 
+TEST(CliBrokerTest, InternalBrokerStopsWhenSigtermIsBlocked) {
+    sigset_t blocked{};
+    sigset_t previous{};
+    ASSERT_EQ(::sigemptyset(&blocked), 0);
+    ASSERT_EQ(::sigaddset(&blocked, SIGTERM), 0);
+    ASSERT_EQ(::pthread_sigmask(SIG_BLOCK, &blocked, &previous), 0);
+    const auto port = unused_loopback_port();
+    ASSERT_NE(port, 0);
+    ASSERT_EQ(sx::comm::cli::start_internal_broker(port), 0);
+    EXPECT_EQ(sx::comm::cli::stop_broker(), 0);
+    EXPECT_EQ(::pthread_sigmask(SIG_SETMASK, &previous, nullptr), 0);
+}
+
 TEST(CliBrokerTest, InternalBrokerFailureInvokesFatalHandler) {
     std::atomic<bool> failed{false};
     sx::comm::cli::set_internal_failure_handler([&failed] { failed.store(true); });

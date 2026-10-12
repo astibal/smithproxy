@@ -48,7 +48,7 @@ class BrokerServer {
 public:
     explicit BrokerServer(BrokerConfig config, SharedStats* stats = nullptr)
         : config_(std::move(config)), stats_(stats) {}
-    int run();
+    int run(int stop_fd = -1);
 
 private:
     BrokerConfig config_;

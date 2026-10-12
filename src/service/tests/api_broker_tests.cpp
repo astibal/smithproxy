@@ -128,6 +128,19 @@ TEST(ApiBrokerTest, InternalBrokerRelaysRawStreamWithoutPreamble) {
     EXPECT_EQ(sx::comm::api::stop_broker(), 0);
 }
 
+TEST(ApiBrokerTest, InternalBrokerStopsWhenSigtermIsBlocked) {
+    sigset_t blocked{};
+    sigset_t previous{};
+    ASSERT_EQ(::sigemptyset(&blocked), 0);
+    ASSERT_EQ(::sigaddset(&blocked, SIGTERM), 0);
+    ASSERT_EQ(::pthread_sigmask(SIG_BLOCK, &blocked, &previous), 0);
+    const auto port = unused_loopback_port();
+    ASSERT_NE(port, 0);
+    ASSERT_EQ(sx::comm::api::start_internal_broker({"127.0.0.1", port, {"*"}, {}}), 0);
+    EXPECT_EQ(sx::comm::api::stop_broker(), 0);
+    EXPECT_EQ(::pthread_sigmask(SIG_SETMASK, &previous, nullptr), 0);
+}
+
 TEST(ApiBrokerTest, ExternalBrokerUsesFilesystemCommSocket) {
     char directory_template[] = "./smithproxy-api-broker-test-XXXXXX";
     char* directory = ::mkdtemp(directory_template);
