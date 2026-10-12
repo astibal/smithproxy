@@ -1,4 +1,5 @@
 #include <service/comm.hpp>
+#include <service/comm_frame.hpp>
 
 #include <atomic>
 #include <array>
@@ -14,6 +15,22 @@
 #include <tests/security/hostile_peer.hpp>
 
 namespace {
+
+TEST(CommFrameTest, VersionOneUsesTheCanonicalNulScPrefix) {
+    const auto encoded = sx::comm::wire::encode(42, 0, "payload");
+    ASSERT_GE(encoded.size(), sx::comm::wire::header_size);
+    EXPECT_EQ(encoded[0], std::byte{0});
+    EXPECT_EQ(encoded[1], std::byte{'S'});
+    EXPECT_EQ(encoded[2], std::byte{'C'});
+    EXPECT_EQ(encoded[3], std::byte{1});
+
+    sx::comm::wire::Header header;
+    std::string payload;
+    ASSERT_TRUE(sx::comm::wire::decode(encoded, header, payload));
+    EXPECT_EQ(header.opcode, 42);
+    EXPECT_EQ(header.status, 0);
+    EXPECT_EQ(payload, "payload");
+}
 
 class OneWayOperation final : public sx::comm::Operation {
 public:
