@@ -1041,6 +1041,17 @@ namespace sx::engine::http {
 
             decoder = std::move(candidate);
 
+            // HPACK state must advance even for a stream whose direction is
+            // already invalid, but later HEADERS cannot repair its semantics.
+            if(auto stream = connection->streams.find(stream_id);
+               stream != connection->streams.end() &&
+               (side == side_t::LEFT
+                    ? stream->second.request_invalid_
+                    : stream->second.response_invalid_)) {
+                _err("Frame: HEADERS on invalid HTTP/2 stream direction");
+                return;
+            }
+
             std::optional<sx::ja4::HTTP> ja4h;
             if(ctx.options.http.ja4h) {
                 ja4h = sx::ja4::HTTP();

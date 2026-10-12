@@ -1302,6 +1302,48 @@ TEST(HTTP2, PreservesForeignApplicationStateWithoutDereferencingItAsHttp) {
 }
 
 
+TEST(HTTP2, DataBeforeResponseHeadersCannotBeRepaired) {
+    auto frame = [](uint8_t type, uint8_t flags, uint32_t stream,
+                    std::vector<uint8_t> const& payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), type, flags,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+
+    HPACK::encoder_t request_encoder;
+    request_encoder.add(":method", "GET", false);
+    request_encoder.add(":scheme", "https", false);
+    request_encoder.add(":authority", "fixture.example", false);
+    request_encoder.add(":path", "/", false);
+    sx::engine::EngineCtx ctx;
+    auto request = frame(1, 0x05, 1, request_encoder.data());
+    v2::process_frame(ctx, socle::side_t::LEFT, request);
+
+    auto premature_data = frame(0, 0, 1, {'x'});
+    v2::process_frame(ctx, socle::side_t::RIGHT, premature_data);
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    ASSERT_EQ(connection->streams.count(1), 1u);
+    EXPECT_TRUE(connection->streams.at(1).response_invalid_);
+
+    HPACK::encoder_t response_encoder;
+    response_encoder.add(":status", "200", false);
+    auto response = frame(1, 0x04, 1, response_encoder.data());
+    v2::process_frame(ctx, socle::side_t::RIGHT, response);
+    EXPECT_TRUE(connection->streams.at(1).response_headers_.empty());
+}
+
+
 TEST(HTTP2, DecodesHpackHeadersWithoutRequiringAttachedOrigin) {
     sx::engine::EngineCtx ctx;
     ctx.state_data = std::make_any<v2::Http2Connection>();
