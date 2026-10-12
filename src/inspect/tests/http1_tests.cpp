@@ -394,6 +394,33 @@ TEST(HTTP1, ParsesMethodsParametersHeadersAndInvalidInput) {
     EXPECT_FALSE(v1::find_referrer(ctx, "referrer: misspelled\r\n"));
 }
 
+TEST(HTTP1, Ja4hOwnsCompletedResultsAndResetsBetweenMessages) {
+    HTTP fingerprint;
+    fingerprint.from_buffer(std::string{
+        "GET /one HTTP/1.1\r\nHost: first.example\r\nX-One: value\r\n\r\n"});
+    const auto first = fingerprint.ja4h();
+    const auto first_raw = fingerprint.ja4h_raw();
+    EXPECT_NE(first_raw.find("Host,X-One"), std::string::npos);
+
+    // A second parse must describe only the second request, rather than
+    // retaining the prior headers, cookies or cached fingerprint.
+    fingerprint.from_buffer(std::string{
+        "POST /two HTTP/1.1\r\nhost: second.example\r\nCookie: b=2\r\n\r\n"});
+    EXPECT_NE(fingerprint.ja4h_raw().find("_host_"), std::string::npos);
+    EXPECT_EQ(fingerprint.ja4h_raw().find("X-One"), std::string::npos);
+    EXPECT_NE(fingerprint.ja4h(), first);
+}
+
+TEST(HTTP1, Ja4hAcceptsOrdinaryHeaderAndCookieWhitespace) {
+    HTTP fingerprint;
+    fingerprint.from_buffer(
+        "GET / HTTP/1.1\nHost:example.test\nX-Tab:\tvalue\n"
+        "Cookie:a=1;b=2; c = 3\n\n");
+    EXPECT_NE(fingerprint.ja4h_raw().find("Host,X-Tab"), std::string::npos);
+    EXPECT_NE(fingerprint.ja4h_raw().find("a,b,c"), std::string::npos);
+    EXPECT_NE(fingerprint.ja4h_raw().find("a=1,b=2,c=3"), std::string::npos);
+}
+
 TEST(HTTP1, FragmentedHeadersAreNotPublishedBeforeAuthorityArrives) {
     sx::engine::EngineCtx ctx;
     const std::string incomplete = "GET /protected HTTP/1.1\r\nUser-Agent: split";
