@@ -1,0 +1,69 @@
+.\" Render with: groff -man -Tutf8 smithproxy-privsep.7
+.TH SMITHPROXY-PRIVSEP 7 "OCT 2026" "Smithproxy" "Miscellaneous Information Manual"
+.SH NAME
+smithproxy-privsep \- Smithproxy privilege separation and communication brokers
+.SH SYNOPSIS
+.B smithproxy --run-as nobody
+.br
+.B SMITHPROXY_RUN_AS=nobody smithproxy
+.SH DESCRIPTION
+Smithproxy starts its restricted helpers while privileged and then changes the
+UID, GID and supplementary groups of the core process. The command-line option
+takes precedence over the environment variable. Smithproxy must initially run
+as root; starting it directly as the target user cannot create the helpers.
+.SH COVERAGE
+Privilege separation covers transparent and privileged socket operations,
+restricted configuration read/write/backup, PID-file operations, raw GRE
+export, CLI and API ingress, and optional webhook network egress.
+.PP
+Ordinary output files are not delegated. The target user must have filesystem
+access to configured logs, captures, TLS key logs and other enabled outputs.
+The service manager must prepare communication socket directories and their
+ownership before startup.
+.SH PRIVILEGED HELPERS
+.TP
+.B Socket helper
+Performs only fixed socket operations: socket creation, selected socket
+options, bind and listen. File descriptors pass over a private Unix socket
+pair. The helper has no network listener and cannot execute commands.
+.TP
+.B File helper
+Reads, writes and backs up the configured Smithproxy configuration and performs
+PID-file operations. Paths are fixed at helper startup. It is not a general
+filesystem interface.
+.SH COMMUNICATION BROKERS
+External brokers may move integration traffic across Unix sockets instead of
+giving the core additional network access:
+.TP
+.BI --comm-gre " path"
+Send GRE export packets to an external GRE broker.
+.TP
+.BI --comm-cli " path"
+Receive CLI connections through an external broker.
+.TP
+.BI --comm-api " path"
+Receive API connections through an external broker.
+.TP
+.BI --comm-webhook " path"
+Relay outbound webhook streams through an external broker.
+.PP
+Without an option, the corresponding standalone/internal transport is used.
+Access to each socket is controlled by its filesystem ownership, mode and
+parent directory. Communication sockets should not be accessible to untrusted
+users.
+.SH DIAGNOSTICS
+.nf
+    diag sys priv stats
+    diag sys gre stats
+    diag sys cli stats
+    diag sys api stats
+    diag sys webhook stats
+.fi
+.SH SECURITY NOTES
+Privilege separation reduces the authority of the Smithproxy core; it does not
+configure TPROXY routing, firewall rules or Unix socket permissions. Treat the
+configuration, CLI, API, captures and TLS private keys as sensitive data.
+.SH SEE ALSO
+.BR smithproxy (1),
+.BR smithproxy.cfg (5),
+.BR smithproxy-mitm (7)
