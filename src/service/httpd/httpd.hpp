@@ -265,6 +265,7 @@ class Http_Responder : public lmh::DynamicController {
     std::string path;
 
     Callable responder;
+    static constexpr std::size_t max_request_body_size = 8U * 1024U * 1024U;
 
     static inline const std::vector<std::pair<std::string, std::string>> Http_Response_Headers  = {
             { "X-Vendor", "smithproxy " SMITH_VERSION },
@@ -308,15 +309,26 @@ public:
             }
         }
         else if(*upload_data_size > 0) {
-            std::string inc(upload_data, *upload_data_size);
-            body->request_data += inc.c_str();
+            if(*upload_data_size > max_request_body_size ||
+               body->request_data.size() > max_request_body_size - *upload_data_size) {
+                // Keep a bounded marker until libmicrohttpd's final callback.
+                body->request_data.clear();
+                body->request_data.resize(max_request_body_size + 1);
+            } else {
+                body->request_data.append(upload_data, *upload_data_size);
+            }
             *upload_data_size = 0;
-
-            request_data = body->request_data;
+            return {};
         }
 
-
-        auto ret = responder(connection, meth, request_data);
+        Http_JsonResponseParams ret;
+        if(body && body->request_data.size() > max_request_body_size) {
+            ret.response_code = 413;
+            ret.response = {{"error", "request body too large"}};
+        } else {
+            if(body) request_data = body->request_data;
+            ret = responder(connection, meth, request_data);
+        }
 
         // MHD_YES is used above to request another upload callback.  Every
         // real HTTP response, including an error, must carry the responder's

@@ -54,4 +54,56 @@ TEST_F(HttpSessionsTest, ValidValuesAndApiKeySnapshotsRoundTrip) {
               (std::set<std::string>{"one", "two"}));
 }
 
+TEST(HttpResponderTest, AccumulatesBinaryPostChunksAndBoundsTheBody) {
+    unsigned calls = 0;
+    std::string received;
+    auto callback = [&](MHD_Connection*, std::string const&, std::string const& body) {
+        ++calls;
+        received = body;
+        sx::webserver::Http_JsonResponseParams result;
+        result.response_code = 200;
+        result.response = {{"ok", true}};
+        return result;
+    };
+    sx::webserver::Http_Responder responder("POST", "/upload", callback);
+
+    void* state = new lmh::ConnectionState(responder);
+    std::stringstream response;
+    const char first[] = {'a', '\0', 'b'};
+    std::size_t first_size = sizeof(first);
+    auto pending = responder.createResponse(nullptr, "/upload", "POST", first,
+                                            &first_size, &state, response);
+    EXPECT_EQ(pending.response_code, MHD_YES);
+    EXPECT_EQ(first_size, 0U);
+    EXPECT_EQ(calls, 0U);
+
+    const char second[] = {'c', 'd'};
+    std::size_t second_size = sizeof(second);
+    responder.createResponse(nullptr, "/upload", "POST", second,
+                             &second_size, &state, response);
+    EXPECT_EQ(calls, 0U);
+
+    std::size_t complete_size = 0;
+    auto complete = responder.createResponse(nullptr, "/upload", "POST", nullptr,
+                                             &complete_size, &state, response);
+    EXPECT_EQ(complete.response_code, 200);
+    EXPECT_EQ(calls, 1U);
+    EXPECT_EQ(received, std::string(first, sizeof(first)) + std::string(second, sizeof(second)));
+    delete static_cast<lmh::ConnectionState*>(state);
+
+    calls = 0;
+    state = new lmh::ConnectionState(responder);
+    std::string oversized(8U * 1024U * 1024U + 1U, 'x');
+    std::size_t oversized_size = oversized.size();
+    responder.createResponse(nullptr, "/upload", "POST", oversized.data(),
+                             &oversized_size, &state, response);
+    complete_size = 0;
+    auto rejected = responder.createResponse(nullptr, "/upload", "POST", nullptr,
+                                             &complete_size, &state, response);
+    EXPECT_EQ(rejected.response_code, 413);
+    EXPECT_EQ(calls, 0U);
+    delete static_cast<lmh::ConnectionState*>(state);
+}
+
+
 } // namespace
