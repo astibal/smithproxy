@@ -76,6 +76,7 @@ namespace sx::http::webhooks {
         settings.url = factory->settings_webhook.spider_engine_url;
         settings.verify_tls = true;
         settings.bind_interface = factory->settings_webhook.bind_interface;
+        settings.unix_socket_path = sx::comm::spider_engine::transport_path();
         std::ostringstream dns;
         for(size_t i = 0; i < factory->db_nameservers.size(); ++i) {
             dns << factory->db_nameservers[i].str_host;

@@ -145,7 +145,8 @@ int prepare_privilege_separation(DaemonFactory& daemon, const std::string& confi
                                  const std::optional<std::string>& comm_gre,
                                  const std::optional<std::string>& comm_cli,
                                  const std::optional<std::string>& comm_api,
-                                 const std::optional<std::string>& comm_webhook) {
+                                 const std::optional<std::string>& comm_webhook,
+                                 const std::optional<std::string>& comm_spider_engine) {
     auto const& log = DaemonFactory::instance()->get_log();
 
     if(sx::privsep::files::start_local_helper({config_file, daemon.pid_file}) != 0) {
@@ -161,6 +162,14 @@ int prepare_privilege_separation(DaemonFactory& daemon, const std::string& confi
 
     if(comm_webhook && sx::comm::webhook::configure_transport(*comm_webhook) != 0) {
         _fat("cannot initialize webhook transport: %s", string_error().c_str());
+        socle::privsep::stop_local_helper();
+        sx::privsep::files::stop_local_helper();
+        return -1;
+    }
+
+    if(comm_spider_engine
+       && sx::comm::spider_engine::configure_transport(*comm_spider_engine) != 0) {
+        _fat("cannot initialize SPIDER engine transport: %s", string_error().c_str());
         socle::privsep::stop_local_helper();
         sx::privsep::files::stop_local_helper();
         return -1;
@@ -491,6 +500,7 @@ void print_help() {
     std::cerr << "    --comm-cli <path>            :  use an external CLI comm broker" << std::endl;
     std::cerr << "    --comm-api <path>            :  use an external API comm broker" << std::endl;
     std::cerr << "    --comm-webhook <path>        :  route webhook connections through a Unix socket" << std::endl;
+    std::cerr << "    --comm-spider-engine <path>  :  route SPIDER engine connections through a Unix socket" << std::endl;
     std::cerr << std::endl;
     std::cerr << "  Notes:" << std::endl;
     std::cerr << std::endl;
@@ -528,6 +538,7 @@ int main(int argc, char *argv[]) {
     constexpr int option_comm_cli = 1002;
     constexpr int option_comm_api = 1003;
     constexpr int option_comm_webhook = 1004;
+    constexpr int option_comm_spider_engine = 1005;
     static struct option long_options[] =
             {
                     /* These options set a flag. */
@@ -545,6 +556,7 @@ int main(int argc, char *argv[]) {
                     {"comm-cli", required_argument, nullptr, option_comm_cli},
                     {"comm-api", required_argument, nullptr, option_comm_api},
                     {"comm-webhook", required_argument, nullptr, option_comm_webhook},
+                    {"comm-spider-engine", required_argument, nullptr, option_comm_spider_engine},
 
                     // multi-tenancy support: listening ports will be shifted by number 'i', while 't' controls logging, pidfile, etc.
                     // both, or none of them have to be set
@@ -568,6 +580,7 @@ int main(int argc, char *argv[]) {
     std::optional<std::string> command_line_comm_cli;
     std::optional<std::string> command_line_comm_api;
     std::optional<std::string> command_line_comm_webhook;
+    std::optional<std::string> command_line_comm_spider_engine;
 
     while(true) {
     /* getopt_long stores the option index here. */
@@ -646,6 +659,14 @@ int main(int argc, char *argv[]) {
                     return EXIT_FAILURE;
                 }
                 command_line_comm_webhook = optarg;
+                break;
+
+            case option_comm_spider_engine:
+                if(optarg == nullptr || *optarg == '\0') {
+                    std::cerr << "--comm-spider-engine requires a non-empty Unix socket path" << std::endl;
+                    return EXIT_FAILURE;
+                }
+                command_line_comm_spider_engine = optarg;
                 break;
                 
                 
@@ -827,9 +848,20 @@ int main(int argc, char *argv[]) {
     });
 
     const auto run_as = resolve_run_as(command_line_run_as);
+    if(command_line_comm_webhook
+       && CfgFactory::get()->settings_webhook.spider_engine
+       && !command_line_comm_spider_engine) {
+        _fat("SPIDER engine is enabled with external webhook communication, but "
+             "--comm-spider-engine is missing");
+        std::cerr << "SPIDER engine requires --comm-spider-engine when --comm-webhook is used"
+                  << std::endl;
+        CfgFactory::get()->cleanup();
+        return EXIT_FAILURE;
+    }
     if(prepare_privilege_separation(*this_daemon, CfgFactory::get()->config_file, run_as,
                                     command_line_comm_gre, command_line_comm_cli,
-                                    command_line_comm_api, command_line_comm_webhook) != 0) {
+                                    command_line_comm_api, command_line_comm_webhook,
+                                    command_line_comm_spider_engine) != 0) {
         CfgFactory::get()->cleanup();
         return EXIT_FAILURE;
     }
