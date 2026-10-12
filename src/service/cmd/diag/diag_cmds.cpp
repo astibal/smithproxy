@@ -2169,6 +2169,15 @@ int cli_diag_proxy_session_list_extra (DiagCli *cli, const char *command, std::v
                         suffix += " " + decor.warning("!" + fi.first);
                     }
                 }
+                if(auto classifications = curr_proxy->sift_classifications();
+                   !classifications.empty()) {
+                    suffix += " " + decor.muted("[sift:");
+                    for(std::size_t i = 0; i < classifications.size(); ++i) {
+                        if(i != 0) suffix += decor.muted(",");
+                        suffix += decor.muted(classifications[i]);
+                    }
+                    suffix += decor.muted("]");
+                }
                 auto const& io_info = get_io_info(lf, rg, sl_flags);
 
                 do_print |= std::get<0>(io_info);

@@ -310,6 +310,17 @@ std::string_view MitmProxy::session_protocol() const noexcept {
     return stream_handler_ ? stream_handler_->session_protocol() : std::string_view{};
 }
 
+void MitmProxy::add_sift_classification(std::string classification) {
+    if(classification.empty()) return;
+    auto lock = std::scoped_lock(sift_classifications_lock_);
+    sift_classifications_.insert(std::move(classification));
+}
+
+std::vector<std::string> MitmProxy::sift_classifications() const {
+    auto lock = std::scoped_lock(sift_classifications_lock_);
+    return {sift_classifications_.begin(), sift_classifications_.end()};
+}
+
 
 std::string MitmProxy::to_connection_ID() const {
     return sx::proxy::connection_id(StaticContent::boot_random, session_id_);
@@ -392,6 +403,9 @@ void MitmProxy::webhook_session_stop() const {
 
     if(tls.has_value())  j["info"]["tls"] = tls.value();
     if(l7.has_value())  j["info"]["l7"] = l7.value();
+    if(auto classifications = sift_classifications(); !classifications.empty()) {
+        j["info"]["classification"]["sift"] = std::move(classifications);
+    }
 
 
 
@@ -930,7 +944,7 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
         { "payload_layer", std::string(payload_layer) }
     };
 
-    auto response_hook = [&](sx::http::expected_reply r){
+    auto response_hook = [&, sift](sx::http::expected_reply r){
         if(r.has_value()) {
             auto reply = r.value();
             _dia("webhook content-replace: response %d", reply.response.first);
@@ -941,6 +955,18 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
                     _err("MitmProxy::content_webhook: response body is invalid");
                 }
                 else {
+                    if(sift) {
+                        if(auto matches = json_obj.find("matches");
+                           matches != json_obj.end() && matches->is_array()) {
+                            for(auto const& match : *matches) {
+                                if(!match.is_object()) continue;
+                                if(auto signature = match.find("signature");
+                                   signature != match.end() && signature->is_string()) {
+                                    add_sift_classification(signature->get<std::string>());
+                                }
+                            }
+                        }
+                    }
                     if(json_obj.contains("action")) {
                         if(json_obj["action"] == "discard") {
                             // data sent to webhook shall be discarded

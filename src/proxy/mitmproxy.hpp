@@ -43,7 +43,11 @@
 
 #include <atomic>
 #include <ctime>
+#include <mutex>
+#include <set>
+#include <string>
 #include <string_view>
+#include <vector>
 
 #include <basecom.hpp>
 #include <hostcx.hpp>
@@ -259,6 +263,8 @@ public:
     std::string to_connection_ID() const;
     [[nodiscard]] std::string_view session_protocol() const noexcept;
     std::optional<std::string> get_application() const;
+    void add_sift_classification(std::string classification);
+    [[nodiscard]] std::vector<std::string> sift_classifications() const;
 
     mutable bool wh_start = false;
     void webhook_session_start() const;
@@ -295,6 +301,8 @@ public:
     DECLARE_LOGGING(to_string)
 
 private:
+    mutable std::mutex sift_classifications_lock_;
+    std::set<std::string> sift_classifications_;
     StartStopTls start_stop_tls_;
     logan_lite log {"proxy"};
     logan_lite log_dump {"proxy.payload"};
