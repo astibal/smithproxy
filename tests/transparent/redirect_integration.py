@@ -248,12 +248,16 @@ def run_case(binary: Path, source: Path, runtime: Path, tls: bool,
     if listener_tls is None:
         listener_tls = tls
     certificate = key = None
-    if reject_certificate:
-        certificate = runtime / "untrusted-cert.pem"
-        key = runtime / "untrusted-key.pem"
+    if tls and not override_scope:
+        certificate = runtime / ("untrusted-cert.pem" if reject_certificate
+                                 else "redirect-cert.pem")
+        key = runtime / ("untrusted-key.pem" if reject_certificate
+                         else "redirect-key.pem")
+        common_name = "untrusted.invalid" if reject_certificate else "redirect.invalid"
         subprocess.run(
             ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
-             "-days", "1", "-subj", "/CN=untrusted.invalid",
+             "-days", "1", "-subj", f"/CN={common_name}",
+             "-addext", f"subjectAltName=DNS:{common_name}",
              "-keyout", str(key), "-out", str(certificate)],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     origin = EchoOrigin(source, tls, certificate, key,
