@@ -1051,7 +1051,7 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
     }
 
     // 1. content webhook first (potentially modifies from->to_read() buffer
-    if(writer_opts()->webhook_enable) {
+    if(writer_opts()->webhook_enable or sx::http::webhooks::spider_engine_enabled()) {
         auto orig_sz = from->to_read().size();
         if(handle_content_webhook(from, to, side)) {
             auto sz = from->to_read().size();
