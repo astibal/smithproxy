@@ -358,6 +358,8 @@ public:
         bool cfg_tls_verify = true;
         bool sift = false;
         std::string sift_url = "http://127.0.0.1:18081/webhook";
+        std::string sift_tenant_id = "default";
+        std::string sift_instance_id;
 
         bool allow_api_override = false;
         struct {

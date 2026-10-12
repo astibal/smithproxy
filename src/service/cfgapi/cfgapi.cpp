@@ -1134,6 +1134,8 @@ bool CfgFactory::load_settings () {
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "tls_verify", settings_webhook.cfg_tls_verify);
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "sift", settings_webhook.sift);
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "sift_url", settings_webhook.sift_url);
+        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "sift_tenant_id", settings_webhook.sift_tenant_id);
+        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "sift_instance_id", settings_webhook.sift_instance_id);
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "api_override", settings_webhook.allow_api_override);
 
         sx::http::webhooks::set_enabled(settings_webhook.enabled);
@@ -6021,6 +6023,8 @@ int save_settings(Config& ex) {
     webhook_objects.add("tls_verify", Setting::TypeBoolean) = CfgFactory::get()->settings_webhook.cfg_tls_verify;
     webhook_objects.add("sift", Setting::TypeBoolean) = CfgFactory::get()->settings_webhook.sift;
     webhook_objects.add("sift_url", Setting::TypeString) = CfgFactory::get()->settings_webhook.sift_url;
+    webhook_objects.add("sift_tenant_id", Setting::TypeString) = CfgFactory::get()->settings_webhook.sift_tenant_id;
+    webhook_objects.add("sift_instance_id", Setting::TypeString) = CfgFactory::get()->settings_webhook.sift_instance_id;
     webhook_objects.add("hostid", Setting::TypeString) = CfgFactory::get()->settings_webhook.hostid;
     webhook_objects.add("bind_interface", Setting::TypeString) = CfgFactory::get()->settings_webhook.bind_interface;
     webhook_objects.add("api_override", Setting::TypeBoolean) = CfgFactory::get()->settings_webhook.allow_api_override;

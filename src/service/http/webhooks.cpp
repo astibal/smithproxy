@@ -86,6 +86,28 @@ namespace sx::http::webhooks {
         return settings;
     }
 
+    static nlohmann::json sift_identity() {
+        static const nlohmann::json identity = [] {
+            std::string tenant;
+            std::string instance;
+
+            {
+                auto lock = std::scoped_lock(CfgFactory::lock());
+                auto const& settings = CfgFactory::get()->settings_webhook;
+                tenant = settings.sift_tenant_id;
+                instance = settings.sift_instance_id;
+            }
+
+            if(tenant.empty()) tenant = "default";
+            if(instance.empty()) instance = get_hostid();
+
+            return nlohmann::json{{"tenant", std::move(tenant)},
+                                  {"instance", std::move(instance)}};
+        }();
+
+        return identity;
+    }
+
     bool send_sift_action(
         std::string const& action, std::string const& action_id,
         nlohmann::json const& details) {
@@ -93,7 +115,7 @@ namespace sx::http::webhooks {
         if(not settings.enabled or settings.url.empty()) return false;
         nlohmann::json message = {
             {"action", action}, {"id", action_id}, {"source", get_hostid()},
-            {"type", "proxy"}, {"details", details}
+            {"identity", sift_identity()}, {"type", "proxy"}, {"details", details}
         };
         return sx::http::AsyncRequest::enqueue(
             std::move(settings), to_string(message), [](auto const&) {});
@@ -108,7 +130,8 @@ namespace sx::http::webhooks {
         info.erase("content");
         nlohmann::json metadata = {
             {"action", "connection-content"}, {"id", action_id},
-            {"source", get_hostid()}, {"type", "proxy"}, {"details", std::move(details)}
+            {"source", get_hostid()}, {"identity", sift_identity()},
+            {"type", "proxy"}, {"details", std::move(details)}
         };
         const auto encoded = to_string(metadata);
         if(encoded.size() > std::numeric_limits<std::uint32_t>::max() ||

@@ -481,6 +481,16 @@ void CfgValueHelp::init() {
             .may_be_empty(false)
             .value_filter(CfgValue::VALUE_ANY);
 
+    add("settings.webhook.sift_tenant_id", "Sift tenant identity")
+            .help_quick("<string>: isolate flows under this tenant; restart required (default: default)")
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_ANY);
+
+    add("settings.webhook.sift_instance_id", "Sift producer instance identity")
+            .help_quick("<string>: stable Smithproxy ID; restart required (default: webhook hostid or hostname)")
+            .may_be_empty(true)
+            .value_filter(CfgValue::VALUE_ANY);
+
     add("settings.webhook.hostid", "webhook identity value override")
             .help_quick("<string>:  override hostid string to custom value (default: <hostname>)")
             .may_be_empty(true)
