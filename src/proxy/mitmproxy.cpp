@@ -312,6 +312,7 @@ std::string_view MitmProxy::session_protocol() const noexcept {
 
 void MitmProxy::add_sift_classification(std::string classification) {
     if(classification.empty()) return;
+
     auto lock = std::scoped_lock(sift_classifications_lock_);
     sift_classifications_.insert(std::move(classification));
 }
@@ -331,34 +332,43 @@ void MitmProxy::submit_flow_observation(
     info["session"] = to_connection_label();
     info["side"] = "L";
     info["payload_layer"] = payload_layer;
-    for(auto const& [name, value] : fields) info[name] = value;
+
+    for(auto const& [name, value] : fields) {
+        info[name] = value;
+    }
 
     if(sx::http::webhooks::is_enabled()) {
         sx::http::webhooks::send_action(
             "connection-info", to_connection_ID(), details);
     }
+
     if(!sx::http::webhooks::sift_enabled()) return;
 
     sx::http::webhooks::send_sift_content_wait(
         to_connection_ID(), std::move(details), {},
         [this](sx::http::expected_reply reply) {
             if(!reply.has_value()) return;
+
             auto const status = reply.value().response.first;
             if(status < 200 || status >= 300) return;
+
             auto body = nlohmann::json::parse(
                 reply.value().response.second, nullptr, false);
             if(body.is_discarded()) return;
+
             auto const matches = body.find("matches");
             if(matches == body.end() || !matches->is_array()) return;
+
             for(auto const& match : *matches) {
                 if(!match.is_object()) continue;
+
                 auto const signature = match.find("signature");
-                if(signature != match.end() && signature->is_string())
+                if(signature != match.end() && signature->is_string()) {
                     add_sift_classification(signature->get<std::string>());
+                }
             }
         });
 }
-
 
 std::string MitmProxy::to_connection_ID() const {
     return sx::proxy::connection_id(StaticContent::boot_random, session_id_);
@@ -981,6 +991,7 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
         { "side", string_format("%c", from_side(side)) },
         { "payload_layer", std::string(payload_layer) }
     };
+
     if(auto* right = first_right(); right != nullptr) {
         if(auto* tls = dynamic_cast<SSLCom*>(right->com()); tls != nullptr) {
             if(auto const& sni = tls->get_sni(); !sni.empty()) {
@@ -988,22 +999,28 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
             }
         }
     }
+
     if(auto const* left = first_left(); left != nullptr) {
         auto const app = std::dynamic_pointer_cast<sx::engine::http::app_HttpRequest>(
             left->engine_ctx.application_data);
+
         if(app && app->populated()) {
             auto const http2 = app->version == sx::engine::http::app_HttpRequest::HTTP_VER::HTTP2;
             auto const prefix = http2 ? "flow.http2." : "flow.http1.";
+
             j["info"][http2 ? "flow.http2" : "flow.http1"] = true;
 
             auto put = [&](std::string const& field, std::string const& value) {
                 if(!value.empty()) j["info"][prefix + field] = value;
             };
+
             auto path = app->http_data.uri;
             if(!app->http_data.params.empty()) path += "?" + app->http_data.params;
+
             auto scheme = app->http_data.proto;
-            if(scheme.size() >= 3 && scheme.compare(scheme.size() - 3, 3, "://") == 0)
+            if(scheme.size() >= 3 && scheme.compare(scheme.size() - 3, 3, "://") == 0) {
                 scheme.resize(scheme.size() - 3);
+            }
 
             put("method", app->http_data.method);
             put(http2 ? "authority" : "host", app->http_data.host);
@@ -1237,7 +1254,9 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
 void MitmProxy::write_traffic_log(side_t side, baseHostCX* cx, buffer* custom_buffer) {
 
     if(not cx) return;
+
     auto* observed = custom_buffer ? custom_buffer : &cx->to_read();
+
     if(traffic_log_adapter_ and observed and not observed->empty()) {
         traffic_log_adapter_->observe(side, *observed);
     }

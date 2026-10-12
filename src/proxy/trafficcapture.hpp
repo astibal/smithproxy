@@ -35,6 +35,8 @@ public:
 
     /** Observe forwarded plaintext independently of capture configuration. */
     virtual void observe(socle::side_t, buffer const&) {}
+
+    /** Publish parsed transport metadata to the owning proxy session. */
     virtual void on_flow_observation(observation_hook) {}
 
     virtual std::unique_ptr<socle::baseTrafficLogger> wrap(

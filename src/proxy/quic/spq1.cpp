@@ -70,21 +70,25 @@ std::unordered_map<std::string, std::string> h3_flow_observations(
     if(record.side != socle::side_t::LEFT) return {};
 
     std::unordered_map<std::string, std::string> headers;
+
     for(auto const& field : record.fields) {
         if(field.name == ":method" || field.name == ":scheme" ||
            field.name == ":authority" || field.name == ":path") {
             headers[field.name] = field.value;
         }
     }
+
     if(headers.find(":method") == headers.end()) return {};
 
     std::unordered_map<std::string, std::string> result{{"flow.http3", "true"}};
+
     auto copy = [&](char const* header, char const* field) {
         if(auto const found = headers.find(header);
            found != headers.end() && !found->second.empty()) {
             result[field] = found->second;
         }
     };
+
     copy(":method", "flow.http3.method");
     copy(":scheme", "flow.http3.scheme");
     copy(":authority", "flow.http3.authority");
@@ -92,13 +96,18 @@ std::unordered_map<std::string, std::string> h3_flow_observations(
 
     auto const scheme = headers.find(":scheme");
     auto const authority = headers.find(":authority");
+
     if(scheme != headers.end() && !scheme->second.empty() &&
        authority != headers.end() && !authority->second.empty()) {
         auto url = scheme->second + "://" + authority->second;
-        if(auto const path = headers.find(":path"); path != headers.end())
+
+        if(auto const path = headers.find(":path"); path != headers.end()) {
             url += path->second;
+        }
+
         result["flow.http3.url"] = std::move(url);
     }
+
     return result;
 }
 
@@ -258,26 +267,33 @@ std::unique_ptr<socle::baseTrafficLogger> stream_log_adapter::wrap(
     pcap->details.next_proto = socle::pcap::connection_details::UDP;
     pcap->details.gre_key = static_cast<std::uint32_t>(
         context_.connection->session_id & 0xFFFFFFFFULL);
+
     auto shared_output = std::shared_ptr<socle::baseTrafficLogger>(std::move(output));
+
     if (context_.connection->native_log) {
         context_.connection->native_log->install(shared_output);
     }
+
     return std::unique_ptr<stream_log>(
         new stream_log(std::move(shared_output), context_, stream_log::shared_output_tag {}));
 }
 
 void stream_log_adapter::observe(socle::side_t side, buffer const& data) {
     auto const connection = context_.connection;
+
     if(!connection || !connection->h3_observer_decoder || data.empty()) return;
 
     try {
         auto records = connection->h3_observer_decoder->ingest(
             side, context_.stream_id,
             static_cast<unsigned char const*>(data.data()), data.size());
+
         for(auto const& record : records) {
             auto fields = h3_flow_observations(record);
-            if(!fields.empty() && observation_hook_)
+
+            if(!fields.empty() && observation_hook_) {
                 observation_hook_(std::move(fields));
+            }
         }
     } catch(std::exception const&) {
         // Semantic enrichment must never alter HTTP/3 forwarding.
