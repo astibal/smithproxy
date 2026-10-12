@@ -2,10 +2,82 @@
 
 #include <service/httpd/httpd.hpp>
 
+#include <algorithm>
+#include <cerrno>
+#include <filesystem>
+#include <fcntl.h>
+#include <set>
+#include <sys/socket.h>
+
 namespace {
 
 using sx::webserver::HttpSessions;
 using sx::webserver::TimedOptional;
+
+std::set<int> listening_sockets() {
+    std::set<int> result;
+    std::error_code error;
+    for(std::filesystem::directory_iterator entry("/proc/self/fd", error), end;
+        not error && entry != end; entry.increment(error)) {
+        auto const name = entry->path().filename().string();
+        char* tail = nullptr;
+        errno = 0;
+        auto const value = std::strtol(name.c_str(), &tail, 10);
+        if(errno or tail == name.c_str() or *tail != '\0' or value < 0) continue;
+
+        int accepting = 0;
+        socklen_t accepting_size = sizeof(accepting);
+        if(::getsockopt(static_cast<int>(value), SOL_SOCKET, SO_ACCEPTCONN,
+                        &accepting, &accepting_size) == 0 && accepting) {
+            result.emplace(static_cast<int>(value));
+        }
+    }
+    return result;
+}
+
+std::set<int> new_listening_sockets(std::set<int> const& before) {
+    auto const after = listening_sockets();
+    std::set<int> result;
+    std::set_difference(after.begin(), after.end(), before.begin(), before.end(),
+                        std::inserter(result, result.end()));
+    return result;
+}
+
+unsigned short listening_port(int descriptor) {
+    sockaddr_in address{};
+    socklen_t size = sizeof(address);
+    if(::getsockname(descriptor, reinterpret_cast<sockaddr*>(&address), &size) != 0)
+        return 0;
+    return ntohs(address.sin_port);
+}
+
+int request_status(unsigned short port) {
+    const int descriptor = ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if(descriptor < 0) return 0;
+    timeval timeout{2, 0};
+    ::setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = htons(port);
+    if(::connect(descriptor, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
+        ::close(descriptor);
+        return 0;
+    }
+    constexpr std::string_view request =
+        "GET /missing HTTP/1.0\r\nHost: localhost\r\n\r\n";
+    if(::send(descriptor, request.data(), request.size(), MSG_NOSIGNAL) !=
+       static_cast<ssize_t>(request.size())) {
+        ::close(descriptor);
+        return 0;
+    }
+    std::array<char, 128> response{};
+    const auto received = ::recv(descriptor, response.data(), response.size() - 1, 0);
+    ::close(descriptor);
+    if(received <= 0) return 0;
+    int status = 0;
+    return std::sscanf(response.data(), "HTTP/%*s %d", &status) == 1 ? status : 0;
+}
 
 class HttpSessionsTest : public ::testing::Test {
 protected:
@@ -103,6 +175,54 @@ TEST(HttpResponderTest, AccumulatesBinaryPostChunksAndBoundsTheBody) {
     EXPECT_EQ(rejected.response_code, 413);
     EXPECT_EQ(calls, 0U);
     delete static_cast<lmh::ConnectionState*>(state);
+}
+
+
+TEST(HttpDaemonLifecycle, ListenerIsCloseOnExecAndCanRestart) {
+    auto const before = listening_sockets();
+    lmh::WebServer server(0);
+    server.options().bind_loopback = true;
+
+    server.start_daemon();
+    ASSERT_TRUE(server.is_daemon_alive());
+    auto first = new_listening_sockets(before);
+    ASSERT_EQ(first.size(), 1U);
+    EXPECT_NE(::fcntl(*first.begin(), F_GETFD) & FD_CLOEXEC, 0);
+
+    server.stop_daemon();
+    EXPECT_FALSE(server.is_daemon_alive());
+    EXPECT_TRUE(new_listening_sockets(before).empty());
+
+    server.start_daemon();
+    ASSERT_TRUE(server.is_daemon_alive());
+    auto second = new_listening_sockets(before);
+    ASSERT_EQ(second.size(), 1U);
+    EXPECT_NE(::fcntl(*second.begin(), F_GETFD) & FD_CLOEXEC, 0);
+    server.stop_daemon();
+}
+
+TEST(HttpDaemonLifecycle, RepeatedEmptyErrorResponsesRemainUsable) {
+    auto const before = listening_sockets();
+    lmh::WebServer missing(0);
+    missing.options().bind_loopback = true;
+    missing.start_daemon();
+    auto listener = new_listening_sockets(before);
+    ASSERT_EQ(listener.size(), 1U);
+    const auto missing_port = listening_port(*listener.begin());
+    ASSERT_NE(missing_port, 0U);
+    for(int i = 0; i < 64; ++i) EXPECT_EQ(request_status(missing_port), 404);
+    missing.stop_daemon();
+
+    lmh::WebServer forbidden(0);
+    forbidden.options().bind_loopback = true;
+    forbidden.options().allowed_ips = {"192.0.2.1"};
+    forbidden.start_daemon();
+    listener = new_listening_sockets(before);
+    ASSERT_EQ(listener.size(), 1U);
+    const auto forbidden_port = listening_port(*listener.begin());
+    ASSERT_NE(forbidden_port, 0U);
+    for(int i = 0; i < 64; ++i) EXPECT_EQ(request_status(forbidden_port), 403);
+    forbidden.stop_daemon();
 }
 
 
