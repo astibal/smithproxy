@@ -105,6 +105,9 @@ namespace sx::engine::http::v2 {
     void process_other(EngineCtx& ctx, socle::side_t side, long stream_id,
                        uint8_t flags, buffer const& data);
     std::size_t process_frame(EngineCtx& ctx, socle::side_t side, buffer& frame);
+    void process_directional_bytes(EngineCtx& ctx, socle::side_t side,
+                                   buffer& input);
+    void process_client_prefaced_bytes(EngineCtx& ctx, buffer& input);
     std::size_t load_prev_state(EngineCtx& ctx, std::size_t absolute_index);
     void save_state(EngineCtx& ctx, std::size_t absolute_index, std::size_t processed);
 }
@@ -723,6 +726,160 @@ TEST(HTTP2, FrameDispatcherCoversDataHeadersPingPriorityAndIncompleteInput) {
     unsigned char* raw = static_cast<unsigned char*>(incomplete.data());
     raw[2] = 5;
     EXPECT_EQ(v2::process_frame(ctx, socle::side_t::LEFT, incomplete), 0U);
+}
+
+TEST(HTTP2, ReassemblesFramesAcrossOppositeDirectionTraffic) {
+    auto frame = [](uint8_t type, uint8_t flags, uint32_t stream,
+                    std::vector<uint8_t> const& payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), type, flags,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        return bytes;
+    };
+
+    HPACK::encoder_t encoder;
+    encoder.add(":method", "GET", false);
+    encoder.add(":scheme", "https", false);
+    encoder.add(":authority", "fixture.example", false);
+    encoder.add(":path", "/interleaved", false);
+    auto request = frame(1, 0x05, 1, encoder.data());
+    auto ping = frame(6, 0, 0, std::vector<uint8_t>(8, 0x42));
+
+    sx::engine::EngineCtx ctx;
+    buffer request_prefix;
+    request_prefix.assign(request.data(), 5);
+    v2::process_directional_bytes(ctx, socle::side_t::LEFT, request_prefix);
+
+    buffer opposite;
+    opposite.assign(ping.data(), ping.size());
+    v2::process_directional_bytes(ctx, socle::side_t::RIGHT, opposite);
+
+    buffer request_suffix;
+    request_suffix.assign(request.data() + 5, request.size() - 5);
+    v2::process_directional_bytes(ctx, socle::side_t::LEFT, request_suffix);
+
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    EXPECT_FALSE(connection->connection_invalid);
+    ASSERT_EQ(connection->streams.count(1), 1U);
+    EXPECT_EQ(connection->streams.at(1).request_header(":path"), "/interleaved");
+    EXPECT_TRUE(connection->left_frame_pending.empty());
+    EXPECT_TRUE(connection->right_frame_pending.empty());
+}
+
+TEST(HTTP2, ReassemblesClientPrefaceAcrossOppositeDirectionTraffic) {
+    auto frame = [](uint8_t type, uint8_t flags, uint32_t stream,
+                    std::vector<uint8_t> const& payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), type, flags,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        return bytes;
+    };
+
+    HPACK::encoder_t encoder;
+    encoder.add(":method", "GET", false);
+    encoder.add(":scheme", "https", false);
+    encoder.add(":authority", "fixture.example", false);
+    encoder.add(":path", "/after-preface", false);
+    const auto request = frame(1, 0x05, 1, encoder.data());
+    const auto settings = frame(4, 0, 0, {});
+
+    sx::engine::EngineCtx ctx;
+    buffer prefix;
+    prefix.assign(v2::txt::magic, 10);
+    v2::process_client_prefaced_bytes(ctx, prefix);
+
+    buffer opposite;
+    opposite.assign(settings.data(), settings.size());
+    v2::process_directional_bytes(ctx, socle::side_t::RIGHT, opposite);
+
+    std::vector<unsigned char> final_chunk(
+        reinterpret_cast<unsigned char const*>(v2::txt::magic) + 10,
+        reinterpret_cast<unsigned char const*>(v2::txt::magic) + v2::txt::magic_sz);
+    final_chunk.insert(final_chunk.end(), settings.begin(), settings.end());
+    final_chunk.insert(final_chunk.end(), request.begin(), request.end());
+    buffer suffix_and_request;
+    suffix_and_request.assign(final_chunk.data(), final_chunk.size());
+    v2::process_client_prefaced_bytes(ctx, suffix_and_request);
+
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    EXPECT_EQ(ctx.status, sx::engine::EngineCtx::status_t::MAGIC);
+    EXPECT_FALSE(connection->connection_invalid);
+    EXPECT_TRUE(connection->client_preface_pending.empty());
+    ASSERT_EQ(connection->streams.count(1), 1U);
+    EXPECT_EQ(connection->streams.at(1).request_header(":path"),
+              "/after-preface");
+}
+
+TEST(HTTP2, ClientPrefaceValidationHasNoFlowBlockCutoff) {
+    auto frame = [](uint8_t type, uint8_t flags, uint32_t stream,
+                    std::vector<uint8_t> const& payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), type, flags,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        return bytes;
+    };
+
+    HPACK::encoder_t encoder;
+    encoder.add(":method", "GET", false);
+    encoder.add(":scheme", "https", false);
+    encoder.add(":authority", "fragmented.example", false);
+    encoder.add(":path", "/many-blocks", false);
+    const auto server_settings = frame(4, 0, 0, {});
+    const auto server_ping = frame(6, 0, 0, std::vector<uint8_t>(8, 0x42));
+    const auto client_settings = frame(4, 0, 0, {});
+    const auto request = frame(1, 0x05, 1, encoder.data());
+
+    sx::engine::EngineCtx ctx;
+    for(std::size_t index = 0; index < 3; ++index) {
+        buffer fragment;
+        fragment.assign(v2::txt::magic + index, 1);
+        v2::process_client_prefaced_bytes(ctx, fragment);
+        auto const& opposite = index == 0 ? server_settings : server_ping;
+        buffer server_frame;
+        server_frame.assign(opposite.data(), opposite.size());
+        v2::process_directional_bytes(ctx, socle::side_t::RIGHT, server_frame);
+    }
+    std::vector<unsigned char> final_client(
+        reinterpret_cast<unsigned char const*>(v2::txt::magic) + 3,
+        reinterpret_cast<unsigned char const*>(v2::txt::magic) + v2::txt::magic_sz);
+    final_client.insert(final_client.end(),
+                        client_settings.begin(), client_settings.end());
+    final_client.insert(final_client.end(), request.begin(), request.end());
+    buffer final_fragment;
+    final_fragment.assign(final_client.data(), final_client.size());
+    v2::process_client_prefaced_bytes(ctx, final_fragment);
+
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    EXPECT_EQ(ctx.status, sx::engine::EngineCtx::status_t::MAGIC);
+    EXPECT_TRUE(connection->client_preface_complete);
+    EXPECT_FALSE(connection->connection_invalid);
+    ASSERT_EQ(connection->streams.count(1), 1U);
+    EXPECT_EQ(connection->streams.at(1).request_header(":path"),
+              "/many-blocks");
 }
 
 TEST(HTTP2, DecodesHpackHeadersWithoutRequiringAttachedOrigin) {

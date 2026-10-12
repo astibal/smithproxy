@@ -1965,6 +1965,93 @@ namespace sx::engine::http {
             return 0;
         };
 
+        void process_directional_bytes(EngineCtx& ctx, side_t side, buffer& input) {
+            auto* connection = std::any_cast<Http2Connection>(&ctx.state_data);
+            if(!connection) {
+                ctx.state_data = std::make_any<Http2Connection>();
+                connection = std::any_cast<Http2Connection>(&ctx.state_data);
+            }
+            auto& pending = side == side_t::LEFT
+                ? connection->left_frame_pending
+                : connection->right_frame_pending;
+            if(connection->connection_invalid) {
+                pending.clear();
+                return;
+            }
+
+            buffer combined;
+            buffer* available = &input;
+            if(!pending.empty()) {
+                if(input.size() > std::numeric_limits<std::size_t>::max() -
+                                      pending.size()) {
+                    connection->connection_invalid = true;
+                    pending.clear();
+                    return;
+                }
+                combined.assign(pending.data(), pending.size());
+                combined.append(input);
+                pending.clear();
+                available = &combined;
+            }
+
+            std::size_t offset = 0;
+            while(offset < available->size()) {
+                auto remaining = available->view(offset);
+                const auto consumed = process_frame(ctx, side, remaining);
+                if(consumed == 0) {
+                    auto* begin = static_cast<unsigned char*>(remaining.data());
+                    pending.assign(begin, begin + remaining.size());
+                    return;
+                }
+                offset += consumed;
+                if(connection->connection_invalid) {
+                    pending.clear();
+                    return;
+                }
+            }
+        }
+
+        void process_client_prefaced_bytes(EngineCtx& ctx, buffer& input) {
+            auto* connection = std::any_cast<Http2Connection>(&ctx.state_data);
+            if(!connection) {
+                ctx.state_data = std::make_any<Http2Connection>();
+                connection = std::any_cast<Http2Connection>(&ctx.state_data);
+            }
+            if(ctx.status != EngineCtx::status_t::START) {
+                process_directional_bytes(ctx, side_t::LEFT, input);
+                return;
+            }
+
+            auto& pending = connection->client_preface_pending;
+            const auto needed = txt::magic_sz - pending.size();
+            const auto taken = std::min(input.size(), needed);
+            auto* begin = static_cast<unsigned char*>(input.data());
+            pending.insert(pending.end(), begin, begin + taken);
+
+            if(!std::equal(pending.begin(), pending.end(), txt::magic)) {
+                connection->connection_invalid = true;
+                pending.clear();
+                return;
+            }
+            if(pending.size() < txt::magic_sz) return;
+
+            pending.clear();
+            ctx.status = EngineCtx::status_t::MAGIC;
+            connection->client_preface_complete = true;
+            if((connection->left_first_frame_seen &&
+                !connection->left_first_frame_is_settings) ||
+               (connection->right_first_frame_seen &&
+                !connection->right_first_frame_is_settings)) {
+                connection->connection_invalid = true;
+                return;
+            }
+
+            if(input.size() > taken) {
+                auto mutable_frames = input.view(taken);
+                process_directional_bytes(ctx, side_t::LEFT, mutable_frames);
+            }
+        }
+
 
         size_t load_prev_state(EngineCtx& ctx, size_t abs_index) {
             auto const& log = log::http2_state;
@@ -2072,68 +2159,23 @@ namespace sx::engine::http {
                 return;
             }
 
-            std::size_t if_magic = 0L;
             auto starting_buffer = h2_buffer->view(starting_index);
-
-            if(side == 'r') {
-                if (ctx.status == EngineCtx::status_t::START) {
-                    // eliminate finding magic later in the flow
-                    if (flow_pos < 5 and h2_buffer_sz >= txt::magic_sz) {
-                        if_magic = find_magic(starting_buffer);
-
-                        // save starting position + size of magic
-                        if (if_magic > 0) {
-                            save_state(ctx, abs_index, starting_index + if_magic);
-                            ctx.status = EngineCtx::status_t::MAGIC;
-
-                            auto const* state_data = std::any_cast<Http2Connection>(& ctx.state_data);
-                            if(not state_data)
-                                ctx.state_data = std::make_any<Http2Connection>();
-                        }
-
-                        if (if_magic + 4 > h2_buffer_sz) {
-                            _err("not enough data to read");
-                            return;
-                        }
-                    } else {
-                        _deb("too late for magic lookup");
-                        ctx.status = EngineCtx::status_t::MAGIC;
-                    }
+            try {
+                if(side == 'r' && ctx.status == EngineCtx::status_t::START) {
+                    process_client_prefaced_bytes(ctx, starting_buffer);
+                } else {
+                    process_directional_bytes(
+                        ctx, side == 'r' ? side_t::LEFT : side_t::RIGHT,
+                        starting_buffer);
                 }
             }
+            catch(std::out_of_range const& e) {
+                _err("incomplete frame: %s", e.what());
+                _war("data dump: \r\n%s",
+                     hex_dump(starting_buffer, 4, 'E', true).c_str());
+            }
 
-            buffer frame = starting_buffer.view(if_magic);
-            std::size_t cur_off = 0L;
-            std::size_t total = 0L;
-            do {
-                frame = frame.view(cur_off);
-
-                try {
-                    // convert side from signature read/write r/w meaning to left/right l/r
-                    cur_off = process_frame(ctx, side == 'r' ? side_t::LEFT : side_t::RIGHT , frame);
-                    if(cur_off == 0) {
-                        // frame not complete
-                        break;
-                    }
-                    total += cur_off;
-                }
-                catch(std::out_of_range const& e) {
-                    _err("incomplete frame: last read size = %d", cur_off);
-                    _err("incomplete frame: total read size = %d", total);
-                    _err("incomplete frame: %s", e.what());
-                    _war("data dump: \r\n%s", hex_dump(frame, 4, 'E', true).c_str());
-                    break;
-                }
-
-                if(cur_off > frame.size()) {
-                    _err("incomplete frame %d / %d", cur_off, frame.size());
-                    break;
-                }
-
-            } while(total < starting_buffer.size() - if_magic);
-
-
-            save_state(ctx, abs_index, starting_index + if_magic + total);
+            save_state(ctx, abs_index, h2_buffer_sz);
 
             if(flow_pos + 1 < ctx.origin->flow().flow_queue().size()) {
                 // move to next pos if we are not finished and missed more arrived blocks
