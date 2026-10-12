@@ -943,6 +943,13 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
         { "side", string_format("%c", from_side(side)) },
         { "payload_layer", std::string(payload_layer) }
     };
+    if(auto* right = first_right(); right != nullptr) {
+        if(auto* tls = dynamic_cast<SSLCom*>(right->com()); tls != nullptr) {
+            if(auto const& sni = tls->get_sni(); !sni.empty()) {
+                j["info"]["sni"] = sni;
+            }
+        }
+    }
 
     auto response_hook = [&, sift](sx::http::expected_reply r){
         if(r.has_value()) {
