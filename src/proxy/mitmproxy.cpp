@@ -890,13 +890,11 @@ static std::string b64_decode(std::string const& encoded) {
 
 
 bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
-                                std::string_view payload_layer) {
+                                std::string_view payload_layer,
+                                bool regular_webhook, bool spider_engine) {
 
     auto& log = log_content;
 
-    const auto regular_webhook = sx::http::webhooks::is_enabled() and
-                                 writer_opts()->webhook_enable;
-    const auto spider_engine = sx::http::webhooks::spider_engine_enabled();
     if(not regular_webhook and not spider_engine) return false;
     if(not cx or buffer.empty()) return false;
 
@@ -973,6 +971,18 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
 }
 
 bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t side) {
+    const auto engine_enabled = sx::http::webhooks::spider_engine_enabled();
+    const auto webhook_enabled = sx::http::webhooks::is_enabled() and
+                                 writer_opts()->webhook_enable;
+
+    // Classification waits only for this flow. It must never participate in
+    // the forensic global webhook lock used by the interactive Spider app.
+    if(engine_enabled and content_webhook(
+            from, side, from->to_read(), "tcp", false, true)) {
+        return true;
+    }
+    if(not webhook_enabled) return false;
+
     if(writer_opts()->webhook_lock_traffic) {
 
         if(from->com() and from->com()->l4_proto() == SOCK_STREAM) {
@@ -1013,7 +1023,7 @@ bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t 
                          to_string(iNOT).c_str(), attempt_no);
 
                 }
-                return content_webhook(from, side, from->to_read(), "tcp");
+                return content_webhook(from, side, from->to_read(), "tcp", true, false);
             }
         }
         _err("[%s]: content_webhook: previous webhook takes too long to complete, content NOT sent to webhook.",
@@ -1023,7 +1033,7 @@ bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t 
 
     }
     else {
-        return content_webhook(from, side, from->to_read(), "tcp");
+        return content_webhook(from, side, from->to_read(), "tcp", true, false);
     }
     return false;
 }
