@@ -524,6 +524,68 @@ TEST(HPack, RejectsEmptyLiteralName) {
     EXPECT_EQ(decoder.failure(), HPACK::decoder_t::failure_t::header_semantics);
 }
 
+TEST(HPack, RejectsHttp2HeaderSemanticViolationsTransactionally) {
+    HPACK::decoder_t decoder;
+
+    // Seed one dynamic entry; every rejected block below must leave it usable.
+    std::vector<uint8_t> seed{0x40, 0x01, 'x', 0x01, 'y'};
+    ASSERT_TRUE(decoder.decode(seed));
+
+    const std::vector<std::vector<uint8_t>> malformed {
+        {0x00, 0x01, 'X', 0x01, 'v'},                 // uppercase name
+        {0x00, 0x03, 'x', ':', 'y', 0x01, 'v'},      // colon in regular name
+        {0x00, 0x01, 'x', 0x01, 'v', 0x82},          // pseudo after regular
+        {0x82, 0x83},                                  // duplicate :method
+        {0x00, 0x0a, 'c','o','n','n','e','c','t','i','o','n',
+         0x05, 'c','l','o','s','e'},                  // connection-specific
+        {0x00, 0x02, 't','e', 0x04, 'g','z','i','p'}, // TE other than trailers
+        {0x00, 0x01, 'x', 0x03, 'a','\r','b'},        // value control
+        {0x00, 0x01, 'x', 0x03, 'a',0x01,'b'},        // other C0 control
+        {0x00, 0x01, 'x', 0x03, 'a',0x7f,'b'},        // DEL
+        {0x00, 0x01, 'x', 0x02, ' ','v'},             // leading whitespace
+    };
+
+    for(auto block: malformed) {
+        EXPECT_FALSE(decoder.decode(block));
+        EXPECT_EQ(decoder.failure(),
+                  HPACK::decoder_t::failure_t::header_semantics);
+        std::vector<uint8_t> indexed{0xbe};
+        ASSERT_TRUE(decoder.decode(indexed));
+        EXPECT_EQ(decoder.headers().at("x").back(), "y");
+    }
+
+    std::vector<uint8_t> valid_te{
+        0x00, 0x02, 't','e', 0x08, 't','r','a','i','l','e','r','s'};
+    EXPECT_TRUE(decoder.decode(valid_te));
+    std::vector<uint8_t> mixed_case_te{
+        0x00, 0x02, 't','e', 0x08, 'T','r','A','i','L','e','R','s'};
+    EXPECT_TRUE(decoder.decode(mixed_case_te));
+}
+
+
+TEST(HPack, SemanticFailureRetainsCompressionStateAndReportsItsClass) {
+    HPACK::decoder_t decoder;
+
+    // The uppercase name is invalid HTTP/2, but HPACK decompression succeeds
+    // and its incremental entry remains part of the connection table.
+    std::vector<uint8_t> malformed{
+        0x40, 0x01, 'X', 0x05, 'v', 'a', 'l', 'u', 'e'};
+    EXPECT_FALSE(decoder.decode(malformed));
+    EXPECT_EQ(decoder.failure(),
+              HPACK::decoder_t::failure_t::header_semantics);
+
+    std::vector<uint8_t> indexed{0xbe};
+    EXPECT_FALSE(decoder.decode(indexed));
+    EXPECT_EQ(decoder.failure(),
+              HPACK::decoder_t::failure_t::header_semantics);
+
+    std::vector<uint8_t> invalid_index{0x80};
+    EXPECT_FALSE(decoder.decode(invalid_index));
+    EXPECT_EQ(decoder.failure(),
+              HPACK::decoder_t::failure_t::compression);
+}
+
+
 TEST(HPack, RejectsMalformedGeneratedHeaderBlock) {
     std::vector<uint8_t> data{
         0xff, 0xff, 0x00, 0x01, 0x00,
@@ -642,12 +704,104 @@ TEST(HPack, DecoderRejectsInvalidIndexesAndTableUpdates) {
     EXPECT_FALSE(decoder.decode(missing_literal_name));
 }
 
+TEST(HPack, DecoderEnforcesTableUpdateCountAndMinimumFirst) {
+    HPACK::decoder_t decoder;
+    std::vector<uint8_t> seed{0x40, 0x01, 'x', 0x01, 'y'};
+    ASSERT_TRUE(decoder.decode(seed));
+
+    // RFC 7541 section 4.2 permits at most the interval minimum followed by
+    // the final size. A third update is never a conformant encoding.
+    std::vector<uint8_t> three_updates{0x20, 0x21, 0x22, 0x82};
+    EXPECT_FALSE(decoder.decode(three_updates));
+    EXPECT_EQ(decoder.failure(), HPACK::decoder_t::failure_t::compression);
+
+    // Failed candidates are transactional: the pre-existing dynamic entry
+    // remains available to a later valid block.
+    std::vector<uint8_t> indexed{0xbe};
+    ASSERT_TRUE(decoder.decode(indexed));
+    EXPECT_EQ(decoder.headers().at("x").back(), "y");
+
+    std::vector<uint8_t> minimum_second{0x2a, 0x25, 0x82};
+    EXPECT_FALSE(decoder.decode(minimum_second));
+    EXPECT_EQ(decoder.failure(), HPACK::decoder_t::failure_t::compression);
+
+    std::vector<uint8_t> minimum_first{0x25, 0x2a, 0x82};
+    ASSERT_TRUE(decoder.decode(minimum_first));
+    EXPECT_EQ(decoder.headers().at(":method").back(), "GET");
+}
+
+
+TEST(HPack, DecoderRequiresAdvertisedTableReductionAtNextBlock) {
+    HPACK::decoder_t decoder;
+    std::vector<uint8_t> insert{0x40, 0x01, 'x', 0x01, 'y'};
+    ASSERT_TRUE(decoder.decode(insert));
+
+    decoder.maximum_table_size(0);
+    EXPECT_EQ(decoder.maximum_table_size(), 0u);
+
+    // A peer must acknowledge a reduced SETTINGS_HEADER_TABLE_SIZE with an
+    // HPACK dynamic-table update before any field in its next block.
+    std::vector<uint8_t> missing_update{0x82};
+    EXPECT_FALSE(decoder.decode(missing_update));
+    EXPECT_EQ(decoder.failure(), HPACK::decoder_t::failure_t::compression);
+
+    std::vector<uint8_t> update_then_header{0x20, 0x82};
+    ASSERT_TRUE(decoder.decode(update_then_header));
+    EXPECT_EQ(decoder.headers().at(":method").back(), "GET");
+
+    // The reduction evicted the prior dynamic entry.
+    std::vector<uint8_t> stale_dynamic_index{0xbe};
+    EXPECT_FALSE(decoder.decode(stale_dynamic_index));
+}
+
+
 TEST(HPack, DecoderDoesNotSilentlyTruncateLargeHeaderBlocks) {
     std::vector<uint8_t> data(101, 0x8f); // indexed accept-charset
     HPACK::decoder_t decoder;
     ASSERT_TRUE(decoder.decode(data));
     ASSERT_EQ(decoder.headers().at("accept-charset").size(), 101u);
 }
+
+TEST(HPack, BoundsDecompressedHeaderListAmplification) {
+    HPACK::decoder_t decoder;
+
+    // Static index 15 is "accept-charset: " and costs 46 bytes under the
+    // RFC header-list accounting rule despite requiring one encoded byte.
+    std::vector<uint8_t> within_limit(22795, 0x8f);
+    ASSERT_TRUE(decoder.decode(within_limit));
+    EXPECT_EQ(decoder.headers().at("accept-charset").size(), 22795u);
+
+    std::vector<uint8_t> over_limit(22796, 0x8f);
+    EXPECT_FALSE(decoder.decode(over_limit));
+    EXPECT_TRUE(decoder.headers().empty());
+}
+
+
+TEST(HPack, BoundsCumulativeDynamicTableStorage) {
+    constexpr std::size_t value_size = 600 * 1024;
+    constexpr std::uint64_t advertised_table_size = 2 * 1024 * 1024;
+
+    HPACK::encoder_t encoder(advertised_table_size);
+    HPACK::decoder_t decoder(advertised_table_size);
+    encoder.add("x-large", std::string(value_size, 'a'), false);
+    std::vector<uint8_t> first = encoder.data();
+    ASSERT_TRUE(decoder.decode(first));
+
+    const auto second_offset = encoder.data().size();
+    encoder.add("x-large", std::string(value_size, 'b'), false);
+    std::vector<uint8_t> second(encoder.data().begin() + second_offset,
+                                encoder.data().end());
+    EXPECT_FALSE(decoder.decode(second));
+    EXPECT_EQ(decoder.failure(), HPACK::decoder_t::failure_t::resource_limit);
+
+    // The over-budget candidate is transactional: the last accepted entry is
+    // still the newest dynamic index after the rejected block.
+    std::vector<uint8_t> previous_entry {0xbe};
+    ASSERT_TRUE(decoder.decode(previous_entry));
+    EXPECT_EQ(decoder.headers().at("x-large").back(),
+              std::string(value_size, 'a'));
+}
+
 
 TEST(HPack, HuffmanRoundTripsOctetsAndRejectsEosAndLongPadding) {
     std::string source;
