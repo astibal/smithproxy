@@ -1244,6 +1244,64 @@ TEST(HTTP2, RejectsOversizedCompleteHeaderBlockBeforeDecode) {
 }
 
 
+TEST(HTTP2, ContentEncodingGzipTokenIsCaseInsensitive) {
+    sx::engine::EngineCtx ctx;
+    HPACK::encoder_t request_encoder;
+    request_encoder.add(":method", "GET", false);
+    request_encoder.add(":scheme", "https", false);
+    request_encoder.add(":authority", "gzip.example", false);
+    request_encoder.add(":path", "/", false);
+    buffer request;
+    request.assign(request_encoder.data().data(), request_encoder.data().size());
+    v2::process_headers(ctx, socle::side_t::LEFT, 47, 0, request);
+
+    HPACK::encoder_t response_encoder;
+    response_encoder.add(":status", "200", false);
+    response_encoder.add("content-encoding", "GZip", false);
+    buffer response;
+    response.assign(response_encoder.data().data(), response_encoder.data().size());
+    v2::process_headers(ctx, socle::side_t::RIGHT, 47, 0, response);
+
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    EXPECT_EQ(connection->streams.at(47).content_encoding_,
+              v2::Http2Stream::content_type_t::GZIP);
+}
+
+
+TEST(HTTP2, PreservesForeignApplicationStateWithoutDereferencingItAsHttp) {
+    sx::engine::EngineCtx ctx;
+    ctx.application_data = std::make_shared<sx::engine::CustomApplicationData>("prior");
+    auto const prior = ctx.application_data;
+    ctx.options.http.ja4h = true;
+
+    HPACK::encoder_t request;
+    request.add(":method", "POST", false);
+    request.add(":scheme", "https", false);
+    request.add(":authority", "resolver.example", false);
+    request.add(":path", "/dns-query", false);
+    buffer request_block;
+    request_block.assign(request.data().data(), request.data().size());
+
+    EXPECT_NO_THROW(v2::process_headers(
+        ctx, socle::side_t::LEFT, 25, 0, request_block));
+    EXPECT_EQ(ctx.application_data, prior);
+
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    auto& stream = connection->streams[25];
+    EXPECT_EQ(stream.request_header(":authority"), "resolver.example");
+    EXPECT_EQ(stream.sub_app_, v2::Http2Stream::sub_app_t::DNS);
+
+    stream.response_headers_["content-type"] = {"application/dns-message"};
+    stream.response_final_headers_ = true;
+    buffer response;
+    response.assign("not-a-dns-packet", 16);
+    EXPECT_NO_THROW(v2::process_data(
+        ctx, socle::side_t::RIGHT, 25, 0, response));
+}
+
+
 TEST(HTTP2, DecodesHpackHeadersWithoutRequiringAttachedOrigin) {
     sx::engine::EngineCtx ctx;
     ctx.state_data = std::make_any<v2::Http2Connection>();

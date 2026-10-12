@@ -927,13 +927,15 @@ namespace sx::engine::http {
                         if (app_data) app_data->http_data.method = hdr_elem;
                     }
 
-                    // save all left (request) values
-                    app_data->properties()[hdr] = hdr_elem;
+                    // Stream capture remains useful even if another inspector
+                    // already owns application_data.
+                    if(app_data) app_data->properties()[hdr] = hdr_elem;
 
                 }
                 else {
                     if(hdr == "content-encoding") {
-                        if(hdr_elem == "gzip") stream_state.content_encoding_ = Http2Stream::content_type_t::GZIP;
+                        if(ascii_equal_ci(hdr_elem, "gzip"))
+                            stream_state.content_encoding_ = Http2Stream::content_type_t::GZIP;
                     }
                 }
                 touch_header(hdr.c_str());
@@ -1058,7 +1060,7 @@ namespace sx::engine::http {
                     }
                 }
             }
-            if(ja4h.has_value()) {
+            if(ja4h.has_value() && my_app_data) {
                 auto meth = my_app_data->http_data.method;
                 if(meth.size() >= 2)
                     ja4h->cmd = sx::ja4::util::to_lower(meth).substr(0,2);
