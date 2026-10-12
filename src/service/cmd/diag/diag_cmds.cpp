@@ -2169,7 +2169,6 @@ int cli_diag_proxy_session_list_extra (DiagCli *cli, const char *command, std::v
                         suffix += " " + decor.warning("!" + fi.first);
                     }
                 }
-
                 auto const& io_info = get_io_info(lf, rg, sl_flags);
 
                 do_print |= std::get<0>(io_info);
@@ -2487,6 +2486,8 @@ int cli_diag_worker_proxy_list(DiagCli *cli, [[maybe_unused]] const char *comman
 
     list_acceptor("== socks acceptor", sx.socks_proxies, sx.socks_threads, verbosity);
     list_acceptor("== socks receiver", sx.socks_udp_proxies, sx.socks_udp_threads, verbosity);
+    list_acceptor("== http-connect acceptor", sx.http_connect_proxies,
+                  sx.http_connect_threads, verbosity);
 
     list_acceptor("== plain redirect acceptor", sx.redir_plain_proxies, sx.redir_plain_threads, verbosity);
     list_acceptor("== dns redirect receiver", sx.redir_udp_proxies, sx.redir_udp_threads, verbosity);
