@@ -1181,6 +1181,44 @@ TEST(HTTP2, BoundsUnfinishedContinuationHeaderBlocks) {
     EXPECT_EQ(initial_connection->streams.count(55), 0u);
 }
 
+TEST(HTTP2, BoundsConcurrentSemanticStreamState) {
+    sx::engine::EngineCtx ctx;
+    ctx.state_data = std::make_any<v2::Http2Connection>();
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    constexpr std::size_t stream_limit = 4096;
+    for(std::size_t index = 0; index < stream_limit; ++index)
+        connection->streams.emplace(static_cast<long>(index * 2 + 1),
+                                    v2::Http2Stream{});
+
+    HPACK::encoder_t encoder;
+    encoder.add(":method", "GET", false);
+    encoder.add(":scheme", "https", false);
+    encoder.add(":authority", "fixture.example", false);
+    encoder.add(":path", "/", false);
+    buffer block;
+    block.assign(encoder.data().data(), encoder.data().size());
+
+    v2::process_headers(ctx, socle::side_t::LEFT, 9001, 0x04, block);
+    EXPECT_EQ(connection->streams.size(), stream_limit);
+    EXPECT_EQ(connection->streams.count(9001), 0u);
+    EXPECT_TRUE(connection->connection_invalid);
+
+    sx::engine::EngineCtx available_ctx;
+    available_ctx.state_data = std::make_any<v2::Http2Connection>();
+    auto* available =
+        std::any_cast<v2::Http2Connection>(&available_ctx.state_data);
+    ASSERT_NE(available, nullptr);
+    for(std::size_t index = 0; index + 1 < stream_limit; ++index)
+        available->streams.emplace(static_cast<long>(index * 2 + 1),
+                                   v2::Http2Stream{});
+    v2::process_headers(
+        available_ctx, socle::side_t::LEFT, 9001, 0x04, block);
+    EXPECT_FALSE(available->connection_invalid);
+    EXPECT_EQ(available->streams.size(), stream_limit);
+    EXPECT_EQ(available->streams.count(9001), 1u);
+}
+
 TEST(HTTP2, DecodesHpackHeadersWithoutRequiringAttachedOrigin) {
     sx::engine::EngineCtx ctx;
     ctx.state_data = std::make_any<v2::Http2Connection>();

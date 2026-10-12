@@ -1003,6 +1003,13 @@ namespace sx::engine::http {
                 connection->connection_invalid = true;
                 return;
             }
+            if(side == side_t::LEFT &&
+               connection->streams.count(stream_id) == 0 &&
+               connection->streams.size() >= max_tracked_streams) {
+                _err("Frame: HTTP/2 semantic stream limit reached");
+                connection->connection_invalid = true;
+                return;
+            }
             auto& decoder = side == side_t::LEFT
                             ? connection->request_decoder
                             : connection->response_decoder;
