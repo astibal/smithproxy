@@ -990,6 +990,80 @@ TEST(HTTP2, MalformedCoreFramesTerminateConnectionSemantics) {
     }
 }
 
+TEST(HTTP2, EnforcesPeerAdvertisedMaximumFrameSize) {
+    auto frame = [](uint8_t type, uint8_t flags, uint32_t stream,
+                    std::vector<uint8_t> const& payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), type, flags,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+
+    HPACK::encoder_t encoder;
+    encoder.add(":method", "GET", false);
+    encoder.add(":scheme", "https", false);
+    encoder.add(":authority", "fixture.example", false);
+    encoder.add(":path", "/large", false);
+    encoder.add("x-padding", std::string(17 * 1024, 'x'), false);
+    ASSERT_GT(encoder.data().size(), 16384U);
+    ASSERT_LT(encoder.data().size(), 32768U);
+
+    sx::engine::EngineCtx rejected_ctx;
+    auto oversized = frame(1, 0x04, 81, encoder.data());
+    v2::process_frame(rejected_ctx, socle::side_t::LEFT, oversized);
+    auto* rejected = std::any_cast<v2::Http2Connection>(&rejected_ctx.state_data);
+    ASSERT_NE(rejected, nullptr);
+    EXPECT_EQ(rejected->streams.count(81), 0U);
+    EXPECT_TRUE(rejected->connection_invalid);
+
+    sx::engine::EngineCtx header_only_ctx;
+    std::array<unsigned char, 9> oversized_header {
+        0x00, 0x40, 0x01, // 16385 bytes, one above the default limit
+        0x00, 0x00,       // DATA, no flags
+        0x00, 0x00, 0x00, 0x01,
+    };
+    buffer header_only;
+    header_only.assign(oversized_header.data(), oversized_header.size());
+    EXPECT_EQ(v2::process_frame(header_only_ctx, socle::side_t::LEFT, header_only),
+              header_only.size());
+    auto* header_only_connection =
+        std::any_cast<v2::Http2Connection>(&header_only_ctx.state_data);
+    ASSERT_NE(header_only_connection, nullptr);
+    EXPECT_TRUE(header_only_connection->connection_invalid);
+
+    HPACK::encoder_t clean_encoder;
+    clean_encoder.add(":method", "GET", false);
+    clean_encoder.add(":scheme", "https", false);
+    clean_encoder.add(":authority", "fixture.example", false);
+    clean_encoder.add(":path", "/after-error", false);
+    auto after_error = frame(1, 0x04, 85, clean_encoder.data());
+    v2::process_frame(rejected_ctx, socle::side_t::LEFT, after_error);
+    EXPECT_EQ(rejected->streams.count(85), 0U);
+
+    sx::engine::EngineCtx accepted_ctx;
+    std::vector<uint8_t> setting {
+        0x00, 0x05, // SETTINGS_MAX_FRAME_SIZE
+        0x00, 0x00, 0x80, 0x00, // 32768
+    };
+    auto settings = frame(4, 0, 0, setting);
+    v2::process_frame(accepted_ctx, socle::side_t::RIGHT, settings);
+    auto allowed = frame(1, 0x04, 83, encoder.data());
+    v2::process_frame(accepted_ctx, socle::side_t::LEFT, allowed);
+    auto* accepted = std::any_cast<v2::Http2Connection>(&accepted_ctx.state_data);
+    ASSERT_NE(accepted, nullptr);
+    EXPECT_EQ(accepted->streams.count(83), 1U);
+}
+
+
 TEST(HTTP2, DecodesHpackHeadersWithoutRequiringAttachedOrigin) {
     sx::engine::EngineCtx ctx;
     ctx.state_data = std::make_any<v2::Http2Connection>();
