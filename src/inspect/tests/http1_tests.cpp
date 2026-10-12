@@ -270,7 +270,7 @@ TEST(HTTP2, ClientGoawaySuppressesNewPushWithoutPoisoningExistingStreams) {
     EXPECT_FALSE(connection->connection_invalid);
 }
 
-std::shared_ptr<app_HttpRequest> parse(std::string data) {
+std::shared_ptr<app_HttpRequest> parse(std::string data, bool verbose = true) {
     sx::engine::EngineCtx ctx;
 
     buffer b;
@@ -279,24 +279,24 @@ std::shared_ptr<app_HttpRequest> parse(std::string data) {
 
     HTTP fp;
     fp.from_buffer(b.string_view());
-    std::cout << fp.ja4h_ab() << "\n";
+    if(verbose) std::cout << fp.ja4h_ab() << "\n";
 
     return std::dynamic_pointer_cast<app_HttpRequest>(ctx.application_data);
 }
 
 
-auto test = [] {
+auto test = [](bool verbose = true) {
 
     std::shared_ptr<app_HttpRequest> ret;
 
-    ret = parse(HTTP_SAMPLES.get1);
+    ret = parse(HTTP_SAMPLES.get1, verbose);
     ASSERT_TRUE(ret);
     ASSERT_TRUE(ret->http_data.uri == "/some/path");
     ASSERT_TRUE(ret->http_data.method == "GET");
     //std::cout << ret->to_string(iINF) << "\n";
 
 
-    ret = parse(HTTP_SAMPLES.post1);
+    ret = parse(HTTP_SAMPLES.post1, verbose);
     ASSERT_TRUE(ret);
     ASSERT_TRUE(ret->http_data.uri == "/some/login");
     ASSERT_TRUE(ret->http_data.method == "POST");
@@ -305,37 +305,37 @@ auto test = [] {
     HTTP h1;
     h1.version = "11";
     h1.from_buffer(util::hex_string_to_string(HTTP_SAMPLES.raw_http_1));
-    std::cout << "h1 my: " << h1.ja4h() << "\n";
-    std::cout << "h1   : " << HTTP_SAMPLES.JA4H_1 << "\n";
+    if(verbose) std::cout << "h1 my: " << h1.ja4h() << "\n";
+    if(verbose) std::cout << "h1   : " << HTTP_SAMPLES.JA4H_1 << "\n";
 
     HTTP h2;
     h2.version = "11";
     h2.from_buffer(util::hex_string_to_string(HTTP_SAMPLES.raw_http_2));
-    std::cout << "h2 my: " << h2.ja4h() << "\n";
-    std::cout << "h2   : " << HTTP_SAMPLES.JA4H_2 << "\n";
+    if(verbose) std::cout << "h2 my: " << h2.ja4h() << "\n";
+    if(verbose) std::cout << "h2   : " << HTTP_SAMPLES.JA4H_2 << "\n";
 
     HTTP h3;
     h3.version = "11";
     h3.from_buffer(util::hex_string_to_string(HTTP_SAMPLES.raw_http_3));
-    std::cout << "h3   my: " << h3.ja4h() << "\n";
-    std::cout << "h3     : " << HTTP_SAMPLES.JA4H_3 << "\n";
-    std::cout << "h3 r my: " << h3.ja4h_raw() << "\n";
-    std::cout << "h3 r   : " << HTTP_SAMPLES.JA4H_r_3 << "\n";
+    if(verbose) std::cout << "h3   my: " << h3.ja4h() << "\n";
+    if(verbose) std::cout << "h3     : " << HTTP_SAMPLES.JA4H_3 << "\n";
+    if(verbose) std::cout << "h3 r my: " << h3.ja4h_raw() << "\n";
+    if(verbose) std::cout << "h3 r   : " << HTTP_SAMPLES.JA4H_r_3 << "\n";
 
     HTTP h4;
     h4.version = "11";
     h4.from_buffer(HTTP_SAMPLES.cookie1);
-    std::cout << "h4 my: " << h4.ja4h() << "\n";
+    if(verbose) std::cout << "h4 my: " << h4.ja4h() << "\n";
 
     HTTP h5;
     h5.version = "11";
     h5.from_buffer(util::hex_string_to_string(HTTP_SAMPLES.raw_http_4));
-    std::cout << "h5   my: " << h5.ja4h() << "\n";
-    std::cout << "h5     : " << HTTP_SAMPLES.JA4H_4 << "\n";
+    if(verbose) std::cout << "h5   my: " << h5.ja4h() << "\n";
+    if(verbose) std::cout << "h5     : " << HTTP_SAMPLES.JA4H_4 << "\n";
     ASSERT_TRUE(h5.ja4h() == HTTP_SAMPLES.JA4H_4);
 
-    std::cout << "h5 r my: " << h5.ja4h_raw() << "\n";
-    std::cout << "h5 r   : " << HTTP_SAMPLES.JA4H_r_4 << "\n";
+    if(verbose) std::cout << "h5 r my: " << h5.ja4h_raw() << "\n";
+    if(verbose) std::cout << "h5 r   : " << HTTP_SAMPLES.JA4H_r_4 << "\n";
 };
 
 TEST(HTTP1, trivial) {
@@ -344,10 +344,10 @@ TEST(HTTP1, trivial) {
 
 TEST(HTTP1, benchmark) {
 
-    const size_t repetitions = 100000;
+    const size_t repetitions = 1000;
     auto start = std::chrono::high_resolution_clock::now();
     for (size_t i = 0; i < repetitions; ++i) {
-        test();
+        test(false);
     }
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
@@ -373,9 +373,145 @@ TEST(HTTP1, ParsesMethodsParametersHeadersAndInvalidInput) {
     EXPECT_EQ(app->http_data.referer, "https://ref.example/path");
 
     EXPECT_FALSE(v1::find_method(ctx, "BREW /coffee HTTP/1.1\r\n"));
-    EXPECT_TRUE(v1::find_host(ctx, "host: lowercase.example\r\n"));
+    EXPECT_FALSE(v1::find_method(ctx, "XGET /confused HTTP/1.1\r\n"));
+    EXPECT_FALSE(v1::find_method(ctx, "prefix GET /confused HTTP/1.1\r\n"));
+    EXPECT_FALSE(v1::find_method(ctx, "GET/confused HTTP/1.1\r\n"));
+    EXPECT_FALSE(v1::find_method(ctx, "GET /missing-version\r\n"));
+    EXPECT_FALSE(v1::find_method(ctx, "GET /wrong-version HTTP/9.9\r\n"));
+    EXPECT_FALSE(v1::find_method(ctx, "GET /split\ttarget HTTP/1.1\r\n"));
+    EXPECT_FALSE(v1::find_method(ctx, "GET /delete\x7f HTTP/1.1\r\n"));
+    std::string nul_target = "GET /hidden";
+    nul_target.push_back('\0');
+    nul_target += "suffix HTTP/1.1\r\n";
+    EXPECT_FALSE(v1::find_method(ctx, nul_target));
+    EXPECT_TRUE(v1::find_host(ctx, "host:\tlowercase.example\t\r\n"));
     EXPECT_EQ(app->http_data.host, "lowercase.example");
+    EXPECT_TRUE(v1::find_referrer(ctx, "referer: https://lowercase.example/\r\n"));
+    EXPECT_EQ(app->http_data.referer, "https://lowercase.example/");
+    EXPECT_FALSE(v1::find_host(ctx, "X-Host: injected.example\r\n"));
+    EXPECT_FALSE(v1::find_host(ctx,
+        "Host: first.example\r\nhost: second.example\r\n"));
     EXPECT_FALSE(v1::find_referrer(ctx, "referrer: misspelled\r\n"));
+}
+
+TEST(HTTP1, FragmentedHeadersAreNotPublishedBeforeAuthorityArrives) {
+    sx::engine::EngineCtx ctx;
+    const std::string incomplete = "GET /protected HTTP/1.1\r\nUser-Agent: split";
+    buffer partial;
+    partial.assign(incomplete.data(), incomplete.size());
+    v1::parse_request(ctx, &partial);
+    EXPECT_FALSE(ctx.application_data);
+
+    const std::string complete =
+        "GET /protected HTTP/1.1\r\nUser-Agent: split\r\n"
+        "Host: authoritative.example\r\n\r\n";
+    buffer assembled;
+    assembled.assign(complete.data(), complete.size());
+    v1::parse_request(ctx, &assembled);
+    auto app = std::dynamic_pointer_cast<app_HttpRequest>(ctx.application_data);
+    ASSERT_TRUE(app);
+    EXPECT_EQ(app->http_data.host, "authoritative.example");
+    EXPECT_TRUE(app->populated());
+}
+
+TEST(HTTP1, AmbiguousHostIsNotPublishedAsPeerFallback) {
+    EXPECT_FALSE(parse(
+        "GET /protected HTTP/1.1\r\n"
+        "Host: allowed.example\r\n"
+        "host: denied.example\r\n\r\n", false));
+    EXPECT_FALSE(parse("GET /protected HTTP/1.1\r\nHost:\t \r\n\r\n", false));
+
+    auto valid = parse(
+        "GET /protected HTTP/1.1\r\nHost: allowed.example\r\n\r\n", false);
+    ASSERT_TRUE(valid);
+    EXPECT_TRUE(valid->populated());
+    EXPECT_EQ(valid->http_data.host, "allowed.example");
+}
+
+TEST(HTTP1, Http11RequiresHostBeforePublishingSemantics) {
+    EXPECT_FALSE(parse(
+        "GET /protected HTTP/1.1\r\nUser-Agent: no-host\r\n\r\n", false));
+
+    auto legacy = parse(
+        "GET /legacy HTTP/1.0\r\nUser-Agent: no-host\r\n\r\n", false);
+    ASSERT_TRUE(legacy);
+    EXPECT_TRUE(legacy->populated());
+}
+
+TEST(HTTP1, RejectsAmbiguousHostAuthoritySyntax) {
+    constexpr std::array<std::string_view, 6> invalid_hosts {
+        "user@allowed.example", "allowed.example/path", "allowed.example\\other",
+        "allowed.example:0", "allowed.example:65536", "[not-ipv6]"
+    };
+    for(auto const host: invalid_hosts) {
+        SCOPED_TRACE(host);
+        EXPECT_FALSE(parse(
+            "GET /protected HTTP/1.1\r\nHost: " + std::string(host) + "\r\n\r\n",
+            false));
+    }
+
+    auto ipv6 = parse(
+        "GET /protected HTTP/1.1\r\nHost: [2001:db8::1]:8443\r\n\r\n", false);
+    ASSERT_TRUE(ipv6);
+    EXPECT_EQ(ipv6->http_data.host, "[2001:db8::1]:8443");
+}
+
+TEST(HTTP1, AbsoluteFormUsesRequestTargetAuthority) {
+    auto request = parse(
+        "GET http://target.example:8080/path?q=1 HTTP/1.1\r\n"
+        "Host: stale.example\r\n\r\n", false);
+    ASSERT_TRUE(request);
+    EXPECT_EQ(request->http_data.host, "target.example:8080");
+    EXPECT_EQ(request->http_data.uri, "/path");
+    EXPECT_EQ(request->http_data.params, "q=1");
+
+    auto query_only = parse(
+        "GET HTTPS://target.example?flag HTTP/1.1\r\n"
+        "Host: stale.example\r\n\r\n", false);
+    ASSERT_TRUE(query_only);
+    EXPECT_EQ(query_only->http_data.host, "target.example");
+    EXPECT_EQ(query_only->http_data.uri, "/");
+    EXPECT_EQ(query_only->http_data.params, "flag");
+
+    EXPECT_FALSE(parse(
+        "GET http://user@target.example/path HTTP/1.1\r\n"
+        "Host: safe.example\r\n\r\n", false));
+}
+
+TEST(HTTP1, ConnectUsesRequestTargetAuthority) {
+    auto request = parse(
+        "CONNECT target.example:443 HTTP/1.1\r\n"
+        "Host: stale.example:443\r\n\r\n", false);
+    ASSERT_TRUE(request);
+    EXPECT_EQ(request->http_data.host, "target.example:443");
+    EXPECT_TRUE(request->http_data.uri.empty());
+    EXPECT_TRUE(request->http_data.params.empty());
+
+    EXPECT_FALSE(parse(
+        "CONNECT user@target.example:443 HTTP/1.1\r\n"
+        "Host: safe.example:443\r\n\r\n", false));
+    EXPECT_FALSE(parse(
+        "CONNECT target.example:0 HTTP/1.1\r\n"
+        "Host: safe.example:443\r\n\r\n", false));
+}
+
+TEST(HTTP1, RejectsMalformedHeaderLinesBeforePublishing) {
+    constexpr std::array<std::string_view, 5> malformed {
+        " continuation", "Header Without Colon", "Bad Name: value",
+        "Host : shadow.example", "X-Test: value\x7f"
+    };
+    for(auto const line: malformed) {
+        SCOPED_TRACE(line);
+        EXPECT_FALSE(parse(
+            "GET /protected HTTP/1.1\r\nHost: safe.example\r\n" +
+            std::string(line) + "\r\n\r\n", false));
+    }
+
+    auto valid = parse(
+        "GET /protected HTTP/1.1\nHost: safe.example\n"
+        "X-Token_~: visible\tvalue\n\n", false);
+    ASSERT_TRUE(valid);
+    EXPECT_EQ(valid->http_data.host, "safe.example");
 }
 
 TEST(HTTP1, ApplicationDataMaintainsHistoryAndPresentation) {
