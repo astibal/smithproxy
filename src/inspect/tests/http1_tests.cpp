@@ -466,6 +466,38 @@ TEST(HTTP2, KeepsMultiplexedRequestMetadataScopedToItsStream) {
     ASSERT_EQ(app->http_history.size(), 2u);
 }
 
+TEST(HTTP2, ZeroLengthDataCanEndAStreamDirection) {
+    auto frame = [](uint8_t type, uint8_t flags,
+                    std::vector<uint8_t> const& payload) {
+        std::vector<uint8_t> bytes {
+            0, 0, static_cast<uint8_t>(payload.size()), type, flags,
+            0, 0, 0, 1,
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+
+    HPACK::encoder_t encoder;
+    encoder.add(":method", "POST", false);
+    encoder.add(":scheme", "https", false);
+    encoder.add(":authority", "fixture.example", false);
+    encoder.add(":path", "/empty", false);
+
+    sx::engine::EngineCtx ctx;
+    auto request = frame(1, 0x04, encoder.data());
+    v2::process_frame(ctx, socle::side_t::LEFT, request);
+    auto end = frame(0, 0x01, {});
+    v2::process_frame(ctx, socle::side_t::LEFT, end);
+
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    ASSERT_EQ(connection->streams.count(1), 1u);
+    EXPECT_TRUE(connection->streams.at(1).request_ended_);
+    EXPECT_FALSE(connection->streams.at(1).request_invalid_);
+}
+
 
 
 TEST(HTTP2, RejectsGoawayBoundaryOwnedByTheSender) {
