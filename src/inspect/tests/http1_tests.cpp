@@ -971,6 +971,68 @@ TEST(HTTP2, ZeroWindowUpdateCannotPreserveRejectedSemantics) {
     EXPECT_TRUE(idle_connection->connection_invalid);
 }
 
+TEST(HTTP2, DisabledServerPushCannotMutateHpackState) {
+    auto frame = [](uint8_t type, uint8_t flags, uint32_t stream,
+                    std::vector<uint8_t> const& payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), type, flags,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+
+    sx::engine::EngineCtx ctx;
+    std::vector<uint8_t> disable_push {
+        0x00, 0x02, // SETTINGS_ENABLE_PUSH
+        0x00, 0x00, 0x00, 0x00,
+    };
+    auto settings = frame(4, 0, 0, disable_push);
+    v2::process_frame(ctx, socle::side_t::LEFT, settings);
+
+    HPACK::encoder_t request_encoder;
+    request_encoder.add(":method", "GET", false);
+    request_encoder.add(":scheme", "https", false);
+    request_encoder.add(":authority", "fixture.example", false);
+    request_encoder.add(":path", "/", false);
+    auto request = frame(1, 0x04, 91, request_encoder.data());
+    v2::process_frame(ctx, socle::side_t::LEFT, request);
+
+    HPACK::encoder_t server_encoder;
+    server_encoder.add(":method", "GET", false);
+    server_encoder.add(":scheme", "https", false);
+    server_encoder.add(":authority", "fixture.example", false);
+    server_encoder.add(":path", "/pushed", false);
+    server_encoder.add("x-disabled-push", "poison", false);
+    const auto pushed_size = server_encoder.data().size();
+    std::vector<uint8_t> push {0, 0, 0, 2};
+    push.insert(push.end(), server_encoder.data().begin(),
+                server_encoder.data().end());
+    auto promise = frame(5, 0x04, 91, push);
+    v2::process_frame(ctx, socle::side_t::RIGHT, promise);
+
+    server_encoder.add(":status", "200", false);
+    server_encoder.add("x-disabled-push", "poison", false);
+    std::vector<uint8_t> response_payload(
+        server_encoder.data().begin() + pushed_size,
+        server_encoder.data().end());
+    auto response = frame(1, 0x04, 91, response_payload);
+    v2::process_frame(ctx, socle::side_t::RIGHT, response);
+
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    EXPECT_TRUE(connection->connection_invalid);
+    EXPECT_FALSE(connection->streams.at(91).response_header(
+        "x-disabled-push").has_value());
+}
+
 
 
 TEST(HTTP2, RejectsGoawayBoundaryOwnedByTheSender) {
