@@ -536,15 +536,15 @@ script_profiles = {
 
             require(cli.command_ok("edit policy"), "(config:/policy)")
             require(cli.command_ok("show"), "policy")
-            require(cli.tab("edit "), "[0]")
+            require(cli.tab("edit "), "0\t:")
             require(cli.tab("add "), "Optional entry name")
             cli.command_ok("add")
-            completed = cli.tab("edit [")
-            indexes = re.findall(r"\[(\d+)\]", completed)
+            completed = cli.tab("edit ")
+            indexes = re.findall(r"^\s*(\d+)\s*\t\s*:", completed, re.MULTILINE)
             if not indexes:
                 raise AssertionError(f"cannot find added policy index in:\n{completed}")
             index = str(max(map(int, indexes)))
-            require(cli.command_ok(f"edit [{index}]"), f"(config:/policy.[{index}])")
+            require(cli.command_ok(f"edit {index}"), f"(config:/policy.[{index}])")
             require(cli.command_ok("show"), "policy")
             policy_children = cli.tab("edit ")
             if any(value in policy_children for value in ("src", "sport", "dst", "dport", "features")):

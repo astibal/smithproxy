@@ -430,6 +430,12 @@ TEST(LineEditor, NonTerminalInputReturnsLinesAndCleanEof) {
     LineEditor editor(cli, context);
     std::istringstream input("show status\n\n");
     std::ostringstream output;
+    ScopedStdinFd stdin_guard;
+    const int null_input = ::open("/dev/null", O_RDONLY | O_CLOEXEC);
+    ASSERT_GE(stdin_guard.saved, 0);
+    ASSERT_GE(null_input, 0);
+    ASSERT_TRUE(stdin_guard.replace_with(null_input));
+    ::close(null_input);
     ScopedInputBuffer replace_input(std::cin, input.rdbuf());
     ScopedStreamBuffer replace_output(std::cout, output.rdbuf());
 
