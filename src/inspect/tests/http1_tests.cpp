@@ -115,6 +115,72 @@ namespace sx::engine::http::v2 {
     void save_state(EngineCtx& ctx, std::size_t absolute_index, std::size_t processed);
 }
 
+TEST(HTTP2, DohDetectionUsesAuthoritativeResponseContentType) {
+    sx::engine::EngineCtx ctx;
+    auto app = std::make_shared<app_HttpRequest>();
+    ctx.application_data = app;
+
+    HPACK::encoder_t request_encoder;
+    request_encoder.add(":method", "POST", false);
+    request_encoder.add(":scheme", "https", false);
+    request_encoder.add(":authority", "dns.example", false);
+    request_encoder.add(":path", "/custom-resolver", false);
+    buffer request;
+    request.assign(request_encoder.data().data(), request_encoder.data().size());
+    v2::process_headers(ctx, socle::side_t::LEFT, 55, 0, request);
+
+    HPACK::encoder_t response_encoder;
+    response_encoder.add(":status", "200", false);
+    response_encoder.add("content-type", "application/dns-message", false);
+    buffer response_headers;
+    response_headers.assign(response_encoder.data().data(),
+                            response_encoder.data().size());
+    v2::process_headers(ctx, socle::side_t::RIGHT, 55, 0, response_headers);
+
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    auto& stream = connection->streams.at(55);
+    ASSERT_EQ(stream.sub_app_, v2::Http2Stream::sub_app_t::DNS);
+
+    const std::array<unsigned char, 46> dns_response {
+        0x12, 0x34, 0x81, 0x80, 0x00, 0x01, 0x00, 0x01,
+        0x00, 0x00, 0x00, 0x00,
+        0x01, 'x', 0x04, 't', 'e', 's', 't', 0x00, 0x00, 0x01, 0x00, 0x01,
+        0x01, 'x', 0x04, 't', 'e', 's', 't', 0x00,
+        0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x3c, 0x00, 0x04,
+        192, 0, 2, 1
+    };
+    buffer payload;
+    payload.assign(dns_response.data(), dns_response.size());
+    v2::process_data(ctx, socle::side_t::RIGHT, 55, 0x01, payload);
+    EXPECT_EQ(app->http_data.sub_proto, "dns");
+}
+
+TEST(HTTP2, RejectsAmbiguousRepeatedContentType) {
+    sx::engine::EngineCtx ctx;
+    HPACK::encoder_t request_encoder;
+    request_encoder.add(":method", "POST", false);
+    request_encoder.add(":scheme", "https", false);
+    request_encoder.add(":authority", "dns.example", false);
+    request_encoder.add(":path", "/dns-query", false);
+    buffer request;
+    request.assign(request_encoder.data().data(), request_encoder.data().size());
+    v2::process_headers(ctx, socle::side_t::LEFT, 51, 0, request);
+
+    HPACK::encoder_t response_encoder;
+    response_encoder.add(":status", "200", false);
+    response_encoder.add("content-type", "application/dns-message", false);
+    response_encoder.add("content-type", "text/plain", false);
+    buffer response;
+    response.assign(response_encoder.data().data(), response_encoder.data().size());
+    v2::process_headers(ctx, socle::side_t::RIGHT, 51, 0, response);
+
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    ASSERT_NE(connection->streams.find(51), connection->streams.end());
+    EXPECT_TRUE(connection->streams.at(51).response_invalid_);
+}
+
 TEST(HTTP2, RejectsGoawayBoundaryOwnedByTheSender) {
     auto frame = [](uint32_t last_stream) {
         std::vector<uint8_t> payload(8);
