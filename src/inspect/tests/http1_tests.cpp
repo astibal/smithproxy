@@ -2786,3 +2786,56 @@ TEST(HTTP2, ClientGoawayRetiresFragmentedPromiseAboveBoundary) {
     EXPECT_EQ(connection->promised_streams.count(2), 0U);
     EXPECT_EQ(connection->refused_promised_streams.count(2), 1U);
 }
+
+TEST(HTTP2, LateDataOnClosedStreamDoesNotPoisonOtherStreams) {
+    auto frame = [](uint8_t type, uint8_t flags, uint32_t stream,
+                    std::vector<uint8_t> const& payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), type, flags,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+
+    HPACK::encoder_t requests;
+    requests.add(":method", "GET", false);
+    requests.add(":scheme", "https", false);
+    requests.add(":authority", "first.example", false);
+    requests.add(":path", "/", false);
+    HPACK::encoder_t responses;
+    responses.add(":status", "200", false);
+
+    sx::engine::EngineCtx ctx;
+    auto request = frame(1, 0x05, 1, requests.data());
+    auto response = frame(1, 0x05, 1, responses.data());
+    v2::process_frame(ctx, socle::side_t::LEFT, request);
+    v2::process_frame(ctx, socle::side_t::RIGHT, response);
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    ASSERT_EQ(connection->streams.count(1), 0U);
+
+    // A DATA frame which races teardown of stream 1 is a stream error.  It
+    // must not suppress a later independent request on the connection.
+    auto late_data = frame(0, 0, 1, {'x'});
+    v2::process_frame(ctx, socle::side_t::RIGHT, late_data);
+    EXPECT_FALSE(connection->connection_invalid);
+
+    HPACK::encoder_t next_request;
+    next_request.add(":method", "GET", false);
+    next_request.add(":scheme", "https", false);
+    next_request.add(":authority", "second.example", false);
+    next_request.add(":path", "/", false);
+    auto next = frame(1, 0x04, 3, next_request.data());
+    v2::process_frame(ctx, socle::side_t::LEFT, next);
+    ASSERT_EQ(connection->streams.count(3), 1U);
+    EXPECT_EQ(connection->streams.at(3).request_header(":authority"),
+              "second.example");
+}
