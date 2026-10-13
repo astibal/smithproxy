@@ -2636,3 +2636,49 @@ TEST(HTTP2, RejectsEmptyPushPromiseHeaderBlocks) {
     EXPECT_EQ(fragmented_connection->promised_streams.count(2), 0U);
     EXPECT_EQ(fragmented_connection->refused_promised_streams.count(2), 1U);
 }
+
+TEST(HTTP2, ResetDuringFragmentedHeadersPreservesOnlyHpackState) {
+    auto frame = [](uint8_t type, uint8_t flags, uint32_t stream,
+                    std::vector<uint8_t> const& payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), type, flags,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+
+    HPACK::encoder_t encoder;
+    encoder.add(":method", "GET", false);
+    encoder.add(":scheme", "https", false);
+    encoder.add(":authority", "reset.example", false);
+    encoder.add(":path", "/race", false);
+    const auto middle = encoder.data().begin() + encoder.data().size() / 2;
+    std::vector<uint8_t> first(encoder.data().begin(), middle);
+    std::vector<uint8_t> second(middle, encoder.data().end());
+
+    sx::engine::EngineCtx ctx;
+    auto headers = frame(1, 0, 101, first);
+    v2::process_frame(ctx, socle::side_t::LEFT, headers);
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    ASSERT_TRUE(connection->request_headers_pending.active());
+
+    auto reset = frame(3, 0, 101, {0, 0, 0, 8});
+    v2::process_frame(ctx, socle::side_t::RIGHT, reset);
+    EXPECT_TRUE(connection->request_headers_pending.decode_only);
+
+    auto continuation = frame(9, 0x04, 101, second);
+    v2::process_frame(ctx, socle::side_t::LEFT, continuation);
+    EXPECT_FALSE(connection->connection_invalid);
+    EXPECT_FALSE(connection->request_headers_pending.active());
+    EXPECT_EQ(connection->streams.count(101), 0U);
+    EXPECT_EQ(ctx.application_data, nullptr);
+}

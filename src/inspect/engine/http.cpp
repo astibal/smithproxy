@@ -1904,6 +1904,43 @@ namespace sx::engine::http {
                     }
                 }
 
+                if(typ == 3 && connection->streams.count(stream_id) == 0) {
+                    // Finish an already fragmented block only to preserve the
+                    // connection-wide HPACK context. Never publish its stream
+                    // semantics after observing RST_STREAM.
+                    if(connection->request_headers_pending.stream_id == stream_id)
+                        connection->request_headers_pending.decode_only = true;
+                    if(connection->response_headers_pending.stream_id == stream_id)
+                        connection->response_headers_pending.decode_only = true;
+
+                    const auto id = static_cast<uint32_t>(stream_id);
+                    if(connection->refused_client_streams.erase(id) != 0)
+                        return preamble_sz + frame_sz;
+
+                    if(connection->promised_streams.erase(id) != 0) {
+                        connection->active_promised_streams.erase(id);
+                        connection->promised_flow_windows.erase(id);
+                        return preamble_sz + frame_sz;
+                    }
+
+                    if(connection->refused_promised_streams.erase(id) != 0)
+                        return preamble_sz + frame_sz;
+
+                    const bool previously_opened = (id & 1U) != 0
+                        ? id <= connection->highest_client_stream_id
+                        : id <= connection->highest_promised_stream_id;
+                    if(!previously_opened) {
+                        _err("Frame: RST_STREAM on idle HTTP/2 stream %ld",
+                             stream_id);
+                        connection->connection_invalid = true;
+                        connection->request_headers_pending.clear();
+                        connection->response_headers_pending.clear();
+                    }
+
+                    // A late reset racing a closed stream is legal.
+                    return preamble_sz + frame_sz;
+                }
+
                 if(typ == 4) {
                     constexpr uint8_t flag_ack = 0x01;
                     if(stream_id != 0 ||
@@ -2544,6 +2581,20 @@ namespace sx::engine::http {
                         } else {
                             auto data = frame.view(payload_offset, payload_size);
                             process_other(ctx, side, stream_id, flg, data);
+                        }
+
+                        if(typ == 3 && stream_id != 0 && frame_sz == 4) {
+                            if(connection->request_headers_pending.stream_id ==
+                               stream_id) {
+                                connection->request_headers_pending.decode_only = true;
+                            }
+                            if(connection->response_headers_pending.stream_id ==
+                               stream_id) {
+                                connection->response_headers_pending.decode_only = true;
+                            }
+                            connection->streams.erase(stream_id);
+                            if(connection->latest_request_stream_id == stream_id)
+                                connection->latest_request_stream_id = -1;
                         }
                     }
                     else {
