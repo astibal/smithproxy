@@ -1083,6 +1083,44 @@ TEST(HTTP2, RejectsReusedOrDecreasingClientStreamIds) {
     EXPECT_EQ(connection->streams.count(99), 0U);
 }
 
+TEST(HTTP2, DohContentTypeFallbackIsScopedToItsRequestStream) {
+    sx::engine::EngineCtx ctx;
+    ctx.state_data = std::make_any<v2::Http2Connection>();
+    auto app = std::make_shared<app_HttpRequest>();
+    app->properties()["accept"] = "application/dns-message";
+    ctx.application_data = app;
+
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    auto& stream = connection->streams[27];
+    stream.request_headers_["accept"] = {"text/plain"};
+    stream.response_headers_[":status"] = {"200"};
+    stream.response_final_headers_ = true;
+    stream.sub_app_ = v2::Http2Stream::sub_app_t::DNS;
+
+    const std::array<unsigned char, 46> dns_response {
+        0x12, 0x34, 0x81, 0x80, 0x00, 0x01, 0x00, 0x01,
+        0x00, 0x00, 0x00, 0x00,
+        0x01, 'x', 0x04, 't', 'e', 's', 't', 0x00, 0x00, 0x01, 0x00, 0x01,
+        0x01, 'x', 0x04, 't', 'e', 's', 't', 0x00,
+        0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x3c, 0x00, 0x04,
+        192, 0, 2, 1
+    };
+    buffer payload;
+    payload.assign(dns_response.data(), dns_response.size());
+
+    v2::process_data(ctx, socle::side_t::RIGHT, 27, 0x01, payload);
+    EXPECT_TRUE(app->http_data.sub_proto.empty());
+
+    auto& dns_stream = connection->streams[29];
+    dns_stream.request_headers_["accept"] = {"application/dns-message"};
+    dns_stream.response_headers_[":status"] = {"200"};
+    dns_stream.response_final_headers_ = true;
+    dns_stream.sub_app_ = v2::Http2Stream::sub_app_t::DNS;
+    v2::process_data(ctx, socle::side_t::RIGHT, 29, 0x01, payload);
+    EXPECT_EQ(app->http_data.sub_proto, "dns");
+}
+
 
 
 TEST(HTTP2, RejectsGoawayBoundaryOwnedByTheSender) {
