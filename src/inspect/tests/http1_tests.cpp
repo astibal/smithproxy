@@ -832,6 +832,71 @@ TEST(HTTP2, RetiresCompletedPushedStreamsWithoutExhaustingTracking) {
     EXPECT_EQ(connection->highest_promised_stream_id, 8194U);
 }
 
+TEST(HTTP2, RetiresPushedStreamsOnEveryTerminalPath) {
+    auto frame = [](uint8_t type, uint8_t flags, uint32_t stream,
+                    std::vector<uint8_t> const& payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), type, flags,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+
+    sx::engine::EngineCtx ctx;
+    HPACK::encoder_t client;
+    client.add(":method", "GET", false);
+    client.add(":scheme", "https", false);
+    client.add(":authority", "fixture.example", false);
+    client.add(":path", "/parent", false);
+    auto parent = frame(1, 0x04, 103, client.data());
+    v2::process_frame(ctx, socle::side_t::LEFT, parent);
+
+    auto promise = [&](uint32_t promised_id) {
+        std::vector<uint8_t> payload {
+            static_cast<uint8_t>((promised_id >> 24) & 0x7f),
+            static_cast<uint8_t>((promised_id >> 16) & 0xff),
+            static_cast<uint8_t>((promised_id >> 8) & 0xff),
+            static_cast<uint8_t>(promised_id & 0xff),
+            0x82, 0x87, 0x84,
+        };
+        auto push = frame(5, 0x04, 103, payload);
+        v2::process_frame(ctx, socle::side_t::RIGHT, push);
+    };
+
+    promise(2);
+    auto terminal_headers = frame(1, 0x05, 2, {0x89});
+    v2::process_frame(ctx, socle::side_t::RIGHT, terminal_headers);
+
+    promise(4);
+    auto fragmented_terminal = frame(1, 0x01, 4, {});
+    auto terminal_continuation = frame(9, 0x04, 4, {0x89});
+    v2::process_frame(ctx, socle::side_t::RIGHT, fragmented_terminal);
+    v2::process_frame(ctx, socle::side_t::RIGHT, terminal_continuation);
+
+    promise(6);
+    auto open_headers = frame(1, 0x04, 6, {0x89});
+    auto terminal_data = frame(0, 0x01, 6, {'x'});
+    v2::process_frame(ctx, socle::side_t::RIGHT, open_headers);
+    v2::process_frame(ctx, socle::side_t::RIGHT, terminal_data);
+
+    promise(8);
+    auto reset = frame(3, 0, 8, {0, 0, 0, 0});
+    v2::process_frame(ctx, socle::side_t::RIGHT, reset);
+
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    EXPECT_FALSE(connection->connection_invalid);
+    EXPECT_TRUE(connection->promised_streams.empty());
+}
+
 
 
 TEST(HTTP2, RejectsGoawayBoundaryOwnedByTheSender) {
