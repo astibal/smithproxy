@@ -419,6 +419,53 @@ TEST(HTTP2, RecordsAllRequestsFromOneMultiplexedConnection) {
     EXPECT_EQ(requests.back(), "http://origin.runner.lab/command-11");
 }
 
+TEST(HTTP2, KeepsMultiplexedRequestMetadataScopedToItsStream) {
+    sx::engine::EngineCtx ctx;
+    ctx.state_data = std::make_any<v2::Http2Connection>();
+
+    auto decode_request = [&](long stream_id,
+                              std::vector<std::pair<std::string, std::string>> const& fields) {
+        HPACK::encoder_t encoder;
+        for(auto const& [name, value]: fields)
+            encoder.add(name, value, false);
+        buffer block;
+        block.assign(encoder.data().data(), encoder.data().size());
+        v2::process_headers(ctx, socle::side_t::LEFT, stream_id, 0, block);
+    };
+
+    decode_request(1, {
+        {":method", "GET"}, {":scheme", "https"},
+        {":authority", "first.example"}, {":path", "/first"},
+        {"referer", "https://ref.example/first"},
+    });
+    auto app = std::dynamic_pointer_cast<app_HttpRequest>(ctx.application_data);
+    ASSERT_NE(app, nullptr);
+    EXPECT_EQ(app->request(), "https://first.example/first");
+    EXPECT_EQ(app->http_data.referer, "https://ref.example/first");
+
+    // Both requests can arrive in one transport block, so no EngineCtx flow
+    // transition is available to advance application history. Host is the
+    // RFC fallback when :authority is absent and must belong to stream 3.
+    decode_request(3, {
+        {":method", "GET"}, {":scheme", "https"}, {":path", "/second"},
+        {"host", "second.example"}, {"referer", "https://ref.example/second"},
+    });
+    ASSERT_EQ(app->http_history.size(), 1u);
+    EXPECT_EQ(app->requests_all(),
+              (std::vector<std::string>{"https://second.example/second",
+                                        "https://first.example/first"}));
+    EXPECT_EQ(app->http_data.referer, "https://ref.example/second");
+
+    // Missing optional identity metadata must remain missing rather than
+    // inheriting the previous stream's connection-wide properties.
+    decode_request(5, {
+        {":method", "GET"}, {":scheme", "custom"}, {":path", "/third"},
+    });
+    EXPECT_TRUE(app->http_data.host.empty());
+    EXPECT_TRUE(app->http_data.referer.empty());
+    ASSERT_EQ(app->http_history.size(), 2u);
+}
+
 
 
 TEST(HTTP2, RejectsGoawayBoundaryOwnedByTheSender) {
