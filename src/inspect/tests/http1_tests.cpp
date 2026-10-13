@@ -3228,3 +3228,64 @@ TEST(HTTP2, DohBodySurvivesUntilContentTypeTrailer) {
     EXPECT_FALSE(stream.response_invalid_);
     EXPECT_TRUE(stream.doh_response_finished_);
 }
+
+TEST(HTTP2, DohMediaTypesAreCaseInsensitiveAndAllowParameters) {
+    auto request = [](std::string const& accept) {
+        HPACK::encoder_t encoder;
+        encoder.add(":method", "POST", false);
+        encoder.add(":scheme", "https", false);
+        encoder.add(":authority", "dns.example", false);
+        encoder.add(":path", "/ordinary", false);
+        encoder.add("accept", accept, false);
+        buffer block;
+        block.assign(encoder.data().data(), encoder.data().size());
+        return block;
+    };
+
+    sx::engine::EngineCtx ctx;
+    auto headers = request("text/plain, Application/DNS-Message; q=1");
+    v2::process_headers(ctx, socle::side_t::LEFT, 45, 0, headers);
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    EXPECT_EQ(connection->streams.at(45).sub_app_,
+              v2::Http2Stream::sub_app_t::DNS);
+
+    HPACK::encoder_t repeated_accept;
+    repeated_accept.add(":method", "POST", false);
+    repeated_accept.add(":scheme", "https", false);
+    repeated_accept.add(":authority", "dns.example", false);
+    repeated_accept.add(":path", "/ordinary", false);
+    repeated_accept.add("accept", "application/dns-message", false);
+    repeated_accept.add("accept", "text/plain", false);
+    buffer repeated_block;
+    repeated_block.assign(repeated_accept.data().data(),
+                          repeated_accept.data().size());
+    v2::process_headers(ctx, socle::side_t::LEFT, 49, 0, repeated_block);
+    EXPECT_EQ(connection->streams.at(49).sub_app_,
+              v2::Http2Stream::sub_app_t::DNS);
+
+    auto refused = request("application/dns-message; q=0");
+    v2::process_headers(ctx, socle::side_t::LEFT, 53, 0, refused);
+    EXPECT_EQ(connection->streams.at(53).sub_app_,
+              v2::Http2Stream::sub_app_t::UNKNOWN);
+
+    for(auto const& [stream, accept, expected]:
+        std::vector<std::tuple<long, std::string, v2::Http2Stream::sub_app_t>>{
+            {57, "application/dns-message; q=0.001",
+             v2::Http2Stream::sub_app_t::DNS},
+            {59, "application/dns-message; q=bogus1",
+             v2::Http2Stream::sub_app_t::UNKNOWN},
+            {61, "application/dns-message; q=1.001",
+             v2::Http2Stream::sub_app_t::UNKNOWN},
+            {63, "application/dns-message; q=1; q=0",
+             v2::Http2Stream::sub_app_t::UNKNOWN},
+            {65, "text/plain; note=\"x,application/dns-message;foo=x\"",
+             v2::Http2Stream::sub_app_t::UNKNOWN},
+            {67, "application/dns-message; note=\"x;q=0;y\"; q=1",
+             v2::Http2Stream::sub_app_t::DNS},
+        }) {
+        auto weighted = request(accept);
+        v2::process_headers(ctx, socle::side_t::LEFT, stream, 0, weighted);
+        EXPECT_EQ(connection->streams.at(stream).sub_app_, expected);
+    }
+}
