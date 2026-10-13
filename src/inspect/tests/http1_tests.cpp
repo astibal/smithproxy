@@ -897,6 +897,80 @@ TEST(HTTP2, RetiresPushedStreamsOnEveryTerminalPath) {
     EXPECT_TRUE(connection->promised_streams.empty());
 }
 
+TEST(HTTP2, ZeroWindowUpdateCannotPreserveRejectedSemantics) {
+    auto frame = [](uint8_t type, uint32_t stream,
+                    std::vector<uint8_t> const& payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), type, 0,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+    auto request = [](uint32_t stream) {
+        HPACK::encoder_t encoder;
+        encoder.add(":method", "GET", false);
+        encoder.add(":scheme", "https", false);
+        encoder.add(":authority", "fixture.example", false);
+        encoder.add(":path", "/window", false);
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((encoder.data().size() >> 16) & 0xff),
+            static_cast<uint8_t>((encoder.data().size() >> 8) & 0xff),
+            static_cast<uint8_t>(encoder.data().size() & 0xff), 1, 0x04,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), encoder.data().begin(), encoder.data().end());
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+    const std::vector<uint8_t> zero_increment(4, 0);
+
+    sx::engine::EngineCtx connection_ctx;
+    auto connection_zero = frame(8, 0, zero_increment);
+    v2::process_frame(connection_ctx, socle::side_t::LEFT, connection_zero);
+    auto* connection = std::any_cast<v2::Http2Connection>(
+        &connection_ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    EXPECT_TRUE(connection->connection_invalid);
+
+    sx::engine::EngineCtx stream_ctx;
+    auto initial_request = request(1);
+    v2::process_frame(stream_ctx, socle::side_t::LEFT, initial_request);
+    auto stream_zero = frame(8, 1, zero_increment);
+    v2::process_frame(stream_ctx, socle::side_t::LEFT, stream_zero);
+    auto* stream_connection = std::any_cast<v2::Http2Connection>(
+        &stream_ctx.state_data);
+    ASSERT_NE(stream_connection, nullptr);
+    ASSERT_FALSE(stream_connection->connection_invalid);
+    ASSERT_EQ(stream_connection->streams.count(1), 1u);
+    EXPECT_TRUE(stream_connection->streams.at(1).request_invalid_);
+    EXPECT_TRUE(stream_connection->streams.at(1).response_invalid_);
+
+    auto retry = request(1);
+    v2::process_frame(stream_ctx, socle::side_t::LEFT, retry);
+    EXPECT_EQ(stream_connection->streams.at(1).request_header(":path"),
+              std::optional<std::string>("/window"));
+
+    sx::engine::EngineCtx idle_ctx;
+    auto idle_zero = frame(8, 3, zero_increment);
+    v2::process_frame(idle_ctx, socle::side_t::LEFT, idle_zero);
+    auto* idle_connection = std::any_cast<v2::Http2Connection>(
+        &idle_ctx.state_data);
+    ASSERT_NE(idle_connection, nullptr);
+    EXPECT_TRUE(idle_connection->connection_invalid);
+}
+
 
 
 TEST(HTTP2, RejectsGoawayBoundaryOwnedByTheSender) {
