@@ -2894,3 +2894,46 @@ TEST(HTTP2, LateHeadersOnClosedStreamPreserveHpackAndOtherStreams) {
     EXPECT_EQ(connection->streams.at(3).request_header(":authority"),
               "second.example");
 }
+
+TEST(HTTP2, RequestTrailersDoNotRetargetConnectionReplacement) {
+    auto frame = [](uint8_t flags, uint32_t stream,
+                    std::vector<uint8_t> const& payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), 1, flags,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+    auto request = [](std::string const& authority) {
+        HPACK::encoder_t encoder;
+        encoder.add(":method", "POST", false);
+        encoder.add(":scheme", "https", false);
+        encoder.add(":authority", authority, false);
+        encoder.add(":path", "/", false);
+        return encoder.data();
+    };
+
+    sx::engine::EngineCtx ctx;
+    auto first = frame(0x04, 1, request("first.example"));
+    auto second = frame(0x04, 3, request("second.example"));
+    v2::process_frame(ctx, socle::side_t::LEFT, first);
+    v2::process_frame(ctx, socle::side_t::LEFT, second);
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    ASSERT_EQ(connection->latest_request_stream_id, 3);
+
+    HPACK::encoder_t trailers;
+    trailers.add("x-finished", "yes", false);
+    auto old_stream_trailers = frame(0x05, 1, trailers.data());
+    v2::process_frame(ctx, socle::side_t::LEFT, old_stream_trailers);
+    EXPECT_FALSE(connection->connection_invalid);
+    EXPECT_EQ(connection->latest_request_stream_id, 3);
+}
