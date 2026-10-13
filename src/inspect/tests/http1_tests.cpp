@@ -2729,3 +2729,60 @@ TEST(HTTP2, GoawayDuringFragmentedHeadersSuppressesRejectedStream) {
     EXPECT_EQ(connection->streams.count(103), 0U);
     EXPECT_EQ(ctx.application_data, nullptr);
 }
+
+TEST(HTTP2, ClientGoawayRetiresFragmentedPromiseAboveBoundary) {
+    auto frame = [](uint8_t type, uint8_t flags, uint32_t stream,
+                    std::vector<uint8_t> const& payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), type, flags,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+
+    sx::engine::EngineCtx ctx;
+    HPACK::encoder_t request;
+    request.add(":method", "GET", false);
+    request.add(":scheme", "https", false);
+    request.add(":authority", "fixture.example", false);
+    request.add(":path", "/", false);
+    auto associated = frame(1, 0x04, 1, request.data());
+    v2::process_frame(ctx, socle::side_t::LEFT, associated);
+
+    HPACK::encoder_t promised;
+    promised.add(":method", "GET", false);
+    promised.add(":scheme", "https", false);
+    promised.add(":authority", "push.example", false);
+    promised.add(":path", "/asset", false);
+    const auto middle = promised.data().begin() + promised.data().size() / 2;
+    std::vector<uint8_t> first {0, 0, 0, 2};
+    first.insert(first.end(), promised.data().begin(), middle);
+    std::vector<uint8_t> second(middle, promised.data().end());
+    auto push = frame(5, 0, 1, first);
+    v2::process_frame(ctx, socle::side_t::RIGHT, push);
+
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    ASSERT_EQ(connection->promised_streams.count(2), 1U);
+    ASSERT_TRUE(connection->response_headers_pending.active());
+
+    auto goaway = frame(7, 0, 0, {0, 0, 0, 0, 0, 0, 0, 0});
+    v2::process_frame(ctx, socle::side_t::LEFT, goaway);
+    EXPECT_EQ(connection->promised_streams.count(2), 0U);
+    EXPECT_EQ(connection->refused_promised_streams.count(2), 1U);
+
+    auto continuation = frame(9, 0x04, 1, second);
+    v2::process_frame(ctx, socle::side_t::RIGHT, continuation);
+    EXPECT_FALSE(connection->connection_invalid);
+    EXPECT_FALSE(connection->response_headers_pending.active());
+    EXPECT_EQ(connection->promised_streams.count(2), 0U);
+    EXPECT_EQ(connection->refused_promised_streams.count(2), 1U);
+}
