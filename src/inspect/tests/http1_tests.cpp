@@ -2236,3 +2236,181 @@ TEST(HTTP2, MalformedSettingsTerminatesConnectionSemantics) {
     v2::process_frame(paired_ack_ctx, socle::side_t::RIGHT, duplicate_ack);
     EXPECT_TRUE(paired_ack_connection->connection_invalid);
 }
+TEST(HTTP2, EnforcesConnectionAndStreamFlowControlWindows) {
+    auto frame = [](uint8_t type, uint8_t flags, uint32_t stream,
+                    std::vector<uint8_t> const& payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), type, flags,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+    auto request = [&] {
+        HPACK::encoder_t encoder;
+        encoder.add(":method", "POST", false);
+        encoder.add(":scheme", "https", false);
+        encoder.add(":authority", "fixture.example", false);
+        encoder.add(":path", "/flow", false);
+        return frame(1, 0x04, 1, encoder.data());
+    };
+    auto initial_window = [&](uint32_t value) {
+        return frame(4, 0, 0, {
+            0x00, 0x04,
+            static_cast<uint8_t>((value >> 24) & 0xff),
+            static_cast<uint8_t>((value >> 16) & 0xff),
+            static_cast<uint8_t>((value >> 8) & 0xff),
+            static_cast<uint8_t>(value & 0xff),
+        });
+    };
+    auto window_update = [&](uint32_t stream, uint32_t increment) {
+        return frame(8, 0, stream, {
+            static_cast<uint8_t>((increment >> 24) & 0x7f),
+            static_cast<uint8_t>((increment >> 16) & 0xff),
+            static_cast<uint8_t>((increment >> 8) & 0xff),
+            static_cast<uint8_t>(increment & 0xff),
+        });
+    };
+
+    // The server advertises the request-direction stream window.
+    sx::engine::EngineCtx stream_ctx;
+    auto one_byte_window = initial_window(1);
+    v2::process_frame(stream_ctx, socle::side_t::RIGHT, one_byte_window);
+    auto stream_request = request();
+    v2::process_frame(stream_ctx, socle::side_t::LEFT, stream_request);
+    auto two_bytes = frame(0, 0, 1, {'a', 'b'});
+    v2::process_frame(stream_ctx, socle::side_t::LEFT, two_bytes);
+    auto* stream_connection =
+        std::any_cast<v2::Http2Connection>(&stream_ctx.state_data);
+    ASSERT_NE(stream_connection, nullptr);
+    EXPECT_FALSE(stream_connection->connection_invalid);
+    ASSERT_EQ(stream_connection->streams.count(1), 1U);
+    EXPECT_TRUE(stream_connection->streams.at(1).request_invalid_);
+
+    // A valid stream WINDOW_UPDATE restores exactly the advertised credit.
+    sx::engine::EngineCtx restored_ctx;
+    auto restored_setting = initial_window(1);
+    v2::process_frame(restored_ctx, socle::side_t::RIGHT, restored_setting);
+    auto restored_request = request();
+    v2::process_frame(restored_ctx, socle::side_t::LEFT, restored_request);
+    auto first_byte = frame(0, 0, 1, {'a'});
+    v2::process_frame(restored_ctx, socle::side_t::LEFT, first_byte);
+    auto restore_one = window_update(1, 1);
+    v2::process_frame(restored_ctx, socle::side_t::RIGHT, restore_one);
+    auto second_byte = frame(0, 0, 1, {'b'});
+    v2::process_frame(restored_ctx, socle::side_t::LEFT, second_byte);
+    auto* restored_connection =
+        std::any_cast<v2::Http2Connection>(&restored_ctx.state_data);
+    ASSERT_NE(restored_connection, nullptr);
+    ASSERT_EQ(restored_connection->streams.count(1), 1U);
+    EXPECT_FALSE(restored_connection->streams.at(1).request_invalid_);
+    EXPECT_EQ(restored_connection->streams.at(1).request_body_bytes_, 2U);
+
+    // A SETTINGS reduction also changes windows of streams that are already
+    // open; it is not merely a default for future requests.
+    sx::engine::EngineCtx reduced_ctx;
+    auto reduced_request = request();
+    v2::process_frame(reduced_ctx, socle::side_t::LEFT, reduced_request);
+    auto zero_window = initial_window(0);
+    v2::process_frame(reduced_ctx, socle::side_t::RIGHT, zero_window);
+    auto forbidden_byte = frame(0, 0, 1, {'x'});
+    v2::process_frame(reduced_ctx, socle::side_t::LEFT, forbidden_byte);
+    auto* reduced_connection =
+        std::any_cast<v2::Http2Connection>(&reduced_ctx.state_data);
+    ASSERT_NE(reduced_connection, nullptr);
+    ASSERT_EQ(reduced_connection->streams.count(1), 1U);
+    EXPECT_TRUE(reduced_connection->streams.at(1).request_invalid_);
+
+    // Four maximum-size DATA frames exceed the default 65,535-byte
+    // connection window by one byte.
+    sx::engine::EngineCtx connection_ctx;
+    auto connection_request = request();
+    v2::process_frame(connection_ctx, socle::side_t::LEFT, connection_request);
+    std::vector<uint8_t> maximum_data(16384, 'x');
+    for(int index = 0; index < 4; ++index) {
+        auto data = frame(0, 0, 1, maximum_data);
+        v2::process_frame(connection_ctx, socle::side_t::LEFT, data);
+    }
+    auto* connection =
+        std::any_cast<v2::Http2Connection>(&connection_ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    EXPECT_TRUE(connection->connection_invalid);
+
+    sx::engine::EngineCtx overflow_ctx;
+    auto overflow = window_update(0, 0x7fffffffU);
+    v2::process_frame(overflow_ctx, socle::side_t::RIGHT, overflow);
+    auto* overflow_connection =
+        std::any_cast<v2::Http2Connection>(&overflow_ctx.state_data);
+    ASSERT_NE(overflow_connection, nullptr);
+    EXPECT_TRUE(overflow_connection->connection_invalid);
+
+    // Stream overflow remains scoped to that stream.
+    sx::engine::EngineCtx stream_overflow_ctx;
+    auto overflow_request = request();
+    v2::process_frame(stream_overflow_ctx, socle::side_t::LEFT,
+                      overflow_request);
+    auto stream_overflow = window_update(1, 0x7fffffffU);
+    v2::process_frame(stream_overflow_ctx, socle::side_t::RIGHT,
+                      stream_overflow);
+    auto* stream_overflow_connection =
+        std::any_cast<v2::Http2Connection>(&stream_overflow_ctx.state_data);
+    ASSERT_NE(stream_overflow_connection, nullptr);
+    EXPECT_FALSE(stream_overflow_connection->connection_invalid);
+    EXPECT_TRUE(stream_overflow_connection->streams.at(1).request_invalid_);
+
+    // Raising the initial window adjusts existing stream credit and must not
+    // make it exceed the signed 31-bit protocol maximum.
+    sx::engine::EngineCtx settings_overflow_ctx;
+    auto settings_overflow_request = request();
+    v2::process_frame(settings_overflow_ctx, socle::side_t::LEFT,
+                      settings_overflow_request);
+    auto to_maximum = window_update(1, 0x7fffffffU - 65535U);
+    v2::process_frame(settings_overflow_ctx, socle::side_t::RIGHT,
+                      to_maximum);
+    auto increase_initial = initial_window(65536);
+    v2::process_frame(settings_overflow_ctx, socle::side_t::RIGHT,
+                      increase_initial);
+    auto* settings_overflow_connection =
+        std::any_cast<v2::Http2Connection>(&settings_overflow_ctx.state_data);
+    ASSERT_NE(settings_overflow_connection, nullptr);
+    EXPECT_TRUE(settings_overflow_connection->connection_invalid);
+
+    // Client-advertised credit applies independently to server push streams.
+    sx::engine::EngineCtx push_ctx;
+    auto push_window = initial_window(1);
+    v2::process_frame(push_ctx, socle::side_t::LEFT, push_window);
+    auto associated_request = request();
+    v2::process_frame(push_ctx, socle::side_t::LEFT, associated_request);
+    HPACK::encoder_t promised_request;
+    promised_request.add(":method", "GET", false);
+    promised_request.add(":scheme", "https", false);
+    promised_request.add(":authority", "fixture.example", false);
+    promised_request.add(":path", "/pushed", false);
+    std::vector<uint8_t> promise_payload {0, 0, 0, 2};
+    promise_payload.insert(promise_payload.end(),
+                           promised_request.data().begin(),
+                           promised_request.data().end());
+    auto promise = frame(5, 0x04, 1, promise_payload);
+    v2::process_frame(push_ctx, socle::side_t::RIGHT, promise);
+    HPACK::encoder_t pushed_response;
+    pushed_response.add(":status", "200", false);
+    auto pushed_headers = frame(1, 0x04, 2, pushed_response.data());
+    v2::process_frame(push_ctx, socle::side_t::RIGHT, pushed_headers);
+    auto pushed_data = frame(0, 0, 2, {'a', 'b'});
+    v2::process_frame(push_ctx, socle::side_t::RIGHT, pushed_data);
+    auto* push_connection =
+        std::any_cast<v2::Http2Connection>(&push_ctx.state_data);
+    ASSERT_NE(push_connection, nullptr);
+    EXPECT_FALSE(push_connection->connection_invalid);
+    EXPECT_EQ(push_connection->promised_streams.count(2), 0U);
+    EXPECT_EQ(push_connection->active_promised_streams.count(2), 0U);
+    EXPECT_EQ(push_connection->promised_flow_windows.count(2), 0U);
+    EXPECT_EQ(push_connection->refused_promised_streams.count(2), 1U);
+}
