@@ -213,6 +213,95 @@ TEST(HTTP2, DohGetQueryPathUsesTheEndpointComponentBoundary) {
               v2::Http2Stream::sub_app_t::UNKNOWN);
 }
 
+TEST(HTTP2, ExtendedConnectRequiresPeerSetting) {
+    auto frame = [](uint8_t type, uint8_t flags, uint32_t stream,
+                    std::vector<uint8_t> const& payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), type, flags,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+    auto request = [&](uint32_t stream) {
+        HPACK::encoder_t encoder;
+        encoder.add(":method", "CONNECT", false);
+        encoder.add(":scheme", "https", false);
+        encoder.add(":authority", "example.test", false);
+        encoder.add(":path", "/chat", false);
+        encoder.add(":protocol", "websocket", false);
+        return frame(1, 0x04, stream, encoder.data());
+    };
+
+    sx::engine::EngineCtx disabled;
+    auto unnegotiated = request(1);
+    v2::process_frame(disabled, socle::side_t::LEFT, unnegotiated);
+    auto* disabled_connection =
+        std::any_cast<v2::Http2Connection>(&disabled.state_data);
+    ASSERT_NE(disabled_connection, nullptr);
+    EXPECT_EQ(disabled_connection->streams.count(1), 0U);
+
+    sx::engine::EngineCtx enabled;
+    std::vector<uint8_t> enable_connect {
+        0x00, 0x08, // SETTINGS_ENABLE_CONNECT_PROTOCOL
+        0x00, 0x00, 0x00, 0x01,
+    };
+    auto settings = frame(4, 0, 0, enable_connect);
+    v2::process_frame(enabled, socle::side_t::RIGHT, settings);
+    auto negotiated = request(1);
+    v2::process_frame(enabled, socle::side_t::LEFT, negotiated);
+    auto* enabled_connection =
+        std::any_cast<v2::Http2Connection>(&enabled.state_data);
+    ASSERT_NE(enabled_connection, nullptr);
+    EXPECT_EQ(enabled_connection->streams.count(1), 1U);
+
+    sx::engine::EngineCtx malformed;
+    enable_connect.back() = 2;
+    auto invalid_settings = frame(4, 0, 0, enable_connect);
+    v2::process_frame(malformed, socle::side_t::RIGHT, invalid_settings);
+    auto* malformed_connection =
+        std::any_cast<v2::Http2Connection>(&malformed.state_data);
+    ASSERT_NE(malformed_connection, nullptr);
+    EXPECT_TRUE(malformed_connection->connection_invalid);
+
+    // RFC 8441 makes the opt-in monotonic.  Once a server has advertised
+    // support, withdrawing it is a connection error rather than a return to
+    // ordinary CONNECT semantics.
+    sx::engine::EngineCtx withdrawn;
+    enable_connect.back() = 1;
+    auto enable_settings = frame(4, 0, 0, enable_connect);
+    v2::process_frame(withdrawn, socle::side_t::RIGHT, enable_settings);
+    enable_connect.back() = 0;
+    auto disable_settings = frame(4, 0, 0, enable_connect);
+    v2::process_frame(withdrawn, socle::side_t::RIGHT, disable_settings);
+    auto* withdrawn_connection =
+        std::any_cast<v2::Http2Connection>(&withdrawn.state_data);
+    ASSERT_NE(withdrawn_connection, nullptr);
+    EXPECT_TRUE(withdrawn_connection->connection_invalid);
+
+    sx::engine::EngineCtx contradictory;
+    std::vector<uint8_t> enable_then_disable {
+        0x00, 0x08, 0x00, 0x00, 0x00, 0x01,
+        0x00, 0x08, 0x00, 0x00, 0x00, 0x00,
+    };
+    auto contradictory_settings = frame(4, 0, 0, enable_then_disable);
+    v2::process_frame(contradictory, socle::side_t::RIGHT,
+                      contradictory_settings);
+    auto* contradictory_connection =
+        std::any_cast<v2::Http2Connection>(&contradictory.state_data);
+    ASSERT_NE(contradictory_connection, nullptr);
+    EXPECT_TRUE(contradictory_connection->connection_invalid);
+}
+
+
+
 TEST(HTTP2, RejectsGoawayBoundaryOwnedByTheSender) {
     auto frame = [](uint32_t last_stream) {
         std::vector<uint8_t> payload(8);
