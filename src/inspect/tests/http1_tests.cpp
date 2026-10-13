@@ -300,6 +300,37 @@ TEST(HTTP2, ExtendedConnectRequiresPeerSetting) {
     EXPECT_TRUE(contradictory_connection->connection_invalid);
 }
 
+TEST(HTTP2, PositiveWindowUpdateOnIdleStreamTerminatesConnectionSemantics) {
+    auto window_update = [](uint32_t stream) {
+        std::vector<uint8_t> bytes {
+            0, 0, 4, 8, 0,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+            0, 0, 0, 1,
+        };
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+
+    for(auto const [side, stream] : {
+            std::pair{socle::side_t::LEFT, 3U},
+            std::pair{socle::side_t::RIGHT, 5U},
+            std::pair{socle::side_t::LEFT, 2U},
+            std::pair{socle::side_t::RIGHT, 4U}}) {
+        sx::engine::EngineCtx ctx;
+        auto update = window_update(stream);
+        v2::process_frame(ctx, side, update);
+        auto* connection =
+            std::any_cast<v2::Http2Connection>(&ctx.state_data);
+        ASSERT_NE(connection, nullptr);
+        EXPECT_TRUE(connection->connection_invalid)
+            << "side=" << static_cast<int>(side) << " stream=" << stream;
+    }
+}
+
 
 
 TEST(HTTP2, RejectsGoawayBoundaryOwnedByTheSender) {
