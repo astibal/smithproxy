@@ -2937,3 +2937,110 @@ TEST(HTTP2, RequestTrailersDoNotRetargetConnectionReplacement) {
     EXPECT_FALSE(connection->connection_invalid);
     EXPECT_EQ(connection->latest_request_stream_id, 3);
 }
+
+TEST(HTTP2, RejectsInvalidRequestPseudoHeaderValues) {
+    auto accepted = [](std::vector<std::pair<std::string, std::string>> const& fields) {
+        sx::engine::EngineCtx ctx;
+        HPACK::encoder_t encoder;
+        for(auto const& [name, value]: fields)
+            encoder.add(name, value, false);
+        buffer block;
+        block.assign(encoder.data().data(), encoder.data().size());
+        v2::process_headers(ctx, socle::side_t::LEFT, 1, 0x04, block);
+        auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+        return connection != nullptr && connection->streams.count(1) != 0;
+    };
+
+    EXPECT_FALSE(accepted({
+        {":method", "G ET"}, {":scheme", "https"}, {":path", "/"},
+    }));
+    EXPECT_FALSE(accepted({
+        {":method", "GET"}, {":scheme", "https"}, {":path", "/"},
+        {":evil", "accepted-by-hpack"},
+    }));
+    EXPECT_FALSE(accepted({
+        {":method", "GET"}, {":scheme", "1https"}, {":path", "/"},
+    }));
+    EXPECT_FALSE(accepted({
+        {":method", "GET"}, {":scheme", "https"}, {":path", ""},
+    }));
+    EXPECT_FALSE(accepted({
+        {":method", "GET"}, {":scheme", "https"}, {":path", "/"},
+    }));
+    for(auto const& path: {"relative", "/raw path", "/fragment#hidden",
+                           "/raw\x7f", "*"}) {
+        EXPECT_FALSE(accepted({
+            {":method", "GET"}, {":scheme", "https"}, {":path", path},
+        })) << path;
+    }
+    EXPECT_FALSE(accepted({
+        {":method", "CONNECT"}, {":authority", "target.example:443"},
+        {":protocol", "web socket"}, {":scheme", "https"}, {":path", "/"},
+    }));
+    for(auto const& authority: {
+        "allowed.example\tevil", "allowed.example/path", "user@allowed.example",
+        "[not-ipv6]:443", "2001:db8::1", "allowed.example:443junk",
+        "allowed.example:", "allowed.example:0", "allowed.example:65536"}) {
+        EXPECT_FALSE(accepted({
+            {":method", "GET"}, {":scheme", "https"},
+            {":authority", authority}, {":path", "/"},
+        })) << authority;
+    }
+    EXPECT_FALSE(accepted({
+        {":method", "GET"}, {":scheme", "https"}, {":path", "/"},
+        {"host", "first.example"}, {"host", "second.example"},
+    }));
+    EXPECT_FALSE(accepted({
+        {":method", "GET"}, {":scheme", "https"}, {":path", "/"},
+        {":authority", "inspected.example"}, {"host", "forwarded.example"},
+    }));
+    EXPECT_FALSE(accepted({
+        {":method", "GET"}, {":scheme", "https"}, {":authority", ""},
+        {":path", "/"}, {"host", "fallback.example"},
+    }));
+    EXPECT_FALSE(accepted({
+        {":method", "CONNECT"}, {":authority", "target.example:443"},
+        {":protocol", "websocket"}, {":scheme", "https"}, {":path", "/"},
+    }));
+    EXPECT_TRUE(accepted({
+        {":method", "GET"}, {":scheme", "https"},
+        {":authority", "[2001:db8::1]:443"}, {":path", "/"},
+    }));
+    EXPECT_TRUE(accepted({
+        {":method", "GET"}, {":scheme", "https"}, {":path", "/"},
+        {":authority", "same.example"}, {"host", "same.example"},
+    }));
+    EXPECT_TRUE(accepted({
+        {":method", "GET"}, {":scheme", "https"}, {":path", "/"},
+        {":authority", "Case.Example:443"}, {"host", "case.example:443"},
+    }));
+    EXPECT_TRUE(accepted({
+        {":method", "OPTIONS"}, {":scheme", "https"}, {":path", "*"},
+        {":authority", "example.test"},
+    }));
+
+    sx::engine::EngineCtx response_ctx;
+    HPACK::encoder_t request;
+    request.add(":method", "GET", false);
+    request.add(":scheme", "https", false);
+    request.add(":authority", "response.example", false);
+    request.add(":path", "/", false);
+    buffer request_block;
+    request_block.assign(request.data().data(), request.data().size());
+    v2::process_headers(response_ctx, socle::side_t::LEFT, 1, 0x04,
+                        request_block);
+
+    HPACK::encoder_t response;
+    response.add(":status", "200", false);
+    response.add(":unexpected", "value", false);
+    buffer response_block;
+    response_block.assign(response.data().data(), response.data().size());
+    v2::process_headers(response_ctx, socle::side_t::RIGHT, 1, 0x04,
+                        response_block);
+    auto* response_connection =
+        std::any_cast<v2::Http2Connection>(&response_ctx.state_data);
+    ASSERT_NE(response_connection, nullptr);
+    ASSERT_NE(response_connection->streams.find(1),
+              response_connection->streams.end());
+    EXPECT_TRUE(response_connection->streams.at(1).response_invalid_);
+}
