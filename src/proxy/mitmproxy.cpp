@@ -944,8 +944,19 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
                     }
                 }
 
-                if(mh->replacement_type() == MitmHostCX::REPLACETYPE_NONE) {
-                    _war("certificate not OK; deferring replacement until client protocol is known");
+                bool h2_request_ready = false;
+                if(mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP2) {
+                    auto* connection =
+                        std::any_cast<sx::engine::http::v2::Http2Connection>(
+                            &mh->engine_ctx.state_data);
+                    h2_request_ready =
+                        connection && connection->latest_request_stream_id > 0;
+                }
+
+                if(mh->replacement_type() == MitmHostCX::REPLACETYPE_NONE ||
+                   (mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP2 &&
+                    !h2_request_ready)) {
+                    _war("certificate not OK; deferring replacement until client request is known");
                     tls_replacement_pending = true;
                     redirected = true;
                 }
