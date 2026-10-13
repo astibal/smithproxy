@@ -717,6 +717,60 @@ TEST(HTTP2, ValidPushedResponseDoesNotPoisonLaterStreams) {
     EXPECT_EQ(connection->streams.at(73).response_header("x-pushed"), "yes");
 }
 
+TEST(HTTP2, RejectsPushPromiseAfterServerEndedAssociatedStream) {
+    auto frame = [](uint8_t type, uint8_t flags, uint32_t stream,
+                    std::vector<uint8_t> const& payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), type, flags,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+
+    sx::engine::EngineCtx ctx;
+    HPACK::encoder_t client;
+    client.add(":method", "POST", false);
+    client.add(":scheme", "https", false);
+    client.add(":authority", "fixture.example", false);
+    client.add(":path", "/upload", false);
+    // Keep the request direction open so the stream object survives after
+    // the server closes its own sending direction.
+    auto request = frame(1, 0x04, 81, client.data());
+    v2::process_frame(ctx, socle::side_t::LEFT, request);
+
+    HPACK::encoder_t server;
+    server.add(":status", "204", false);
+    auto terminal_response = frame(1, 0x05, 81, server.data());
+    v2::process_frame(ctx, socle::side_t::RIGHT, terminal_response);
+
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    ASSERT_EQ(connection->streams.count(81), 1U);
+    ASSERT_TRUE(connection->streams.at(81).response_ended_);
+
+    const auto push_offset = server.data().size();
+    server.add(":method", "GET", false);
+    server.add(":scheme", "https", false);
+    server.add(":authority", "push.example", false);
+    server.add(":path", "/too-late", false);
+    std::vector<uint8_t> promise {0, 0, 0, 2};
+    promise.insert(promise.end(), server.data().begin() + push_offset,
+                   server.data().end());
+    auto late_push = frame(5, 0x04, 81, promise);
+    v2::process_frame(ctx, socle::side_t::RIGHT, late_push);
+
+    EXPECT_TRUE(connection->connection_invalid);
+    EXPECT_TRUE(connection->promised_streams.empty());
+}
+
 
 
 TEST(HTTP2, RejectsGoawayBoundaryOwnedByTheSender) {
