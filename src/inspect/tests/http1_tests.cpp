@@ -2584,3 +2584,55 @@ TEST(HTTP2, SynchronizesHpackAcrossFragmentedPushPromise) {
 
     EXPECT_EQ(connection->streams.count(73), 0U);
 }
+
+TEST(HTTP2, RejectsEmptyPushPromiseHeaderBlocks) {
+    auto frame = [](uint8_t type, uint8_t flags, uint32_t stream,
+                    std::vector<uint8_t> const& payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), type, flags,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+    auto open_request = [&](sx::engine::EngineCtx& ctx) {
+        HPACK::encoder_t encoder;
+        encoder.add(":method", "GET", false);
+        encoder.add(":scheme", "https", false);
+        encoder.add(":authority", "fixture.example", false);
+        encoder.add(":path", "/", false);
+        auto request = frame(1, 0x04, 1, encoder.data());
+        v2::process_frame(ctx, socle::side_t::LEFT, request);
+    };
+
+    sx::engine::EngineCtx complete_ctx;
+    open_request(complete_ctx);
+    auto complete = frame(5, 0x04, 1, {0, 0, 0, 2});
+    v2::process_frame(complete_ctx, socle::side_t::RIGHT, complete);
+    auto* complete_connection =
+        std::any_cast<v2::Http2Connection>(&complete_ctx.state_data);
+    ASSERT_NE(complete_connection, nullptr);
+    EXPECT_FALSE(complete_connection->connection_invalid);
+    EXPECT_EQ(complete_connection->promised_streams.count(2), 0U);
+    EXPECT_EQ(complete_connection->refused_promised_streams.count(2), 1U);
+
+    sx::engine::EngineCtx fragmented_ctx;
+    open_request(fragmented_ctx);
+    auto first = frame(5, 0, 1, {0, 0, 0, 2});
+    auto last = frame(9, 0x04, 1, {});
+    v2::process_frame(fragmented_ctx, socle::side_t::RIGHT, first);
+    v2::process_frame(fragmented_ctx, socle::side_t::RIGHT, last);
+    auto* fragmented_connection =
+        std::any_cast<v2::Http2Connection>(&fragmented_ctx.state_data);
+    ASSERT_NE(fragmented_connection, nullptr);
+    EXPECT_FALSE(fragmented_connection->connection_invalid);
+    EXPECT_EQ(fragmented_connection->promised_streams.count(2), 0U);
+    EXPECT_EQ(fragmented_connection->refused_promised_streams.count(2), 1U);
+}
