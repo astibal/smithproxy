@@ -11,6 +11,7 @@
 #include <string>
 #include <unordered_map>
 #include <mutex>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -31,10 +32,25 @@ public:
     using flow_observation = std::unordered_map<std::string, std::string>;
     using observation_hook = std::function<void(flow_observation)>;
 
+    struct content_metadata {
+        // Half-open byte ranges in the exact buffer passed to inspect_content.
+        // {0, 0} means definitely no L7 body in this message; {-1, -1}
+        // means that the adapter cannot locate it.
+        std::string payload_layer;
+        std::vector<std::pair<std::int64_t, std::int64_t>> payload_ranges;
+        // Positional companion to payload_ranges; an empty item means plain
+        // or unknown encoding rather than absence of the corresponding range.
+        std::vector<std::string> encodings;
+    };
+
     virtual ~traffic_log_adapter() = default;
 
     /** Observe forwarded plaintext independently of capture configuration. */
     virtual void observe(socle::side_t, buffer const&) {}
+
+    /** Inspect plaintext before a content webhook and describe its L7 payload. */
+    virtual std::optional<content_metadata> inspect_content(
+        socle::side_t, buffer const&) { return std::nullopt; }
 
     /** Publish parsed transport metadata to the owning proxy session. */
     virtual void on_flow_observation(observation_hook) {}

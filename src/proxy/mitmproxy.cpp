@@ -74,6 +74,32 @@
 
 using namespace socle;
 
+namespace {
+
+using HttpApplication = sx::engine::http::app_HttpRequest;
+
+std::shared_ptr<HttpApplication> ensure_http_application(MitmHostCX* context) {
+    if(!context) return {};
+    auto app = std::dynamic_pointer_cast<HttpApplication>(
+        context->engine_ctx.application_data);
+    if(!app) {
+        app = std::make_shared<HttpApplication>();
+        context->engine_ctx.application_data = app;
+    }
+    return app;
+}
+
+std::string_view content_payload_layer(baseHostCX* context) {
+    auto const* current = MitmHostCX::from_baseHostCX(context);
+    if(!current) return "tcp";
+    auto const app = std::dynamic_pointer_cast<HttpApplication>(
+        current->engine_ctx.application_data);
+    return app && app->version == HttpApplication::HTTP_VER::HTTP3
+        ? std::string_view{"http3"} : std::string_view{"tcp"};
+}
+
+} // namespace
+
 MitmProxy::MitmProxy(baseCom* c): baseProxy(c), start_stop_tls_(*this) {
 
     current_sessions()++;
@@ -341,6 +367,21 @@ void MitmProxy::submit_flow_observation(
     sx::traffic_log_adapter::flow_observation fields,
     std::string_view payload_layer) {
     if(fields.empty()) return;
+
+    if(payload_layer == "http3.headers") {
+        if(auto* left = first_left(); left != nullptr) {
+            auto app = ensure_http_application(left);
+            app->version = HttpApplication::HTTP_VER::HTTP3;
+            auto copy = [&](char const* source, std::string& target) {
+                if(auto const found = fields.find(source); found != fields.end())
+                    target = found->second;
+            };
+            copy("flow.http3.method", app->http_data.method);
+            copy("flow.http3.authority", app->http_data.host);
+            copy("flow.http3.path", app->http_data.uri);
+            copy("flow.http3.scheme", app->http_data.proto);
+        }
+    }
 
     nlohmann::json details;
     auto& info = details["info"];
@@ -1061,9 +1102,11 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
 
         if(app && app->populated()) {
             auto const http2 = app->version == sx::engine::http::app_HttpRequest::HTTP_VER::HTTP2;
-            auto const prefix = http2 ? "flow.http2." : "flow.http1.";
+            auto const http3 = app->version == sx::engine::http::app_HttpRequest::HTTP_VER::HTTP3;
+            auto const prefix = http3 ? "flow.http3." :
+                                http2 ? "flow.http2." : "flow.http1.";
 
-            j["info"][http2 ? "flow.http2" : "flow.http1"] = true;
+            j["info"][http3 ? "flow.http3" : http2 ? "flow.http2" : "flow.http1"] = true;
 
             auto put = [&](std::string const& field, std::string const& value) {
                 if(!value.empty()) j["info"][prefix + field] = value;
@@ -1078,7 +1121,7 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
             }
 
             put("method", app->http_data.method);
-            put(http2 ? "authority" : "host", app->http_data.host);
+            put((http2 || http3) ? "authority" : "host", app->http_data.host);
             put("path", path);
             put("scheme", scheme);
             put("url", app->request());
@@ -1168,8 +1211,10 @@ bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t 
 
     // Classification waits only for this flow. It must never participate in
     // the forensic global webhook lock used by the interactive Spider app.
+    auto const payload_layer = content_payload_layer(from);
+
     if(sift_is_enabled and content_webhook(
-            from, side, from->to_read(), "tcp", false, true)) {
+            from, side, from->to_read(), payload_layer, false, true)) {
         return true;
     }
     if(not webhook_enabled) return false;
@@ -1214,7 +1259,7 @@ bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t 
                          to_string(iNOT).c_str(), attempt_no);
 
                 }
-                return content_webhook(from, side, from->to_read(), "tcp", true, false);
+                return content_webhook(from, side, from->to_read(), payload_layer, true, false);
             }
         }
         _err("[%s]: content_webhook: previous webhook takes too long to complete, content NOT sent to webhook.",
@@ -1224,7 +1269,7 @@ bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t 
 
     }
     else {
-        return content_webhook(from, side, from->to_read(), "tcp", true, false);
+        return content_webhook(from, side, from->to_read(), payload_layer, true, false);
     }
     return false;
 }
@@ -1249,6 +1294,28 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
         auto* upstream = side == side_t::RIGHT ? from : to;
         upstream->shutdown();
         return;
+    }
+
+    // Transport adapters may enrich the ordinary application state before
+    // the same content webhook path used by TCP-based inspection engines.
+    if(traffic_log_adapter_) {
+        if(auto metadata = traffic_log_adapter_->inspect_content(side, from->to_read())) {
+            if(auto* current = MitmHostCX::from_baseHostCX(from); current != nullptr) {
+                auto app = std::dynamic_pointer_cast<HttpApplication>(
+                    current->engine_ctx.application_data);
+                if(!app && metadata->payload_layer == "http3") {
+                    app = ensure_http_application(current);
+                }
+                if(app) {
+                    if(metadata->payload_layer == "http3")
+                        app->version = HttpApplication::HTTP_VER::HTTP3;
+                    app->l7_payload.assign(metadata->payload_ranges.begin(),
+                                           metadata->payload_ranges.end());
+                    app->l7_encoding = std::move(metadata->encodings);
+                    app->l7_payload_observed_bytes = current->meter_read_bytes;
+                }
+            }
+        }
     }
 
     // 1. content webhook first (potentially modifies from->to_read() buffer

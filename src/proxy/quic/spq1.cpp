@@ -12,6 +12,19 @@ namespace {
 
 constexpr unsigned char version[] {'S', 'P', 'Q', '1'};
 constexpr unsigned char header_end[] {'>', '>', '>'};
+constexpr std::uint64_t h3_data_frame = 0x00;
+
+std::optional<std::pair<std::uint64_t, std::size_t>> read_varint(
+    unsigned char const* data, std::size_t size) {
+    if(!data || size == 0) return std::nullopt;
+    auto const width = std::size_t{1} << (data[0] >> 6U);
+    if(size < width) return std::nullopt;
+
+    std::uint64_t value = data[0] & 0x3fU;
+    for(std::size_t i = 1; i < width; ++i)
+        value = (value << 8U) | data[i];
+    return std::pair{value, width};
+}
 
 void append_u32(std::vector<unsigned char>& output, std::uint32_t value) {
     output.push_back(static_cast<unsigned char>(value >> 24));
@@ -64,6 +77,25 @@ std::vector<unsigned char> wrap_packet(
 }
 
 } // namespace
+
+std::uint64_t connection_context::stream_side_key(
+    socle::side_t side, std::uint64_t stream_id) {
+    // QUIC stream IDs use at most 62 bits, leaving one safe bit for direction.
+    return (stream_id << 1U) | (side == socle::side_t::RIGHT ? 1U : 0U);
+}
+
+void connection_context::content_encoding(
+    socle::side_t side, std::uint64_t stream_id, std::string value) {
+    std::lock_guard lock(content_encoding_lock);
+    content_encodings[stream_side_key(side, stream_id)] = std::move(value);
+}
+
+std::string connection_context::content_encoding(
+    socle::side_t side, std::uint64_t stream_id) const {
+    std::lock_guard lock(content_encoding_lock);
+    auto const found = content_encodings.find(stream_side_key(side, stream_id));
+    return found == content_encodings.end() ? std::string{} : found->second;
+}
 
 std::unordered_map<std::string, std::string> h3_flow_observations(
     h3_headers_record const& record) {
@@ -278,17 +310,81 @@ std::unique_ptr<socle::baseTrafficLogger> stream_log_adapter::wrap(
         new stream_log(std::move(shared_output), context_, stream_log::shared_output_tag {}));
 }
 
-void stream_log_adapter::observe(socle::side_t side, buffer const& data) {
+std::size_t stream_log_adapter::side_index(socle::side_t side) {
+    return side == socle::side_t::RIGHT ? 1U : 0U;
+}
+
+std::vector<std::pair<std::int64_t, std::int64_t>>
+stream_log_adapter::data_ranges(socle::side_t side, buffer const& data) {
+    std::vector<std::pair<std::int64_t, std::int64_t>> ranges;
+    if(data.empty() || (context_.stream_id & 0x02U) != 0) return {{0, 0}};
+
+    auto& state = frames_[side_index(side)];
+    auto const* bytes = static_cast<unsigned char const*>(data.data());
+    std::size_t cursor = 0;
+
+    while(cursor < data.size()) {
+        if(!state.type) {
+            while(cursor < data.size() && state.header.size() < 16) {
+                state.header.push_back(bytes[cursor++]);
+                auto const type = read_varint(state.header.data(), state.header.size());
+                if(!type) continue;
+                auto const length = read_varint(
+                    state.header.data() + type->second,
+                    state.header.size() - type->second);
+                if(!length) continue;
+                state.type = type->first;
+                state.remaining = length->first;
+                state.header.clear();
+                break;
+            }
+            if(!state.type) break;
+            if(state.remaining == 0) {
+                state.type.reset();
+                continue;
+            }
+        }
+
+        auto const count = static_cast<std::size_t>(
+            std::min<std::uint64_t>(state.remaining, data.size() - cursor));
+        if(*state.type == h3_data_frame && count != 0) {
+            auto const start = static_cast<std::int64_t>(cursor);
+            auto const end = static_cast<std::int64_t>(cursor + count);
+            if(!ranges.empty() && ranges.back().second == start)
+                ranges.back().second = end;
+            else
+                ranges.emplace_back(start, end);
+        }
+        cursor += count;
+        state.remaining -= count;
+        if(state.remaining == 0) state.type.reset();
+    }
+
+    if(ranges.empty()) ranges.emplace_back(0, 0);
+    return ranges;
+}
+
+std::optional<traffic_log_adapter::content_metadata>
+stream_log_adapter::inspect_content(socle::side_t side, buffer const& data) {
     auto const connection = context_.connection;
 
-    if(!connection || !connection->h3_observer_decoder || data.empty()) return;
+    if(!connection || !connection->h3_observer_decoder || data.empty())
+        return std::nullopt;
 
     try {
+        // QPACK state is connection-wide: encoder instructions received on a
+        // unidirectional stream may unblock headers belonging to another one.
         auto records = connection->h3_observer_decoder->ingest(
             side, context_.stream_id,
             static_cast<unsigned char const*>(data.data()), data.size());
 
         for(auto const& record : records) {
+            for(auto const& field : record.fields) {
+                if(field.name == "content-encoding") {
+                    connection->content_encoding(
+                        record.side, record.stream_id, field.value);
+                }
+            }
             auto fields = h3_flow_observations(record);
 
             if(!fields.empty() && observation_hook_) {
@@ -298,6 +394,17 @@ void stream_log_adapter::observe(socle::side_t side, buffer const& data) {
     } catch(std::exception const&) {
         // Semantic enrichment must never alter HTTP/3 forwarding.
     }
+
+    // Ranges deliberately refer to this exact buffer. They can therefore
+    // start at zero when an H3 DATA frame began in the previous message.
+    content_metadata result;
+    result.payload_layer = "http3";
+    result.payload_ranges = data_ranges(side, data);
+    auto const encoding = connection->content_encoding(side, context_.stream_id);
+    result.encodings.assign(result.payload_ranges.size(),
+        result.payload_ranges.front() == std::pair<std::int64_t, std::int64_t>{0, 0}
+            ? std::string{} : encoding);
+    return result;
 }
 
 } // namespace sx::quic::spq1

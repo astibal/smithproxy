@@ -59,6 +59,7 @@ namespace sx::engine::http {
     constexpr const char* str_http1_0 = "http1.0";
     constexpr const char* str_http1_1 = "http1.1";
     constexpr const char* str_http2 = "http2";
+    constexpr const char* str_http3 = "http3";
 
     using L7PayloadRange = std::pair<std::int64_t, std::int64_t>;
     using L7PayloadHints = std::vector<L7PayloadRange>;
@@ -139,7 +140,7 @@ namespace sx::engine::http {
         }
 
 
-        enum class HTTP_VER { HTTP_1, HTTP1_0, HTTP1_1, HTTP2 } version;
+        enum class HTTP_VER { HTTP_1, HTTP1_0, HTTP1_1, HTTP2, HTTP3 } version;
 
         constexpr const char* http_str(HTTP_VER v) const {
             switch (v) {
@@ -152,6 +153,8 @@ namespace sx::engine::http {
                     return str_http1_1;
                 case HTTP_VER::HTTP2:
                     return str_http2;
+                case HTTP_VER::HTTP3:
+                    return str_http3;
             }
             return str_unknown;
         }
