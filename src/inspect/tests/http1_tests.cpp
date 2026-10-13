@@ -181,6 +181,38 @@ TEST(HTTP2, RejectsAmbiguousRepeatedContentType) {
     EXPECT_TRUE(connection->streams.at(51).response_invalid_);
 }
 
+TEST(HTTP2, DohGetQueryPathUsesTheEndpointComponentBoundary) {
+    auto request = [](std::string const& path,
+                      std::string const& method = "GET") {
+        HPACK::encoder_t encoder;
+        encoder.add(":method", method, false);
+        encoder.add(":scheme", "https", false);
+        encoder.add(":authority", "dns.example", false);
+        encoder.add(":path", path, false);
+        buffer block;
+        block.assign(encoder.data().data(), encoder.data().size());
+        return block;
+    };
+
+    sx::engine::EngineCtx ctx;
+    auto query = request("/dns-query?dns=AAABAAABAAAAAAAAA2NvbQAAAQAB");
+    v2::process_headers(ctx, socle::side_t::LEFT, 69, 0x01, query);
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    EXPECT_EQ(connection->streams.at(69).sub_app_,
+              v2::Http2Stream::sub_app_t::DNS);
+
+    auto lookalike = request("/dns-query-archive?dns=AAAB");
+    v2::process_headers(ctx, socle::side_t::LEFT, 71, 0x01, lookalike);
+    EXPECT_EQ(connection->streams.at(71).sub_app_,
+              v2::Http2Stream::sub_app_t::UNKNOWN);
+
+    auto wrong_method = request("/dns-query?dns=AAAB", "DELETE");
+    v2::process_headers(ctx, socle::side_t::LEFT, 73, 0x01, wrong_method);
+    EXPECT_EQ(connection->streams.at(73).sub_app_,
+              v2::Http2Stream::sub_app_t::UNKNOWN);
+}
+
 TEST(HTTP2, RejectsGoawayBoundaryOwnedByTheSender) {
     auto frame = [](uint32_t last_stream) {
         std::vector<uint8_t> payload(8);
