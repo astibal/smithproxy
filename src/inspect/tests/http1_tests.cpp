@@ -2177,3 +2177,62 @@ TEST(HTTP2, HonorsPeerAdvertisedConcurrentStreamLimits) {
     EXPECT_EQ(push_connection->refused_promised_streams.count(2), 1U);
     EXPECT_FALSE(push_connection->connection_invalid);
 }
+
+TEST(HTTP2, MalformedSettingsTerminatesConnectionSemantics) {
+    auto frame = [](uint8_t type, uint8_t flags, uint32_t stream,
+                    std::vector<uint8_t> const& payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), type, flags,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+
+    sx::engine::EngineCtx ctx;
+    auto malformed = frame(4, 0, 0, {0, 5, 0, 0, 0});
+    v2::process_frame(ctx, socle::side_t::LEFT, malformed);
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    ASSERT_TRUE(connection->connection_invalid);
+
+    HPACK::encoder_t encoder;
+    encoder.add(":method", "GET", false);
+    encoder.add(":scheme", "https", false);
+    encoder.add(":authority", "fixture.example", false);
+    encoder.add(":path", "/ignored", false);
+    auto request = frame(1, 0x04, 87, encoder.data());
+    v2::process_frame(ctx, socle::side_t::LEFT, request);
+    EXPECT_EQ(connection->streams.count(87), 0U);
+
+    sx::engine::EngineCtx unsolicited_ack_ctx;
+    auto unsolicited_ack = frame(4, 0x01, 0, {});
+    v2::process_frame(unsolicited_ack_ctx, socle::side_t::RIGHT,
+                      unsolicited_ack);
+    auto* unsolicited_ack_connection =
+        std::any_cast<v2::Http2Connection>(&unsolicited_ack_ctx.state_data);
+    ASSERT_NE(unsolicited_ack_connection, nullptr);
+    EXPECT_TRUE(unsolicited_ack_connection->connection_invalid);
+
+    sx::engine::EngineCtx paired_ack_ctx;
+    auto client_settings = frame(4, 0, 0, {});
+    v2::process_frame(paired_ack_ctx, socle::side_t::LEFT, client_settings);
+    auto server_ack = frame(4, 0x01, 0, {});
+    v2::process_frame(paired_ack_ctx, socle::side_t::RIGHT, server_ack);
+    auto* paired_ack_connection =
+        std::any_cast<v2::Http2Connection>(&paired_ack_ctx.state_data);
+    ASSERT_NE(paired_ack_connection, nullptr);
+    EXPECT_FALSE(paired_ack_connection->connection_invalid);
+    EXPECT_EQ(paired_ack_connection->left_settings_awaiting_ack, 0U);
+
+    auto duplicate_ack = frame(4, 0x01, 0, {});
+    v2::process_frame(paired_ack_ctx, socle::side_t::RIGHT, duplicate_ack);
+    EXPECT_TRUE(paired_ack_connection->connection_invalid);
+}
