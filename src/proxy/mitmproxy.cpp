@@ -988,6 +988,22 @@ static std::string b64_decode(std::string const& encoded) {
     return libbase64::decode<std::string, char, unsigned char, false>(encoded);
 }
 
+static std::pair<nlohmann::json, nlohmann::json> l7_payload_lists(
+        sx::engine::http::L7PayloadHints const& ranges) {
+    auto starts = nlohmann::json::array();
+    auto ends = nlohmann::json::array();
+    if(ranges.empty()) {
+        starts.push_back(-1);
+        ends.push_back(-1);
+        return {std::move(starts), std::move(ends)};
+    }
+    for(auto const& [start, end] : ranges) {
+        starts.push_back(start);
+        ends.push_back(end);
+    }
+    return {std::move(starts), std::move(ends)};
+}
+
 
 
 bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
@@ -1006,8 +1022,30 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
     j["info"] = {
         { "session", cl },
         { "side", string_format("%c", from_side(side)) },
-        { "payload_layer", std::string(payload_layer) }
+        { "payload_layer", std::string(payload_layer) },
+        { "L7_payload_start", nlohmann::json::array({-1}) },
+        { "L7_payload_end", nlohmann::json::array({-1}) },
+        { "L7_encoding", nlohmann::json::array({""}) }
     };
+
+    if(auto const* current = MitmHostCX::from_baseHostCX(cx); current != nullptr) {
+        if(auto const app = std::dynamic_pointer_cast<sx::engine::http::app_HttpRequest>(
+               current->engine_ctx.application_data);
+           app && app->l7_payload_observed_bytes == current->meter_read_bytes) {
+            auto const [starts, ends] = l7_payload_lists(app->l7_payload);
+            j["info"]["L7_payload_start"] = starts;
+            j["info"]["L7_payload_end"] = ends;
+            auto encodings = nlohmann::json::array();
+            if(app->l7_encoding.size() == app->l7_payload.size()) {
+                for(auto const& encoding : app->l7_encoding)
+                    encodings.push_back(encoding);
+            } else {
+                for(std::size_t i = 0; i < app->l7_payload.size(); ++i)
+                    encodings.push_back("");
+            }
+            j["info"]["L7_encoding"] = std::move(encodings);
+        }
+    }
 
     if(auto* right = first_right(); right != nullptr) {
         if(auto* tls = dynamic_cast<SSLCom*>(right->com()); tls != nullptr) {

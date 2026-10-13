@@ -877,3 +877,78 @@ TEST(EngineCtx, SeenDataPolicyDistinguishesSmallGrowingAndNewBlocks) {
     ctx.update_seen_block(2, 7000);
     EXPECT_FALSE(ctx.new_data_check(2, 7000));
 }
+
+TEST(L7PayloadHint, Http1DistinguishesHeadersBodyAndUnknownFraming) {
+    const std::string headers =
+        "POST / HTTP/1.1\r\nHost: example.test\r\nContent-Length: 5\r\n\r\n";
+    auto none = http1_payload_hint(headers);
+    ASSERT_EQ(none.size(), 1u);
+    EXPECT_EQ(none.front(), L7PayloadRange(0, 0));
+
+    const auto message = headers + "hello";
+    auto body = http1_payload_hint(message);
+    ASSERT_EQ(body.size(), 1u);
+    EXPECT_EQ(body.front(), L7PayloadRange(headers.size(), message.size()));
+
+    auto tail = http1_payload_hint(message, headers.size() + 2);
+    ASSERT_EQ(tail.size(), 1u);
+    EXPECT_EQ(tail.front(), L7PayloadRange(0, 3));
+
+    auto chunked = http1_payload_hint(
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: Chunked\r\n\r\n"
+        "5;kind=text\r\nhello\r\n6\r\n world\r\n0\r\nX-End: yes\r\n\r\n");
+    ASSERT_EQ(chunked.size(), 2u);
+    auto const first_start = std::string_view(
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: Chunked\r\n\r\n5;kind=text\r\n").size();
+    EXPECT_EQ(chunked[0], L7PayloadRange(first_start, first_start + 5));
+    auto const second_start = first_start + 5 + std::string_view("\r\n6\r\n").size();
+    EXPECT_EQ(chunked[1], L7PayloadRange(second_start, second_start + 6));
+}
+
+TEST(L7PayloadHint, Http2LocatesMultipleDataFrames) {
+    auto frame = [](std::uint8_t type, std::uint8_t flags,
+                    std::string_view payload) {
+        std::string value(9, '\0');
+        value[0] = static_cast<char>((payload.size() >> 16U) & 0xffU);
+        value[1] = static_cast<char>((payload.size() >> 8U) & 0xffU);
+        value[2] = static_cast<char>(payload.size() & 0xffU);
+        value[3] = static_cast<char>(type);
+        value[4] = static_cast<char>(flags);
+        value[8] = 1;
+        value.append(payload);
+        return value;
+    };
+
+    auto headers = http2_payload_hint(frame(1, 4, "headers"));
+    ASSERT_EQ(headers.size(), 1u);
+    EXPECT_EQ(headers.front(), L7PayloadRange(0, 0));
+
+    const auto data_frame = frame(0, 0, "hello");
+    auto data = http2_payload_hint(data_frame);
+    ASSERT_EQ(data.size(), 1u);
+    EXPECT_EQ(data.front(), L7PayloadRange(9, 14));
+
+    auto tail = http2_payload_hint(data_frame, 11);
+    ASSERT_EQ(tail.size(), 1u);
+    EXPECT_EQ(tail.front(), L7PayloadRange(0, 3));
+
+    const auto two_frames = frame(0, 0, "one") + frame(0, 0, "two");
+    auto multiple = http2_payload_hint(two_frames);
+    ASSERT_EQ(multiple.size(), 2u);
+    EXPECT_EQ(multiple[0], L7PayloadRange(9, 12));
+    EXPECT_EQ(multiple[1], L7PayloadRange(21, 24));
+}
+
+TEST(L7PayloadHint, EncodingIsKeptPerRange) {
+    app_HttpRequest app;
+    EXPECT_TRUE(app.l7_encoding.empty());
+
+    app.observe_l7_encoding("gzip");
+    app.observe_l7_encoding("");
+    ASSERT_EQ(app.l7_encoding.size(), 2u);
+    EXPECT_EQ(app.l7_encoding[0], "gzip");
+    EXPECT_EQ(app.l7_encoding[1], "");
+
+    app.reset_l7_encoding();
+    EXPECT_TRUE(app.l7_encoding.empty());
+}

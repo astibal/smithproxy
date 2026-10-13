@@ -12,7 +12,208 @@
 #include <inspect/dnsinspector.hpp>
 #include <inspect/kb/kb.hpp>
 
+#include <charconv>
+
 namespace sx::engine::http {
+
+    namespace {
+        std::optional<L7PayloadRange> intersect_payload(
+                                        std::size_t payload_start,
+                                        std::size_t payload_end,
+                                        std::size_t current_offset,
+                                        std::size_t block_size) {
+            if(current_offset > block_size || payload_start > payload_end ||
+               payload_end > block_size) return std::nullopt;
+
+            const auto start = std::max(payload_start, current_offset);
+            const auto end = std::min(payload_end, block_size);
+            if(start >= end) return std::nullopt;
+            return L7PayloadRange{
+                static_cast<std::int64_t>(start - current_offset),
+                static_cast<std::int64_t>(end - current_offset)
+            };
+        }
+
+        bool ascii_equal_ci(std::string_view left, std::string_view right) {
+            if(left.size() != right.size()) return false;
+            return std::equal(left.begin(), left.end(), right.begin(),
+                [](unsigned char l, unsigned char r) {
+                    return std::tolower(l) == std::tolower(r);
+                });
+        }
+
+        bool ascii_contains_ci(std::string_view value, std::string_view needle) {
+            if(needle.size() > value.size()) return false;
+            for(std::size_t offset = 0; offset + needle.size() <= value.size(); ++offset) {
+                if(ascii_equal_ci(value.substr(offset, needle.size()), needle)) return true;
+            }
+            return false;
+        }
+
+        std::optional<std::string_view> header_value(std::string_view headers,
+                                                      std::string_view name) {
+            auto line_start = headers.find('\n');
+            if(line_start == std::string_view::npos) return std::nullopt;
+            ++line_start;
+            while(line_start < headers.size()) {
+                auto line_end = headers.find('\n', line_start);
+                if(line_end == std::string_view::npos) line_end = headers.size();
+                auto line = headers.substr(line_start, line_end - line_start);
+                if(!line.empty() && line.back() == '\r') line.remove_suffix(1);
+                if(line.empty()) break;
+                const auto colon = line.find(':');
+                if(colon != std::string_view::npos &&
+                   ascii_equal_ci(line.substr(0, colon), name)) {
+                    auto value = line.substr(colon + 1);
+                    while(!value.empty() && (value.front() == ' ' || value.front() == '\t'))
+                        value.remove_prefix(1);
+                    while(!value.empty() && (value.back() == ' ' || value.back() == '\t'))
+                        value.remove_suffix(1);
+                    return value;
+                }
+                line_start = line_end + (line_end < headers.size());
+            }
+            return std::nullopt;
+        }
+    }
+
+    L7PayloadHints http1_payload_hint(std::string_view block,
+                                      std::size_t current_offset) {
+        const L7PayloadHints unknown{{-1, -1}};
+        const L7PayloadHints none{{0, 0}};
+        if(current_offset > block.size()) return unknown;
+
+        auto delimiter = block.find("\r\n\r\n");
+        std::size_t delimiter_size = 4;
+        if(delimiter == std::string_view::npos) {
+            delimiter = block.find("\n\n");
+            delimiter_size = 2;
+        }
+        if(delimiter == std::string_view::npos) return none;
+
+        const auto body_start = delimiter + delimiter_size;
+        const auto headers = block.substr(0, body_start);
+        auto body_end = block.size();
+
+        if(auto transfer_encoding = header_value(headers, "transfer-encoding");
+           transfer_encoding && ascii_contains_ci(*transfer_encoding, "chunked")) {
+            L7PayloadHints ranges;
+            auto offset = body_start;
+            while(offset < block.size()) {
+                auto line_end = block.find("\r\n", offset);
+                std::size_t line_delimiter_size = 2;
+                if(line_end == std::string_view::npos) {
+                    line_end = block.find('\n', offset);
+                    line_delimiter_size = 1;
+                }
+                if(line_end == std::string_view::npos) return unknown;
+
+                auto size_text = block.substr(offset, line_end - offset);
+                if(auto extension = size_text.find(';'); extension != std::string_view::npos)
+                    size_text = size_text.substr(0, extension);
+                while(!size_text.empty() && (size_text.front() == ' ' || size_text.front() == '\t'))
+                    size_text.remove_prefix(1);
+                while(!size_text.empty() && (size_text.back() == ' ' || size_text.back() == '\t'))
+                    size_text.remove_suffix(1);
+
+                std::uint64_t chunk_size = 0;
+                const auto parsed = std::from_chars(size_text.data(),
+                                                    size_text.data() + size_text.size(),
+                                                    chunk_size, 16);
+                if(size_text.empty() || parsed.ec != std::errc{} ||
+                   parsed.ptr != size_text.data() + size_text.size()) return unknown;
+
+                const auto data_start = line_end + line_delimiter_size;
+                if(chunk_size == 0) break;
+                const auto available = block.size() - data_start;
+                const auto data_size = static_cast<std::size_t>(
+                    std::min<std::uint64_t>(chunk_size, available));
+                if(auto range = intersect_payload(data_start, data_start + data_size,
+                                                  current_offset, block.size())) {
+                    ranges.push_back(*range);
+                }
+                if(chunk_size > available) break;
+
+                offset = data_start + static_cast<std::size_t>(chunk_size);
+                if(offset == block.size()) break;
+                if(block.substr(offset, 2) == "\r\n") offset += 2;
+                else if(block[offset] == '\n') ++offset;
+                else return unknown;
+            }
+            return ranges.empty() ? none : ranges;
+        }
+
+        if(auto content_length = header_value(headers, "content-length")) {
+            std::uint64_t length = 0;
+            const auto parsed = std::from_chars(content_length->data(),
+                                                content_length->data() + content_length->size(),
+                                                length);
+            if(parsed.ec != std::errc{} || parsed.ptr != content_length->data() + content_length->size())
+                return unknown;
+            const auto available = block.size() - body_start;
+            body_end = body_start + static_cast<std::size_t>(
+                std::min<std::uint64_t>(length, available));
+        } else if(block.size() < 5 || block.substr(0, 5) != "HTTP/") {
+            // Requests without explicit framing do not carry a body.
+            body_end = body_start;
+        } else {
+            auto first_line_end = block.find('\n');
+            auto first_line = block.substr(0, first_line_end);
+            if(first_line.find(" 1") != std::string_view::npos ||
+               first_line.find(" 204") != std::string_view::npos ||
+               first_line.find(" 205") != std::string_view::npos ||
+               first_line.find(" 304") != std::string_view::npos) {
+                body_end = body_start;
+            }
+        }
+
+        if(auto range = intersect_payload(body_start, body_end,
+                                          current_offset, block.size())) {
+            return {*range};
+        }
+        return none;
+    }
+
+    L7PayloadHints http2_payload_hint(std::string_view block,
+                                      std::size_t current_offset) {
+        const L7PayloadHints unknown{{-1, -1}};
+        const L7PayloadHints none{{0, 0}};
+        if(current_offset > block.size()) return unknown;
+
+        std::size_t offset = 0;
+        if(block.size() >= v2::txt::magic_sz &&
+           block.substr(0, v2::txt::magic_sz) == v2::txt::magic) {
+            offset = v2::txt::magic_sz;
+        }
+        L7PayloadHints ranges;
+
+        while(offset < block.size()) {
+            if(block.size() - offset < 9) return unknown;
+            const auto* bytes = reinterpret_cast<const unsigned char*>(block.data() + offset);
+            const std::size_t length = (static_cast<std::size_t>(bytes[0]) << 16U) |
+                                       (static_cast<std::size_t>(bytes[1]) << 8U) |
+                                       static_cast<std::size_t>(bytes[2]);
+            const auto type = bytes[3];
+            const auto flags = bytes[4];
+            if(length > block.size() - offset - 9) return unknown;
+
+            if(type == 0 && length != 0) {
+                auto payload_start = offset + 9;
+                auto payload_end = payload_start + length;
+                if((flags & 0x08U) != 0) {
+                    const auto padding = static_cast<std::size_t>(bytes[9]);
+                    if(padding + 1 > length) return unknown;
+                    ++payload_start;
+                    payload_end -= padding;
+                }
+                if(auto range = intersect_payload(payload_start, payload_end,
+                                                  current_offset, block.size()))
+                    ranges.push_back(*range);
+            }
+            offset += 9 + length;
+        }
+        return ranges.empty() ? none : ranges;
+    }
 
     namespace v1 {
 
@@ -471,6 +672,29 @@ namespace sx::engine::http {
                 if(ctx.new_data_check(flow_pos + 1, buf_sz)) {
                     ctx.update_seen_block(flow_pos + 1, buf_sz);
                     parse_request(ctx, buffer);
+                }
+            }
+
+            if(auto app = std::dynamic_pointer_cast<app_HttpRequest>(
+                   ctx.application_data)) {
+                const auto current_size = std::min(buffer->size(),
+                                                   ctx.origin->to_read().size());
+                app->l7_payload = http1_payload_hint(
+                    buffer->string_view(), buffer->size() - current_size);
+                app->l7_payload_observed_bytes = ctx.origin->meter_read_bytes;
+                app->reset_l7_encoding();
+                const auto has_payload = std::any_of(
+                    app->l7_payload.begin(), app->l7_payload.end(),
+                    [](auto const& range) { return range.second > range.first; });
+                if(has_payload) {
+                    const auto encoding = header_value(
+                        buffer->string_view(), "content-encoding");
+                    const auto value = encoding && ascii_contains_ci(*encoding, "gzip")
+                        ? std::string_view("gzip") : std::string_view{};
+                    for(auto const& range : app->l7_payload) {
+                        if(range.second > range.first)
+                            app->observe_l7_encoding(value);
+                    }
                 }
             }
 
@@ -1168,6 +1392,16 @@ namespace sx::engine::http {
                 }
 
                 if(data.empty() && (flags & 0x01U) == 0) return;
+
+                if(!data.empty()) {
+                    if(auto app = std::dynamic_pointer_cast<app_HttpRequest>(
+                           ctx.application_data)) {
+                        app->observe_l7_encoding(
+                            stream_state.content_encoding_ ==
+                                    Http2Stream::content_type_t::GZIP
+                                ? "gzip" : "");
+                    }
+                }
 
                 if(stream_state.content_encoding_ == Http2Stream::content_type_t::GZIP) {
 //                    auto& gz_instance = state_data->streams[stream_id].gzip;
@@ -2053,6 +2287,18 @@ namespace sx::engine::http {
             auto const& side = last_flow_entry.source();
             auto const& h2_buffer= last_flow_entry.data();
             auto const h2_buffer_sz = h2_buffer->size();
+
+            if(flow_pos + 1 == q_size) {
+                if(auto app = std::dynamic_pointer_cast<app_HttpRequest>(
+                       ctx.application_data)) {
+                    const auto current_size = std::min(h2_buffer_sz,
+                                                       ctx.origin->to_read().size());
+                    app->l7_payload = http2_payload_hint(
+                        h2_buffer->string_view(), h2_buffer_sz - current_size);
+                    app->l7_payload_observed_bytes = ctx.origin->meter_read_bytes;
+                    app->reset_l7_encoding();
+                }
+            }
 
             auto abs_index = pos_size - q_size + flow_pos;
 

@@ -60,6 +60,14 @@ namespace sx::engine::http {
     constexpr const char* str_http1_1 = "http1.1";
     constexpr const char* str_http2 = "http2";
 
+    using L7PayloadRange = std::pair<std::int64_t, std::int64_t>;
+    using L7PayloadHints = std::vector<L7PayloadRange>;
+
+    L7PayloadHints http1_payload_hint(std::string_view flow_block,
+                                      std::size_t current_offset = 0);
+    L7PayloadHints http2_payload_hint(std::string_view flow_block,
+                                      std::size_t current_offset = 0);
+
     struct ProtoRex {
         static std::regex const &http_req_get () {
             static std::regex r{R"((GET|POST|HEAD|PUT|DELETE|CONNECT|OPTIONS|TRACE|PATCH) *([^ \r\n\?]+)\??([^ \r\n]*))"};
@@ -101,6 +109,21 @@ namespace sx::engine::http {
                 ja4h.clear();
             }
         } http_data;
+
+        // Byte offsets in the current content message. [-1, -1] means that
+        // the engine cannot locate L7 user content; [0, 0] positively means
+        // that this content message carries none. The end offset is exclusive.
+        L7PayloadHints l7_payload{{-1, -1}};
+        std::uint64_t l7_payload_observed_bytes = 0;
+        std::vector<std::string> l7_encoding;
+
+        void reset_l7_encoding() {
+            l7_encoding.clear();
+        }
+
+        void observe_l7_encoding(std::string_view encoding) {
+            l7_encoding.emplace_back(encoding.data(), encoding.size());
+        }
 
         std::list<HttpData> http_history;
         constexpr static inline std::size_t http_history_max = 10000;
