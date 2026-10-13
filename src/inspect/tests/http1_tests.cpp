@@ -634,6 +634,89 @@ TEST(HTTP2, HpackCompressionErrorsTerminateConnectionSemantics) {
     EXPECT_TRUE(sync_connection->connection_invalid);
 }
 
+TEST(HTTP2, ValidPushedResponseDoesNotPoisonLaterStreams) {
+    auto frame = [](uint8_t type, uint8_t flags, uint32_t stream,
+                    std::vector<uint8_t> const& payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), type, flags,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+
+    sx::engine::EngineCtx ctx;
+    HPACK::encoder_t client;
+    client.add(":method", "GET", false);
+    client.add(":scheme", "https", false);
+    client.add(":authority", "fixture.example", false);
+    client.add(":path", "/parent", false);
+    auto parent = frame(1, 0x04, 71, client.data());
+    v2::process_frame(ctx, socle::side_t::LEFT, parent);
+
+    HPACK::encoder_t server;
+    server.add(":method", "GET", false);
+    server.add(":scheme", "https", false);
+    server.add(":authority", "push.example", false);
+    server.add(":path", "/asset", false);
+    std::vector<uint8_t> promise {0, 0, 0, 2};
+    promise.insert(promise.end(), server.data().begin(), server.data().end());
+    auto push = frame(5, 0x04, 71, promise);
+    v2::process_frame(ctx, socle::side_t::RIGHT, push);
+
+    const auto pushed_response_offset = server.data().size();
+    server.add(":status", "200", false);
+    server.add("x-pushed", "yes", false);
+    std::vector<uint8_t> pushed_response(
+        server.data().begin() + pushed_response_offset, server.data().end());
+    ASSERT_GT(pushed_response.size(), 1U);
+    const auto pushed_middle = pushed_response.size() / 2;
+    std::vector<uint8_t> pushed_first(
+        pushed_response.begin(), pushed_response.begin() + pushed_middle);
+    std::vector<uint8_t> pushed_second(
+        pushed_response.begin() + pushed_middle, pushed_response.end());
+    auto pushed_headers = frame(1, 0x00, 2, pushed_first);
+    auto pushed_continuation = frame(9, 0x04, 2, pushed_second);
+    auto pushed_data = frame(0, 0x01, 2, {'x'});
+    v2::process_frame(ctx, socle::side_t::RIGHT, pushed_headers);
+    v2::process_frame(ctx, socle::side_t::RIGHT, pushed_continuation);
+    v2::process_frame(ctx, socle::side_t::RIGHT, pushed_data);
+
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    EXPECT_FALSE(connection->connection_invalid);
+    EXPECT_EQ(connection->streams.count(2), 0U);
+
+    const auto next_request_offset = client.data().size();
+    client.add(":method", "GET", false);
+    client.add(":scheme", "https", false);
+    client.add(":authority", "fixture.example", false);
+    client.add(":path", "/after-push", false);
+    std::vector<uint8_t> next_request(
+        client.data().begin() + next_request_offset, client.data().end());
+    auto next = frame(1, 0x04, 73, next_request);
+    v2::process_frame(ctx, socle::side_t::LEFT, next);
+    EXPECT_EQ(connection->streams.count(73), 1U);
+
+    const auto next_response_offset = server.data().size();
+    server.add(":status", "204", false);
+    server.add("x-pushed", "yes", false);
+    std::vector<uint8_t> next_response(
+        server.data().begin() + next_response_offset, server.data().end());
+    auto response = frame(1, 0x04, 73, next_response);
+    v2::process_frame(ctx, socle::side_t::RIGHT, response);
+    ASSERT_EQ(connection->streams.count(73), 1U);
+    EXPECT_EQ(connection->streams.at(73).response_header(":status"), "204");
+    EXPECT_EQ(connection->streams.at(73).response_header("x-pushed"), "yes");
+}
+
 
 
 TEST(HTTP2, RejectsGoawayBoundaryOwnedByTheSender) {
