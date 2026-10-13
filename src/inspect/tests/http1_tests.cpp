@@ -3092,3 +3092,101 @@ TEST(HTTP2, RejectsMalformedPushPromiseSemantics) {
     ASSERT_EQ(connection->streams.count(1), 1U);
     EXPECT_TRUE(connection->streams.at(1).response_invalid_);
 }
+
+TEST(HTTP2, DohRequestDetectionIsScopedToItsStream) {
+    auto request = [](std::string const& authority,
+                      std::optional<std::string> accept) {
+        HPACK::encoder_t encoder;
+        encoder.add(":method", "POST", false);
+        encoder.add(":scheme", "https", false);
+        encoder.add(":authority", authority, false);
+        encoder.add(":path", "/ordinary", false);
+        if(accept) encoder.add("accept", *accept, false);
+        buffer block;
+        block.assign(encoder.data().data(), encoder.data().size());
+        return block;
+    };
+
+    sx::engine::EngineCtx ctx;
+    auto dns = request("dns.example", "application/dns-message");
+    v2::process_headers(ctx, socle::side_t::LEFT, 41, 0, dns);
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    ASSERT_EQ(connection->streams.at(41).sub_app_,
+              v2::Http2Stream::sub_app_t::DNS);
+
+    auto ordinary = request("web.example", std::nullopt);
+    v2::process_headers(ctx, socle::side_t::LEFT, 43, 0, ordinary);
+    EXPECT_EQ(connection->streams.at(43).sub_app_,
+              v2::Http2Stream::sub_app_t::UNKNOWN);
+}
+
+TEST(HTTP2, ReassemblesDohResponseAcrossDataFrames) {
+    const std::array<unsigned char, 46> dns_response {
+        0x12, 0x34, 0x81, 0x80, 0x00, 0x01, 0x00, 0x01,
+        0x00, 0x00, 0x00, 0x00,
+        0x01, 'x', 0x04, 't', 'e', 's', 't', 0x00, 0x00, 0x01, 0x00, 0x01,
+        0x01, 'x', 0x04, 't', 'e', 's', 't', 0x00,
+        0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x3c, 0x00, 0x04,
+        192, 0, 2, 1
+    };
+    sx::engine::EngineCtx ctx;
+    ctx.state_data = std::make_any<v2::Http2Connection>();
+    auto app = std::make_shared<app_HttpRequest>();
+    ctx.application_data = app;
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    auto& stream = connection->streams[29];
+    stream.request_headers_["accept"] = {"application/dns-message"};
+    stream.response_headers_[":status"] = {"200"};
+    stream.response_headers_["content-type"] = {"application/dns-message"};
+    stream.response_final_headers_ = true;
+    stream.sub_app_ = v2::Http2Stream::sub_app_t::DNS;
+
+    buffer first;
+    first.assign(dns_response.data(), 10);
+    v2::process_data(ctx, socle::side_t::RIGHT, 29, 0, first);
+    EXPECT_TRUE(app->http_data.sub_proto.empty());
+    EXPECT_FALSE(stream.response_invalid_);
+
+    buffer second;
+    second.assign(dns_response.data() + 10, dns_response.size() - 10);
+    v2::process_data(ctx, socle::side_t::RIGHT, 29, 0x01, second);
+    EXPECT_EQ(app->http_data.sub_proto, "dns");
+    EXPECT_FALSE(stream.response_invalid_);
+    EXPECT_TRUE(stream.doh_response_finished_);
+}
+
+TEST(HTTP2, DohRequiresExactlyOneDnsResponseMessage) {
+    const std::array<unsigned char, 46> valid_response {
+        0x12, 0x34, 0x81, 0x80, 0x00, 0x01, 0x00, 0x01,
+        0x00, 0x00, 0x00, 0x00,
+        0x01, 'x', 0x04, 't', 'e', 's', 't', 0x00, 0x00, 0x01, 0x00, 0x01,
+        0x01, 'x', 0x04, 't', 'e', 's', 't', 0x00,
+        0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x3c, 0x00, 0x04,
+        192, 0, 2, 1
+    };
+    auto rejected = [&](std::vector<unsigned char> bytes) {
+        sx::engine::EngineCtx ctx;
+        ctx.state_data = std::make_any<v2::Http2Connection>();
+        ctx.application_data = std::make_shared<app_HttpRequest>();
+        auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+        auto& stream = connection->streams[31];
+        stream.request_headers_["accept"] = {"application/dns-message"};
+        stream.response_headers_[":status"] = {"200"};
+        stream.response_headers_["content-type"] = {"application/dns-message"};
+        stream.response_final_headers_ = true;
+        stream.sub_app_ = v2::Http2Stream::sub_app_t::DNS;
+        buffer payload;
+        payload.assign(bytes.data(), bytes.size());
+        v2::process_data(ctx, socle::side_t::RIGHT, 31, 0x01, payload);
+        return stream.response_invalid_;
+    };
+
+    std::vector<unsigned char> trailing(valid_response.begin(), valid_response.end());
+    trailing.push_back(0xff);
+    EXPECT_TRUE(rejected(std::move(trailing)));
+
+    std::vector<unsigned char> request(valid_response.begin(), valid_response.end());
+    request[2] &= 0x7fU; // clear DNS QR bit
+    EXPECT_TRUE(rejected(std::move(request)));
+}
