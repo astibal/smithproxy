@@ -1696,8 +1696,6 @@ namespace sx::engine::http {
                     return;
                 }
 
-                if(data.empty()) return;
-
                 if(stream_state.content_encoding_ == Http2Stream::content_type_t::GZIP) {
 //                    auto& gz_instance = state_data->streams[stream_id].gzip;
 //
@@ -2347,31 +2345,54 @@ namespace sx::engine::http {
                                 if(pushed_response &&
                                    connection->active_promised_streams.count(
                                        static_cast<uint32_t>(stream_id)) == 0) {
-                                    connection->active_promised_streams.insert(
-                                        static_cast<uint32_t>(stream_id));
-                                    connection->promised_flow_windows.emplace(
-                                        static_cast<uint32_t>(stream_id),
-                                        connection->server_initial_stream_window);
+                                    if(connection->active_promised_streams.size() >=
+                                       connection->max_server_streams) {
+                                        connection->promised_streams.erase(
+                                            static_cast<uint32_t>(stream_id));
+                                        connection->refused_promised_streams.insert(
+                                            static_cast<uint32_t>(stream_id));
+                                        pushed_response = false;
+                                        refused_pushed_response = true;
+                                    } else {
+                                        connection->active_promised_streams.insert(
+                                            static_cast<uint32_t>(stream_id));
+                                        connection->promised_flow_windows.emplace(
+                                            static_cast<uint32_t>(stream_id),
+                                            connection->server_initial_stream_window);
+                                    }
                                 }
                                 bool refused_request = side == side_t::LEFT &&
                                     connection->refused_client_streams.count(
                                         static_cast<uint32_t>(stream_id)) != 0;
                                 if(side == side_t::LEFT &&
-                                   connection->streams.count(stream_id) == 0 &&
-                                   !refused_request) {
-                                    const bool exceeds_goaway =
-                                        connection->server_goaway_last_stream_id &&
-                                        static_cast<uint32_t>(stream_id) >
-                                            *connection->server_goaway_last_stream_id;
-                                    if(exceeds_goaway) {
-                                        if(connection->refused_client_streams.size() >=
-                                           max_tracked_streams) {
-                                            connection->connection_invalid = true;
-                                            return preamble_sz + frame_sz;
+                                   connection->streams.count(stream_id) == 0) {
+                                    if(!refused_request &&
+                                       static_cast<uint32_t>(stream_id) <=
+                                           connection->highest_client_stream_id) {
+                                        _err("non-increasing HTTP/2 client stream id");
+                                        connection->connection_invalid = true;
+                                        return preamble_sz + frame_sz;
+                                    }
+                                    if(!refused_request) {
+                                        connection->highest_client_stream_id =
+                                            static_cast<uint32_t>(stream_id);
+                                        const bool exceeds_concurrent_limit =
+                                            connection->streams.size() >=
+                                            connection->max_client_streams;
+                                        const bool exceeds_goaway =
+                                            connection->server_goaway_last_stream_id &&
+                                            static_cast<uint32_t>(stream_id) >
+                                                *connection->server_goaway_last_stream_id;
+                                        if(exceeds_concurrent_limit || exceeds_goaway) {
+                                            if(connection->refused_client_streams.size() >=
+                                               max_tracked_streams) {
+                                                connection->connection_invalid = true;
+                                                return preamble_sz + frame_sz;
+                                            }
+                                            connection->refused_client_streams.insert(
+                                                static_cast<uint32_t>(stream_id));
+                                            refused_request = true;
                                         }
-                                        connection->refused_client_streams.insert(
-                                            static_cast<uint32_t>(stream_id));
-                                        refused_request = true;
                                     }
                                 }
                                 if (flg & flag_end_headers) {
