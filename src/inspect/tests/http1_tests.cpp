@@ -2482,3 +2482,105 @@ TEST(HTTP2, HeaderTableSettingTakesEffectAtAcknowledgement) {
     EXPECT_EQ(valid_connection->streams.at(103).request_header(":path"),
               std::optional<std::string>("/missing-update"));
 }
+
+TEST(HTTP2, SynchronizesHpackAcrossFragmentedPushPromise) {
+    auto frame = [](uint8_t type, uint8_t flags, uint32_t stream,
+                    std::vector<uint8_t> const& payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), type, flags,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+
+    sx::engine::EngineCtx ctx;
+    HPACK::encoder_t request_encoder;
+    request_encoder.add(":method", "GET", false);
+    request_encoder.add(":scheme", "https", false);
+    request_encoder.add(":authority", "fixture.example", false);
+    request_encoder.add(":path", "/", false);
+    auto request = frame(1, 0x04, 71, request_encoder.data());
+    v2::process_frame(ctx, socle::side_t::LEFT, request);
+
+    HPACK::encoder_t server_encoder;
+    server_encoder.add(":method", "GET", false);
+    server_encoder.add(":scheme", "https", false);
+    server_encoder.add(":authority", "push.example", false);
+    server_encoder.add(":path", "/asset", false);
+    // URI hosts are case-insensitive.  Host and :authority may therefore
+    // differ only in case without making the promised request ambiguous.
+    server_encoder.add("host", "Push.Example", false);
+    server_encoder.add("x-push-dynamic", "seed", false);
+    const auto push_size = server_encoder.data().size();
+    const auto middle = push_size / 2;
+    std::vector<uint8_t> first {0, 0, 0, 2};
+    first.insert(first.end(), server_encoder.data().begin(),
+                 server_encoder.data().begin() + middle);
+    std::vector<uint8_t> second(server_encoder.data().begin() + middle,
+                                server_encoder.data().end());
+    // Bit 0x1 is unknown on PUSH_PROMISE and must be ignored rather than
+    // replayed later as HEADERS/END_STREAM semantics.
+    auto push = frame(5, 0x01, 71, first);
+    auto continuation = frame(9, 0x04, 71, second);
+    v2::process_frame(ctx, socle::side_t::RIGHT, push);
+    v2::process_frame(ctx, socle::side_t::RIGHT, continuation);
+
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    EXPECT_EQ(connection->promised_streams.count(2), 1U);
+
+    server_encoder.add(":status", "200", false);
+    server_encoder.add("x-push-dynamic", "seed", false);
+    std::vector<uint8_t> response_payload(
+        server_encoder.data().begin() + push_size,
+        server_encoder.data().end());
+    auto response = frame(1, 0x04, 71, response_payload);
+    v2::process_frame(ctx, socle::side_t::RIGHT, response);
+
+    ASSERT_EQ(connection->streams.count(71), 1u);
+    EXPECT_EQ(connection->streams.at(71).response_header(":status"), "200");
+    EXPECT_EQ(connection->streams.at(71).response_header("x-push-dynamic"),
+              "seed");
+
+    // Reusing an already promised stream is a connection error and must not
+    // mutate the response-direction HPACK table used for later inspection.
+    const auto duplicate_offset = server_encoder.data().size();
+    server_encoder.add("x-duplicate-push", "poison", false);
+    std::vector<uint8_t> duplicate {0, 0, 0, 2};
+    duplicate.insert(duplicate.end(),
+                     server_encoder.data().begin() + duplicate_offset,
+                     server_encoder.data().end());
+    auto duplicate_push = frame(5, 0x04, 71, duplicate);
+    v2::process_frame(ctx, socle::side_t::RIGHT, duplicate_push);
+    EXPECT_TRUE(connection->connection_invalid);
+
+    const auto request_offset = request_encoder.data().size();
+    request_encoder.add(":method", "GET", false);
+    request_encoder.add(":scheme", "https", false);
+    request_encoder.add(":authority", "fixture.example", false);
+    request_encoder.add(":path", "/next", false);
+    std::vector<uint8_t> next_request_payload(
+        request_encoder.data().begin() + request_offset,
+        request_encoder.data().end());
+    auto next_request = frame(1, 0x04, 73, next_request_payload);
+    v2::process_frame(ctx, socle::side_t::LEFT, next_request);
+
+    const auto next_response_offset = server_encoder.data().size();
+    server_encoder.add(":status", "200", false);
+    server_encoder.add("x-duplicate-push", "poison", false);
+    std::vector<uint8_t> next_response_payload(
+        server_encoder.data().begin() + next_response_offset,
+        server_encoder.data().end());
+    auto next_response = frame(1, 0x04, 73, next_response_payload);
+    v2::process_frame(ctx, socle::side_t::RIGHT, next_response);
+
+    EXPECT_EQ(connection->streams.count(73), 0U);
+}
