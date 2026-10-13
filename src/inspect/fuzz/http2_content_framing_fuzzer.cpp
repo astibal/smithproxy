@@ -26,6 +26,11 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data,
                 std::abort();
             previous = end;
         }
+        for(const auto& annotation : directions[side].annotations()) {
+            if(annotation.start < 0 || annotation.end < annotation.start ||
+               static_cast<std::size_t>(annotation.end) > block.size())
+                std::abort();
+        }
         offset += length;
     }
     return 0;

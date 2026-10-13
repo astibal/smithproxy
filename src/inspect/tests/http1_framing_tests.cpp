@@ -461,3 +461,38 @@ TEST(ContentWebhookL7Metadata, UsesIndicesRelativeToEachReceivedBlock) {
     for(const auto& end : metadata["L7_payload_end"])
         EXPECT_LE(end.get<std::size_t>(), continuation.size());
 }
+
+TEST(ContentWebhookAnnotations, Http1MapsFramingAndBodyBytes) {
+    Http1Direction direction;
+    const std::string wire =
+        "POST / HTTP/1.1\r\nHost: test\r\nContent-Length: 4\r\n\r\ndata";
+    const auto ranges = direction.observe(wire, false);
+    const auto metadata = sx::proxy::l7_payload_metadata(
+        ranges, direction.encodings(), direction.annotations());
+    const auto body_start = static_cast<std::int64_t>(wire.size() - 4);
+    ASSERT_EQ(metadata["content_annotations"].size(), 3U);
+    const auto first_line_end = static_cast<std::int64_t>(wire.find('\n') + 1);
+    EXPECT_EQ(metadata["content_annotations"][0],
+              nlohmann::json::array({0, first_line_end, "http1.start_line"}));
+    EXPECT_EQ(metadata["content_annotations"][1],
+              nlohmann::json::array({first_line_end, body_start, "http1.headers"}));
+    EXPECT_EQ(metadata["content_annotations"][2],
+              nlohmann::json::array({body_start,
+                                     static_cast<std::int64_t>(wire.size()),
+                                     "http1.body"}));
+}
+
+TEST(ContentWebhookAnnotations, Http1ChunkedAnnotationsCoverEveryByte) {
+    Http1Direction direction;
+    const std::string wire =
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
+        "2\r\nhi\r\n0\r\n\r\n";
+    direction.observe(wire, true);
+    std::int64_t cursor = 0;
+    for(const auto& annotation : direction.annotations()) {
+        EXPECT_EQ(annotation.start, cursor);
+        EXPECT_GE(annotation.end, annotation.start);
+        cursor = annotation.end;
+    }
+    EXPECT_EQ(cursor, static_cast<std::int64_t>(wire.size()));
+}

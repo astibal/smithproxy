@@ -41,6 +41,11 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data,
             reinterpret_cast<const char*>(data + offset), length);
         const auto ranges = connection.observe(direction, block, response_side);
         check_ranges(block, ranges);
+        for(const auto& annotation : connection.directions[direction].annotations()) {
+            if(annotation.start < 0 || annotation.end < annotation.start ||
+               static_cast<std::size_t>(annotation.end) > block.size())
+                std::abort();
+        }
         offset += length;
     }
     return 0;

@@ -139,17 +139,97 @@ TEST(Http2ContentFraming, WebhookIndicesReferToExactCurrentBlock) {
     const auto second = std::string_view(wire).substr(split);
 
     auto ranges = direction.observe(first, false);
-    auto metadata = sx::proxy::l7_payload_metadata(ranges, {});
+    auto metadata = sx::proxy::l7_payload_metadata(ranges, {},
+                                                   direction.annotations());
     EXPECT_EQ(metadata["L7_payload_start"], nlohmann::json::array({9}));
     EXPECT_EQ(metadata["L7_payload_end"], nlohmann::json::array({12}));
     EXPECT_EQ(first.substr(9, 3), "abc");
+    ASSERT_EQ(metadata["content_annotations"].size(), 2U);
+    EXPECT_EQ(metadata["content_annotations"][0][0], 0);
+    EXPECT_EQ(metadata["content_annotations"][0][1], 9);
+    EXPECT_EQ(metadata["content_annotations"][0][2], "h2.frame.header");
+    EXPECT_EQ(metadata["content_annotations"][0][3]["frame_type"], "DATA");
+    EXPECT_EQ(metadata["content_annotations"][0][3]["stream_id"], 1);
+    EXPECT_EQ(metadata["content_annotations"][1][2], "h2.data");
 
     ranges = direction.observe(second, false);
-    metadata = sx::proxy::l7_payload_metadata(ranges, {});
+    metadata = sx::proxy::l7_payload_metadata(ranges, {},
+                                              direction.annotations());
     EXPECT_EQ(metadata["L7_payload_start"], nlohmann::json::array({0}));
     EXPECT_EQ(metadata["L7_payload_end"], nlohmann::json::array({7}));
     EXPECT_EQ(second.substr(0, 7), "defghij");
+    ASSERT_EQ(metadata["content_annotations"].size(), 1U);
+    EXPECT_EQ(metadata["content_annotations"][0][0], 0);
+    EXPECT_EQ(metadata["content_annotations"][0][1], 7);
+    EXPECT_EQ(metadata["content_annotations"][0][2], "h2.data");
     EXPECT_EQ(nlohmann::json::parse(metadata.dump()), metadata);
+}
+
+TEST(Http2ContentFraming, PriorKnowledgeBootstrapsBeforeFirstWebhook) {
+    sx::engine::EngineCtx ctx;
+    auto app = std::make_shared<sx::engine::http::app_HttpRequest>();
+    ASSERT_EQ(app->version, sx::engine::http::app_HttpRequest::HTTP_VER::HTTP_1);
+    ctx.application_data = app;
+    const auto wire = std::string(sx::engine::http::v2::txt::magic) +
+                      frame(4, 0, 0, std::string(6, '\0'));
+
+    ASSERT_TRUE(sx::engine::http::v2::is_prior_knowledge_preface(wire));
+    sx::engine::http::v2::observe_content(ctx, 0, wire, wire.size(), true);
+
+    EXPECT_EQ(app->version, sx::engine::http::app_HttpRequest::HTTP_VER::HTTP2);
+    ASSERT_FALSE(app->payload_annotations.empty());
+    EXPECT_EQ(app->payload_annotations.front().kind, "h2.preface");
+    for(const auto& annotation : app->payload_annotations)
+        EXPECT_EQ(annotation.kind.rfind("http1.", 0), std::string::npos);
+}
+
+TEST(Http2ContentFraming, NegotiatedAlpnSelectsH2AcrossSplitPreface) {
+    sx::engine::EngineCtx ctx;
+    ctx.negotiated_alpn = "h2";
+    auto const preface = std::string(sx::engine::http::v2::txt::magic);
+
+    sx::engine::http::observe_content(ctx, 0, std::string_view(preface).substr(0, 7),
+                                      7, true);
+    auto app = std::dynamic_pointer_cast<sx::engine::http::app_HttpRequest>(
+        ctx.application_data);
+    ASSERT_NE(app, nullptr);
+    EXPECT_EQ(app->version, sx::engine::http::app_HttpRequest::HTTP_VER::HTTP2);
+    ASSERT_EQ(app->payload_annotations.size(), 1U);
+    EXPECT_EQ(app->payload_annotations.front().kind, "h2.preface");
+
+    sx::engine::http::observe_content(ctx, 0, std::string_view(preface).substr(7),
+                                      preface.size(), true);
+    ASSERT_FALSE(app->payload_annotations.empty());
+    EXPECT_EQ(app->payload_annotations.front().kind, "h2.preface");
+}
+
+TEST(Http2ContentFraming, UnknownNegotiatedAlpnDoesNotFallBackToHttp1) {
+    sx::engine::EngineCtx ctx;
+    ctx.negotiated_alpn = "h4";
+    auto app = std::make_shared<sx::engine::http::app_HttpRequest>();
+    ctx.application_data = app;
+
+    sx::engine::http::observe_content(ctx, 0, "GET / HTTP/1.1\r\n\r\n", 18, true);
+
+    EXPECT_FALSE(app->l7_payload_observed);
+    EXPECT_TRUE(app->payload_annotations.empty());
+}
+
+TEST(Http2ContentFraming, AnnotatesSettingsAndPadding) {
+    Http2Direction direction;
+    const std::string settings_payload(6, '\0');
+    const std::string padded_payload("\x02x\0\0", 4);
+    const auto wire = frame(4, 0, 0, settings_payload) +
+                      frame(0, 0x08, 1, padded_payload);
+    direction.observe(wire, false);
+    const auto metadata = sx::proxy::l7_payload_metadata(
+        {{24, 25}}, {""}, direction.annotations());
+    const auto& annotations = metadata["content_annotations"];
+    ASSERT_GE(annotations.size(), 6U);
+    EXPECT_EQ(annotations[1][2], "h2.settings");
+    EXPECT_EQ(annotations[3][2], "h2.padding.length");
+    EXPECT_EQ(annotations[4][2], "h2.data");
+    EXPECT_EQ(annotations[5][2], "h2.padding");
 }
 
 TEST(Http2ContentFraming, EnginePublishesPerRangeEncodingToWebhookMetadata) {
