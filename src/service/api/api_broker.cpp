@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <mutex>
 #include <signal.h>
+#include <sys/socket.h>
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
@@ -15,6 +16,7 @@ namespace {
 
 std::mutex state_mutex;
 int core_listener = -1;
+int broker_control = -1;
 pid_t broker_pid = -1;
 std::string owned_path;
 std::thread broker_monitor;
@@ -36,20 +38,30 @@ int start_internal_broker(Profile profile) {
     const std::string path = "@smithproxy-api-" + std::to_string(::getpid());
     core_listener = sx::comm::stream::create_unix_listener(path);
     if(core_listener < 0) { sx::comm::stream::destroy_shared_stats(shared_stats); shared_stats = nullptr; return -1; }
-    const pid_t child = ::fork();
-    if(child < 0) {
+    int controls[2] = {-1, -1};
+    if(::socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, controls) != 0) {
         const int saved = errno; ::close(core_listener); core_listener = -1;
         sx::comm::stream::destroy_shared_stats(shared_stats); shared_stats = nullptr;
         errno = saved; return -1;
     }
+    const pid_t child = ::fork();
+    if(child < 0) {
+        const int saved = errno; ::close(controls[0]); ::close(controls[1]);
+        ::close(core_listener); core_listener = -1;
+        sx::comm::stream::destroy_shared_stats(shared_stats); shared_stats = nullptr;
+        errno = saved; return -1;
+    }
     if(child == 0) {
+        ::close(controls[0]);
         ::close(core_listener);
         sx::comm::stream::BrokerServer server({std::move(profile.listen_address),
                                                profile.listen_port, path, {},
                                                std::move(profile.allowed_ips),
                                                std::move(profile.bind_interface), 256}, shared_stats);
-        ::_exit(server.run() == 0 ? EXIT_SUCCESS : EXIT_FAILURE);
+        ::_exit(server.run(controls[1]) == 0 ? EXIT_SUCCESS : EXIT_FAILURE);
     }
+    ::close(controls[1]);
+    broker_control = controls[0];
     broker_pid = child;
     stopping.store(false, std::memory_order_relaxed);
     broker_monitor = std::thread([child] {
@@ -84,14 +96,23 @@ int ingress_fd() {
 
 int stop_broker() {
     pid_t child = -1;
+    int control = -1;
     {
         std::lock_guard lock(state_mutex);
         stopping.store(true, std::memory_order_relaxed);
         if(core_listener >= 0) { ::close(core_listener); core_listener = -1; }
         if(!owned_path.empty()) { ::unlink(owned_path.c_str()); owned_path.clear(); }
         child = broker_pid;
+        control = broker_control;
+        broker_control = -1;
     }
-    if(child > 0) ::kill(child, SIGTERM);
+    if(control >= 0) {
+        const char stop = 1;
+        (void)::send(control, &stop, sizeof(stop), MSG_NOSIGNAL);
+        ::close(control);
+    } else if(child > 0) {
+        ::kill(child, SIGTERM);
+    }
     if(broker_monitor.joinable()) broker_monitor.join();
     const int status = wait_status.load(std::memory_order_relaxed);
     {

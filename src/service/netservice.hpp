@@ -100,7 +100,7 @@ std::vector<std::unique_ptr<Listener>> NetworkServiceFactory::prepare_listener (
     ss << "Entering " << friendly_name << " mode on port/path " << port;
     auto sss = ss.str();
 
-    _not(sss.c_str());
+    _not("%s", sss.c_str());
 
 
     auto fdhints = std::make_shared<FdQueue>();

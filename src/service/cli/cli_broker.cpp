@@ -26,6 +26,7 @@ namespace {
 constexpr std::array<char, 8> cli_handshake{'S', 'C', 'C', 'L', 1, 0, 0, 0};
 std::mutex state_mutex;
 int core_listener = -1;
+int broker_control = -1;
 pid_t broker_pid = -1;
 std::string owned_path;
 std::atomic<bool> broker_stop{false};
@@ -226,7 +227,7 @@ int DuplexRelay::run(int left, int right, const std::atomic<bool>& stop,
     return 0;
 }
 
-int BrokerServer::run() {
+int BrokerServer::run(int stop_fd) {
     broker_stop.store(false, std::memory_order_relaxed);
     struct sigaction action{};
     action.sa_handler = request_stop;
@@ -257,11 +258,16 @@ int BrokerServer::run() {
                 ++it;
             }
         }
-        pollfd descriptor{listener, POLLIN, 0};
+        pollfd descriptors[2]{{listener, POLLIN, 0}, {stop_fd, POLLIN, 0}};
+        const nfds_t descriptor_count = stop_fd >= 0 ? 2 : 1;
         int ready;
-        do { ready = ::poll(&descriptor, 1, 250); } while(ready < 0 && errno == EINTR);
+        do { ready = ::poll(descriptors, descriptor_count, 250); } while(ready < 0 && errno == EINTR);
         if(ready < 0) { ::close(listener); return -1; }
-        if(ready == 0 || !(descriptor.revents & POLLIN)) continue;
+        if(stop_fd >= 0 && (descriptors[1].revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL))) {
+            broker_stop.store(true, std::memory_order_relaxed);
+            continue;
+        }
+        if(ready == 0 || !(descriptors[0].revents & POLLIN)) continue;
         sockaddr_in peer{};
         socklen_t peer_size = sizeof(peer);
         const int client = ::accept4(listener, reinterpret_cast<sockaddr*>(&peer), &peer_size,
@@ -343,18 +349,28 @@ int start_internal_broker(std::uint16_t port) {
     const std::string path = "@smithproxy-cli-" + std::to_string(::getpid());
     core_listener = sx::comm::stream::create_unix_listener(path);
     if(core_listener < 0) { sx::comm::stream::destroy_shared_stats(shared_stats); shared_stats = nullptr; return -1; }
+    int controls[2] = {-1, -1};
+    if(::socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, controls) != 0) {
+        const int saved = errno; ::close(core_listener); core_listener = -1;
+        sx::comm::stream::destroy_shared_stats(shared_stats); shared_stats = nullptr;
+        errno = saved; return -1;
+    }
     const pid_t child = ::fork();
     if(child < 0) {
         const int saved = errno;
+        ::close(controls[0]); ::close(controls[1]);
         ::close(core_listener); core_listener = -1;
         sx::comm::stream::destroy_shared_stats(shared_stats); shared_stats = nullptr;
         errno = saved; return -1;
     }
     if(child == 0) {
+        ::close(controls[0]);
         ::close(core_listener);
         CliBrokerServer server({"127.0.0.1", port, path, handshake(), {"*"}, {}, 256}, shared_stats);
-        ::_exit(server.run() == 0 ? EXIT_SUCCESS : EXIT_FAILURE);
+        ::_exit(server.run(controls[1]) == 0 ? EXIT_SUCCESS : EXIT_FAILURE);
     }
+    ::close(controls[1]);
+    broker_control = controls[0];
     broker_pid = child;
     broker_stopping.store(false, std::memory_order_relaxed);
     broker_monitor = std::thread([child] {
@@ -404,14 +420,23 @@ bool receive_handshake(int fd, int timeout_ms) {
 
 int stop_broker() {
     pid_t child = -1;
+    int control = -1;
     {
         std::lock_guard lock(state_mutex);
         broker_stopping.store(true, std::memory_order_relaxed);
         if(core_listener >= 0) { ::close(core_listener); core_listener = -1; }
         if(!owned_path.empty()) { ::unlink(owned_path.c_str()); owned_path.clear(); }
         child = broker_pid;
+        control = broker_control;
+        broker_control = -1;
     }
-    if(child > 0) ::kill(child, SIGTERM);
+    if(control >= 0) {
+        const char stop = 1;
+        (void)::send(control, &stop, sizeof(stop), MSG_NOSIGNAL);
+        ::close(control);
+    } else if(child > 0) {
+        ::kill(child, SIGTERM);
+    }
     if(broker_monitor.joinable()) broker_monitor.join();
     const int status = broker_wait_status.load(std::memory_order_relaxed);
     {
