@@ -373,6 +373,52 @@ TEST(HTTP2, RejectsPaddedPushPromiseWithoutCompleteStreamId) {
     EXPECT_TRUE(connection->promised_streams.empty());
 }
 
+TEST(HTTP2, RecordsAllRequestsFromOneMultiplexedConnection) {
+    auto frame = [](uint8_t type, uint8_t flags, uint32_t stream,
+                    std::vector<uint8_t> payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), type, flags,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+
+    sx::engine::EngineCtx ctx;
+    ctx.state_data = std::make_any<v2::Http2Connection>();
+    for(uint32_t number = 1; number <= 12; ++number) {
+        HPACK::encoder_t request;
+        request.add(":method", "GET", false);
+        request.add(":scheme", "http", false);
+        request.add(":authority", "origin.runner.lab", false);
+        request.add(":path", string_format("/command-%02u", number), false);
+        auto request_frame = frame(1, 0x05, number * 2 - 1, request.data());
+        EXPECT_EQ(v2::process_frame(ctx, socle::side_t::LEFT, request_frame),
+                  request_frame.size());
+
+        HPACK::encoder_t response;
+        response.add(":status", "200", false);
+        auto response_frame = frame(1, 0x05, number * 2 - 1, response.data());
+        EXPECT_EQ(v2::process_frame(ctx, socle::side_t::RIGHT, response_frame),
+                  response_frame.size());
+    }
+
+    auto app = std::dynamic_pointer_cast<app_HttpRequest>(ctx.application_data);
+    ASSERT_NE(app, nullptr);
+    auto const requests = app->requests_all();
+    ASSERT_EQ(requests.size(), 12U);
+    EXPECT_EQ(requests.front(), "http://origin.runner.lab/command-12");
+    EXPECT_EQ(requests[1], "http://origin.runner.lab/command-01");
+    EXPECT_EQ(requests.back(), "http://origin.runner.lab/command-11");
+}
+
 
 
 TEST(HTTP2, RejectsGoawayBoundaryOwnedByTheSender) {
