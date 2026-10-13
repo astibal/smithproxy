@@ -2414,3 +2414,71 @@ TEST(HTTP2, EnforcesConnectionAndStreamFlowControlWindows) {
     EXPECT_EQ(push_connection->promised_flow_windows.count(2), 0U);
     EXPECT_EQ(push_connection->refused_promised_streams.count(2), 1U);
 }
+TEST(HTTP2, HeaderTableSettingTakesEffectAtAcknowledgement) {
+    auto frame = [](uint8_t type, uint8_t flags, uint32_t stream,
+                    std::vector<uint8_t> const& payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), type, flags,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+
+    const std::vector<uint8_t> disable_table {
+        0x00, 0x01, // SETTINGS_HEADER_TABLE_SIZE
+        0x00, 0x00, 0x00, 0x00,
+    };
+
+    sx::engine::EngineCtx missing_ctx;
+    auto server_settings = frame(4, 0, 0, disable_table);
+    v2::process_frame(missing_ctx, socle::side_t::RIGHT, server_settings);
+    auto* missing_connection = std::any_cast<v2::Http2Connection>(
+        &missing_ctx.state_data);
+    ASSERT_NE(missing_connection, nullptr);
+    EXPECT_EQ(missing_connection->request_decoder->maximum_table_size(), 4096u);
+    EXPECT_EQ(missing_connection->response_decoder->maximum_table_size(), 4096u);
+
+    HPACK::encoder_t encoder;
+    encoder.add(":method", "GET", false);
+    encoder.add(":scheme", "https", false);
+    encoder.add(":authority", "fixture.example", false);
+    encoder.add(":path", "/missing-update", false);
+    // A field block already in flight before the ACK still uses the old
+    // encoder limit and must remain valid.
+    auto before_ack = frame(1, 0x04, 99, encoder.data());
+    v2::process_frame(missing_ctx, socle::side_t::LEFT, before_ack);
+    EXPECT_FALSE(missing_connection->connection_invalid);
+    EXPECT_EQ(missing_connection->streams.count(99), 1u);
+
+    auto client_ack = frame(4, 0x01, 0, {});
+    v2::process_frame(missing_ctx, socle::side_t::LEFT, client_ack);
+    EXPECT_EQ(missing_connection->request_decoder->maximum_table_size(), 0u);
+
+    auto missing = frame(1, 0x04, 101, encoder.data());
+    v2::process_frame(missing_ctx, socle::side_t::LEFT, missing);
+    EXPECT_TRUE(missing_connection->connection_invalid);
+    EXPECT_EQ(missing_connection->streams.count(101), 0u);
+
+    sx::engine::EngineCtx valid_ctx;
+    v2::process_frame(valid_ctx, socle::side_t::RIGHT, server_settings);
+    v2::process_frame(valid_ctx, socle::side_t::LEFT, client_ack);
+    std::vector<uint8_t> compliant{0x20}; // dynamic table size update to zero
+    compliant.insert(compliant.end(), encoder.data().begin(), encoder.data().end());
+    auto valid = frame(1, 0x04, 103, compliant);
+    v2::process_frame(valid_ctx, socle::side_t::LEFT, valid);
+    auto* valid_connection = std::any_cast<v2::Http2Connection>(
+        &valid_ctx.state_data);
+    ASSERT_NE(valid_connection, nullptr);
+    EXPECT_FALSE(valid_connection->connection_invalid);
+    ASSERT_EQ(valid_connection->streams.count(103), 1u);
+    EXPECT_EQ(valid_connection->streams.at(103).request_header(":path"),
+              std::optional<std::string>("/missing-update"));
+}
