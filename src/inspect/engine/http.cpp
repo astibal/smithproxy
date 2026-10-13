@@ -1574,13 +1574,51 @@ namespace sx::engine::http {
                 return false;
             }
 
-            // H2-056/H2-057 need the compression context updated even when
-            // the stream is semantically refused. PUSH_PROMISE semantic
-            // validation belongs to the later HTTP/2 validation tranche.
-            (void)validate_push_promise;
+            if(validate_push_promise) {
+                auto const has = [&](std::string_view name) {
+                    auto const it = decoder.headers().find(name);
+                    return it != decoder.headers().end() && !it->second.empty();
+                };
+                auto const value = [&](std::string_view name) -> std::string_view {
+                    auto const it = decoder.headers().find(name);
+                    return it == decoder.headers().end() || it->second.empty()
+                        ? std::string_view{} : std::string_view(it->second.back());
+                };
+                for(auto const& [name, values]: decoder.headers()) {
+                    (void)values;
+                    if(!name.empty() && name.front() == ':' &&
+                       name != ":method" && name != ":scheme" &&
+                       name != ":authority" && name != ":path") {
+                        return false;
+                    }
+                }
+                const auto authority = value(":authority");
+                const auto host = value("host");
+                const auto host_it = decoder.headers().find("host");
+                const bool duplicate_host = host_it != decoder.headers().end() &&
+                    host_it->second.size() != 1;
+                const bool valid = is_http_token(value(":method")) &&
+                    is_uri_scheme(value(":scheme")) &&
+                    sx::inspect::http_detail::is_valid_request_path(
+                        value(":method"), value(":path")) &&
+                    !authority.empty() &&
+                    sx::inspect::http_detail::is_unambiguous_authority(authority) &&
+                    !duplicate_host &&
+                    (host.empty() || ascii_equal_ci(host, authority)) &&
+                    !has(":protocol");
+                if(!valid) {
+                    _err("invalid PUSH_PROMISE semantics method='%.*s' scheme='%.*s' authority='%.*s' path='%.*s'",
+                         static_cast<int>(value(":method").size()), value(":method").data(),
+                         static_cast<int>(value(":scheme").size()), value(":scheme").data(),
+                         static_cast<int>(authority.size()), authority.data(),
+                         static_cast<int>(value(":path").size()), value(":path").data());
+                }
+                return valid;
+            }
             return true;
 #else
-            (void)ctx; (void)side; (void)data; (void)validate_push_promise;
+            (void)ctx; (void)side; (void)data;
+            (void)validate_push_promise;
             return false;
 #endif
         }

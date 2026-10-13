@@ -3044,3 +3044,51 @@ TEST(HTTP2, RejectsInvalidRequestPseudoHeaderValues) {
               response_connection->streams.end());
     EXPECT_TRUE(response_connection->streams.at(1).response_invalid_);
 }
+
+TEST(HTTP2, RejectsMalformedPushPromiseSemantics) {
+    auto frame = [](uint8_t type, uint8_t flags, uint32_t stream,
+                    std::vector<uint8_t> const& payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), type, flags,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+
+    sx::engine::EngineCtx ctx;
+    HPACK::encoder_t client;
+    client.add(":method", "GET", false);
+    client.add(":scheme", "https", false);
+    client.add(":authority", "fixture.example", false);
+    client.add(":path", "/", false);
+    auto request = frame(1, 0x04, 1, client.data());
+    v2::process_frame(ctx, socle::side_t::LEFT, request);
+
+    // A pushed request has to carry :authority explicitly. Host fallback is
+    // valid for an ordinary request, but not for PUSH_PROMISE.
+    HPACK::encoder_t server;
+    server.add(":method", "GET", false);
+    server.add(":scheme", "https", false);
+    server.add(":path", "/asset", false);
+    server.add("host", "push.example", false);
+    std::vector<uint8_t> promise {0, 0, 0, 2};
+    promise.insert(promise.end(), server.data().begin(), server.data().end());
+    auto malformed = frame(5, 0x04, 1, promise);
+    v2::process_frame(ctx, socle::side_t::RIGHT, malformed);
+
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    EXPECT_FALSE(connection->connection_invalid);
+    EXPECT_EQ(connection->promised_streams.count(2), 0U);
+    EXPECT_EQ(connection->refused_promised_streams.count(2), 1U);
+    ASSERT_EQ(connection->streams.count(1), 1U);
+    EXPECT_TRUE(connection->streams.at(1).response_invalid_);
+}
