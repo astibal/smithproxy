@@ -2839,3 +2839,58 @@ TEST(HTTP2, LateDataOnClosedStreamDoesNotPoisonOtherStreams) {
     EXPECT_EQ(connection->streams.at(3).request_header(":authority"),
               "second.example");
 }
+
+TEST(HTTP2, LateHeadersOnClosedStreamPreserveHpackAndOtherStreams) {
+    auto frame = [](uint8_t type, uint8_t flags, uint32_t stream,
+                    std::vector<uint8_t> const& payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), type, flags,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+
+    HPACK::encoder_t request_encoder;
+    request_encoder.add(":method", "GET", false);
+    request_encoder.add(":scheme", "https", false);
+    request_encoder.add(":authority", "first.example", false);
+    request_encoder.add(":path", "/", false);
+    HPACK::encoder_t response_encoder;
+    response_encoder.add(":status", "200", false);
+
+    sx::engine::EngineCtx ctx;
+    auto request = frame(1, 0x05, 1, request_encoder.data());
+    auto response = frame(1, 0x05, 1, response_encoder.data());
+    v2::process_frame(ctx, socle::side_t::LEFT, request);
+    v2::process_frame(ctx, socle::side_t::RIGHT, response);
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    ASSERT_EQ(connection->streams.count(1), 0U);
+
+    HPACK::encoder_t late_encoder;
+    late_encoder.add(":status", "204", false);
+    late_encoder.add("x-late", "synchronized", false);
+    auto late = frame(1, 0x04, 1, late_encoder.data());
+    v2::process_frame(ctx, socle::side_t::RIGHT, late);
+    EXPECT_FALSE(connection->connection_invalid);
+    EXPECT_EQ(connection->streams.count(1), 0U);
+
+    HPACK::encoder_t next_encoder;
+    next_encoder.add(":method", "GET", false);
+    next_encoder.add(":scheme", "https", false);
+    next_encoder.add(":authority", "second.example", false);
+    next_encoder.add(":path", "/", false);
+    auto next = frame(1, 0x04, 3, next_encoder.data());
+    v2::process_frame(ctx, socle::side_t::LEFT, next);
+    ASSERT_EQ(connection->streams.count(3), 1U);
+    EXPECT_EQ(connection->streams.at(3).request_header(":authority"),
+              "second.example");
+}
