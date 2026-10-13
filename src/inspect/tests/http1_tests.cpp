@@ -331,6 +331,48 @@ TEST(HTTP2, PositiveWindowUpdateOnIdleStreamTerminatesConnectionSemantics) {
     }
 }
 
+TEST(HTTP2, RejectsPaddedPushPromiseWithoutCompleteStreamId) {
+    auto frame = [](uint8_t type, uint8_t flags, uint32_t stream,
+                    std::vector<uint8_t> const& payload) {
+        std::vector<uint8_t> bytes {
+            static_cast<uint8_t>((payload.size() >> 16) & 0xff),
+            static_cast<uint8_t>((payload.size() >> 8) & 0xff),
+            static_cast<uint8_t>(payload.size() & 0xff), type, flags,
+            static_cast<uint8_t>((stream >> 24) & 0x7f),
+            static_cast<uint8_t>((stream >> 16) & 0xff),
+            static_cast<uint8_t>((stream >> 8) & 0xff),
+            static_cast<uint8_t>(stream & 0xff),
+        };
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        buffer result;
+        result.assign(bytes.data(), bytes.size());
+        return result;
+    };
+
+    HPACK::encoder_t request_encoder;
+    request_encoder.add(":method", "GET", false);
+    request_encoder.add(":scheme", "https", false);
+    request_encoder.add(":authority", "push.example", false);
+    request_encoder.add(":path", "/", false);
+
+    sx::engine::EngineCtx ctx;
+    auto request = frame(1, 0x05, 1, request_encoder.data());
+    ASSERT_EQ(v2::process_frame(ctx, socle::side_t::LEFT, request),
+              request.size());
+
+    // Four bytes satisfy the unpadded minimum, but PADDED consumes one byte
+    // for Pad Length and three for padding, leaving no promised stream id.
+    auto malformed = frame(5, 0x0c, 1, {3, 0, 0, 0});
+    EXPECT_NO_THROW({
+        EXPECT_EQ(v2::process_frame(ctx, socle::side_t::RIGHT, malformed),
+                  malformed.size());
+    });
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    EXPECT_TRUE(connection->connection_invalid);
+    EXPECT_TRUE(connection->promised_streams.empty());
+}
+
 
 
 TEST(HTTP2, RejectsGoawayBoundaryOwnedByTheSender) {
