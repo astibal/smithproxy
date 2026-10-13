@@ -1672,6 +1672,33 @@ TEST(HTTP2, ReplacementResponseUsesH2FramesAndSplitsLargeBodies) {
     EXPECT_FALSE(v2::make_response(1, body, 99).has_value());
 }
 
+TEST(HTTP2, ReplacementResponseHonorsZeroHeaderTableSize) {
+    auto response = v2::make_response(17, "blocked", 403);
+    ASSERT_TRUE(response.has_value());
+
+    // The replacement preamble consists of an empty server SETTINGS and its
+    // acknowledgement of the client's SETTINGS. Decode the following
+    // HEADERS as a client which advertised SETTINGS_HEADER_TABLE_SIZE=0.
+    std::size_t offset = 18;
+    ASSERT_GE(response->size(), offset + 9);
+    auto const byte = [&](std::size_t at) {
+        return static_cast<uint8_t>((*response)[offset + at]);
+    };
+    auto const length = (static_cast<std::size_t>(byte(0)) << 16) |
+                        (static_cast<std::size_t>(byte(1)) << 8) |
+                        byte(2);
+    ASSERT_EQ(byte(3), 1u);
+    ASSERT_LE(offset + 9 + length, response->size());
+
+    auto const payload = std::string_view(*response).substr(offset + 9, length);
+    HPACK::decoder_t decoder;
+    decoder.maximum_table_size(0);
+    std::vector<uint8_t> encoded(payload.begin(), payload.end());
+    ASSERT_TRUE(decoder.decode(encoded));
+    EXPECT_EQ(decoder.headers().at(":status").front(), "403");
+    EXPECT_EQ(decoder.headers().at("content-length").front(), "7");
+}
+
 TEST(HTTP2, ReplacementGoawayIsAConnectionLevelFrame) {
     auto const frame = v2::make_goaway(31, 0x0c, "certificate rejected");
     ASSERT_GE(frame.size(), 17u);
