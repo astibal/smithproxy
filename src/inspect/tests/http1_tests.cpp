@@ -98,6 +98,8 @@ namespace sx::engine::http::v2 {
                               std::string const& header, std::string const& value);
     void process_headers(EngineCtx& ctx, socle::side_t side, long stream_id,
                          uint8_t flags, buffer const& data);
+    void synchronize_headers(EngineCtx& ctx, socle::side_t side,
+                             buffer const& data);
     void process_data(EngineCtx& ctx, socle::side_t side, long stream_id,
                       uint8_t flags, buffer const& data);
     void process_ping(EngineCtx& ctx, socle::side_t side, long stream_id,
@@ -535,6 +537,101 @@ TEST(HTTP2, RejectsSwitchingProtocolsStatus) {
     ASSERT_EQ(connection->streams.count(1), 1u);
     EXPECT_TRUE(connection->streams.at(1).response_invalid_);
     EXPECT_TRUE(connection->streams.at(1).response_headers_.empty());
+}
+
+TEST(HTTP2, RetainsHpackStateAcrossRejectedHeaderSemantics) {
+    sx::engine::EngineCtx ctx;
+    ctx.state_data = std::make_any<v2::Http2Connection>();
+
+    HPACK::encoder_t attacker;
+    attacker.add(":method", "GET", false);
+    attacker.add(":scheme", "https", false);
+    attacker.add(":authority", "fixture.example", false);
+    // Missing :path makes this request semantically invalid, but the literal
+    // below would still update HPACK if decode were committed too early.
+    attacker.add("x-semantic-poison", "retained", false);
+    buffer rejected;
+    rejected.assign(attacker.data().data(), attacker.data().size());
+    v2::process_headers(ctx, socle::side_t::LEFT, 31, 0, rejected);
+
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    EXPECT_EQ(connection->streams.count(31), 0U);
+
+    const auto previous_size = attacker.data().size();
+    attacker.add(":method", "GET", false);
+    attacker.add(":scheme", "https", false);
+    attacker.add(":authority", "fixture.example", false);
+    attacker.add(":path", "/indexed", false);
+    attacker.add("x-semantic-poison", "retained", false);
+    buffer indexed;
+    indexed.assign(attacker.data().data() + previous_size,
+                   attacker.data().size() - previous_size);
+    v2::process_headers(ctx, socle::side_t::LEFT, 33, 0, indexed);
+    ASSERT_EQ(connection->streams.count(33), 1U);
+    EXPECT_EQ(connection->streams.at(33).request_header("x-semantic-poison"),
+              "retained");
+    EXPECT_FALSE(connection->connection_invalid);
+
+    HPACK::encoder_t clean;
+    clean.add(":method", "GET", false);
+    clean.add(":scheme", "https", false);
+    clean.add(":authority", "fixture.example", false);
+    clean.add(":path", "/clean", false);
+    clean.add("x-clean", "accepted", false);
+    buffer clean_block;
+    clean_block.assign(clean.data().data(), clean.data().size());
+    v2::process_headers(ctx, socle::side_t::LEFT, 35, 0, clean_block);
+    ASSERT_EQ(connection->streams.count(35), 1U);
+    EXPECT_EQ(connection->streams.at(35).request_header("x-clean"), "accepted");
+}
+
+TEST(HTTP2, HpackCompressionErrorsTerminateConnectionSemantics) {
+    auto valid_request = [] {
+        HPACK::encoder_t encoder;
+        encoder.add(":method", "GET", false);
+        encoder.add(":scheme", "https", false);
+        encoder.add(":authority", "fixture.example", false);
+        encoder.add(":path", "/after-compression-error", false);
+        buffer block;
+        block.assign(encoder.data().data(), encoder.data().size());
+        return block;
+    };
+
+    for(auto malformed: std::vector<std::vector<uint8_t>>{
+            {0x80},
+            {0x00},
+            {0x00, 0x01, 'x', 0x81, 0xff},
+        }) {
+        sx::engine::EngineCtx ctx;
+        buffer block;
+        block.assign(malformed.data(), malformed.size());
+        v2::process_headers(ctx, socle::side_t::LEFT, 41, 0x04, block);
+
+        auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+        ASSERT_NE(connection, nullptr);
+        EXPECT_TRUE(connection->connection_invalid);
+        EXPECT_EQ(connection->streams.count(41), 0u);
+
+        auto clean = valid_request();
+        v2::process_headers(ctx, socle::side_t::LEFT, 43, 0x04, clean);
+        EXPECT_EQ(connection->streams.count(43), 0u);
+    }
+
+    // PUSH_PROMISE blocks are decoded only to keep the response-direction
+    // compression table synchronized. Their HPACK failures are equally
+    // terminal.
+    sx::engine::EngineCtx sync_ctx;
+    sync_ctx.state_data = std::make_any<v2::Http2Connection>();
+    const std::array<uint8_t, 1> invalid_index{0x80};
+    buffer malformed_push_headers;
+    malformed_push_headers.assign(invalid_index.data(), invalid_index.size());
+    v2::synchronize_headers(sync_ctx, socle::side_t::RIGHT,
+                            malformed_push_headers);
+    auto* sync_connection =
+        std::any_cast<v2::Http2Connection>(&sync_ctx.state_data);
+    ASSERT_NE(sync_connection, nullptr);
+    EXPECT_TRUE(sync_connection->connection_invalid);
 }
 
 
