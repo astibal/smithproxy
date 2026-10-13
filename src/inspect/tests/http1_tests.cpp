@@ -878,31 +878,86 @@ TEST(EngineCtx, SeenDataPolicyDistinguishesSmallGrowingAndNewBlocks) {
     EXPECT_FALSE(ctx.new_data_check(2, 7000));
 }
 
-TEST(L7PayloadHint, Http1DistinguishesHeadersBodyAndUnknownFraming) {
-    const std::string headers =
-        "POST / HTTP/1.1\r\nHost: example.test\r\nContent-Length: 5\r\n\r\n";
-    auto none = http1_payload_hint(headers);
-    ASSERT_EQ(none.size(), 1u);
-    EXPECT_EQ(none.front(), L7PayloadRange(0, 0));
+TEST(L7PayloadHint, Http1EngineKeepsFixedBodyAcrossInputBlocks) {
+    v1::Http1Direction direction;
+    const std::string first =
+        "POST /upload HTTP/1.1\r\nHost: example.test\r\nContent-Length: 11\r\n\r\nhello";
+    auto ranges = direction.observe(first, false);
+    ASSERT_EQ(ranges.size(), 1u);
+    EXPECT_EQ(ranges[0], L7PayloadRange(first.size() - 5, first.size()));
 
-    const auto message = headers + "hello";
-    auto body = http1_payload_hint(message);
-    ASSERT_EQ(body.size(), 1u);
-    EXPECT_EQ(body.front(), L7PayloadRange(headers.size(), message.size()));
+    const std::string second = " worldGET /next HTTP/1.1\r\nHost: example.test\r\n\r\n";
+    ranges = direction.observe(second, false);
+    ASSERT_EQ(ranges.size(), 1u);
+    EXPECT_EQ(ranges[0], L7PayloadRange(0, 6));
+}
 
-    auto tail = http1_payload_hint(message, headers.size() + 2);
-    ASSERT_EQ(tail.size(), 1u);
-    EXPECT_EQ(tail.front(), L7PayloadRange(0, 3));
+TEST(L7PayloadHint, Http1EngineHandlesSplitHeadersAndChunkFraming) {
+    v1::Http1Direction direction;
+    auto ranges = direction.observe(
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chu", true);
+    ASSERT_EQ(ranges, L7PayloadHints({{0, 0}}));
 
-    auto chunked = http1_payload_hint(
-        "HTTP/1.1 200 OK\r\nTransfer-Encoding: Chunked\r\n\r\n"
-        "5;kind=text\r\nhello\r\n6\r\n world\r\n0\r\nX-End: yes\r\n\r\n");
-    ASSERT_EQ(chunked.size(), 2u);
-    auto const first_start = std::string_view(
-        "HTTP/1.1 200 OK\r\nTransfer-Encoding: Chunked\r\n\r\n5;kind=text\r\n").size();
-    EXPECT_EQ(chunked[0], L7PayloadRange(first_start, first_start + 5));
-    auto const second_start = first_start + 5 + std::string_view("\r\n6\r\n").size();
-    EXPECT_EQ(chunked[1], L7PayloadRange(second_start, second_start + 6));
+    const std::string first = "nked\r\nContent-Encoding: gzip\r\n\r\n5\r\nhe";
+    ranges = direction.observe(first, true);
+    ASSERT_EQ(ranges.size(), 1u);
+    EXPECT_EQ(ranges[0], L7PayloadRange(first.size() - 2, first.size()));
+    ASSERT_EQ(direction.encodings().size(), 1u);
+    EXPECT_EQ(direction.encodings()[0], "gzip");
+
+    ranges = direction.observe("llo\r\n6\r\n wor", true);
+    ASSERT_EQ(ranges.size(), 2u);
+    EXPECT_EQ(ranges[0], L7PayloadRange(0, 3));
+    EXPECT_EQ(ranges[1], L7PayloadRange(8, 12));
+
+    ranges = direction.observe("ld\r\n0\r\nX-End: yes\r\n\r\n", true);
+    ASSERT_EQ(ranges.size(), 1u);
+    EXPECT_EQ(ranges[0], L7PayloadRange(0, 2));
+}
+
+TEST(L7PayloadHint, Http1EngineMarksCloseDelimitedResponseContinuations) {
+    v1::Http1Direction direction;
+    const std::string first = "HTTP/1.1 200 OK\r\nServer: test\r\n\r\nfirst";
+    auto ranges = direction.observe(first, true);
+    ASSERT_EQ(ranges.size(), 1u);
+    EXPECT_EQ(ranges[0], L7PayloadRange(first.size() - 5, first.size()));
+    ranges = direction.observe("second", true);
+    ASSERT_EQ(ranges, L7PayloadHints({{0, 6}}));
+}
+
+TEST(L7PayloadHint, ApplicationObservationMatchesOnlyTheParsedBuffer) {
+    app_HttpRequest app;
+    app.observe_l7_payload("payload", 107, {{0, 7}}, {"gzip"});
+
+    EXPECT_TRUE(app.l7_payload_matches("payload", 107));
+    EXPECT_FALSE(app.l7_payload_matches("changed", 107));
+    EXPECT_FALSE(app.l7_payload_matches("payload", 108));
+    EXPECT_FALSE(app.l7_payload_matches("payload!", 107));
+}
+
+TEST(L7PayloadHint, Http1EngineOwnsDuplexFramingState) {
+    sx::engine::EngineCtx ctx;
+    auto app = std::make_shared<app_HttpRequest>();
+    app->version = app_HttpRequest::HTTP_VER::HTTP_1;
+    ctx.application_data = app;
+
+    const std::string request =
+        "POST / HTTP/1.1\r\nHost: example.test\r\nContent-Length: 6\r\n\r\nabc";
+    v1::observe_content(ctx, 0, request, 100, false);
+    ASSERT_TRUE(std::any_cast<v1::Http1Connection>(&ctx.state_data));
+    ASSERT_EQ(app->l7_payload,
+              L7PayloadHints({{static_cast<std::int64_t>(request.size() - 3),
+                               static_cast<std::int64_t>(request.size())}}));
+
+    v1::observe_content(ctx, 0, "def", 103, false);
+    EXPECT_EQ(app->l7_payload, L7PayloadHints({{0, 3}}));
+
+    const std::string response =
+        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok";
+    v1::observe_content(ctx, 1, response, 200, true);
+    EXPECT_EQ(app->l7_payload,
+              L7PayloadHints({{static_cast<std::int64_t>(response.size() - 2),
+                               static_cast<std::int64_t>(response.size())}}));
 }
 
 TEST(L7PayloadHint, Http2LocatesMultipleDataFrames) {

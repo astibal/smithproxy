@@ -64,8 +64,6 @@ namespace sx::engine::http {
     using L7PayloadRange = std::pair<std::int64_t, std::int64_t>;
     using L7PayloadHints = std::vector<L7PayloadRange>;
 
-    L7PayloadHints http1_payload_hint(std::string_view flow_block,
-                                      std::size_t current_offset = 0);
     L7PayloadHints http2_payload_hint(std::string_view flow_block,
                                       std::size_t current_offset = 0);
 
@@ -115,8 +113,38 @@ namespace sx::engine::http {
         // the engine cannot locate L7 user content; [0, 0] positively means
         // that this content message carries none. The end offset is exclusive.
         L7PayloadHints l7_payload{{-1, -1}};
+        bool l7_payload_observed = false;
         std::uint64_t l7_payload_observed_bytes = 0;
+        std::size_t l7_payload_observed_size = 0;
+        std::uint64_t l7_payload_observed_fingerprint = 0;
         std::vector<std::string> l7_encoding;
+        static std::uint64_t payload_fingerprint(std::string_view data) {
+            std::uint64_t value = 14695981039346656037ULL;
+            for(unsigned char byte : data) {
+                value ^= byte;
+                value *= 1099511628211ULL;
+            }
+            return value;
+        }
+
+        void observe_l7_payload(std::string_view data, std::uint64_t read_bytes,
+                                L7PayloadHints ranges,
+                                std::vector<std::string> encodings = {}) {
+            l7_payload = std::move(ranges);
+            l7_encoding = std::move(encodings);
+            l7_payload_observed_bytes = read_bytes;
+            l7_payload_observed_size = data.size();
+            l7_payload_observed_fingerprint = payload_fingerprint(data);
+            l7_payload_observed = true;
+        }
+
+        [[nodiscard]] bool l7_payload_matches(std::string_view data,
+                                              std::uint64_t read_bytes) const {
+            return l7_payload_observed &&
+                   l7_payload_observed_bytes == read_bytes &&
+                   l7_payload_observed_size == data.size() &&
+                   l7_payload_observed_fingerprint == payload_fingerprint(data);
+        }
 
         void reset_l7_encoding() {
             l7_encoding.clear();
@@ -249,6 +277,47 @@ namespace sx::engine::http {
 
 
     namespace v1 {
+        struct Http1Message {
+            enum class phase_t { headers, fixed_body, chunk_size, chunk_data,
+                                 chunk_delimiter, trailers, until_close, opaque };
+            phase_t phase = phase_t::headers;
+            std::string pending;
+            std::uint64_t remaining = 0;
+            std::string encoding;
+        };
+
+        // HTTP/1 parser state belongs to the v1 engine and is stored in
+        // EngineCtx::state_data, parallel to v2::Http2Connection.
+        class Http1Direction {
+        public:
+            L7PayloadHints observe(std::string_view data, bool response_side,
+                                   std::deque<std::string>* pending_methods = nullptr);
+            [[nodiscard]] std::vector<std::string> const& encodings() const {
+                return last_encodings_;
+            }
+
+        private:
+            Http1Message message_;
+            std::vector<std::string> last_encodings_;
+        };
+
+        struct Http1Connection {
+            std::array<Http1Direction, 2> directions;
+            // Response framing depends on the corresponding request method
+            // for HEAD and successful CONNECT. Both directions share one FIFO.
+            std::deque<std::string> pending_methods;
+
+            L7PayloadHints observe(std::size_t side, std::string_view data,
+                                   bool response_side) {
+                return directions.at(side).observe(data, response_side,
+                                                    &pending_methods);
+            }
+            [[nodiscard]] std::vector<std::string> const& encodings(
+                    std::size_t side) const {
+                return directions.at(side).encodings();
+            }
+        };
+
         // request parsing
         void parse_request (EngineCtx &ctx, buffer const* buffer_data_string);
         bool find_referrer (EngineCtx &ctx, std::string_view data);
@@ -257,6 +326,12 @@ namespace sx::engine::http {
 
         // execute engine
         void start(EngineCtx &ctx);
+
+        // Process the exact application block before content consumers run.
+        // The connection parser remains owned by EngineCtx::state_data.
+        void observe_content(EngineCtx& ctx, std::size_t direction,
+                             std::string_view data, std::uint64_t read_bytes,
+                             bool response_side);
     }
 
     namespace v2 {
@@ -371,6 +446,30 @@ namespace sx::engine::http {
             }
         };
 
+        class Http2Direction {
+        public:
+            L7PayloadHints observe(std::string_view data, bool client_side);
+            [[nodiscard]] std::vector<std::uint32_t> const& stream_ids() const {
+                return last_stream_ids_;
+            }
+
+        private:
+            std::array<unsigned char, 9> header_{};
+            std::size_t header_size_ = 0;
+            std::uint32_t frame_remaining_ = 0;
+            std::uint32_t data_remaining_ = 0;
+            std::uint32_t padding_remaining_ = 0;
+            bool data_frame_ = false;
+            bool padded_ = false;
+            bool need_padding_length_ = false;
+            bool first_input_ = true;
+            std::size_t preface_size_ = 0;
+            bool reading_preface_ = false;
+            bool opaque_ = false;
+            std::uint32_t current_stream_id_ = 0;
+            std::vector<std::uint32_t> last_stream_ids_;
+        };
+
         struct Http2Connection {
             struct PendingHeaderBlock {
                 long stream_id = -1;
@@ -391,6 +490,7 @@ namespace sx::engine::http {
 
             // map
             mp::map<long,Http2Stream> streams;
+            std::array<Http2Direction, 2> content_directions;
             long latest_request_stream_id = -1;
             uint32_t highest_client_stream_id = 0;
             uint32_t highest_promised_stream_id = 0;
@@ -434,6 +534,10 @@ namespace sx::engine::http {
             std::shared_ptr<HPACK::decoder_t> response_decoder = std::make_shared<HPACK::decoder_t>();
 #endif
         };
+
+        void observe_content(EngineCtx& ctx, std::size_t direction,
+                             std::string_view data, std::uint64_t read_bytes,
+                             bool client_side);
     }
 
     struct log {

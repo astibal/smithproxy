@@ -75,103 +75,265 @@ namespace sx::engine::http {
             }
             return std::nullopt;
         }
+
+        std::vector<std::string_view> header_values(std::string_view headers,
+                                                     std::string_view name) {
+            std::vector<std::string_view> values;
+            auto line_start = headers.find('\n');
+            if(line_start == std::string_view::npos) return values;
+            ++line_start;
+            while(line_start < headers.size()) {
+                auto line_end = headers.find('\n', line_start);
+                if(line_end == std::string_view::npos) line_end = headers.size();
+                auto line = headers.substr(line_start, line_end - line_start);
+                if(!line.empty() && line.back() == '\r') line.remove_suffix(1);
+                if(line.empty()) break;
+                const auto colon = line.find(':');
+                if(colon != std::string_view::npos &&
+                   ascii_equal_ci(line.substr(0, colon), name)) {
+                    auto value = line.substr(colon + 1);
+                    while(!value.empty() &&
+                          (value.front() == ' ' || value.front() == '\t'))
+                        value.remove_prefix(1);
+                    while(!value.empty() &&
+                          (value.back() == ' ' || value.back() == '\t'))
+                        value.remove_suffix(1);
+                    values.push_back(value);
+                }
+                line_start = line_end + (line_end < headers.size());
+            }
+            return values;
+        }
     }
 
-    L7PayloadHints http1_payload_hint(std::string_view block,
-                                      std::size_t current_offset) {
-        const L7PayloadHints unknown{{-1, -1}};
-        const L7PayloadHints none{{0, 0}};
-        if(current_offset > block.size()) return unknown;
-
-        auto delimiter = block.find("\r\n\r\n");
-        std::size_t delimiter_size = 4;
-        if(delimiter == std::string_view::npos) {
-            delimiter = block.find("\n\n");
-            delimiter_size = 2;
-        }
-        if(delimiter == std::string_view::npos) return none;
-
-        const auto body_start = delimiter + delimiter_size;
-        const auto headers = block.substr(0, body_start);
-        auto body_end = block.size();
-
-        if(auto transfer_encoding = header_value(headers, "transfer-encoding");
-           transfer_encoding && ascii_contains_ci(*transfer_encoding, "chunked")) {
-            L7PayloadHints ranges;
-            auto offset = body_start;
-            while(offset < block.size()) {
-                auto line_end = block.find("\r\n", offset);
-                std::size_t line_delimiter_size = 2;
-                if(line_end == std::string_view::npos) {
-                    line_end = block.find('\n', offset);
-                    line_delimiter_size = 1;
-                }
-                if(line_end == std::string_view::npos) return unknown;
-
-                auto size_text = block.substr(offset, line_end - offset);
-                if(auto extension = size_text.find(';'); extension != std::string_view::npos)
-                    size_text = size_text.substr(0, extension);
-                while(!size_text.empty() && (size_text.front() == ' ' || size_text.front() == '\t'))
-                    size_text.remove_prefix(1);
-                while(!size_text.empty() && (size_text.back() == ' ' || size_text.back() == '\t'))
-                    size_text.remove_suffix(1);
-
-                std::uint64_t chunk_size = 0;
-                const auto parsed = std::from_chars(size_text.data(),
-                                                    size_text.data() + size_text.size(),
-                                                    chunk_size, 16);
-                if(size_text.empty() || parsed.ec != std::errc{} ||
-                   parsed.ptr != size_text.data() + size_text.size()) return unknown;
-
-                const auto data_start = line_end + line_delimiter_size;
-                if(chunk_size == 0) break;
-                const auto available = block.size() - data_start;
-                const auto data_size = static_cast<std::size_t>(
-                    std::min<std::uint64_t>(chunk_size, available));
-                if(auto range = intersect_payload(data_start, data_start + data_size,
-                                                  current_offset, block.size())) {
-                    ranges.push_back(*range);
-                }
-                if(chunk_size > available) break;
-
-                offset = data_start + static_cast<std::size_t>(chunk_size);
-                if(offset == block.size()) break;
-                if(block.substr(offset, 2) == "\r\n") offset += 2;
-                else if(block[offset] == '\n') ++offset;
-                else return unknown;
+    L7PayloadHints v1::Http1Direction::observe(
+            std::string_view data, bool response_side,
+            std::deque<std::string>* pending_methods) {
+        L7PayloadHints ranges;
+        last_encodings_.clear();
+        auto add_body = [&](std::size_t start, std::size_t end) {
+            if(start == end) return;
+            if(!ranges.empty() && ranges.back().second == static_cast<std::int64_t>(start) &&
+               last_encodings_.back() == message_.encoding) {
+                ranges.back().second = static_cast<std::int64_t>(end);
+            } else {
+                ranges.emplace_back(static_cast<std::int64_t>(start),
+                                    static_cast<std::int64_t>(end));
+                last_encodings_.push_back(message_.encoding);
             }
-            return ranges.empty() ? none : ranges;
-        }
+        };
+        auto finish_line = [&]() {
+            if(message_.pending.empty() || message_.pending.back() != '\n') return false;
+            while(!message_.pending.empty() &&
+                  (message_.pending.back() == '\r' || message_.pending.back() == '\n'))
+                message_.pending.pop_back();
+            return true;
+        };
 
-        if(auto content_length = header_value(headers, "content-length")) {
-            std::uint64_t length = 0;
-            const auto parsed = std::from_chars(content_length->data(),
-                                                content_length->data() + content_length->size(),
-                                                length);
-            if(parsed.ec != std::errc{} || parsed.ptr != content_length->data() + content_length->size())
-                return unknown;
-            const auto available = block.size() - body_start;
-            body_end = body_start + static_cast<std::size_t>(
-                std::min<std::uint64_t>(length, available));
-        } else if(block.size() < 5 || block.substr(0, 5) != "HTTP/") {
-            // Requests without explicit framing do not carry a body.
-            body_end = body_start;
-        } else {
-            auto first_line_end = block.find('\n');
-            auto first_line = block.substr(0, first_line_end);
-            if(first_line.find(" 1") != std::string_view::npos ||
-               first_line.find(" 204") != std::string_view::npos ||
-               first_line.find(" 205") != std::string_view::npos ||
-               first_line.find(" 304") != std::string_view::npos) {
-                body_end = body_start;
+        std::size_t cursor = 0;
+        while(cursor < data.size()) {
+            switch(message_.phase) {
+                case v1::Http1Message::phase_t::headers: {
+                    message_.pending.push_back(data[cursor++]);
+                    if(message_.pending.size() > 65536) {
+                        message_.pending.clear();
+                        message_.phase = v1::Http1Message::phase_t::opaque;
+                        break;
+                    }
+                    const bool complete = message_.pending.size() >= 4 &&
+                        message_.pending.compare(message_.pending.size() - 4, 4, "\r\n\r\n") == 0;
+                    const bool complete_lf = message_.pending.size() >= 2 &&
+                        message_.pending.compare(message_.pending.size() - 2, 2, "\n\n") == 0;
+                    if(!complete && !complete_lf) break;
+
+                    const auto headers = std::string_view(message_.pending);
+                    message_.encoding.clear();
+                    if(auto value = header_value(headers, "content-encoding"))
+                        message_.encoding.assign(value->data(), value->size());
+                    const auto transfer_values = header_values(headers, "transfer-encoding");
+                    const auto length_values = header_values(headers, "content-length");
+                    const auto transfer = transfer_values.empty()
+                        ? std::optional<std::string_view>{}
+                        : std::optional<std::string_view>{transfer_values.front()};
+                    const auto length = length_values.empty()
+                        ? std::optional<std::string_view>{}
+                        : std::optional<std::string_view>{length_values.front()};
+                    const auto connection = header_value(headers, "connection");
+                    const auto upgrade = header_value(headers, "upgrade");
+
+                    bool body_forbidden = false;
+                    bool final_response = false;
+                    bool successful_connect = false;
+                    std::string request_method;
+                    if(response_side && headers.substr(0, 5) == "HTTP/") {
+                        const auto first_space = headers.find(' ');
+                        if(first_space != std::string_view::npos && first_space + 4 <= headers.size()) {
+                            unsigned status = 0;
+                            auto parsed = std::from_chars(headers.data() + first_space + 1,
+                                                          headers.data() + first_space + 4,
+                                                          status);
+                            if(parsed.ec == std::errc{}) {
+                                const bool informational = status >= 100 && status < 200;
+                                final_response = !informational || status == 101;
+                                body_forbidden = informational || status == 204 ||
+                                                 status == 205 || status == 304;
+                                if(final_response && pending_methods &&
+                                   !pending_methods->empty()) {
+                                    body_forbidden = body_forbidden ||
+                                        ascii_equal_ci(pending_methods->front(), "HEAD");
+                                    successful_connect = status >= 200 && status < 300 &&
+                                        ascii_equal_ci(pending_methods->front(), "CONNECT");
+                                }
+                            }
+                        }
+                    } else if(!response_side && pending_methods) {
+                        const auto method_end = headers.find(' ');
+                        if(method_end != std::string_view::npos && method_end != 0)
+                            request_method.assign(headers.substr(0, method_end));
+                    }
+                    message_.pending.clear();
+                    if(transfer_values.size() > 1 || length_values.size() > 1 ||
+                       (transfer && !ascii_equal_ci(*transfer, "chunked"))) {
+                        message_.phase = v1::Http1Message::phase_t::opaque;
+                    } else if(successful_connect ||
+                              (connection && ascii_contains_ci(*connection, "upgrade")) || upgrade) {
+                        message_.phase = v1::Http1Message::phase_t::opaque;
+                    } else if(body_forbidden) {
+                        message_.phase = v1::Http1Message::phase_t::headers;
+                    } else if(transfer && ascii_contains_ci(*transfer, "chunked")) {
+                        message_.phase = v1::Http1Message::phase_t::chunk_size;
+                    } else if(length) {
+                        std::uint64_t parsed_length = 0;
+                        auto parsed = std::from_chars(length->data(),
+                                                      length->data() + length->size(),
+                                                      parsed_length);
+                        if(parsed.ec != std::errc{} ||
+                           parsed.ptr != length->data() + length->size()) {
+                            message_.phase = v1::Http1Message::phase_t::opaque;
+                        } else if(parsed_length == 0) {
+                            message_.phase = v1::Http1Message::phase_t::headers;
+                        } else {
+                            message_.remaining = parsed_length;
+                            message_.phase = v1::Http1Message::phase_t::fixed_body;
+                        }
+                    } else {
+                        message_.phase = response_side ? v1::Http1Message::phase_t::until_close
+                                                       : v1::Http1Message::phase_t::headers;
+                    }
+                    if(!response_side && pending_methods && !request_method.empty() &&
+                       message_.phase != v1::Http1Message::phase_t::opaque)
+                        pending_methods->push_back(std::move(request_method));
+                    if(final_response && pending_methods && !pending_methods->empty())
+                        pending_methods->pop_front();
+                    break;
+                }
+                case v1::Http1Message::phase_t::fixed_body: {
+                    const auto count = static_cast<std::size_t>(
+                        std::min<std::uint64_t>(message_.remaining, data.size() - cursor));
+                    add_body(cursor, cursor + count);
+                    cursor += count;
+                    message_.remaining -= count;
+                    if(message_.remaining == 0) message_.phase = v1::Http1Message::phase_t::headers;
+                    break;
+                }
+                case v1::Http1Message::phase_t::chunk_size: {
+                    message_.pending.push_back(data[cursor++]);
+                    if(message_.pending.size() > 128) {
+                        message_.pending.clear();
+                        message_.phase = v1::Http1Message::phase_t::opaque;
+                        break;
+                    }
+                    if(!finish_line()) break;
+                    auto size_text = std::string_view(message_.pending);
+                    if(auto extension = size_text.find(';'); extension != std::string_view::npos)
+                        size_text = size_text.substr(0, extension);
+                    while(!size_text.empty() && (size_text.front() == ' ' || size_text.front() == '\t'))
+                        size_text.remove_prefix(1);
+                    while(!size_text.empty() && (size_text.back() == ' ' || size_text.back() == '\t'))
+                        size_text.remove_suffix(1);
+                    std::uint64_t chunk_size = 0;
+                    auto parsed = std::from_chars(size_text.data(),
+                                                  size_text.data() + size_text.size(),
+                                                  chunk_size, 16);
+                    message_.pending.clear();
+                    if(size_text.empty() || parsed.ec != std::errc{} ||
+                       parsed.ptr != size_text.data() + size_text.size()) {
+                        message_.phase = v1::Http1Message::phase_t::opaque;
+                    } else if(chunk_size == 0) {
+                        message_.phase = v1::Http1Message::phase_t::trailers;
+                    } else {
+                        message_.remaining = chunk_size;
+                        message_.phase = v1::Http1Message::phase_t::chunk_data;
+                    }
+                    break;
+                }
+                case v1::Http1Message::phase_t::chunk_data: {
+                    const auto count = static_cast<std::size_t>(
+                        std::min<std::uint64_t>(message_.remaining, data.size() - cursor));
+                    add_body(cursor, cursor + count);
+                    cursor += count;
+                    message_.remaining -= count;
+                    if(message_.remaining == 0)
+                        message_.phase = v1::Http1Message::phase_t::chunk_delimiter;
+                    break;
+                }
+                case v1::Http1Message::phase_t::chunk_delimiter:
+                    message_.pending.push_back(data[cursor++]);
+                    if(message_.pending.back() == '\n') {
+                        message_.pending.clear();
+                        message_.phase = v1::Http1Message::phase_t::chunk_size;
+                    } else if(message_.pending.size() > 1 || message_.pending.back() != '\r') {
+                        message_.pending.clear();
+                        message_.phase = v1::Http1Message::phase_t::opaque;
+                    }
+                    break;
+                case v1::Http1Message::phase_t::trailers:
+                    message_.pending.push_back(data[cursor++]);
+                    if(message_.pending.size() > 65536) {
+                        message_.pending.clear();
+                        message_.phase = v1::Http1Message::phase_t::opaque;
+                    } else if(finish_line()) {
+                        const bool final_line = message_.pending.empty();
+                        message_.pending.clear();
+                        if(final_line) message_.phase = v1::Http1Message::phase_t::headers;
+                    }
+                    break;
+                case v1::Http1Message::phase_t::until_close:
+                    add_body(cursor, data.size());
+                    cursor = data.size();
+                    break;
+                case v1::Http1Message::phase_t::opaque:
+                    cursor = data.size();
+                    break;
             }
         }
-
-        if(auto range = intersect_payload(body_start, body_end,
-                                          current_offset, block.size())) {
-            return {*range};
+        // A framing error anywhere in this input invalidates ranges already
+        // collected from the same block. Publishing a prefix would present
+        // attacker-controlled malformed framing as trusted L7 content.
+        if(message_.phase == v1::Http1Message::phase_t::opaque) {
+            last_encodings_.assign(1, "");
+            return L7PayloadHints{{-1, -1}};
         }
-        return none;
+        if(!ranges.empty()) return ranges;
+        last_encodings_.assign(1, "");
+        return L7PayloadHints{{0, 0}};
+    }
+
+    void v1::observe_content(EngineCtx& ctx, std::size_t direction,
+                             std::string_view data, std::uint64_t read_bytes,
+                             bool response_side) {
+        auto app = std::dynamic_pointer_cast<app_HttpRequest>(ctx.application_data);
+        if(!app || app->version != app_HttpRequest::HTTP_VER::HTTP_1) return;
+
+        auto* connection = std::any_cast<Http1Connection>(&ctx.state_data);
+        if(!connection) {
+            ctx.state_data = std::make_any<Http1Connection>();
+            connection = std::any_cast<Http1Connection>(&ctx.state_data);
+        }
+
+        auto ranges = connection->observe(direction, data, response_side);
+        app->observe_l7_payload(data, read_bytes, std::move(ranges),
+                                connection->encodings(direction));
     }
 
     L7PayloadHints http2_payload_hint(std::string_view block,
@@ -675,34 +837,127 @@ namespace sx::engine::http {
                 }
             }
 
-            if(auto app = std::dynamic_pointer_cast<app_HttpRequest>(
-                   ctx.application_data)) {
-                const auto current_size = std::min(buffer->size(),
-                                                   ctx.origin->to_read().size());
-                app->l7_payload = http1_payload_hint(
-                    buffer->string_view(), buffer->size() - current_size);
-                app->l7_payload_observed_bytes = ctx.origin->meter_read_bytes;
-                app->reset_l7_encoding();
-                const auto has_payload = std::any_of(
-                    app->l7_payload.begin(), app->l7_payload.end(),
-                    [](auto const& range) { return range.second > range.first; });
-                if(has_payload) {
-                    const auto encoding = header_value(
-                        buffer->string_view(), "content-encoding");
-                    const auto value = encoding && ascii_contains_ci(*encoding, "gzip")
-                        ? std::string_view("gzip") : std::string_view{};
-                    for(auto const& range : app->l7_payload) {
-                        if(range.second > range.first)
-                            app->observe_l7_encoding(value);
-                    }
-                }
-            }
-
             _deb("start finished");
         }
     }
 
     namespace v2 {
+
+        L7PayloadHints Http2Direction::observe(std::string_view data,
+                                               bool client_side) {
+            L7PayloadHints ranges;
+            last_stream_ids_.clear();
+            auto add_body = [&](std::size_t start, std::size_t end) {
+                if(start == end) return;
+                if(!ranges.empty() && ranges.back().second ==
+                        static_cast<std::int64_t>(start) &&
+                   last_stream_ids_.back() == current_stream_id_) {
+                    ranges.back().second = static_cast<std::int64_t>(end);
+                } else {
+                    ranges.emplace_back(static_cast<std::int64_t>(start),
+                                        static_cast<std::int64_t>(end));
+                    last_stream_ids_.push_back(current_stream_id_);
+                }
+            };
+            auto reset_frame = [&]() {
+                header_size_ = 0;
+                frame_remaining_ = 0;
+                data_remaining_ = 0;
+                padding_remaining_ = 0;
+                data_frame_ = false;
+                padded_ = false;
+                need_padding_length_ = false;
+            };
+
+            if(opaque_) return {{-1, -1}};
+            std::size_t cursor = 0;
+            if(first_input_) {
+                first_input_ = false;
+                reading_preface_ = client_side && !data.empty() && data.front() == txt::magic[0];
+            }
+            while(cursor < data.size()) {
+                if(reading_preface_) {
+                    if(data[cursor] != txt::magic[preface_size_]) {
+                        opaque_ = true;
+                        break;
+                    }
+                    ++cursor;
+                    if(++preface_size_ == txt::magic_sz) reading_preface_ = false;
+                    continue;
+                }
+                if(header_size_ < header_.size()) {
+                    header_[header_size_++] = static_cast<unsigned char>(data[cursor++]);
+                    if(header_size_ != header_.size()) continue;
+                    frame_remaining_ = (static_cast<std::uint32_t>(header_[0]) << 16U) |
+                                       (static_cast<std::uint32_t>(header_[1]) << 8U) |
+                                       static_cast<std::uint32_t>(header_[2]);
+                    data_frame_ = header_[3] == 0;
+                    current_stream_id_ =
+                        (static_cast<std::uint32_t>(header_[5] & 0x7fU) << 24U) |
+                        (static_cast<std::uint32_t>(header_[6]) << 16U) |
+                        (static_cast<std::uint32_t>(header_[7]) << 8U) |
+                        static_cast<std::uint32_t>(header_[8]);
+                    padded_ = data_frame_ && (header_[4] & 0x08U) != 0;
+                    need_padding_length_ = padded_;
+                    data_remaining_ = data_frame_ && !padded_ ? frame_remaining_ : 0;
+                    if(frame_remaining_ == 0) reset_frame();
+                    continue;
+                }
+                if(need_padding_length_) {
+                    const auto padding = static_cast<std::uint32_t>(
+                        static_cast<unsigned char>(data[cursor++]));
+                    if(frame_remaining_ == 0 || padding > frame_remaining_ - 1) {
+                        opaque_ = true;
+                        break;
+                    }
+                    --frame_remaining_;
+                    padding_remaining_ = padding;
+                    data_remaining_ = frame_remaining_ - padding;
+                    need_padding_length_ = false;
+                    continue;
+                }
+                if(data_remaining_ != 0) {
+                    const auto count = std::min<std::size_t>(data_remaining_,
+                                                             data.size() - cursor);
+                    add_body(cursor, cursor + count);
+                    cursor += count;
+                    data_remaining_ -= static_cast<std::uint32_t>(count);
+                    frame_remaining_ -= static_cast<std::uint32_t>(count);
+                } else {
+                    const auto count = std::min<std::size_t>(
+                        frame_remaining_, data.size() - cursor);
+                    cursor += count;
+                    frame_remaining_ -= static_cast<std::uint32_t>(count);
+                    if(padding_remaining_ >= count)
+                        padding_remaining_ -= static_cast<std::uint32_t>(count);
+                }
+                if(frame_remaining_ == 0) reset_frame();
+            }
+            if(opaque_) return {{-1, -1}};
+            return ranges.empty() ? L7PayloadHints{{0, 0}} : ranges;
+        }
+
+        void observe_content(EngineCtx& ctx, std::size_t direction,
+                             std::string_view data, std::uint64_t read_bytes,
+                             bool client_side) {
+            auto app = std::dynamic_pointer_cast<app_HttpRequest>(ctx.application_data);
+            if(!app || app->version != app_HttpRequest::HTTP_VER::HTTP2) return;
+            auto* connection = std::any_cast<Http2Connection>(&ctx.state_data);
+            if(!connection) return;
+            auto& tracker = connection->content_directions.at(direction);
+            auto ranges = tracker.observe(data, client_side);
+            std::vector<std::string> encodings;
+            encodings.reserve(tracker.stream_ids().size());
+            for(const auto stream_id : tracker.stream_ids()) {
+                const auto stream = connection->streams.find(stream_id);
+                encodings.push_back(stream != connection->streams.end() &&
+                                    stream->second.content_encoding_ ==
+                                        Http2Stream::content_type_t::GZIP
+                                    ? "gzip" : "");
+            }
+            app->observe_l7_payload(data, read_bytes, std::move(ranges),
+                                    std::move(encodings));
+        }
 
         // Bound attacker-controlled inspection state independently of peer
         // transport limits.
@@ -2287,18 +2542,6 @@ namespace sx::engine::http {
             auto const& side = last_flow_entry.source();
             auto const& h2_buffer= last_flow_entry.data();
             auto const h2_buffer_sz = h2_buffer->size();
-
-            if(flow_pos + 1 == q_size) {
-                if(auto app = std::dynamic_pointer_cast<app_HttpRequest>(
-                       ctx.application_data)) {
-                    const auto current_size = std::min(h2_buffer_sz,
-                                                       ctx.origin->to_read().size());
-                    app->l7_payload = http2_payload_hint(
-                        h2_buffer->string_view(), h2_buffer_sz - current_size);
-                    app->l7_payload_observed_bytes = ctx.origin->meter_read_bytes;
-                    app->reset_l7_encoding();
-                }
-            }
 
             auto abs_index = pos_size - q_size + flow_pos;
 

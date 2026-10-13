@@ -45,6 +45,7 @@
 #include <openssl/rand.h>
 
 #include <proxy/mitmproxy.hpp>
+#include <proxy/content_webhook_metadata.hpp>
 #include <proxy/mitmhost.hpp>
 #include <proxy/streamhandler.hpp>
 #include <proxy/mitmproxy_utils.hpp>
@@ -1029,24 +1030,6 @@ static std::string b64_decode(std::string const& encoded) {
     return libbase64::decode<std::string, char, unsigned char, false>(encoded);
 }
 
-static std::pair<nlohmann::json, nlohmann::json> l7_payload_lists(
-        sx::engine::http::L7PayloadHints const& ranges) {
-    auto starts = nlohmann::json::array();
-    auto ends = nlohmann::json::array();
-    if(ranges.empty()) {
-        starts.push_back(-1);
-        ends.push_back(-1);
-        return {std::move(starts), std::move(ends)};
-    }
-    for(auto const& [start, end] : ranges) {
-        starts.push_back(start);
-        ends.push_back(end);
-    }
-    return {std::move(starts), std::move(ends)};
-}
-
-
-
 bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
                                 std::string_view payload_layer,
                                 bool regular_webhook, bool sift) {
@@ -1069,23 +1052,24 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
         { "L7_encoding", nlohmann::json::array({""}) }
     };
 
-    if(auto const* current = MitmHostCX::from_baseHostCX(cx); current != nullptr) {
-        if(auto const app = std::dynamic_pointer_cast<sx::engine::http::app_HttpRequest>(
-               current->engine_ctx.application_data);
-           app && app->l7_payload_observed_bytes == current->meter_read_bytes) {
-            auto const [starts, ends] = l7_payload_lists(app->l7_payload);
-            j["info"]["L7_payload_start"] = starts;
-            j["info"]["L7_payload_end"] = ends;
-            auto encodings = nlohmann::json::array();
-            if(app->l7_encoding.size() == app->l7_payload.size()) {
-                for(auto const& encoding : app->l7_encoding)
-                    encodings.push_back(encoding);
-            } else {
-                for(std::size_t i = 0; i < app->l7_payload.size(); ++i)
-                    encodings.push_back("");
-            }
-            j["info"]["L7_encoding"] = std::move(encodings);
-        }
+    auto publish_l7_ranges = [&j](auto const& ranges,
+                                  std::vector<std::string> const& known_encodings) {
+        auto metadata = sx::proxy::l7_payload_metadata(ranges, known_encodings);
+        for(auto& [key, value] : metadata.items())
+            j["info"][key] = std::move(value);
+    };
+
+    auto publish_matching_observation = [&](MitmHostCX const* context) {
+        if(!context) return false;
+        auto const app = std::dynamic_pointer_cast<HttpApplication>(
+            context->engine_ctx.application_data);
+        if(!app || !app->l7_payload_matches(buffer.string_view(),
+                                             cx->meter_read_bytes)) return false;
+        publish_l7_ranges(app->l7_payload, app->l7_encoding);
+        return true;
+    };
+    if(!publish_matching_observation(MitmHostCX::from_baseHostCX(cx))) {
+        publish_matching_observation(first_left());
     }
 
     if(auto* right = first_right(); right != nullptr) {
@@ -1296,6 +1280,24 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
         return;
     }
 
+    // Application framing runs before consumers can inspect or replace this
+    // block. HTTP/1 owns one duplex parser in the authoritative left context.
+    if(auto* engine_context = first_left(); engine_context != nullptr) {
+        auto const app = std::dynamic_pointer_cast<HttpApplication>(
+            engine_context->engine_ctx.application_data);
+        if(app && app->version == HttpApplication::HTTP_VER::HTTP_1) {
+            sx::engine::http::v1::observe_content(
+                engine_context->engine_ctx, side == side_t::RIGHT ? 1U : 0U,
+                from->to_read().string_view(), from->meter_read_bytes,
+                side == side_t::RIGHT);
+        } else if(app && app->version == HttpApplication::HTTP_VER::HTTP2) {
+            sx::engine::http::v2::observe_content(
+                engine_context->engine_ctx, side == side_t::RIGHT ? 1U : 0U,
+                from->to_read().string_view(), from->meter_read_bytes,
+                side == side_t::LEFT);
+        }
+    }
+
     // Transport adapters may enrich the ordinary application state before
     // the same content webhook path used by TCP-based inspection engines.
     if(traffic_log_adapter_) {
@@ -1309,10 +1311,12 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
                 if(app) {
                     if(metadata->payload_layer == "http3")
                         app->version = HttpApplication::HTTP_VER::HTTP3;
-                    app->l7_payload.assign(metadata->payload_ranges.begin(),
-                                           metadata->payload_ranges.end());
-                    app->l7_encoding = std::move(metadata->encodings);
-                    app->l7_payload_observed_bytes = current->meter_read_bytes;
+                    app->observe_l7_payload(
+                        from->to_read().string_view(), current->meter_read_bytes,
+                        sx::engine::http::L7PayloadHints(
+                            metadata->payload_ranges.begin(),
+                            metadata->payload_ranges.end()),
+                        std::move(metadata->encodings));
                 }
             }
         }
