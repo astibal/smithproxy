@@ -44,8 +44,10 @@
 #include <regex>
 #include <deque>
 #include <limits>
+#include <map>
 #include <unordered_map>
 #include <unordered_set>
+#include <variant>
 
 #include <inspect/engine.hpp>
 #ifdef USE_HPACK
@@ -63,6 +65,21 @@ namespace sx::engine::http {
 
     using L7PayloadRange = std::pair<std::int64_t, std::int64_t>;
     using L7PayloadHints = std::vector<L7PayloadRange>;
+    using PayloadAnnotationValue = std::variant<std::int64_t, std::string, bool>;
+    using PayloadAnnotationAttributes =
+        std::map<std::string, PayloadAnnotationValue, std::less<>>;
+    struct PayloadAnnotation {
+        std::int64_t start = 0;
+        std::int64_t end = 0;
+        std::string kind;
+        PayloadAnnotationAttributes attributes;
+
+        bool operator==(PayloadAnnotation const& other) const {
+            return start == other.start && end == other.end && kind == other.kind &&
+                   attributes == other.attributes;
+        }
+    };
+    using PayloadAnnotations = std::vector<PayloadAnnotation>;
 
     L7PayloadHints http2_payload_hint(std::string_view flow_block,
                                       std::size_t current_offset = 0);
@@ -118,6 +135,7 @@ namespace sx::engine::http {
         std::size_t l7_payload_observed_size = 0;
         std::uint64_t l7_payload_observed_fingerprint = 0;
         std::vector<std::string> l7_encoding;
+        PayloadAnnotations payload_annotations;
         static std::uint64_t payload_fingerprint(std::string_view data) {
             std::uint64_t value = 14695981039346656037ULL;
             for(unsigned char byte : data) {
@@ -129,9 +147,11 @@ namespace sx::engine::http {
 
         void observe_l7_payload(std::string_view data, std::uint64_t read_bytes,
                                 L7PayloadHints ranges,
-                                std::vector<std::string> encodings = {}) {
+                                std::vector<std::string> encodings = {},
+                                PayloadAnnotations annotations = {}) {
             l7_payload = std::move(ranges);
             l7_encoding = std::move(encodings);
+            payload_annotations = std::move(annotations);
             l7_payload_observed_bytes = read_bytes;
             l7_payload_observed_size = data.size();
             l7_payload_observed_fingerprint = payload_fingerprint(data);
@@ -284,6 +304,7 @@ namespace sx::engine::http {
             std::string pending;
             std::uint64_t remaining = 0;
             std::string encoding;
+            bool start_line = true;
         };
 
         // HTTP/1 parser state belongs to the v1 engine and is stored in
@@ -295,10 +316,14 @@ namespace sx::engine::http {
             [[nodiscard]] std::vector<std::string> const& encodings() const {
                 return last_encodings_;
             }
+            [[nodiscard]] PayloadAnnotations const& annotations() const {
+                return last_annotations_;
+            }
 
         private:
             Http1Message message_;
             std::vector<std::string> last_encodings_;
+            PayloadAnnotations last_annotations_;
         };
 
         struct Http1Connection {
@@ -350,6 +375,8 @@ namespace sx::engine::http {
             static constexpr const char* magic = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
             static constexpr const size_t magic_sz = 24;
         };
+
+        [[nodiscard]] bool is_prior_knowledge_preface(std::string_view data);
 
         void start(EngineCtx &ctx);
 
@@ -452,6 +479,9 @@ namespace sx::engine::http {
             [[nodiscard]] std::vector<std::uint32_t> const& stream_ids() const {
                 return last_stream_ids_;
             }
+            [[nodiscard]] PayloadAnnotations const& annotations() const {
+                return last_annotations_;
+            }
 
         private:
             std::array<unsigned char, 9> header_{};
@@ -466,8 +496,10 @@ namespace sx::engine::http {
             std::size_t preface_size_ = 0;
             bool reading_preface_ = false;
             bool opaque_ = false;
+            std::uint8_t current_frame_type_ = 0;
             std::uint32_t current_stream_id_ = 0;
             std::vector<std::uint32_t> last_stream_ids_;
+            PayloadAnnotations last_annotations_;
         };
 
         struct Http2Connection {
@@ -539,6 +571,13 @@ namespace sx::engine::http {
                              std::string_view data, std::uint64_t read_bytes,
                              bool client_side);
     }
+
+    // Dispatch an exact application-data block using transport metadata
+    // already published in EngineCtx. Unknown negotiated protocols are not
+    // guessed as HTTP/1; clear-text H2 magic remains a fallback without ALPN.
+    void observe_content(EngineCtx& ctx, std::size_t direction,
+                         std::string_view data, std::uint64_t read_bytes,
+                         bool client_side);
 
     struct log {
         static inline logan_lite http1 {"com.app.http1" };

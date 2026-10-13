@@ -12,7 +12,8 @@ namespace sx::proxy {
 // transformation pure makes the wire contract independently testable.
 inline nlohmann::json l7_payload_metadata(
         engine::http::L7PayloadHints const& ranges,
-        std::vector<std::string> const& known_encodings) {
+        std::vector<std::string> const& known_encodings,
+        engine::http::PayloadAnnotations const& annotations = {}) {
     auto starts = nlohmann::json::array();
     auto ends = nlohmann::json::array();
     auto encodings = nlohmann::json::array();
@@ -30,10 +31,25 @@ inline nlohmann::json l7_payload_metadata(
         }
     }
 
+    auto serialized_annotations = nlohmann::json::array();
+    for(auto const& annotation : annotations) {
+        auto entry = nlohmann::json::array({annotation.start, annotation.end,
+                                            annotation.kind});
+        if(!annotation.attributes.empty()) {
+            auto attributes = nlohmann::json::object();
+            for(auto const& [key, value] : annotation.attributes) {
+                std::visit([&](auto const& item) { attributes[key] = item; }, value);
+            }
+            entry.push_back(std::move(attributes));
+        }
+        serialized_annotations.push_back(std::move(entry));
+    }
+
     return {
         {"L7_payload_start", std::move(starts)},
         {"L7_payload_end", std::move(ends)},
-        {"L7_encoding", std::move(encodings)}
+        {"L7_encoding", std::move(encodings)},
+        {"content_annotations", std::move(serialized_annotations)}
     };
 }
 

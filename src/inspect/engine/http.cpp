@@ -111,6 +111,20 @@ namespace sx::engine::http {
             std::deque<std::string>* pending_methods) {
         L7PayloadHints ranges;
         last_encodings_.clear();
+        last_annotations_.clear();
+        auto annotate = [&](std::size_t start, std::size_t end,
+                            std::string_view kind) {
+            if(start == end) return;
+            if(!last_annotations_.empty() &&
+               last_annotations_.back().end == static_cast<std::int64_t>(start) &&
+               last_annotations_.back().kind == kind) {
+                last_annotations_.back().end = static_cast<std::int64_t>(end);
+            } else {
+                last_annotations_.push_back({static_cast<std::int64_t>(start),
+                                             static_cast<std::int64_t>(end),
+                                             std::string(kind), {}});
+            }
+        };
         auto add_body = [&](std::size_t start, std::size_t end) {
             if(start == end) return;
             if(!ranges.empty() && ranges.back().second == static_cast<std::int64_t>(start) &&
@@ -134,7 +148,13 @@ namespace sx::engine::http {
         while(cursor < data.size()) {
             switch(message_.phase) {
                 case v1::Http1Message::phase_t::headers: {
-                    message_.pending.push_back(data[cursor++]);
+                    annotate(cursor, cursor + 1, message_.start_line
+                                                   ? "http1.start_line"
+                                                   : "http1.headers");
+                    const auto header_byte = data[cursor++];
+                    message_.pending.push_back(header_byte);
+                    if(message_.start_line && header_byte == '\n')
+                        message_.start_line = false;
                     if(message_.pending.size() > 65536) {
                         message_.pending.clear();
                         message_.phase = v1::Http1Message::phase_t::opaque;
@@ -147,6 +167,7 @@ namespace sx::engine::http {
                     if(!complete && !complete_lf) break;
 
                     const auto headers = std::string_view(message_.pending);
+                    message_.start_line = true;
                     message_.encoding.clear();
                     if(auto value = header_value(headers, "content-encoding"))
                         message_.encoding.assign(value->data(), value->size());
@@ -231,12 +252,14 @@ namespace sx::engine::http {
                     const auto count = static_cast<std::size_t>(
                         std::min<std::uint64_t>(message_.remaining, data.size() - cursor));
                     add_body(cursor, cursor + count);
+                    annotate(cursor, cursor + count, "http1.body");
                     cursor += count;
                     message_.remaining -= count;
                     if(message_.remaining == 0) message_.phase = v1::Http1Message::phase_t::headers;
                     break;
                 }
                 case v1::Http1Message::phase_t::chunk_size: {
+                    annotate(cursor, cursor + 1, "http1.chunk.size");
                     message_.pending.push_back(data[cursor++]);
                     if(message_.pending.size() > 128) {
                         message_.pending.clear();
@@ -271,6 +294,7 @@ namespace sx::engine::http {
                     const auto count = static_cast<std::size_t>(
                         std::min<std::uint64_t>(message_.remaining, data.size() - cursor));
                     add_body(cursor, cursor + count);
+                    annotate(cursor, cursor + count, "http1.chunk.data");
                     cursor += count;
                     message_.remaining -= count;
                     if(message_.remaining == 0)
@@ -278,6 +302,7 @@ namespace sx::engine::http {
                     break;
                 }
                 case v1::Http1Message::phase_t::chunk_delimiter:
+                    annotate(cursor, cursor + 1, "http1.chunk.delimiter");
                     message_.pending.push_back(data[cursor++]);
                     if(message_.pending.back() == '\n') {
                         message_.pending.clear();
@@ -288,6 +313,7 @@ namespace sx::engine::http {
                     }
                     break;
                 case v1::Http1Message::phase_t::trailers:
+                    annotate(cursor, cursor + 1, "http1.trailers");
                     message_.pending.push_back(data[cursor++]);
                     if(message_.pending.size() > 65536) {
                         message_.pending.clear();
@@ -300,9 +326,11 @@ namespace sx::engine::http {
                     break;
                 case v1::Http1Message::phase_t::until_close:
                     add_body(cursor, data.size());
+                    annotate(cursor, data.size(), "http1.body");
                     cursor = data.size();
                     break;
                 case v1::Http1Message::phase_t::opaque:
+                    annotate(cursor, data.size(), "http1.opaque");
                     cursor = data.size();
                     break;
             }
@@ -312,6 +340,8 @@ namespace sx::engine::http {
         // attacker-controlled malformed framing as trusted L7 content.
         if(message_.phase == v1::Http1Message::phase_t::opaque) {
             last_encodings_.assign(1, "");
+            last_annotations_.push_back({0, static_cast<std::int64_t>(data.size()),
+                                         "http1.invalid", {}});
             return L7PayloadHints{{-1, -1}};
         }
         if(!ranges.empty()) return ranges;
@@ -333,7 +363,8 @@ namespace sx::engine::http {
 
         auto ranges = connection->observe(direction, data, response_side);
         app->observe_l7_payload(data, read_bytes, std::move(ranges),
-                                connection->encodings(direction));
+                                connection->encodings(direction),
+                                connection->directions.at(direction).annotations());
     }
 
     L7PayloadHints http2_payload_hint(std::string_view block,
@@ -847,6 +878,58 @@ namespace sx::engine::http {
                                                bool client_side) {
             L7PayloadHints ranges;
             last_stream_ids_.clear();
+            last_annotations_.clear();
+            auto frame_name = [](std::uint8_t type) -> std::string_view {
+                switch(type) {
+                    case 0: return "DATA";
+                    case 1: return "HEADERS";
+                    case 2: return "PRIORITY";
+                    case 3: return "RST_STREAM";
+                    case 4: return "SETTINGS";
+                    case 5: return "PUSH_PROMISE";
+                    case 6: return "PING";
+                    case 7: return "GOAWAY";
+                    case 8: return "WINDOW_UPDATE";
+                    case 9: return "CONTINUATION";
+                    default: return "UNKNOWN";
+                }
+            };
+            auto payload_kind = [](std::uint8_t type) -> std::string_view {
+                switch(type) {
+                    case 0: return "h2.data";
+                    case 1: return "h2.headers";
+                    case 2: return "h2.priority";
+                    case 3: return "h2.rst_stream";
+                    case 4: return "h2.settings";
+                    case 5: return "h2.push_promise";
+                    case 6: return "h2.ping";
+                    case 7: return "h2.goaway";
+                    case 8: return "h2.window_update";
+                    case 9: return "h2.continuation";
+                    default: return "h2.frame.payload";
+                }
+            };
+            auto annotate = [&](std::size_t start, std::size_t end,
+                                std::string_view kind,
+                                bool frame_attributes = false) {
+                if(start == end) return;
+                PayloadAnnotationAttributes attributes;
+                if(frame_attributes) {
+                    attributes["frame_type"] = std::string(frame_name(current_frame_type_));
+                    attributes["stream_id"] = static_cast<std::int64_t>(current_stream_id_);
+                }
+                if(!last_annotations_.empty() &&
+                   last_annotations_.back().end == static_cast<std::int64_t>(start) &&
+                   last_annotations_.back().kind == kind &&
+                   last_annotations_.back().attributes == attributes) {
+                    last_annotations_.back().end = static_cast<std::int64_t>(end);
+                } else {
+                    last_annotations_.push_back({static_cast<std::int64_t>(start),
+                                                 static_cast<std::int64_t>(end),
+                                                 std::string(kind),
+                                                 std::move(attributes)});
+                }
+            };
             auto add_body = [&](std::size_t start, std::size_t end) {
                 if(start == end) return;
                 if(!ranges.empty() && ranges.back().second ==
@@ -881,22 +964,32 @@ namespace sx::engine::http {
                         opaque_ = true;
                         break;
                     }
+                    annotate(cursor, cursor + 1, "h2.preface");
                     ++cursor;
                     if(++preface_size_ == txt::magic_sz) reading_preface_ = false;
                     continue;
                 }
                 if(header_size_ < header_.size()) {
+                    annotate(cursor, cursor + 1, "h2.frame.header");
                     header_[header_size_++] = static_cast<unsigned char>(data[cursor++]);
                     if(header_size_ != header_.size()) continue;
                     frame_remaining_ = (static_cast<std::uint32_t>(header_[0]) << 16U) |
                                        (static_cast<std::uint32_t>(header_[1]) << 8U) |
                                        static_cast<std::uint32_t>(header_[2]);
-                    data_frame_ = header_[3] == 0;
+                    current_frame_type_ = header_[3];
+                    data_frame_ = current_frame_type_ == 0;
                     current_stream_id_ =
                         (static_cast<std::uint32_t>(header_[5] & 0x7fU) << 24U) |
                         (static_cast<std::uint32_t>(header_[6]) << 16U) |
                         (static_cast<std::uint32_t>(header_[7]) << 8U) |
                         static_cast<std::uint32_t>(header_[8]);
+                    if(!last_annotations_.empty() &&
+                       last_annotations_.back().kind == "h2.frame.header") {
+                        last_annotations_.back().attributes["frame_type"] =
+                            std::string(frame_name(current_frame_type_));
+                        last_annotations_.back().attributes["stream_id"] =
+                            static_cast<std::int64_t>(current_stream_id_);
+                    }
                     padded_ = data_frame_ && (header_[4] & 0x08U) != 0;
                     need_padding_length_ = padded_;
                     data_remaining_ = data_frame_ && !padded_ ? frame_remaining_ : 0;
@@ -904,6 +997,7 @@ namespace sx::engine::http {
                     continue;
                 }
                 if(need_padding_length_) {
+                    annotate(cursor, cursor + 1, "h2.padding.length", true);
                     const auto padding = static_cast<std::uint32_t>(
                         static_cast<unsigned char>(data[cursor++]));
                     if(frame_remaining_ == 0 || padding > frame_remaining_ - 1) {
@@ -920,12 +1014,16 @@ namespace sx::engine::http {
                     const auto count = std::min<std::size_t>(data_remaining_,
                                                              data.size() - cursor);
                     add_body(cursor, cursor + count);
+                    annotate(cursor, cursor + count, "h2.data", true);
                     cursor += count;
                     data_remaining_ -= static_cast<std::uint32_t>(count);
                     frame_remaining_ -= static_cast<std::uint32_t>(count);
                 } else {
                     const auto count = std::min<std::size_t>(
                         frame_remaining_, data.size() - cursor);
+                    annotate(cursor, cursor + count,
+                             data_frame_ ? "h2.padding" :
+                                           payload_kind(current_frame_type_), true);
                     cursor += count;
                     frame_remaining_ -= static_cast<std::uint32_t>(count);
                     if(padding_remaining_ >= count)
@@ -933,17 +1031,36 @@ namespace sx::engine::http {
                 }
                 if(frame_remaining_ == 0) reset_frame();
             }
-            if(opaque_) return {{-1, -1}};
+            if(opaque_) {
+                last_annotations_.push_back({0, static_cast<std::int64_t>(data.size()),
+                                             "h2.invalid", {}});
+                return {{-1, -1}};
+            }
             return ranges.empty() ? L7PayloadHints{{0, 0}} : ranges;
+        }
+
+        bool is_prior_knowledge_preface(std::string_view data) {
+            return data.size() >= txt::magic_sz &&
+                   data.substr(0, txt::magic_sz) == txt::magic;
         }
 
         void observe_content(EngineCtx& ctx, std::size_t direction,
                              std::string_view data, std::uint64_t read_bytes,
                              bool client_side) {
             auto app = std::dynamic_pointer_cast<app_HttpRequest>(ctx.application_data);
-            if(!app || app->version != app_HttpRequest::HTTP_VER::HTTP2) return;
+            if(!app) return;
+            if(app->version != app_HttpRequest::HTTP_VER::HTTP2) {
+                // The content consumer runs before the ordinary flow detector.
+                // Bootstrap clear prior-knowledge H2 here so its very first
+                // block is never fed to the HTTP/1 framing tracker.
+                if(!client_side || !is_prior_knowledge_preface(data)) return;
+                app->version = app_HttpRequest::HTTP_VER::HTTP2;
+            }
             auto* connection = std::any_cast<Http2Connection>(&ctx.state_data);
-            if(!connection) return;
+            if(!connection) {
+                ctx.state_data = std::make_any<Http2Connection>();
+                connection = std::any_cast<Http2Connection>(&ctx.state_data);
+            }
             auto& tracker = connection->content_directions.at(direction);
             auto ranges = tracker.observe(data, client_side);
             std::vector<std::string> encodings;
@@ -956,8 +1073,51 @@ namespace sx::engine::http {
                                     ? "gzip" : "");
             }
             app->observe_l7_payload(data, read_bytes, std::move(ranges),
-                                    std::move(encodings));
+                                    std::move(encodings), tracker.annotations());
         }
+
+    }
+
+    void observe_content(EngineCtx& ctx, std::size_t direction,
+                         std::string_view data, std::uint64_t read_bytes,
+                         bool client_side) {
+        auto app = std::dynamic_pointer_cast<app_HttpRequest>(ctx.application_data);
+
+        // Negotiated ALPN is authoritative. An unknown future protocol must
+        // not accidentally fall through to an HTTP/1 parser selected earlier.
+        if(!ctx.negotiated_alpn.empty()) {
+            if(ctx.negotiated_alpn == "h2") {
+                if(!app) {
+                    app = std::make_shared<app_HttpRequest>();
+                    ctx.application_data = app;
+                }
+                app->version = app_HttpRequest::HTTP_VER::HTTP2;
+                v2::observe_content(ctx, direction, data, read_bytes, client_side);
+            } else if(ctx.negotiated_alpn == "http/1.1" ||
+                      ctx.negotiated_alpn == "http/1.0") {
+                if(!app) {
+                    app = std::make_shared<app_HttpRequest>();
+                    ctx.application_data = app;
+                }
+                app->version = app_HttpRequest::HTTP_VER::HTTP_1;
+                v1::observe_content(ctx, direction, data, read_bytes, !client_side);
+            }
+            return;
+        }
+
+        if((app && app->version == app_HttpRequest::HTTP_VER::HTTP2) ||
+           (client_side && v2::is_prior_knowledge_preface(data))) {
+            if(!app) {
+                app = std::make_shared<app_HttpRequest>();
+                ctx.application_data = app;
+            }
+            v2::observe_content(ctx, direction, data, read_bytes, client_side);
+        } else if(app && app->version == app_HttpRequest::HTTP_VER::HTTP_1) {
+            v1::observe_content(ctx, direction, data, read_bytes, !client_side);
+        }
+    }
+
+    namespace v2 {
 
         // Bound attacker-controlled inspection state independently of peer
         // transport limits.

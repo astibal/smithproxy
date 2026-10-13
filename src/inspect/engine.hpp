@@ -147,6 +147,11 @@ namespace sx::engine {
         MitmHostCX* origin = nullptr;
         std::shared_ptr<duplexFlowMatch> signature;
 
+        // Transport metadata captured before an application engine runs.
+        // This is the protocol selected by TLS ALPN, not the ClientHello
+        // offer list. An empty value means that ALPN was unavailable.
+        std::string negotiated_alpn;
+
         struct FlowPos {
             std::size_t blocks_seen = 0; // flow size seen
             std::size_t bytes_in_last_block_seen = 0;

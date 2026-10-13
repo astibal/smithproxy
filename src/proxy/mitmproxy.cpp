@@ -831,6 +831,13 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
         }
     }
 
+    // Publish the origin server's selected ALPN into the inspection context
+    // once it becomes available. Application engines consume this metadata;
+    // they never have to reach back into SSLCom or the proxy topology.
+    if(scom && mh->engine_ctx.negotiated_alpn.empty()) {
+        mh->engine_ctx.negotiated_alpn = scom->negotiated_alpn();
+    }
+
     if(not wh_sni and scom and not scom->get_sni().empty()) {
         if(auto const* target = first_right(); target) {
             wh_sni = sx::http::webhooks::hostname_info(
@@ -1049,12 +1056,15 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
         { "payload_layer", std::string(payload_layer) },
         { "L7_payload_start", nlohmann::json::array({-1}) },
         { "L7_payload_end", nlohmann::json::array({-1}) },
-        { "L7_encoding", nlohmann::json::array({""}) }
+        { "L7_encoding", nlohmann::json::array({""}) },
+        { "content_annotations", nlohmann::json::array() }
     };
 
     auto publish_l7_ranges = [&j](auto const& ranges,
-                                  std::vector<std::string> const& known_encodings) {
-        auto metadata = sx::proxy::l7_payload_metadata(ranges, known_encodings);
+                                  std::vector<std::string> const& known_encodings,
+                                  auto const& annotations) {
+        auto metadata = sx::proxy::l7_payload_metadata(ranges, known_encodings,
+                                                       annotations);
         for(auto& [key, value] : metadata.items())
             j["info"][key] = std::move(value);
     };
@@ -1065,10 +1075,24 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
             context->engine_ctx.application_data);
         if(!app || !app->l7_payload_matches(buffer.string_view(),
                                              cx->meter_read_bytes)) return false;
-        publish_l7_ranges(app->l7_payload, app->l7_encoding);
+        publish_l7_ranges(app->l7_payload, app->l7_encoding,
+                          app->payload_annotations);
         return true;
     };
-    if(!publish_matching_observation(MitmHostCX::from_baseHostCX(cx))) {
+    // TCP HTTP/1 and HTTP/2 framing is owned by the authoritative left
+    // context (see proxy() immediately before this webhook).  The current
+    // side context may still contain an outer HTTP/1 CONNECT application;
+    // consulting it first can therefore attach HTTP/1 annotations to inner
+    // HTTP/2 bytes.  HTTP/3 is the exception: its transport adapter stores
+    // observations on the current QUIC stream context.
+    auto const* current = MitmHostCX::from_baseHostCX(cx);
+    auto const current_app = current
+        ? std::dynamic_pointer_cast<HttpApplication>(
+              current->engine_ctx.application_data)
+        : nullptr;
+    if(current_app && current_app->version == HttpApplication::HTTP_VER::HTTP3) {
+        publish_matching_observation(current);
+    } else {
         publish_matching_observation(first_left());
     }
 
@@ -1283,19 +1307,11 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
     // Application framing runs before consumers can inspect or replace this
     // block. HTTP/1 owns one duplex parser in the authoritative left context.
     if(auto* engine_context = first_left(); engine_context != nullptr) {
-        auto const app = std::dynamic_pointer_cast<HttpApplication>(
-            engine_context->engine_ctx.application_data);
-        if(app && app->version == HttpApplication::HTTP_VER::HTTP_1) {
-            sx::engine::http::v1::observe_content(
-                engine_context->engine_ctx, side == side_t::RIGHT ? 1U : 0U,
-                from->to_read().string_view(), from->meter_read_bytes,
-                side == side_t::RIGHT);
-        } else if(app && app->version == HttpApplication::HTTP_VER::HTTP2) {
-            sx::engine::http::v2::observe_content(
-                engine_context->engine_ctx, side == side_t::RIGHT ? 1U : 0U,
-                from->to_read().string_view(), from->meter_read_bytes,
-                side == side_t::LEFT);
-        }
+        auto& ctx = engine_context->engine_ctx;
+        sx::engine::http::observe_content(
+            ctx, side == side_t::RIGHT ? 1U : 0U,
+            from->to_read().string_view(), from->meter_read_bytes,
+            side == side_t::LEFT);
     }
 
     // Transport adapters may enrich the ordinary application state before
