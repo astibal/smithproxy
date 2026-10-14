@@ -13,9 +13,13 @@
 #include <map>
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <limits>
+#include <memory>
+#include <numeric>
 #include <string_view>
+#include <vector>
 #include <arpa/inet.h>
 
 
@@ -37,6 +41,79 @@ namespace sx::http::webhooks {
     static std::string sxbn_callback_url;
 
     namespace {
+        struct timing_samples {
+            static constexpr std::size_t window_size = 1024;
+            std::uint64_t count = 0;
+            double last = 0.0;
+            double total = 0.0;
+            double minimum = 0.0;
+            double maximum = 0.0;
+            std::deque<double> recent;
+
+            void add(double value) {
+                ++count;
+                last = value;
+                total += value;
+                if(count == 1) minimum = maximum = value;
+                else {
+                    minimum = std::min(minimum, value);
+                    maximum = std::max(maximum, value);
+                }
+                recent.push_back(value);
+                if(recent.size() > window_size) recent.pop_front();
+            }
+
+            [[nodiscard]] timing_diagnostics_snapshot snapshot() const {
+                timing_diagnostics_snapshot result;
+                result.samples = count;
+                result.last_ms = last;
+                result.average_ms = count ? total / static_cast<double>(count) : 0.0;
+                result.min_ms = minimum;
+                result.max_ms = maximum;
+                if(recent.empty()) return result;
+
+                std::vector<double> sorted(recent.begin(), recent.end());
+                std::sort(sorted.begin(), sorted.end());
+                const auto middle = sorted.size() / 2;
+                result.median_ms = sorted.size() % 2
+                    ? sorted[middle]
+                    : (sorted[middle - 1] + sorted[middle]) / 2.0;
+                const auto p95_index = static_cast<std::size_t>(
+                    std::ceil(static_cast<double>(sorted.size()) * 0.95)) - 1;
+                result.p95_ms = sorted[std::min(p95_index, sorted.size() - 1)];
+                return result;
+            }
+        };
+
+        struct webhook_runtime_stats {
+            std::mutex lock;
+            std::uint64_t requests = 0;
+            std::uint64_t accepted = 0;
+            std::uint64_t rejected = 0;
+            std::uint64_t completed = 0;
+            std::uint64_t succeeded = 0;
+            std::uint64_t failed = 0;
+            std::uint64_t asynchronous_requests = 0;
+            std::uint64_t waiting_requests = 0;
+            std::uint64_t action_requests = 0;
+            std::uint64_t content_requests = 0;
+            std::uint64_t request_bytes = 0;
+            std::uint64_t response_bytes = 0;
+            std::uint64_t last_request_ms = 0;
+            std::uint64_t last_response_ms = 0;
+            long last_status = 0;
+            std::string last_error;
+            std::map<std::string, std::uint64_t> actions;
+            timing_samples total_delay;
+            timing_samples queue_delay;
+            timing_samples transport_delay;
+        } webhook_stats;
+
+        struct webhook_request_trace {
+            std::chrono::steady_clock::time_point submitted = std::chrono::steady_clock::now();
+            std::optional<std::chrono::steady_clock::time_point> initialized;
+        };
+
         struct sift_runtime_stats {
             std::mutex lock;
             std::uint64_t requests = 0;
@@ -62,6 +139,105 @@ namespace sx::http::webhooks {
         std::uint64_t wallclock_ms() {
             return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count());
+        }
+
+        void webhook_request_started(std::size_t bytes, std::string const& action,
+                                     bool waiting, bool content) {
+            auto lock = std::scoped_lock(webhook_stats.lock);
+            ++webhook_stats.requests;
+            ++webhook_stats.actions[action.empty() ? "<unknown>" : action];
+            if(waiting) ++webhook_stats.waiting_requests;
+            else ++webhook_stats.asynchronous_requests;
+            if(content) ++webhook_stats.content_requests;
+            else ++webhook_stats.action_requests;
+            webhook_stats.request_bytes += bytes;
+            webhook_stats.last_request_ms = wallclock_ms();
+        }
+
+        void webhook_request_accepted(bool accepted) {
+            auto lock = std::scoped_lock(webhook_stats.lock);
+            if(accepted) ++webhook_stats.accepted;
+            else {
+                ++webhook_stats.rejected;
+                webhook_stats.last_error = "request was not accepted by the worker";
+            }
+        }
+
+        void webhook_request_initialized(webhook_request_trace& trace,
+                                         std::chrono::steady_clock::time_point now) {
+            trace.initialized = now;
+            const auto elapsed = std::chrono::duration<double, std::milli>(
+                now - trace.submitted).count();
+            auto lock = std::scoped_lock(webhook_stats.lock);
+            webhook_stats.queue_delay.add(elapsed);
+        }
+
+        void webhook_request_completed(sx::http::expected_reply const& reply,
+                                       webhook_request_trace const& trace,
+                                       std::chrono::steady_clock::time_point now) {
+            const auto total = std::chrono::duration<double, std::milli>(
+                now - trace.submitted).count();
+            auto lock = std::scoped_lock(webhook_stats.lock);
+            ++webhook_stats.completed;
+            webhook_stats.last_response_ms = wallclock_ms();
+            webhook_stats.total_delay.add(total);
+            if(trace.initialized) {
+                webhook_stats.transport_delay.add(
+                    std::chrono::duration<double, std::milli>(now - *trace.initialized).count());
+            }
+            if(!reply) {
+                ++webhook_stats.failed;
+                webhook_stats.last_status = 0;
+                webhook_stats.last_error = "request completed without a reply";
+                return;
+            }
+            const auto status = reply->response.first;
+            webhook_stats.last_status = status;
+            webhook_stats.response_bytes += reply->response.second.size();
+            if(status >= 200 && status < 300) {
+                ++webhook_stats.succeeded;
+                webhook_stats.last_error.clear();
+            } else {
+                ++webhook_stats.failed;
+                webhook_stats.last_error = reply->response.second;
+                constexpr std::size_t max_error = 240;
+                if(webhook_stats.last_error.size() > max_error) {
+                    webhook_stats.last_error.resize(max_error);
+                    webhook_stats.last_error += "...";
+                }
+            }
+        }
+
+        sx::http::AsyncRequest::reply_hook webhook_tracked_hook(
+            sx::http::AsyncRequest::reply_hook hook,
+            std::shared_ptr<webhook_request_trace> trace) {
+            return [hook = std::move(hook), trace = std::move(trace)](
+                    sx::http::expected_reply const& reply) {
+                const auto now = std::chrono::steady_clock::now();
+                const auto initialization = reply && reply->response.first == -100;
+                if(initialization) webhook_request_initialized(*trace, now);
+                else webhook_request_completed(reply, *trace, now);
+                if(hook) hook(reply);
+            };
+        }
+
+        bool webhook_emit(std::string payload, std::string const& action,
+                          sx::http::AsyncRequest::reply_hook hook, bool content = false) {
+            webhook_request_started(payload.size(), action, false, content);
+            auto trace = std::make_shared<webhook_request_trace>();
+            const auto accepted = sx::http::AsyncRequest::emit(
+                payload, webhook_tracked_hook(std::move(hook), std::move(trace)));
+            webhook_request_accepted(accepted);
+            return accepted;
+        }
+
+        void webhook_emit_wait(std::string const& payload, std::string const& action,
+                               sx::http::AsyncRequest::reply_hook hook, bool content = false) {
+            webhook_request_started(payload.size(), action, true, content);
+            webhook_request_accepted(true);
+            auto trace = std::make_shared<webhook_request_trace>();
+            sx::http::AsyncRequest::emit_wait(
+                payload, webhook_tracked_hook(std::move(hook), std::move(trace)));
         }
 
         void sift_request_started(std::size_t bytes, bool content) {
@@ -142,6 +318,39 @@ namespace sx::http::webhooks {
     static std::string active_webhook_url() {
         auto lock = std::scoped_lock(CfgFactory::lock());
         return CfgFactory::get()->settings_webhook.active_url();
+    }
+
+    webhook_diagnostics_snapshot webhook_diagnostics() {
+        const auto settings = sx::http::AsyncRequest::settings_snapshot();
+        const auto binary = binary_content_enabled();
+        auto lock = std::scoped_lock(webhook_stats.lock);
+        webhook_diagnostics_snapshot result;
+        result.enabled = settings.enabled;
+        result.verify_tls = settings.verify_tls;
+        result.binary_content = binary;
+        result.url = settings.url;
+        result.timeout_seconds = sx::http::AsyncRequest::config::timeout;
+        result.requests = webhook_stats.requests;
+        result.accepted = webhook_stats.accepted;
+        result.rejected = webhook_stats.rejected;
+        result.completed = webhook_stats.completed;
+        result.succeeded = webhook_stats.succeeded;
+        result.failed = webhook_stats.failed;
+        result.asynchronous_requests = webhook_stats.asynchronous_requests;
+        result.waiting_requests = webhook_stats.waiting_requests;
+        result.action_requests = webhook_stats.action_requests;
+        result.content_requests = webhook_stats.content_requests;
+        result.request_bytes = webhook_stats.request_bytes;
+        result.response_bytes = webhook_stats.response_bytes;
+        result.last_request_ms = webhook_stats.last_request_ms;
+        result.last_response_ms = webhook_stats.last_response_ms;
+        result.last_status = webhook_stats.last_status;
+        result.last_error = webhook_stats.last_error;
+        result.actions = webhook_stats.actions;
+        result.total_delay = webhook_stats.total_delay.snapshot();
+        result.queue_delay = webhook_stats.queue_delay.snapshot();
+        result.transport_delay = webhook_stats.transport_delay.snapshot();
+        return result;
     }
 
     bool binary_content_enabled() {
@@ -384,7 +593,7 @@ namespace sx::http::webhooks {
                     }
                 }
             };
-            sx::http::AsyncRequest::emit(to_string(info), info_callback());
+            webhook_emit(to_string(info), "info", info_callback());
             nlohmann::json const ping = {
                                           { "action", "ping" },
                                           {"source", get_hostid() },
@@ -392,9 +601,7 @@ namespace sx::http::webhooks {
                                           {"instance", SmithProxy::instance().API.instance_OID() },
                                           {"proxies", SmithProxy::instance().API.proxy_session_connid_list() }
                                         };
-            sx::http::AsyncRequest::emit(
-                    to_string(ping),
-                    default_callback());
+            webhook_emit(to_string(ping), "ping", default_callback());
         }
     }
 
@@ -408,9 +615,7 @@ namespace sx::http::webhooks {
                 {"proxies", SmithProxy::instance().API.proxy_session_connid_list() },
                 {"proxies-plus", SmithProxy::instance().API.proxy_session_connid_list_plus() }
             };
-            sx::http::AsyncRequest::emit(
-                    to_string(ping),
-                    default_callback());
+            webhook_emit(to_string(ping), "ping", default_callback());
         }
     }
 
@@ -452,9 +657,7 @@ namespace sx::http::webhooks {
                     {"type", "proxy"},
                     { "addresses", hostnames }
             };
-            sx::http::AsyncRequest::emit(
-                    to_string(nbr_ping),
-                    neighbor_reply());
+            webhook_emit(to_string(nbr_ping), "neighbor", neighbor_reply());
         }
     }
 
@@ -474,9 +677,7 @@ namespace sx::http::webhooks {
                     {"addresses", address_vec }
             };
 
-            sx::http::AsyncRequest::emit(
-                    to_string(nbr_update),
-                    neighbor_reply());
+            webhook_emit(to_string(nbr_update), "neighbor", neighbor_reply());
         }
     }
 
@@ -594,7 +795,8 @@ namespace sx::http::webhooks {
                         }
                     }
                 };
-                sx::http::AsyncRequest::emit(msg_str, action_hook());
+                webhook_emit(std::move(msg_str), action, action_hook(),
+                             action == "connection-content");
 
             }
         }
@@ -620,13 +822,13 @@ namespace sx::http::webhooks {
                     {"type",   "proxy"}};
 
             msg.push_back({"details", details});
-            sx::http::AsyncRequest::emit_wait(
-                    to_string(msg),
+            webhook_emit_wait(
+                    to_string(msg), action,
                     [hook = std::move(hook)](sx::http::expected_reply const& reply) {
                         // The negative status is an internal Request setup hook,
                         // not a webhook response for synchronous callers.
                         if(!reply || reply->response.first > 0) hook(reply);
-                    });
+                    }, action == "connection-content");
             return true;
         }
         return false;
@@ -637,10 +839,10 @@ namespace sx::http::webhooks {
         if(!enabled or !hook or !binary_content_enabled()) return false;
         auto message = encode_content(action_id, std::move(details), payload);
         if(message.empty()) return false;
-        sx::http::AsyncRequest::emit_wait(message,
+        webhook_emit_wait(message, "connection-content",
             [hook = std::move(hook)](sx::http::expected_reply const& reply) {
                 if(!reply || reply->response.first > 0) hook(reply);
-            });
+            }, true);
         return true;
     }
 }

@@ -1233,6 +1233,22 @@ int cli_diag_sys_api_stats(DiagCli* cli, const char* command,
 int cli_diag_sys_webhook_stats(DiagCli* cli, const char* command,
                                char* argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
+    const auto stats = sx::http::webhooks::webhook_diagnostics();
+    const auto inflight = stats.accepted >= stats.completed
+        ? stats.accepted - stats.completed : 0;
+    const auto now_ms = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count());
+    const auto age = [now_ms](std::uint64_t timestamp) -> std::string {
+        if(timestamp == 0) return "never";
+        return std::to_string(now_ms >= timestamp ? now_ms - timestamp : 0) + " ms ago";
+    };
+    const auto append_timing = [](std::ostringstream& stream, char const* name,
+                                  sx::http::webhooks::timing_diagnostics_snapshot const& timing) {
+        stream << "  " << name << " ms (" << timing.samples << " samples): last "
+               << timing.last_ms << ", avg " << timing.average_ms
+               << ", median " << timing.median_ms << ", p95 " << timing.p95_ms
+               << ", min " << timing.min_ms << ", max " << timing.max_ms << "\n";
+    };
     std::ostringstream output;
     output << "Webhook communication worker:\n";
     if(sx::comm::webhook::enabled()) {
@@ -1242,10 +1258,39 @@ int cli_diag_sys_webhook_stats(DiagCli* cli, const char* command,
     } else {
         output << "  mode: direct\n";
     }
-    output << "  pending requests: "
-           << sx::http::AsyncRequest::pending_requests.load(std::memory_order_relaxed) << "\n"
-           << "  dropped requests: "
-           << sx::http::AsyncRequest::dropped_requests.load(std::memory_order_relaxed);
+    output << "  enabled: " << (stats.enabled ? "yes" : "no") << "\n"
+           << "  endpoint: " << (stats.url.empty() ? "<not configured>" : stats.url) << "\n"
+           << "  TLS verify: " << (stats.verify_tls ? "yes" : "no") << "\n"
+           << "  content protocol: " << (stats.binary_content ? "sxbn-001" : "json-base64") << "\n"
+           << "  timeout: " << stats.timeout_seconds << " s\n"
+           << "  requests: " << stats.requests
+           << " (async " << stats.asynchronous_requests
+           << ", waiting " << stats.waiting_requests << ")\n"
+           << "  request types: actions " << stats.action_requests
+           << ", content " << stats.content_requests << "\n"
+           << "  accepted/rejected: " << stats.accepted << "/" << stats.rejected << "\n"
+           << "  in flight: " << inflight << "\n"
+           << "  completed: " << stats.completed
+           << " (ok " << stats.succeeded << ", failed " << stats.failed << ")\n"
+           << "  bytes: tx " << stats.request_bytes << ", rx " << stats.response_bytes << "\n"
+           << "  worker pool pending/dropped: "
+           << sx::http::AsyncRequest::pending_requests.load(std::memory_order_relaxed) << "/"
+           << sx::http::AsyncRequest::dropped_requests.load(std::memory_order_relaxed) << "\n"
+           << "  last request: " << age(stats.last_request_ms) << "\n"
+           << "  last response: " << age(stats.last_response_ms) << "\n"
+           << "  last status: " << (stats.last_status ? std::to_string(stats.last_status) : "n/a") << "\n"
+           << std::fixed << std::setprecision(3);
+    append_timing(output, "total delay", stats.total_delay);
+    append_timing(output, "queue delay", stats.queue_delay);
+    append_timing(output, "transport delay", stats.transport_delay);
+    if(!stats.actions.empty()) {
+        output << "  actions:";
+        for(auto const& [action, count]: stats.actions) {
+            output << " " << action << "=" << count;
+        }
+        output << "\n";
+    }
+    if(!stats.last_error.empty()) output << "  last error: " << stats.last_error;
     cli_print(cli, "%s", output.str().c_str());
     return CLI_OK;
 }
