@@ -17,6 +17,7 @@ namespace sx::webserver {
         void controller_add_uni(lmh::WebServer &server);
         void controller_add_wh_register(lmh::WebServer &server);
         void controller_add_wh_unregister(lmh::WebServer &server);
+        void controller_add_wh_v2(lmh::WebServer &server);
     }
 }
 

@@ -45,6 +45,7 @@
 #include <openssl/rand.h>
 
 #include <proxy/mitmproxy.hpp>
+#include <proxy/content_webhook_metadata.hpp>
 #include <proxy/mitmhost.hpp>
 #include <proxy/streamhandler.hpp>
 #include <proxy/mitmproxy_utils.hpp>
@@ -70,13 +71,40 @@
 #include <socle/timed_guard.hpp>
 
 #include <inspect/fp/ja4.hpp>
+#include <proxy/connection_identity.hpp>
 
 using namespace socle;
+
+namespace {
+
+using HttpApplication = sx::engine::http::app_HttpRequest;
+
+std::shared_ptr<HttpApplication> ensure_http_application(MitmHostCX* context) {
+    if(!context) return {};
+    auto app = std::dynamic_pointer_cast<HttpApplication>(
+        context->engine_ctx.application_data);
+    if(!app) {
+        app = std::make_shared<HttpApplication>();
+        context->engine_ctx.application_data = app;
+    }
+    return app;
+}
+
+std::string_view content_payload_layer(baseHostCX* context) {
+    auto const* current = MitmHostCX::from_baseHostCX(context);
+    if(!current) return "tcp";
+    auto const app = std::dynamic_pointer_cast<HttpApplication>(
+        current->engine_ctx.application_data);
+    return app && app->version == HttpApplication::HTTP_VER::HTTP3
+        ? std::string_view{"http3"} : std::string_view{"tcp"};
+}
+
+} // namespace
 
 MitmProxy::MitmProxy(baseCom* c): baseProxy(c), start_stop_tls_(*this) {
 
     current_sessions()++;
-    total_sessions()++;
+    session_id_ = total_sessions().fetch_add(1, std::memory_order_relaxed) + 1;
 }
 
 bool MitmProxy::stage_stream_handler(std::unique_ptr<sx::StreamHandler> handler) {
@@ -309,19 +337,112 @@ std::string_view MitmProxy::session_protocol() const noexcept {
     return stream_handler_ ? stream_handler_->session_protocol() : std::string_view{};
 }
 
+bool MitmProxy::add_sift_classification(std::string classification) {
+    if(classification.empty()) return false;
+
+    auto lock = std::scoped_lock(sift_classifications_lock_);
+    return sift_classifications_.insert(std::move(classification)).second;
+}
+
+std::vector<std::string> MitmProxy::sift_classifications() const {
+    auto lock = std::scoped_lock(sift_classifications_lock_);
+    return {sift_classifications_.begin(), sift_classifications_.end()};
+}
+
+void MitmProxy::publish_sift_classifications() const {
+    if(!sx::http::webhooks::is_enabled()) return;
+
+    auto const classifications = sift_classifications();
+    if(classifications.empty()) return;
+
+    nlohmann::json details;
+    details["info"] = {
+        {"session", to_connection_label()},
+        {"classification", {{"sift", classifications}}}
+    };
+    sx::http::webhooks::send_action(
+        "connection-info", to_connection_ID(), details);
+}
+
+void MitmProxy::submit_flow_observation(
+    sx::traffic_log_adapter::flow_observation fields,
+    std::string_view payload_layer) {
+    if(fields.empty()) return;
+
+    if(payload_layer == "http3.headers") {
+        if(auto* left = first_left(); left != nullptr) {
+            auto app = ensure_http_application(left);
+            app->version = HttpApplication::HTTP_VER::HTTP3;
+            auto copy = [&](char const* source, std::string& target) {
+                if(auto const found = fields.find(source); found != fields.end())
+                    target = found->second;
+            };
+            copy("flow.http3.method", app->http_data.method);
+            copy("flow.http3.authority", app->http_data.host);
+            copy("flow.http3.path", app->http_data.uri);
+            copy("flow.http3.scheme", app->http_data.proto);
+        }
+    }
+
+    nlohmann::json details;
+    auto& info = details["info"];
+    info["session"] = to_connection_label();
+    info["side"] = "L";
+    info["payload_layer"] = payload_layer;
+
+    for(auto const& [name, value] : fields) {
+        info[name] = value;
+    }
+
+    if(sx::http::webhooks::is_enabled()) {
+        sx::http::webhooks::send_action(
+            "connection-info", to_connection_ID(), details);
+    }
+
+    if(!sx::http::webhooks::sift_enabled()) return;
+
+    sx::http::webhooks::send_sift_content_wait(
+        to_connection_ID(), std::move(details), {},
+        [this](sx::http::expected_reply reply) {
+            if(!reply.has_value()) return;
+
+            auto const status = reply.value().response.first;
+            if(status < 200 || status >= 300) return;
+
+            auto body = nlohmann::json::parse(
+                reply.value().response.second, nullptr, false);
+            if(body.is_discarded()) return;
+
+            auto const matches = body.find("matches");
+            if(matches == body.end() || !matches->is_array()) return;
+
+            bool changed = false;
+            for(auto const& match : *matches) {
+                if(!match.is_object()) continue;
+
+                auto const signature = match.find("signature");
+                if(signature != match.end() && signature->is_string()) {
+                    changed |= add_sift_classification(signature->get<std::string>());
+                }
+            }
+            if(changed) publish_sift_classifications();
+        });
+}
 
 std::string MitmProxy::to_connection_ID() const {
-    return string_format("Proxy-%lX-PTR-%lX", StaticContent::boot_random,
-                         reinterpret_cast<std::uintptr_t>(this));
+    return sx::proxy::connection_id(StaticContent::boot_random, session_id_);
 }
 
 void MitmProxy::webhook_session_start() const {
-    if(not sx::http::webhooks::is_enabled() or wh_start) return;
+    if(wh_start or (not sx::http::webhooks::is_enabled() and
+                    not sx::http::webhooks::sift_enabled())) return;
 
     nlohmann::json j;
     auto cl = to_connection_label();
     j["info"] = { {"session", cl } };
-    sx::http::webhooks::send_action("connection-start", to_connection_ID(), j);
+    if(sx::http::webhooks::is_enabled())
+        sx::http::webhooks::send_action("connection-start", to_connection_ID(), j);
+    sx::http::webhooks::send_sift_action("connection-start", to_connection_ID(), j);
 
     wh_start = true;
 }
@@ -342,7 +463,8 @@ std::optional<std::string> MitmProxy::get_application() const {
 }
 
 void MitmProxy::webhook_session_stop() const {
-    if(not sx::http::webhooks::is_enabled() or wh_stop) return;
+    if(wh_stop or (not sx::http::webhooks::is_enabled() and
+                   not sx::http::webhooks::sift_enabled())) return;
 
     nlohmann::json j;
     auto cl = to_connection_label();
@@ -388,10 +510,15 @@ void MitmProxy::webhook_session_stop() const {
 
     if(tls.has_value())  j["info"]["tls"] = tls.value();
     if(l7.has_value())  j["info"]["l7"] = l7.value();
+    if(auto classifications = sift_classifications(); !classifications.empty()) {
+        j["info"]["classification"]["sift"] = std::move(classifications);
+    }
 
 
 
-    sx::http::webhooks::send_action("connection-stop", to_connection_ID(), j);
+    if(sx::http::webhooks::is_enabled())
+        sx::http::webhooks::send_action("connection-stop", to_connection_ID(), j);
+    sx::http::webhooks::send_sift_action("connection-stop", to_connection_ID(), j);
 
     wh_stop = true;
 }
@@ -704,6 +831,20 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
         }
     }
 
+    // Publish the origin server's selected ALPN into the inspection context
+    // once it becomes available. Application engines consume this metadata;
+    // they never have to reach back into SSLCom or the proxy topology.
+    if(scom && mh->engine_ctx.negotiated_alpn.empty()) {
+        mh->engine_ctx.negotiated_alpn = scom->negotiated_alpn();
+    }
+
+    if(not wh_sni and scom and not scom->get_sni().empty()) {
+        if(auto const* target = first_right(); target) {
+            wh_sni = sx::http::webhooks::hostname_info(
+                "sni", {target->host()}, scom->get_sni());
+        }
+    }
+
     bool redirected = false;
 
     auto const client_cert_action = scom
@@ -803,8 +944,19 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
                     }
                 }
 
-                if(mh->replacement_type() == MitmHostCX::REPLACETYPE_NONE) {
-                    _war("certificate not OK; deferring replacement until client protocol is known");
+                bool h2_request_ready = false;
+                if(mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP2) {
+                    auto* connection =
+                        std::any_cast<sx::engine::http::v2::Http2Connection>(
+                            &mh->engine_ctx.state_data);
+                    h2_request_ready =
+                        connection && connection->latest_request_stream_id > 0;
+                }
+
+                if(mh->replacement_type() == MitmHostCX::REPLACETYPE_NONE ||
+                   (mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP2 &&
+                    !h2_request_ready)) {
+                    _war("certificate not OK; deferring replacement until client request is known");
                     tls_replacement_pending = true;
                     redirected = true;
                 }
@@ -896,29 +1048,106 @@ static std::string b64_decode(std::string const& encoded) {
     return libbase64::decode<std::string, char, unsigned char, false>(encoded);
 }
 
-
-
-bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer) {
+bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
+                                std::string_view payload_layer,
+                                bool regular_webhook, bool sift) {
 
     auto& log = log_content;
 
-    if(not sx::http::webhooks::is_enabled()) return false;
+    if(not regular_webhook and not sift) return false;
     if(not cx or buffer.empty()) return false;
-
-    if(not writer_opts()->webhook_enable) return false;
 
     bool was_modified = false;
 
     nlohmann::json j;
     auto cl = to_connection_label();
-    std::string encoded = b64_encode(buffer);
     j["info"] = {
         { "session", cl },
         { "side", string_format("%c", from_side(side)) },
-        { "content", encoded }
+        { "payload_layer", std::string(payload_layer) },
+        { "L7_payload_start", nlohmann::json::array({-1}) },
+        { "L7_payload_end", nlohmann::json::array({-1}) },
+        { "L7_encoding", nlohmann::json::array({""}) },
+        { "content_annotations", nlohmann::json::array() }
     };
 
-    sx::http::webhooks::send_action_wait("connection-content", to_connection_ID(), j, [&](sx::http::expected_reply r){
+    auto publish_l7_ranges = [&j](auto const& ranges,
+                                  std::vector<std::string> const& known_encodings,
+                                  auto const& annotations) {
+        auto metadata = sx::proxy::l7_payload_metadata(ranges, known_encodings,
+                                                       annotations);
+        for(auto& [key, value] : metadata.items())
+            j["info"][key] = std::move(value);
+    };
+
+    auto publish_matching_observation = [&](MitmHostCX const* context) {
+        if(!context) return false;
+        auto const app = std::dynamic_pointer_cast<HttpApplication>(
+            context->engine_ctx.application_data);
+        if(!app || !app->l7_payload_matches(buffer.string_view(),
+                                             cx->meter_read_bytes)) return false;
+        publish_l7_ranges(app->l7_payload, app->l7_encoding,
+                          app->payload_annotations);
+        return true;
+    };
+    // TCP HTTP/1 and HTTP/2 framing is owned by the authoritative left
+    // context (see proxy() immediately before this webhook).  The current
+    // side context may still contain an outer HTTP/1 CONNECT application;
+    // consulting it first can therefore attach HTTP/1 annotations to inner
+    // HTTP/2 bytes.  HTTP/3 is the exception: its transport adapter stores
+    // observations on the current QUIC stream context.
+    auto const* current = MitmHostCX::from_baseHostCX(cx);
+    auto const current_app = current
+        ? std::dynamic_pointer_cast<HttpApplication>(
+              current->engine_ctx.application_data)
+        : nullptr;
+    if(current_app && current_app->version == HttpApplication::HTTP_VER::HTTP3) {
+        publish_matching_observation(current);
+    } else {
+        publish_matching_observation(first_left());
+    }
+
+    if(auto* right = first_right(); right != nullptr) {
+        if(auto* tls = dynamic_cast<SSLCom*>(right->com()); tls != nullptr) {
+            if(auto const& sni = tls->get_sni(); !sni.empty()) {
+                j["info"]["flow.tls.sni"] = sni;
+            }
+        }
+    }
+
+    if(auto const* left = first_left(); left != nullptr) {
+        auto const app = std::dynamic_pointer_cast<sx::engine::http::app_HttpRequest>(
+            left->engine_ctx.application_data);
+
+        if(app && app->populated()) {
+            auto const http2 = app->version == sx::engine::http::app_HttpRequest::HTTP_VER::HTTP2;
+            auto const http3 = app->version == sx::engine::http::app_HttpRequest::HTTP_VER::HTTP3;
+            auto const prefix = http3 ? "flow.http3." :
+                                http2 ? "flow.http2." : "flow.http1.";
+
+            j["info"][http3 ? "flow.http3" : http2 ? "flow.http2" : "flow.http1"] = true;
+
+            auto put = [&](std::string const& field, std::string const& value) {
+                if(!value.empty()) j["info"][prefix + field] = value;
+            };
+
+            auto path = app->http_data.uri;
+            if(!app->http_data.params.empty()) path += "?" + app->http_data.params;
+
+            auto scheme = app->http_data.proto;
+            if(scheme.size() >= 3 && scheme.compare(scheme.size() - 3, 3, "://") == 0) {
+                scheme.resize(scheme.size() - 3);
+            }
+
+            put("method", app->http_data.method);
+            put((http2 || http3) ? "authority" : "host", app->http_data.host);
+            put("path", path);
+            put("scheme", scheme);
+            put("url", app->request());
+        }
+    }
+
+    auto response_hook = [&, sift](sx::http::expected_reply r){
         if(r.has_value()) {
             auto reply = r.value();
             _dia("webhook content-replace: response %d", reply.response.first);
@@ -929,6 +1158,20 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer) {
                     _err("MitmProxy::content_webhook: response body is invalid");
                 }
                 else {
+                    if(sift) {
+                        if(auto matches = json_obj.find("matches");
+                           matches != json_obj.end() && matches->is_array()) {
+                            bool changed = false;
+                            for(auto const& match : *matches) {
+                                if(!match.is_object()) continue;
+                                if(auto signature = match.find("signature");
+                                   signature != match.end() && signature->is_string()) {
+                                    changed |= add_sift_classification(signature->get<std::string>());
+                                }
+                            }
+                            if(changed) publish_sift_classifications();
+                        }
+                    }
                     if(json_obj.contains("action")) {
                         if(json_obj["action"] == "discard") {
                             // data sent to webhook shall be discarded
@@ -959,12 +1202,42 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer) {
                 }
             }
         }
-    });
+    };
+    if(sift) {
+        sx::http::webhooks::send_sift_content_wait(
+            to_connection_ID(), j,
+            std::string_view(reinterpret_cast<const char*>(buffer.data()), buffer.size()),
+            response_hook);
+    }
+    if(regular_webhook) {
+        const auto binary_sent = sx::http::webhooks::send_content_wait(
+            to_connection_ID(), j,
+            std::string_view(reinterpret_cast<const char*>(buffer.data()), buffer.size()), response_hook);
+        if(!binary_sent) {
+        j["info"]["content"] = b64_encode(buffer);
+        sx::http::webhooks::send_action_wait(
+            "connection-content", to_connection_ID(), j, response_hook);
+        }
+    }
 
     return was_modified;
 }
 
 bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t side) {
+    const auto sift_is_enabled = sx::http::webhooks::sift_enabled();
+    const auto webhook_enabled = sx::http::webhooks::is_enabled() and
+                                 writer_opts()->webhook_enable;
+
+    // Classification waits only for this flow. It must never participate in
+    // the forensic global webhook lock used by the interactive Spider app.
+    auto const payload_layer = content_payload_layer(from);
+
+    if(sift_is_enabled and content_webhook(
+            from, side, from->to_read(), payload_layer, false, true)) {
+        return true;
+    }
+    if(not webhook_enabled) return false;
+
     if(writer_opts()->webhook_lock_traffic) {
 
         if(from->com() and from->com()->l4_proto() == SOCK_STREAM) {
@@ -1005,7 +1278,7 @@ bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t 
                          to_string(iNOT).c_str(), attempt_no);
 
                 }
-                return content_webhook(from, side, from->to_read());
+                return content_webhook(from, side, from->to_read(), payload_layer, true, false);
             }
         }
         _err("[%s]: content_webhook: previous webhook takes too long to complete, content NOT sent to webhook.",
@@ -1015,7 +1288,7 @@ bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t 
 
     }
     else {
-        return content_webhook(from, side, from->to_read());
+        return content_webhook(from, side, from->to_read(), payload_layer, true, false);
     }
     return false;
 }
@@ -1042,8 +1315,42 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
         return;
     }
 
+    // Application framing runs before consumers can inspect or replace this
+    // block. HTTP/1 owns one duplex parser in the authoritative left context.
+    if(auto* engine_context = first_left(); engine_context != nullptr) {
+        auto& ctx = engine_context->engine_ctx;
+        sx::engine::http::observe_content(
+            ctx, side == side_t::RIGHT ? 1U : 0U,
+            from->to_read().string_view(), from->meter_read_bytes,
+            side == side_t::LEFT);
+    }
+
+    // Transport adapters may enrich the ordinary application state before
+    // the same content webhook path used by TCP-based inspection engines.
+    if(traffic_log_adapter_) {
+        if(auto metadata = traffic_log_adapter_->inspect_content(side, from->to_read())) {
+            if(auto* current = MitmHostCX::from_baseHostCX(from); current != nullptr) {
+                auto app = std::dynamic_pointer_cast<HttpApplication>(
+                    current->engine_ctx.application_data);
+                if(!app && metadata->payload_layer == "http3") {
+                    app = ensure_http_application(current);
+                }
+                if(app) {
+                    if(metadata->payload_layer == "http3")
+                        app->version = HttpApplication::HTTP_VER::HTTP3;
+                    app->observe_l7_payload(
+                        from->to_read().string_view(), current->meter_read_bytes,
+                        sx::engine::http::L7PayloadHints(
+                            metadata->payload_ranges.begin(),
+                            metadata->payload_ranges.end()),
+                        std::move(metadata->encodings));
+                }
+            }
+        }
+    }
+
     // 1. content webhook first (potentially modifies from->to_read() buffer
-    if(writer_opts()->webhook_enable) {
+    if(writer_opts()->webhook_enable or sx::http::webhooks::sift_enabled()) {
         auto orig_sz = from->to_read().size();
         if(handle_content_webhook(from, to, side)) {
             auto sz = from->to_read().size();
@@ -1101,9 +1408,15 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
 
 void MitmProxy::write_traffic_log(side_t side, baseHostCX* cx, buffer* custom_buffer) {
 
-    if(writer_opts()->write_payload) {
-        if(not cx) return;
+    if(not cx) return;
 
+    auto* observed = custom_buffer ? custom_buffer : &cx->to_read();
+
+    if(traffic_log_adapter_ and observed and not observed->empty()) {
+        traffic_log_adapter_->observe(side, *observed);
+    }
+
+    if(writer_opts()->write_payload) {
         auto* buffer = custom_buffer;
         if(not buffer) {
             buffer = &cx->to_read();

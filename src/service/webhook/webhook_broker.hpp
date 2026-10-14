@@ -16,3 +16,12 @@ bool enabled() noexcept;
 std::string transport_path();
 
 } // namespace sx::comm::webhook
+
+namespace sx::comm::sift {
+
+int configure_transport(const std::string& path);
+void clear_transport() noexcept;
+bool enabled() noexcept;
+std::string transport_path();
+
+} // namespace sx::comm::sift

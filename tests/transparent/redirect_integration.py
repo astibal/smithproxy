@@ -269,6 +269,7 @@ def run_case(binary: Path, source: Path, runtime: Path, tls: bool,
                         early_origin_data=early_origin_data)
     origin.start()
     redirect_port = free_port()
+    cli_port = free_port()
     base_port = redirect_port - 1000
     if base_port <= 1024:
         raise AssertionError(f"unsuitable generated redirect port: {redirect_port}")
@@ -327,6 +328,10 @@ def run_case(binary: Path, source: Path, runtime: Path, tls: bool,
         ("failed_certcheck_override", "TRUE;" if override_scope else "FALSE;"),
     ):
         text = replace_setting(text, name, value)
+    text, cli_count = re.subn(
+        r"(?m)^(\s*port\s*=\s*)50000;", rf"\g<1>{cli_port};", text, count=1)
+    if cli_count != 1:
+        raise AssertionError("CLI port setting not found")
     text = text.replace('dir = "/var/smithproxy/data"', f'dir = "{capture_dir}"', 1)
     text = text.replace("write_payload = FALSE;", "write_payload = TRUE;", 1)
     text, content_count = re.subn(

@@ -2,6 +2,8 @@
 #include <inspect/dns_socket_io.hpp>
 #include <inspect/dnsinspector.hpp>
 #include <gtest/gtest.h>
+#include <tuple>
+#include <vector>
 #include <fcntl.h>
 
 constexpr const char* host = "smithproxy.org";
@@ -921,7 +923,18 @@ TEST(DNS_Inspector, stores_address_responses_and_domain_hierarchy) {
     auto response = std::make_shared<DNS_Response>();
     ASSERT_TRUE(response->load(&packet).has_value());
 
+    std::vector<std::tuple<std::string, std::vector<std::string>, std::string>> hostnames;
+    DNS_Inspector::set_hostname_observer(
+        [&hostnames](std::string const& origin, std::vector<std::string> const& addresses,
+                     std::string const& hostname) {
+            hostnames.emplace_back(origin, addresses, hostname);
+        });
     EXPECT_TRUE(DNS_Inspector::store(response));
+    DNS_Inspector::set_hostname_observer({});
+    ASSERT_EQ(hostnames.size(), 1U);
+    EXPECT_EQ(std::get<0>(hostnames.front()), "dns");
+    EXPECT_EQ(std::get<1>(hostnames.front()), std::vector<std::string>({"172.65.10.226"}));
+    EXPECT_EQ(std::get<2>(hostnames.front()), "pcdn.brave.com");
     EXPECT_EQ(DNS::get_dns_cache().get("A:pcdn.brave.com"), response);
 
     auto domain = DNS::get_domain_cache().get("brave.com");

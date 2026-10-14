@@ -4,6 +4,7 @@
 #include <proxy/explicitproxy.hpp>
 #include <proxy/explicitproxycx.hpp>
 #include <proxy/httpconnect/httpconnectrequest.hpp>
+#include <service/core/sessionlist.hpp>
 
 #include <string_view>
 
@@ -41,7 +42,8 @@ private:
     logan_lite log {"com.http-connect.proxy"};
 };
 
-class MitmHttpConnectProxy : public ThreadedAcceptorProxy<HttpConnectProxy> {
+class MitmHttpConnectProxy : public ThreadedAcceptorProxy<HttpConnectProxy>,
+                             public SessionListConsumer {
 public:
     MitmHttpConnectProxy(baseCom* c, int worker_id,
                          proxyType t = proxyType::proxy())
@@ -49,6 +51,7 @@ public:
 
     baseHostCX* new_cx(int s) override;
     void on_left_new(std::unique_ptr<baseHostCX> accepted_cx) override;
+    int handle_sockets_once(baseCom* c) override;
 
     TYPENAME_OVERRIDE("MitmHttpConnectProxy")
 

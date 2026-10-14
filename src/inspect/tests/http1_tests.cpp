@@ -2750,6 +2750,137 @@ TEST(EngineCtx, SeenDataPolicyDistinguishesSmallGrowingAndNewBlocks) {
     ctx.update_seen_block(2, 7000);
     EXPECT_FALSE(ctx.new_data_check(2, 7000));
 }
+
+TEST(L7PayloadHint, Http1EngineKeepsFixedBodyAcrossInputBlocks) {
+    v1::Http1Direction direction;
+    const std::string first =
+        "POST /upload HTTP/1.1\r\nHost: example.test\r\nContent-Length: 11\r\n\r\nhello";
+    auto ranges = direction.observe(first, false);
+    ASSERT_EQ(ranges.size(), 1u);
+    EXPECT_EQ(ranges[0], L7PayloadRange(first.size() - 5, first.size()));
+
+    const std::string second = " worldGET /next HTTP/1.1\r\nHost: example.test\r\n\r\n";
+    ranges = direction.observe(second, false);
+    ASSERT_EQ(ranges.size(), 1u);
+    EXPECT_EQ(ranges[0], L7PayloadRange(0, 6));
+}
+
+TEST(L7PayloadHint, Http1EngineHandlesSplitHeadersAndChunkFraming) {
+    v1::Http1Direction direction;
+    auto ranges = direction.observe(
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chu", true);
+    ASSERT_EQ(ranges, L7PayloadHints({{0, 0}}));
+
+    const std::string first = "nked\r\nContent-Encoding: gzip\r\n\r\n5\r\nhe";
+    ranges = direction.observe(first, true);
+    ASSERT_EQ(ranges.size(), 1u);
+    EXPECT_EQ(ranges[0], L7PayloadRange(first.size() - 2, first.size()));
+    ASSERT_EQ(direction.encodings().size(), 1u);
+    EXPECT_EQ(direction.encodings()[0], "gzip");
+
+    ranges = direction.observe("llo\r\n6\r\n wor", true);
+    ASSERT_EQ(ranges.size(), 2u);
+    EXPECT_EQ(ranges[0], L7PayloadRange(0, 3));
+    EXPECT_EQ(ranges[1], L7PayloadRange(8, 12));
+
+    ranges = direction.observe("ld\r\n0\r\nX-End: yes\r\n\r\n", true);
+    ASSERT_EQ(ranges.size(), 1u);
+    EXPECT_EQ(ranges[0], L7PayloadRange(0, 2));
+}
+
+TEST(L7PayloadHint, Http1EngineMarksCloseDelimitedResponseContinuations) {
+    v1::Http1Direction direction;
+    const std::string first = "HTTP/1.1 200 OK\r\nServer: test\r\n\r\nfirst";
+    auto ranges = direction.observe(first, true);
+    ASSERT_EQ(ranges.size(), 1u);
+    EXPECT_EQ(ranges[0], L7PayloadRange(first.size() - 5, first.size()));
+    ranges = direction.observe("second", true);
+    ASSERT_EQ(ranges, L7PayloadHints({{0, 6}}));
+}
+
+TEST(L7PayloadHint, ApplicationObservationMatchesOnlyTheParsedBuffer) {
+    app_HttpRequest app;
+    app.observe_l7_payload("payload", 107, {{0, 7}}, {"gzip"});
+
+    EXPECT_TRUE(app.l7_payload_matches("payload", 107));
+    EXPECT_FALSE(app.l7_payload_matches("changed", 107));
+    EXPECT_FALSE(app.l7_payload_matches("payload", 108));
+    EXPECT_FALSE(app.l7_payload_matches("payload!", 107));
+}
+
+TEST(L7PayloadHint, Http1EngineOwnsDuplexFramingState) {
+    sx::engine::EngineCtx ctx;
+    auto app = std::make_shared<app_HttpRequest>();
+    app->version = app_HttpRequest::HTTP_VER::HTTP_1;
+    ctx.application_data = app;
+
+    const std::string request =
+        "POST / HTTP/1.1\r\nHost: example.test\r\nContent-Length: 6\r\n\r\nabc";
+    v1::observe_content(ctx, 0, request, 100, false);
+    ASSERT_TRUE(std::any_cast<v1::Http1Connection>(&ctx.state_data));
+    ASSERT_EQ(app->l7_payload,
+              L7PayloadHints({{static_cast<std::int64_t>(request.size() - 3),
+                               static_cast<std::int64_t>(request.size())}}));
+
+    v1::observe_content(ctx, 0, "def", 103, false);
+    EXPECT_EQ(app->l7_payload, L7PayloadHints({{0, 3}}));
+
+    const std::string response =
+        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok";
+    v1::observe_content(ctx, 1, response, 200, true);
+    EXPECT_EQ(app->l7_payload,
+              L7PayloadHints({{static_cast<std::int64_t>(response.size() - 2),
+                               static_cast<std::int64_t>(response.size())}}));
+}
+
+TEST(L7PayloadHint, Http2LocatesMultipleDataFrames) {
+    auto frame = [](std::uint8_t type, std::uint8_t flags,
+                    std::string_view payload) {
+        std::string value(9, '\0');
+        value[0] = static_cast<char>((payload.size() >> 16U) & 0xffU);
+        value[1] = static_cast<char>((payload.size() >> 8U) & 0xffU);
+        value[2] = static_cast<char>(payload.size() & 0xffU);
+        value[3] = static_cast<char>(type);
+        value[4] = static_cast<char>(flags);
+        value[8] = 1;
+        value.append(payload);
+        return value;
+    };
+
+    auto headers = http2_payload_hint(frame(1, 4, "headers"));
+    ASSERT_EQ(headers.size(), 1u);
+    EXPECT_EQ(headers.front(), L7PayloadRange(0, 0));
+
+    const auto data_frame = frame(0, 0, "hello");
+    auto data = http2_payload_hint(data_frame);
+    ASSERT_EQ(data.size(), 1u);
+    EXPECT_EQ(data.front(), L7PayloadRange(9, 14));
+
+    auto tail = http2_payload_hint(data_frame, 11);
+    ASSERT_EQ(tail.size(), 1u);
+    EXPECT_EQ(tail.front(), L7PayloadRange(0, 3));
+
+    const auto two_frames = frame(0, 0, "one") + frame(0, 0, "two");
+    auto multiple = http2_payload_hint(two_frames);
+    ASSERT_EQ(multiple.size(), 2u);
+    EXPECT_EQ(multiple[0], L7PayloadRange(9, 12));
+    EXPECT_EQ(multiple[1], L7PayloadRange(21, 24));
+}
+
+TEST(L7PayloadHint, EncodingIsKeptPerRange) {
+    app_HttpRequest app;
+    EXPECT_TRUE(app.l7_encoding.empty());
+
+    app.observe_l7_encoding("gzip");
+    app.observe_l7_encoding("");
+    ASSERT_EQ(app.l7_encoding.size(), 2u);
+    EXPECT_EQ(app.l7_encoding[0], "gzip");
+    EXPECT_EQ(app.l7_encoding[1], "");
+
+    app.reset_l7_encoding();
+    EXPECT_TRUE(app.l7_encoding.empty());
+}
+
 TEST(HTTP2, RejectsAmbiguousOrInvalidContentLength) {
     auto accepted = [](std::vector<std::pair<std::string, std::string>> const& fields) {
         sx::engine::EngineCtx ctx;

@@ -105,6 +105,29 @@ TEST(Spq1, EncodesDecodedH3HeadersAsPrivateExtension) {
     EXPECT_EQ(">>>", std::string(packet.end() - 3, packet.end()));
 }
 
+TEST(Spq1, ConvertsInitialH3RequestHeadersToFlowObservations) {
+    sx::quic::h3_headers_record request {
+        socle::side_t::LEFT,
+        4,
+        {{":method", "GET"}, {":scheme", "https"},
+         {":authority", "video.example"}, {":path", "/watch?id=7"}},
+    };
+
+    auto const fields = sx::quic::spq1::h3_flow_observations(request);
+    EXPECT_EQ("true", fields.at("flow.http3"));
+    EXPECT_EQ("GET", fields.at("flow.http3.method"));
+    EXPECT_EQ("https", fields.at("flow.http3.scheme"));
+    EXPECT_EQ("video.example", fields.at("flow.http3.authority"));
+    EXPECT_EQ("/watch?id=7", fields.at("flow.http3.path"));
+    EXPECT_EQ("https://video.example/watch?id=7", fields.at("flow.http3.url"));
+
+    request.side = socle::side_t::RIGHT;
+    EXPECT_TRUE(sx::quic::spq1::h3_flow_observations(request).empty());
+    request.side = socle::side_t::LEFT;
+    request.fields = {{"content-type", "application/example"}};
+    EXPECT_TRUE(sx::quic::spq1::h3_flow_observations(request).empty());
+}
+
 TEST(Spq1, SplitsGreSafeChunksAndEmitsOneFin) {
     auto packets = std::make_shared<std::vector<captured_packet>>();
     auto connection = std::make_shared<sx::quic::spq1::connection_context>(7, "h3");
@@ -292,4 +315,55 @@ TEST(Spq1, AdapterConfiguresAndWrapsPacketLogger) {
     EXPECT_EQ(socle::pcap::connection_details::UDP, pcap->details.next_proto);
     ASSERT_TRUE(pcap->details.gre_key.has_value());
     EXPECT_EQ(0x55667788U, *pcap->details.gre_key);
+}
+
+TEST(Spq1, AdapterDescribesHttp3DataFrames) {
+    auto connection = std::make_shared<sx::quic::spq1::connection_context>(9, "h3");
+    sx::quic::spq1::stream_log_adapter adapter({connection, 0});
+    unsigned char bytes[] {0x01, 0x00, 0x00, 0x03, 'a', 'b', 'c',
+                           0x21, 0x01, 'x', 0x00, 0x02, 'd', 'e'};
+    buffer data(bytes, sizeof(bytes));
+
+    auto metadata = adapter.inspect_content(socle::side_t::LEFT, data);
+
+    ASSERT_TRUE(metadata.has_value());
+    EXPECT_EQ("http3", metadata->payload_layer);
+    ASSERT_EQ(2U, metadata->payload_ranges.size());
+    EXPECT_EQ((std::pair<std::int64_t, std::int64_t>{4, 7}),
+              metadata->payload_ranges[0]);
+    EXPECT_EQ((std::pair<std::int64_t, std::int64_t>{12, 14}),
+              metadata->payload_ranges[1]);
+    EXPECT_EQ((std::vector<std::string>{"", ""}), metadata->encodings);
+}
+
+TEST(Spq1, AdapterTracksHttp3DataAcrossContentMessages) {
+    auto connection = std::make_shared<sx::quic::spq1::connection_context>(10, "h3");
+    sx::quic::spq1::stream_log_adapter adapter({connection, 0});
+    unsigned char first_bytes[] {0x00, 0x05, 'a', 'b'};
+    unsigned char second_bytes[] {'c', 'd', 'e', 0x01, 0x00};
+    buffer first(first_bytes, sizeof(first_bytes));
+    buffer second(second_bytes, sizeof(second_bytes));
+
+    auto first_metadata = adapter.inspect_content(socle::side_t::LEFT, first);
+    auto second_metadata = adapter.inspect_content(socle::side_t::LEFT, second);
+
+    ASSERT_TRUE(first_metadata.has_value());
+    ASSERT_TRUE(second_metadata.has_value());
+    EXPECT_EQ((std::vector<std::pair<std::int64_t, std::int64_t>>{{2, 4}}),
+              first_metadata->payload_ranges);
+    EXPECT_EQ((std::vector<std::pair<std::int64_t, std::int64_t>>{{0, 3}}),
+              second_metadata->payload_ranges);
+}
+
+TEST(Spq1, AdapterAlignsHttp3ContentEncodingWithDataRanges) {
+    auto connection = std::make_shared<sx::quic::spq1::connection_context>(11, "h3");
+    connection->content_encoding(socle::side_t::RIGHT, 0, "gzip");
+    sx::quic::spq1::stream_log_adapter adapter({connection, 0});
+    unsigned char bytes[] {0x00, 0x01, 'a', 0x00, 0x01, 'b'};
+    buffer data(bytes, sizeof(bytes));
+
+    auto metadata = adapter.inspect_content(socle::side_t::RIGHT, data);
+
+    ASSERT_TRUE(metadata.has_value());
+    EXPECT_EQ((std::vector<std::string>{"gzip", "gzip"}), metadata->encodings);
 }

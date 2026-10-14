@@ -43,6 +43,11 @@
 
 #include <atomic>
 #include <ctime>
+#include <mutex>
+#include <set>
+#include <string>
+#include <string_view>
+#include <vector>
 
 #include <basecom.hpp>
 #include <hostcx.hpp>
@@ -209,7 +214,9 @@ public:
                bool consume_source = true);
 
     // makes a synchronous API call letting webhook modify the content
-    bool content_webhook(baseHostCX* cx, side_t side, buffer& buffer);
+    bool content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
+                         std::string_view payload_layer,
+                         bool regular_webhook, bool sift);
     bool handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t side);
 
     // this virtual method is called whenever there are new bytes in any LEFT host context!
@@ -256,12 +263,20 @@ public:
     std::string to_connection_ID() const;
     [[nodiscard]] std::string_view session_protocol() const noexcept;
     std::optional<std::string> get_application() const;
+    bool add_sift_classification(std::string classification);
+    [[nodiscard]] std::vector<std::string> sift_classifications() const;
+    void publish_sift_classifications() const;
+    void submit_flow_observation(
+        sx::traffic_log_adapter::flow_observation fields,
+        std::string_view payload_layer);
 
     mutable bool wh_start = false;
     void webhook_session_start() const;
 
     mutable bool wh_stop = false;
     void webhook_session_stop() const;
+
+    bool wh_sni = false;
 
     int handle_sockets_once(baseCom*) override;
     
@@ -290,6 +305,8 @@ public:
     DECLARE_LOGGING(to_string)
 
 private:
+    mutable std::mutex sift_classifications_lock_;
+    std::set<std::string> sift_classifications_;
     StartStopTls start_stop_tls_;
     logan_lite log {"proxy"};
     logan_lite log_dump {"proxy.payload"};

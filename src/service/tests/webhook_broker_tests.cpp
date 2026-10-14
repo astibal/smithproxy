@@ -118,6 +118,7 @@ protected:
 
     void TearDown() override {
         sx::comm::webhook::clear_transport();
+        sx::comm::sift::clear_transport();
         std::error_code ignored;
         std::filesystem::remove_all(directory_, ignored);
     }
@@ -133,6 +134,24 @@ TEST_F(WebhookBrokerTest, SpecializationStoresOnlyTheUnixTransportPath) {
     EXPECT_EQ(sx::comm::webhook::transport_path(), path_);
     sx::comm::webhook::clear_transport();
     EXPECT_FALSE(sx::comm::webhook::enabled());
+}
+
+TEST_F(WebhookBrokerTest, SiftHasAnIndependentUnixTransportPath) {
+    const auto sift_path = directory_ + "/sift.sock";
+    ASSERT_EQ(sx::comm::webhook::configure_transport(path_), 0);
+    ASSERT_EQ(sx::comm::sift::configure_transport(sift_path), 0);
+    EXPECT_EQ(sx::comm::webhook::transport_path(), path_);
+    EXPECT_EQ(sx::comm::sift::transport_path(), sift_path);
+    sx::comm::sift::clear_transport();
+    EXPECT_TRUE(sx::comm::webhook::enabled());
+    EXPECT_FALSE(sx::comm::sift::enabled());
+}
+
+TEST_F(WebhookBrokerTest, SiftRejectsAnEmptyTransportPath) {
+    errno = 0;
+    EXPECT_EQ(sx::comm::sift::configure_transport(""), -1);
+    EXPECT_EQ(errno, EINVAL);
+    EXPECT_FALSE(sx::comm::sift::enabled());
 }
 
 TEST_F(WebhookBrokerTest, RelaysOpaqueBinaryStreamAndPreservesHalfClose) {

@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <sstream>
 
 using namespace smithproxy::config_cli;
 
@@ -50,6 +51,51 @@ bool reload_section(const std::string& section) {
     return true;
 }
 
+std::string setting_text(const libconfig::Setting& parent, const char* name, std::string_view fallback) {
+    if (!parent.exists(name)) return std::string(fallback);
+    try {
+        const auto& value = parent[name];
+        if (value.isArray() || value.isList()) {
+            std::ostringstream result;
+            for (int i = 0; i < value.getLength(); ++i) {
+                if (i) result << ',';
+                result << static_cast<const char*>(value[i]);
+            }
+            const auto text = result.str();
+            return text.empty() ? std::string(fallback) : text;
+        }
+        const char* text = value;
+        return text ? text : std::string(fallback);
+    } catch (const libconfig::SettingException&) {
+        return std::string(fallback);
+    }
+}
+
+std::string policy_description(const libconfig::Setting& policy, const libconfig::Setting& root) {
+    std::string description = setting_text(policy, "name", "<unnamed>") + ": " +
+                              setting_text(policy, "proto", "any") + " " +
+                              setting_text(policy, "src", "any") + " -> " +
+                              setting_text(policy, "dst", "any") + ":" +
+                              setting_text(policy, "dport", "all") + ", nat: " +
+                              setting_text(policy, "nat", "none");
+
+    const auto routing_name = setting_text(policy, "routing", "none");
+    if (routing_name != "none" && !routing_name.empty()) {
+        description += ", routing: " + routing_name;
+        try {
+            if (root.exists("routing")) {
+                const auto& routing = root["routing"];
+                if (routing.exists(routing_name.c_str()))
+                    description += ", lb: " + setting_text(routing[routing_name.c_str()],
+                                                            "dnat_lb_method", "round-robin");
+            }
+        } catch (const libconfig::SettingException&) {
+            // Keep the referenced routing name visible even when its profile is invalid.
+        }
+    }
+    return description + " -> " + setting_text(policy, "action", "accept");
+}
+
 }  // namespace
 
 ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
@@ -62,6 +108,11 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
         return kind != ConfigCollectionKind::none;
     };
     access.can_move = [](std::string_view path) { return path == "policy"; };
+    access.describe_entry = [](std::string_view parent_path, const libconfig::Setting& entry) {
+        return parent_path == "policy" && entry.isGroup()
+                   ? policy_description(entry, CfgFactory::cfg_root())
+                   : std::string{};
+    };
     access.values = [](std::string_view path, std::string_view property) {
         std::vector<libcli2::CompletionItem> result;
         const std::string section(path);

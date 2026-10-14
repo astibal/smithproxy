@@ -12,7 +12,401 @@
 #include <inspect/dnsinspector.hpp>
 #include <inspect/kb/kb.hpp>
 
+#include <charconv>
+
 namespace sx::engine::http {
+
+    namespace {
+        std::optional<L7PayloadRange> intersect_payload(
+                                        std::size_t payload_start,
+                                        std::size_t payload_end,
+                                        std::size_t current_offset,
+                                        std::size_t block_size) {
+            if(current_offset > block_size || payload_start > payload_end ||
+               payload_end > block_size) return std::nullopt;
+
+            const auto start = std::max(payload_start, current_offset);
+            const auto end = std::min(payload_end, block_size);
+            if(start >= end) return std::nullopt;
+            return L7PayloadRange{
+                static_cast<std::int64_t>(start - current_offset),
+                static_cast<std::int64_t>(end - current_offset)
+            };
+        }
+
+        bool ascii_equal_ci(std::string_view left, std::string_view right) {
+            if(left.size() != right.size()) return false;
+            return std::equal(left.begin(), left.end(), right.begin(),
+                [](unsigned char l, unsigned char r) {
+                    return std::tolower(l) == std::tolower(r);
+                });
+        }
+
+        bool ascii_contains_ci(std::string_view value, std::string_view needle) {
+            if(needle.size() > value.size()) return false;
+            for(std::size_t offset = 0; offset + needle.size() <= value.size(); ++offset) {
+                if(ascii_equal_ci(value.substr(offset, needle.size()), needle)) return true;
+            }
+            return false;
+        }
+
+        std::optional<std::string_view> header_value(std::string_view headers,
+                                                      std::string_view name) {
+            auto line_start = headers.find('\n');
+            if(line_start == std::string_view::npos) return std::nullopt;
+            ++line_start;
+            while(line_start < headers.size()) {
+                auto line_end = headers.find('\n', line_start);
+                if(line_end == std::string_view::npos) line_end = headers.size();
+                auto line = headers.substr(line_start, line_end - line_start);
+                if(!line.empty() && line.back() == '\r') line.remove_suffix(1);
+                if(line.empty()) break;
+                const auto colon = line.find(':');
+                if(colon != std::string_view::npos &&
+                   ascii_equal_ci(line.substr(0, colon), name)) {
+                    auto value = line.substr(colon + 1);
+                    while(!value.empty() && (value.front() == ' ' || value.front() == '\t'))
+                        value.remove_prefix(1);
+                    while(!value.empty() && (value.back() == ' ' || value.back() == '\t'))
+                        value.remove_suffix(1);
+                    return value;
+                }
+                line_start = line_end + (line_end < headers.size());
+            }
+            return std::nullopt;
+        }
+
+        std::vector<std::string_view> header_values(std::string_view headers,
+                                                     std::string_view name) {
+            std::vector<std::string_view> values;
+            auto line_start = headers.find('\n');
+            if(line_start == std::string_view::npos) return values;
+            ++line_start;
+            while(line_start < headers.size()) {
+                auto line_end = headers.find('\n', line_start);
+                if(line_end == std::string_view::npos) line_end = headers.size();
+                auto line = headers.substr(line_start, line_end - line_start);
+                if(!line.empty() && line.back() == '\r') line.remove_suffix(1);
+                if(line.empty()) break;
+                const auto colon = line.find(':');
+                if(colon != std::string_view::npos &&
+                   ascii_equal_ci(line.substr(0, colon), name)) {
+                    auto value = line.substr(colon + 1);
+                    while(!value.empty() &&
+                          (value.front() == ' ' || value.front() == '\t'))
+                        value.remove_prefix(1);
+                    while(!value.empty() &&
+                          (value.back() == ' ' || value.back() == '\t'))
+                        value.remove_suffix(1);
+                    values.push_back(value);
+                }
+                line_start = line_end + (line_end < headers.size());
+            }
+            return values;
+        }
+    }
+
+    L7PayloadHints v1::Http1Direction::observe(
+            std::string_view data, bool response_side,
+            std::deque<std::string>* pending_methods) {
+        L7PayloadHints ranges;
+        last_encodings_.clear();
+        last_annotations_.clear();
+        auto annotate = [&](std::size_t start, std::size_t end,
+                            std::string_view kind) {
+            if(start == end) return;
+            if(!last_annotations_.empty() &&
+               last_annotations_.back().end == static_cast<std::int64_t>(start) &&
+               last_annotations_.back().kind == kind) {
+                last_annotations_.back().end = static_cast<std::int64_t>(end);
+            } else {
+                last_annotations_.push_back({static_cast<std::int64_t>(start),
+                                             static_cast<std::int64_t>(end),
+                                             std::string(kind), {}});
+            }
+        };
+        auto add_body = [&](std::size_t start, std::size_t end) {
+            if(start == end) return;
+            if(!ranges.empty() && ranges.back().second == static_cast<std::int64_t>(start) &&
+               last_encodings_.back() == message_.encoding) {
+                ranges.back().second = static_cast<std::int64_t>(end);
+            } else {
+                ranges.emplace_back(static_cast<std::int64_t>(start),
+                                    static_cast<std::int64_t>(end));
+                last_encodings_.push_back(message_.encoding);
+            }
+        };
+        auto finish_line = [&]() {
+            if(message_.pending.empty() || message_.pending.back() != '\n') return false;
+            while(!message_.pending.empty() &&
+                  (message_.pending.back() == '\r' || message_.pending.back() == '\n'))
+                message_.pending.pop_back();
+            return true;
+        };
+
+        std::size_t cursor = 0;
+        while(cursor < data.size()) {
+            switch(message_.phase) {
+                case v1::Http1Message::phase_t::headers: {
+                    annotate(cursor, cursor + 1, message_.start_line
+                                                   ? "http1.start_line"
+                                                   : "http1.headers");
+                    const auto header_byte = data[cursor++];
+                    message_.pending.push_back(header_byte);
+                    if(message_.start_line && header_byte == '\n')
+                        message_.start_line = false;
+                    if(message_.pending.size() > 65536) {
+                        message_.pending.clear();
+                        message_.phase = v1::Http1Message::phase_t::opaque;
+                        break;
+                    }
+                    const bool complete = message_.pending.size() >= 4 &&
+                        message_.pending.compare(message_.pending.size() - 4, 4, "\r\n\r\n") == 0;
+                    const bool complete_lf = message_.pending.size() >= 2 &&
+                        message_.pending.compare(message_.pending.size() - 2, 2, "\n\n") == 0;
+                    if(!complete && !complete_lf) break;
+
+                    const auto headers = std::string_view(message_.pending);
+                    message_.start_line = true;
+                    message_.encoding.clear();
+                    if(auto value = header_value(headers, "content-encoding"))
+                        message_.encoding.assign(value->data(), value->size());
+                    const auto transfer_values = header_values(headers, "transfer-encoding");
+                    const auto length_values = header_values(headers, "content-length");
+                    std::optional<std::string_view> transfer;
+                    if(!transfer_values.empty())
+                        transfer.emplace(transfer_values.front());
+                    std::optional<std::string_view> length;
+                    if(!length_values.empty())
+                        length.emplace(length_values.front());
+                    const auto connection = header_value(headers, "connection");
+                    const auto upgrade = header_value(headers, "upgrade");
+
+                    bool body_forbidden = false;
+                    bool final_response = false;
+                    bool successful_connect = false;
+                    std::string request_method;
+                    if(response_side && headers.substr(0, 5) == "HTTP/") {
+                        const auto first_space = headers.find(' ');
+                        if(first_space != std::string_view::npos && first_space + 4 <= headers.size()) {
+                            unsigned status = 0;
+                            auto parsed = std::from_chars(headers.data() + first_space + 1,
+                                                          headers.data() + first_space + 4,
+                                                          status);
+                            if(parsed.ec == std::errc{}) {
+                                const bool informational = status >= 100 && status < 200;
+                                final_response = !informational || status == 101;
+                                body_forbidden = informational || status == 204 ||
+                                                 status == 205 || status == 304;
+                                if(final_response && pending_methods &&
+                                   !pending_methods->empty()) {
+                                    body_forbidden = body_forbidden ||
+                                        ascii_equal_ci(pending_methods->front(), "HEAD");
+                                    successful_connect = status >= 200 && status < 300 &&
+                                        ascii_equal_ci(pending_methods->front(), "CONNECT");
+                                }
+                            }
+                        }
+                    } else if(!response_side && pending_methods) {
+                        const auto method_end = headers.find(' ');
+                        if(method_end != std::string_view::npos && method_end != 0)
+                            request_method.assign(headers.substr(0, method_end));
+                    }
+                    message_.pending.clear();
+                    if(transfer_values.size() > 1 || length_values.size() > 1 ||
+                       (transfer && !ascii_equal_ci(*transfer, "chunked"))) {
+                        message_.phase = v1::Http1Message::phase_t::opaque;
+                    } else if(successful_connect ||
+                              (connection && ascii_contains_ci(*connection, "upgrade")) || upgrade) {
+                        message_.phase = v1::Http1Message::phase_t::opaque;
+                    } else if(body_forbidden) {
+                        message_.phase = v1::Http1Message::phase_t::headers;
+                    } else if(transfer && ascii_contains_ci(*transfer, "chunked")) {
+                        message_.phase = v1::Http1Message::phase_t::chunk_size;
+                    } else if(length) {
+                        std::uint64_t parsed_length = 0;
+                        auto parsed = std::from_chars(length->data(),
+                                                      length->data() + length->size(),
+                                                      parsed_length);
+                        if(parsed.ec != std::errc{} ||
+                           parsed.ptr != length->data() + length->size()) {
+                            message_.phase = v1::Http1Message::phase_t::opaque;
+                        } else if(parsed_length == 0) {
+                            message_.phase = v1::Http1Message::phase_t::headers;
+                        } else {
+                            message_.remaining = parsed_length;
+                            message_.phase = v1::Http1Message::phase_t::fixed_body;
+                        }
+                    } else {
+                        message_.phase = response_side ? v1::Http1Message::phase_t::until_close
+                                                       : v1::Http1Message::phase_t::headers;
+                    }
+                    if(!response_side && pending_methods && !request_method.empty() &&
+                       message_.phase != v1::Http1Message::phase_t::opaque)
+                        pending_methods->push_back(std::move(request_method));
+                    if(final_response && pending_methods && !pending_methods->empty())
+                        pending_methods->pop_front();
+                    break;
+                }
+                case v1::Http1Message::phase_t::fixed_body: {
+                    const auto count = static_cast<std::size_t>(
+                        std::min<std::uint64_t>(message_.remaining, data.size() - cursor));
+                    add_body(cursor, cursor + count);
+                    annotate(cursor, cursor + count, "http1.body");
+                    cursor += count;
+                    message_.remaining -= count;
+                    if(message_.remaining == 0) message_.phase = v1::Http1Message::phase_t::headers;
+                    break;
+                }
+                case v1::Http1Message::phase_t::chunk_size: {
+                    annotate(cursor, cursor + 1, "http1.chunk.size");
+                    message_.pending.push_back(data[cursor++]);
+                    if(message_.pending.size() > 128) {
+                        message_.pending.clear();
+                        message_.phase = v1::Http1Message::phase_t::opaque;
+                        break;
+                    }
+                    if(!finish_line()) break;
+                    auto size_text = std::string_view(message_.pending);
+                    if(auto extension = size_text.find(';'); extension != std::string_view::npos)
+                        size_text = size_text.substr(0, extension);
+                    while(!size_text.empty() && (size_text.front() == ' ' || size_text.front() == '\t'))
+                        size_text.remove_prefix(1);
+                    while(!size_text.empty() && (size_text.back() == ' ' || size_text.back() == '\t'))
+                        size_text.remove_suffix(1);
+                    std::uint64_t chunk_size = 0;
+                    auto parsed = std::from_chars(size_text.data(),
+                                                  size_text.data() + size_text.size(),
+                                                  chunk_size, 16);
+                    message_.pending.clear();
+                    if(size_text.empty() || parsed.ec != std::errc{} ||
+                       parsed.ptr != size_text.data() + size_text.size()) {
+                        message_.phase = v1::Http1Message::phase_t::opaque;
+                    } else if(chunk_size == 0) {
+                        message_.phase = v1::Http1Message::phase_t::trailers;
+                    } else {
+                        message_.remaining = chunk_size;
+                        message_.phase = v1::Http1Message::phase_t::chunk_data;
+                    }
+                    break;
+                }
+                case v1::Http1Message::phase_t::chunk_data: {
+                    const auto count = static_cast<std::size_t>(
+                        std::min<std::uint64_t>(message_.remaining, data.size() - cursor));
+                    add_body(cursor, cursor + count);
+                    annotate(cursor, cursor + count, "http1.chunk.data");
+                    cursor += count;
+                    message_.remaining -= count;
+                    if(message_.remaining == 0)
+                        message_.phase = v1::Http1Message::phase_t::chunk_delimiter;
+                    break;
+                }
+                case v1::Http1Message::phase_t::chunk_delimiter:
+                    annotate(cursor, cursor + 1, "http1.chunk.delimiter");
+                    message_.pending.push_back(data[cursor++]);
+                    if(message_.pending.back() == '\n') {
+                        message_.pending.clear();
+                        message_.phase = v1::Http1Message::phase_t::chunk_size;
+                    } else if(message_.pending.size() > 1 || message_.pending.back() != '\r') {
+                        message_.pending.clear();
+                        message_.phase = v1::Http1Message::phase_t::opaque;
+                    }
+                    break;
+                case v1::Http1Message::phase_t::trailers:
+                    annotate(cursor, cursor + 1, "http1.trailers");
+                    message_.pending.push_back(data[cursor++]);
+                    if(message_.pending.size() > 65536) {
+                        message_.pending.clear();
+                        message_.phase = v1::Http1Message::phase_t::opaque;
+                    } else if(finish_line()) {
+                        const bool final_line = message_.pending.empty();
+                        message_.pending.clear();
+                        if(final_line) message_.phase = v1::Http1Message::phase_t::headers;
+                    }
+                    break;
+                case v1::Http1Message::phase_t::until_close:
+                    add_body(cursor, data.size());
+                    annotate(cursor, data.size(), "http1.body");
+                    cursor = data.size();
+                    break;
+                case v1::Http1Message::phase_t::opaque:
+                    annotate(cursor, data.size(), "http1.opaque");
+                    cursor = data.size();
+                    break;
+            }
+        }
+        // A framing error anywhere in this input invalidates ranges already
+        // collected from the same block. Publishing a prefix would present
+        // attacker-controlled malformed framing as trusted L7 content.
+        if(message_.phase == v1::Http1Message::phase_t::opaque) {
+            last_encodings_.assign(1, "");
+            last_annotations_.push_back({0, static_cast<std::int64_t>(data.size()),
+                                         "http1.invalid", {}});
+            return L7PayloadHints{{-1, -1}};
+        }
+        if(!ranges.empty()) return ranges;
+        last_encodings_.assign(1, "");
+        return L7PayloadHints{{0, 0}};
+    }
+
+    void v1::observe_content(EngineCtx& ctx, std::size_t direction,
+                             std::string_view data, std::uint64_t read_bytes,
+                             bool response_side) {
+        auto app = std::dynamic_pointer_cast<app_HttpRequest>(ctx.application_data);
+        if(!app || app->version != app_HttpRequest::HTTP_VER::HTTP_1) return;
+
+        auto* connection = std::any_cast<Http1Connection>(&ctx.state_data);
+        if(!connection) {
+            ctx.state_data = std::make_any<Http1Connection>();
+            connection = std::any_cast<Http1Connection>(&ctx.state_data);
+        }
+
+        auto ranges = connection->observe(direction, data, response_side);
+        app->observe_l7_payload(data, read_bytes, std::move(ranges),
+                                connection->encodings(direction),
+                                connection->directions.at(direction).annotations());
+    }
+
+    L7PayloadHints http2_payload_hint(std::string_view block,
+                                      std::size_t current_offset) {
+        const L7PayloadHints unknown{{-1, -1}};
+        const L7PayloadHints none{{0, 0}};
+        if(current_offset > block.size()) return unknown;
+
+        std::size_t offset = 0;
+        if(block.size() >= v2::txt::magic_sz &&
+           block.substr(0, v2::txt::magic_sz) == v2::txt::magic) {
+            offset = v2::txt::magic_sz;
+        }
+        L7PayloadHints ranges;
+
+        while(offset < block.size()) {
+            if(block.size() - offset < 9) return unknown;
+            const auto* bytes = reinterpret_cast<const unsigned char*>(block.data() + offset);
+            const std::size_t length = (static_cast<std::size_t>(bytes[0]) << 16U) |
+                                       (static_cast<std::size_t>(bytes[1]) << 8U) |
+                                       static_cast<std::size_t>(bytes[2]);
+            const auto type = bytes[3];
+            const auto flags = bytes[4];
+            if(length > block.size() - offset - 9) return unknown;
+
+            if(type == 0 && length != 0) {
+                auto payload_start = offset + 9;
+                auto payload_end = payload_start + length;
+                if((flags & 0x08U) != 0) {
+                    const auto padding = static_cast<std::size_t>(bytes[9]);
+                    if(padding + 1 > length) return unknown;
+                    ++payload_start;
+                    payload_end -= padding;
+                }
+                if(auto range = intersect_payload(payload_start, payload_end,
+                                                  current_offset, block.size()))
+                    ranges.push_back(*range);
+            }
+            offset += 9 + length;
+        }
+        return ranges.empty() ? none : ranges;
+    }
 
     namespace v1 {
 
@@ -475,6 +869,251 @@ namespace sx::engine::http {
             }
 
             _deb("start finished");
+        }
+    }
+
+    namespace v2 {
+
+        L7PayloadHints Http2Direction::observe(std::string_view data,
+                                               bool client_side) {
+            L7PayloadHints ranges;
+            last_stream_ids_.clear();
+            last_annotations_.clear();
+            auto frame_name = [](std::uint8_t type) -> std::string_view {
+                switch(type) {
+                    case 0: return "DATA";
+                    case 1: return "HEADERS";
+                    case 2: return "PRIORITY";
+                    case 3: return "RST_STREAM";
+                    case 4: return "SETTINGS";
+                    case 5: return "PUSH_PROMISE";
+                    case 6: return "PING";
+                    case 7: return "GOAWAY";
+                    case 8: return "WINDOW_UPDATE";
+                    case 9: return "CONTINUATION";
+                    default: return "UNKNOWN";
+                }
+            };
+            auto payload_kind = [](std::uint8_t type) -> std::string_view {
+                switch(type) {
+                    case 0: return "h2.data";
+                    case 1: return "h2.headers";
+                    case 2: return "h2.priority";
+                    case 3: return "h2.rst_stream";
+                    case 4: return "h2.settings";
+                    case 5: return "h2.push_promise";
+                    case 6: return "h2.ping";
+                    case 7: return "h2.goaway";
+                    case 8: return "h2.window_update";
+                    case 9: return "h2.continuation";
+                    default: return "h2.frame.payload";
+                }
+            };
+            auto annotate = [&](std::size_t start, std::size_t end,
+                                std::string_view kind,
+                                bool frame_attributes = false) {
+                if(start == end) return;
+                PayloadAnnotationAttributes attributes;
+                if(frame_attributes) {
+                    attributes["frame_type"] = std::string(frame_name(current_frame_type_));
+                    attributes["stream_id"] = static_cast<std::int64_t>(current_stream_id_);
+                }
+                if(!last_annotations_.empty() &&
+                   last_annotations_.back().end == static_cast<std::int64_t>(start) &&
+                   last_annotations_.back().kind == kind &&
+                   last_annotations_.back().attributes == attributes) {
+                    last_annotations_.back().end = static_cast<std::int64_t>(end);
+                } else {
+                    last_annotations_.push_back({static_cast<std::int64_t>(start),
+                                                 static_cast<std::int64_t>(end),
+                                                 std::string(kind),
+                                                 std::move(attributes)});
+                }
+            };
+            auto add_body = [&](std::size_t start, std::size_t end) {
+                if(start == end) return;
+                if(!ranges.empty() && ranges.back().second ==
+                        static_cast<std::int64_t>(start) &&
+                   last_stream_ids_.back() == current_stream_id_) {
+                    ranges.back().second = static_cast<std::int64_t>(end);
+                } else {
+                    ranges.emplace_back(static_cast<std::int64_t>(start),
+                                        static_cast<std::int64_t>(end));
+                    last_stream_ids_.push_back(current_stream_id_);
+                }
+            };
+            auto reset_frame = [&]() {
+                header_size_ = 0;
+                frame_remaining_ = 0;
+                data_remaining_ = 0;
+                padding_remaining_ = 0;
+                data_frame_ = false;
+                padded_ = false;
+                need_padding_length_ = false;
+            };
+
+            if(opaque_) return {{-1, -1}};
+            std::size_t cursor = 0;
+            if(first_input_) {
+                first_input_ = false;
+                reading_preface_ = client_side && !data.empty() && data.front() == txt::magic[0];
+            }
+            while(cursor < data.size()) {
+                if(reading_preface_) {
+                    if(data[cursor] != txt::magic[preface_size_]) {
+                        opaque_ = true;
+                        break;
+                    }
+                    annotate(cursor, cursor + 1, "h2.preface");
+                    ++cursor;
+                    if(++preface_size_ == txt::magic_sz) reading_preface_ = false;
+                    continue;
+                }
+                if(header_size_ < header_.size()) {
+                    annotate(cursor, cursor + 1, "h2.frame.header");
+                    header_[header_size_++] = static_cast<unsigned char>(data[cursor++]);
+                    if(header_size_ != header_.size()) continue;
+                    frame_remaining_ = (static_cast<std::uint32_t>(header_[0]) << 16U) |
+                                       (static_cast<std::uint32_t>(header_[1]) << 8U) |
+                                       static_cast<std::uint32_t>(header_[2]);
+                    current_frame_type_ = header_[3];
+                    data_frame_ = current_frame_type_ == 0;
+                    current_stream_id_ =
+                        (static_cast<std::uint32_t>(header_[5] & 0x7fU) << 24U) |
+                        (static_cast<std::uint32_t>(header_[6]) << 16U) |
+                        (static_cast<std::uint32_t>(header_[7]) << 8U) |
+                        static_cast<std::uint32_t>(header_[8]);
+                    if(!last_annotations_.empty() &&
+                       last_annotations_.back().kind == "h2.frame.header") {
+                        last_annotations_.back().attributes["frame_type"] =
+                            std::string(frame_name(current_frame_type_));
+                        last_annotations_.back().attributes["stream_id"] =
+                            static_cast<std::int64_t>(current_stream_id_);
+                    }
+                    padded_ = data_frame_ && (header_[4] & 0x08U) != 0;
+                    need_padding_length_ = padded_;
+                    data_remaining_ = data_frame_ && !padded_ ? frame_remaining_ : 0;
+                    if(frame_remaining_ == 0) reset_frame();
+                    continue;
+                }
+                if(need_padding_length_) {
+                    annotate(cursor, cursor + 1, "h2.padding.length", true);
+                    const auto padding = static_cast<std::uint32_t>(
+                        static_cast<unsigned char>(data[cursor++]));
+                    if(frame_remaining_ == 0 || padding > frame_remaining_ - 1) {
+                        opaque_ = true;
+                        break;
+                    }
+                    --frame_remaining_;
+                    padding_remaining_ = padding;
+                    data_remaining_ = frame_remaining_ - padding;
+                    need_padding_length_ = false;
+                    continue;
+                }
+                if(data_remaining_ != 0) {
+                    const auto count = std::min<std::size_t>(data_remaining_,
+                                                             data.size() - cursor);
+                    add_body(cursor, cursor + count);
+                    annotate(cursor, cursor + count, "h2.data", true);
+                    cursor += count;
+                    data_remaining_ -= static_cast<std::uint32_t>(count);
+                    frame_remaining_ -= static_cast<std::uint32_t>(count);
+                } else {
+                    const auto count = std::min<std::size_t>(
+                        frame_remaining_, data.size() - cursor);
+                    annotate(cursor, cursor + count,
+                             data_frame_ ? "h2.padding" :
+                                           payload_kind(current_frame_type_), true);
+                    cursor += count;
+                    frame_remaining_ -= static_cast<std::uint32_t>(count);
+                    if(padding_remaining_ >= count)
+                        padding_remaining_ -= static_cast<std::uint32_t>(count);
+                }
+                if(frame_remaining_ == 0) reset_frame();
+            }
+            if(opaque_) {
+                last_annotations_.push_back({0, static_cast<std::int64_t>(data.size()),
+                                             "h2.invalid", {}});
+                return {{-1, -1}};
+            }
+            return ranges.empty() ? L7PayloadHints{{0, 0}} : ranges;
+        }
+
+        bool is_prior_knowledge_preface(std::string_view data) {
+            return data.size() >= txt::magic_sz &&
+                   data.substr(0, txt::magic_sz) == txt::magic;
+        }
+
+        void observe_content(EngineCtx& ctx, std::size_t direction,
+                             std::string_view data, std::uint64_t read_bytes,
+                             bool client_side) {
+            auto app = std::dynamic_pointer_cast<app_HttpRequest>(ctx.application_data);
+            if(!app) return;
+            if(app->version != app_HttpRequest::HTTP_VER::HTTP2) {
+                // The content consumer runs before the ordinary flow detector.
+                // Bootstrap clear prior-knowledge H2 here so its very first
+                // block is never fed to the HTTP/1 framing tracker.
+                if(!client_side || !is_prior_knowledge_preface(data)) return;
+                app->version = app_HttpRequest::HTTP_VER::HTTP2;
+            }
+            auto* connection = std::any_cast<Http2Connection>(&ctx.state_data);
+            if(!connection) {
+                ctx.state_data = std::make_any<Http2Connection>();
+                connection = std::any_cast<Http2Connection>(&ctx.state_data);
+            }
+            auto& tracker = connection->content_directions.at(direction);
+            auto ranges = tracker.observe(data, client_side);
+            std::vector<std::string> encodings;
+            encodings.reserve(tracker.stream_ids().size());
+            for(const auto stream_id : tracker.stream_ids()) {
+                const auto stream = connection->streams.find(stream_id);
+                encodings.push_back(stream != connection->streams.end() &&
+                                    stream->second.content_encoding_ ==
+                                        Http2Stream::content_type_t::GZIP
+                                    ? "gzip" : "");
+            }
+            app->observe_l7_payload(data, read_bytes, std::move(ranges),
+                                    std::move(encodings), tracker.annotations());
+        }
+
+    }
+
+    void observe_content(EngineCtx& ctx, std::size_t direction,
+                         std::string_view data, std::uint64_t read_bytes,
+                         bool client_side) {
+        auto app = std::dynamic_pointer_cast<app_HttpRequest>(ctx.application_data);
+
+        // Negotiated ALPN is authoritative. An unknown future protocol must
+        // not accidentally fall through to an HTTP/1 parser selected earlier.
+        if(!ctx.negotiated_alpn.empty()) {
+            if(ctx.negotiated_alpn == "h2") {
+                if(!app) {
+                    app = std::make_shared<app_HttpRequest>();
+                    ctx.application_data = app;
+                }
+                app->version = app_HttpRequest::HTTP_VER::HTTP2;
+                v2::observe_content(ctx, direction, data, read_bytes, client_side);
+            } else if(ctx.negotiated_alpn == "http/1.1" ||
+                      ctx.negotiated_alpn == "http/1.0") {
+                if(!app) {
+                    app = std::make_shared<app_HttpRequest>();
+                    ctx.application_data = app;
+                }
+                app->version = app_HttpRequest::HTTP_VER::HTTP_1;
+                v1::observe_content(ctx, direction, data, read_bytes, !client_side);
+            }
+            return;
+        }
+
+        if((app && app->version == app_HttpRequest::HTTP_VER::HTTP2) ||
+           (client_side && v2::is_prior_knowledge_preface(data))) {
+            if(!app) {
+                app = std::make_shared<app_HttpRequest>();
+                ctx.application_data = app;
+            }
+            v2::observe_content(ctx, direction, data, read_bytes, client_side);
+        } else if(app && app->version == app_HttpRequest::HTTP_VER::HTTP_1) {
+            v1::observe_content(ctx, direction, data, read_bytes, !client_side);
         }
     }
 
@@ -947,6 +1586,13 @@ namespace sx::engine::http {
                             load_from_props(":authority", app_data->http_data.host);
                             load_from_props(":method", app_data->http_data.method);
                             load_from_props(":referer", app_data->http_data.referer);
+
+                            if(app_data->http_data.proto.empty()) {
+                                if(auto const scheme = app_data->properties().find(":scheme");
+                                   scheme != app_data->properties().end()) {
+                                    app_data->http_data.proto = scheme->second + "://";
+                                }
+                            }
                         }
 
                     } else if (hdr == ":method") {
@@ -1748,6 +2394,17 @@ namespace sx::engine::http {
                     return;
                 }
 
+                // Record the representation used by non-empty payloads, but
+                // still process an empty DATA frame carrying END_STREAM.
+                if(!data.empty()) {
+                    if(auto app = std::dynamic_pointer_cast<app_HttpRequest>(
+                           ctx.application_data)) {
+                        app->observe_l7_encoding(
+                            stream_state.content_encoding_ ==
+                                    Http2Stream::content_type_t::GZIP
+                                ? "gzip" : "");
+                    }
+                }
                 if(stream_state.content_encoding_ == Http2Stream::content_type_t::GZIP) {
 //                    auto& gz_instance = state_data->streams[stream_id].gzip;
 //

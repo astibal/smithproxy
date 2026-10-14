@@ -5,7 +5,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -24,6 +27,8 @@ struct connection_context {
         : session_id(id), alpn(std::move(protocol)),
           h3_decoder(alpn.rfind("h3", 0) == 0
               ? std::make_shared<h3_capture_decoder>() : nullptr),
+          h3_observer_decoder(alpn.rfind("h3", 0) == 0
+              ? std::make_shared<h3_capture_decoder>() : nullptr),
           native_log(std::move(native_log)) {}
 
     std::uint64_t session_id = 0;
@@ -31,8 +36,22 @@ struct connection_context {
     std::atomic_uint32_t next_packet_number {1};
     /** Shared across streams because QPACK instructions use dedicated flows. */
     std::shared_ptr<h3_capture_decoder> h3_decoder;
+    /** Independent decoder used even when packet capture is disabled. */
+    std::shared_ptr<h3_capture_decoder> h3_observer_decoder;
     /** Encrypted session packets and secrets routed into the selected logger. */
     std::shared_ptr<sx::session_traffic_log> native_log;
+
+    /** Remember decoded Content-Encoding across H3 DATA messages. */
+    void content_encoding(socle::side_t side, std::uint64_t stream_id,
+                          std::string value);
+    [[nodiscard]] std::string content_encoding(
+        socle::side_t side, std::uint64_t stream_id) const;
+
+private:
+    static std::uint64_t stream_side_key(
+        socle::side_t side, std::uint64_t stream_id);
+    mutable std::mutex content_encoding_lock;
+    std::unordered_map<std::uint64_t, std::string> content_encodings;
 };
 
 /** Metadata which remains constant for one downstream-visible QUIC stream. */
@@ -40,6 +59,10 @@ struct stream_context {
     std::shared_ptr<connection_context> connection;
     std::uint64_t stream_id = 0;
 };
+
+/** Convert a decoded initial request field section to canonical flow metadata. */
+std::unordered_map<std::string, std::string> h3_flow_observations(
+    h3_headers_record const& record);
 
 /** Serialize one plaintext STREAM frame inside the private SPQ1 QUIC envelope. */
 std::vector<unsigned char> encode_stream_packet(
@@ -101,9 +124,28 @@ public:
 
     std::unique_ptr<socle::baseTrafficLogger> wrap(
         std::unique_ptr<socle::baseTrafficLogger> output) override;
+    std::optional<content_metadata> inspect_content(
+        socle::side_t side, buffer const& data) override;
+    void on_flow_observation(observation_hook hook) override {
+        observation_hook_ = std::move(hook);
+    }
 
 private:
+    struct frame_state {
+        // A frame type and length are both QUIC varints, hence at most 16
+        // header bytes even when a content message ends halfway through them.
+        std::vector<unsigned char> header;
+        std::optional<std::uint64_t> type;
+        std::uint64_t remaining = 0;
+    };
+
+    std::vector<std::pair<std::int64_t, std::int64_t>> data_ranges(
+        socle::side_t side, buffer const& data);
+    static std::size_t side_index(socle::side_t side);
+
     stream_context context_;
+    observation_hook observation_hook_;
+    frame_state frames_[2];
 };
 
 } // namespace sx::quic::spq1

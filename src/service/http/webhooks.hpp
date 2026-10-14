@@ -46,6 +46,8 @@
 #include <cstdint>
 #include <deque>
 #include <mutex>
+#include <optional>
+#include <map>
 #include <unordered_map>
 
 #include <nlohmann/json.hpp>
@@ -147,13 +149,95 @@ namespace sx::http::webhooks {
     bool is_enabled();
     void set_hostid(std::string const& ref);
     std::string get_hostid();
+    bool sift_enabled();
+
+    struct timing_diagnostics_snapshot {
+        std::uint64_t samples = 0;
+        double last_ms = 0.0;
+        double average_ms = 0.0;
+        double median_ms = 0.0;
+        double p95_ms = 0.0;
+        double min_ms = 0.0;
+        double max_ms = 0.0;
+    };
+
+    struct webhook_diagnostics_snapshot {
+        bool enabled = false;
+        bool verify_tls = true;
+        bool binary_content = false;
+        std::string url;
+        long timeout_seconds = 0;
+        std::uint64_t requests = 0;
+        std::uint64_t accepted = 0;
+        std::uint64_t rejected = 0;
+        std::uint64_t completed = 0;
+        std::uint64_t succeeded = 0;
+        std::uint64_t failed = 0;
+        std::uint64_t asynchronous_requests = 0;
+        std::uint64_t waiting_requests = 0;
+        std::uint64_t action_requests = 0;
+        std::uint64_t content_requests = 0;
+        std::uint64_t request_bytes = 0;
+        std::uint64_t response_bytes = 0;
+        std::uint64_t last_request_ms = 0;
+        std::uint64_t last_response_ms = 0;
+        long last_status = 0;
+        std::string last_error;
+        std::map<std::string, std::uint64_t> actions;
+        timing_diagnostics_snapshot total_delay;
+        timing_diagnostics_snapshot queue_delay;
+        timing_diagnostics_snapshot transport_delay;
+    };
+
+    [[nodiscard]] webhook_diagnostics_snapshot webhook_diagnostics();
+
+    struct sift_diagnostics_snapshot {
+        bool enabled = false;
+        std::string url;
+        std::string unix_socket_path;
+        long timeout_seconds = 0;
+        std::uint64_t requests = 0;
+        std::uint64_t accepted = 0;
+        std::uint64_t rejected = 0;
+        std::uint64_t completed = 0;
+        std::uint64_t succeeded = 0;
+        std::uint64_t failed = 0;
+        std::uint64_t action_requests = 0;
+        std::uint64_t content_requests = 0;
+        std::uint64_t request_bytes = 0;
+        std::uint64_t response_bytes = 0;
+        std::uint64_t last_request_ms = 0;
+        std::uint64_t last_response_ms = 0;
+        long last_status = 0;
+        std::string last_error;
+        double rtt_last_ms = 0.0;
+        double rtt_average_ms = 0.0;
+        double rtt_min_ms = 0.0;
+        double rtt_max_ms = 0.0;
+    };
+
+    [[nodiscard]] sift_diagnostics_snapshot sift_diagnostics();
+    bool send_sift_content_wait(
+        std::string const& action_id, nlohmann::json details,
+        std::string_view payload, sx::http::AsyncRequest::reply_hook hook);
+    bool send_sift_action(
+        std::string const& action, std::string const& action_id,
+        nlohmann::json const& details);
 
     void neighbor_state(std::string const& address_str, std::string const& state);
     void neighbor_state(std::vector<std::string> const& address_vec, std::string const& state);
     void neighbor_new(std::string const& address_str);
 
+    bool hostname_info(std::string const& origin, std::vector<std::string> const& addresses,
+                       std::string const& hostname);
+    bool hostname_info_dns_cache();
+
+    void send_action(std::string const& action, nlohmann::json const& details);
     void send_action(std::string const& action, std::string const& action_id, nlohmann::json const& details);
     bool send_action_wait(std::string const& action, std::string const& action_id, nlohmann::json const& details, sx::http::AsyncRequest::reply_hook hook);
+    bool send_content_wait(std::string const& action_id, nlohmann::json details,
+                           std::string_view payload, sx::http::AsyncRequest::reply_hook hook);
+    bool binary_content_enabled();
 }
 
 #endif

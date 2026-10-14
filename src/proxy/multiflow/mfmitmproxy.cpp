@@ -225,13 +225,21 @@ private:
             // consumers; the paired upstream flow may use a different ID.
             auto const flow_id = downstream_->wire_flow_id(left_handle)
                 .value_or(left_handle.id);
-            proxy->traffic_log_adapter(
-                context_.make_traffic_log_adapter(flow_id));
+            auto adapter = context_.make_traffic_log_adapter(flow_id);
+
+            adapter->on_flow_observation(
+                [proxy = proxy.get()](sx::traffic_log_adapter::flow_observation fields) {
+                    proxy->submit_flow_observation(std::move(fields), "http3.headers");
+                });
+
+            proxy->traffic_log_adapter(std::move(adapter));
         }
+
         if (!proxy || !proxymaker::policy(proxy, false)) {
             source_connection->reset(source, 0x10c);
             return;
         }
+
         if (!proxymaker::setup_snat(proxy, context_.source_host, context_.source_port)) {
             source_connection->reset(source, 0x102);
             return;

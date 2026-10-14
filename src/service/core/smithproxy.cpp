@@ -56,6 +56,7 @@
 #include "service/http/webhooks.hpp"
 #include "proxy/nbrhood.hpp"
 #include "proxy/multiflow/mfmitmproxy.hpp"
+#include <inspect/dnsinspector.hpp>
 
 #ifdef ASAN_LEAKS
 extern "C" int __lsan_do_recoverable_leak_check();
@@ -87,6 +88,11 @@ void SmithProxy::create_log_writer_thread() {
 
 
 void SmithProxy::create_dns_thread() {
+    DNS_Inspector::set_hostname_observer(
+        [](std::string const& origin, std::vector<std::string> const& addresses,
+           std::string const& hostname) {
+            sx::http::webhooks::hostname_info(origin, addresses, hostname);
+        });
     dns_thread = std::shared_ptr<std::thread>(create_dns_updater());
     if(dns_thread) {
         pthread_setname_np( dns_thread->native_handle(),
@@ -121,7 +127,6 @@ bool SmithProxy::create_listeners() {
 
         std::string tcp_frm = "tcp";
         std::string tls_frm = "tls";
-        std::string dtls_frm = "dtls";
         std::string udp_frm = "udp";
         std::string quic_frm = "quic";
 
@@ -157,15 +162,6 @@ bool SmithProxy::create_listeners() {
                     proxyType::transparent());
 
             log_listener(tls_frm, ssl_proxies);
-
-
-            dtls_proxies = NetworkServiceFactory::prepare_listener<theReceiver, MyDTLSMitmCom>(
-                    std::stoi(CfgFactory::get()->listen_dtls_port),
-                    dtls_frm,
-                    CfgFactory::get()->num_workers_dtls,
-                    proxyType::transparent());
-
-            log_listener(dtls_frm, dtls_proxies);
 
 
             udp_proxies = NetworkServiceFactory::prepare_listener<theReceiver, UDPCom>(
@@ -208,7 +204,6 @@ bool SmithProxy::create_listeners() {
 
             if ((plain_proxies.empty() && CfgFactory::get()->num_workers_tcp >= 0) ||
                 (ssl_proxies.empty() && CfgFactory::get()->num_workers_tls >= 0) ||
-                (dtls_proxies.empty() && CfgFactory::get()->num_workers_dtls >= 0) ||
                 (udp_proxies.empty() && CfgFactory::get()->num_workers_udp >= 0)) {
 
                 _fat("Failed to setup tproxy proxies. Bailing!");
@@ -393,7 +388,6 @@ void SmithProxy::run() {
     if(CfgFactory::get()->accept_tproxy) {
         launch_proxy_threads(plain_proxies, plain_threads, "TCP listener", friendly_thread_name_tcp.c_str());
         launch_proxy_threads(ssl_proxies, ssl_threads, "TLS listener", friendly_thread_name_tls.c_str());
-        launch_proxy_threads(dtls_proxies, dtls_threads, "DTLS listener", friendly_thread_name_dls.c_str());
         launch_proxy_threads(udp_proxies, udp_threads, "UDP listener", friendly_thread_name_udp.c_str());
         for (auto& service : quic_services) {
             _inf("Starting: QUIC listener");
@@ -453,6 +447,7 @@ void SmithProxy::run() {
     unsigned int wh_ping_seconds = webhook_ping_interval > 10
                                    ? webhook_ping_interval - 10 : 0; // speed-up first ping
     unsigned int wh_nbr_seconds = 0;
+    bool wh_hostname_snapshot_sent = false;
 
 
 
@@ -489,6 +484,10 @@ void SmithProxy::run() {
 
                 wh_ping_seconds = 0;
                 sx::http::webhooks::ping();
+                if(not wh_hostname_snapshot_sent) {
+                    sx::http::webhooks::hostname_info_dns_cache();
+                    wh_hostname_snapshot_sent = true;
+                }
                 sx::webserver::HttpSessions::cleanup();
 
                 state_save();

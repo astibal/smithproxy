@@ -207,3 +207,8 @@ void MitmHttpConnectProxy::on_left_new(std::unique_ptr<baseHostCX> accepted_cx) 
     accepted_cx.release();
     add_proxy(std::move(proxy));
 }
+
+int MitmHttpConnectProxy::handle_sockets_once(baseCom* c) {
+    process_session_lists(*this);
+    return ThreadedAcceptorProxy<HttpConnectProxy>::handle_sockets_once(c);
+}

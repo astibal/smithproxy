@@ -570,6 +570,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 )
         add_executable(sx_gtests_http1
                 src/inspect/tests/http1_tests.cpp
+                src/inspect/tests/http1_framing_tests.cpp
+                src/inspect/tests/http2_content_framing_tests.cpp
 
                 src/inspect/engine.hpp
                 src/inspect/engine/http.cpp
@@ -907,6 +909,34 @@ if(SMITHPROXY_FUZZING)
             src/proxy/quic/fuzz/lifecycle_fuzzer.cpp)
     target_link_libraries(quic_lifecycle_fuzzer socle_lib pthread crypto ssl)
     smithproxy_fuzzer(quic_lifecycle_fuzzer)
+
+    add_executable(http1_framing_fuzzer
+            src/inspect/fuzz/http1_framing_fuzzer.cpp
+            src/inspect/engine/http.cpp
+            src/inspect/fp/ja4.cpp
+            src/inspect/dns.cpp
+            src/policy/inspectors.cpp
+            src/inspect/dnsinspector.cpp
+            src/ext/libcidr/cidr.cpp
+            src/policy/addrobj.cpp)
+    target_link_libraries(http1_framing_fuzzer socle_lib pthread crypto ssl)
+    target_compile_options(http1_framing_fuzzer PRIVATE
+            -Wno-error=missing-template-arg-list-after-template-kw)
+    smithproxy_fuzzer(http1_framing_fuzzer)
+
+    add_executable(http2_content_framing_fuzzer
+            src/inspect/fuzz/http2_content_framing_fuzzer.cpp
+            src/inspect/engine/http.cpp
+            src/inspect/fp/ja4.cpp
+            src/inspect/dns.cpp
+            src/policy/inspectors.cpp
+            src/inspect/dnsinspector.cpp
+            src/ext/libcidr/cidr.cpp
+            src/policy/addrobj.cpp)
+    target_link_libraries(http2_content_framing_fuzzer socle_lib pthread crypto ssl)
+    target_compile_options(http2_content_framing_fuzzer PRIVATE
+            -Wno-error=missing-template-arg-list-after-template-kw)
+    smithproxy_fuzzer(http2_content_framing_fuzzer)
 endif()
 
 option(SMITHPROXY_TLS_FUZZING "Build Clang TLS libFuzzer targets" OFF)

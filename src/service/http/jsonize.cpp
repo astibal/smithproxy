@@ -134,6 +134,10 @@ namespace jsonize {
 
         ret["oid"] = what->to_connection_ID();
 
+        if(auto classifications = what->sift_classifications(); !classifications.empty()) {
+            ret["classification"]["sift"] = std::move(classifications);
+        }
+
         if (auto const protocol = what->session_protocol(); !protocol.empty()) {
             for (auto& endpoint : left) endpoint["com"] = protocol;
             for (auto& endpoint : right) endpoint["com"] = protocol;

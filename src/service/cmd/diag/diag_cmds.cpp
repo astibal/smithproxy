@@ -44,6 +44,8 @@
 #include <cctype>
 #include <cstdio>
 #include <ctime>
+#include <chrono>
+#include <iomanip>
 #include <memory>
 #include <sstream>
 #include <pwd.h>
@@ -67,6 +69,7 @@
 #include <service/api/api_broker.hpp>
 #include <service/webhook/webhook_broker.hpp>
 #include <service/http/async_request.hpp>
+#include <service/http/webhooks.hpp>
 #include <inspect/engine/http.hpp>
 
 
@@ -1230,6 +1233,22 @@ int cli_diag_sys_api_stats(DiagCli* cli, const char* command,
 int cli_diag_sys_webhook_stats(DiagCli* cli, const char* command,
                                char* argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
+    const auto stats = sx::http::webhooks::webhook_diagnostics();
+    const auto inflight = stats.accepted >= stats.completed
+        ? stats.accepted - stats.completed : 0;
+    const auto now_ms = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count());
+    const auto age = [now_ms](std::uint64_t timestamp) -> std::string {
+        if(timestamp == 0) return "never";
+        return std::to_string(now_ms >= timestamp ? now_ms - timestamp : 0) + " ms ago";
+    };
+    const auto append_timing = [](std::ostringstream& stream, char const* name,
+                                  sx::http::webhooks::timing_diagnostics_snapshot const& timing) {
+        stream << "  " << name << " ms (" << timing.samples << " samples): last "
+               << timing.last_ms << ", avg " << timing.average_ms
+               << ", median " << timing.median_ms << ", p95 " << timing.p95_ms
+               << ", min " << timing.min_ms << ", max " << timing.max_ms << "\n";
+    };
     std::ostringstream output;
     output << "Webhook communication worker:\n";
     if(sx::comm::webhook::enabled()) {
@@ -1239,10 +1258,83 @@ int cli_diag_sys_webhook_stats(DiagCli* cli, const char* command,
     } else {
         output << "  mode: direct\n";
     }
-    output << "  pending requests: "
-           << sx::http::AsyncRequest::pending_requests.load(std::memory_order_relaxed) << "\n"
-           << "  dropped requests: "
-           << sx::http::AsyncRequest::dropped_requests.load(std::memory_order_relaxed);
+    output << "  enabled: " << (stats.enabled ? "yes" : "no") << "\n"
+           << "  endpoint: " << (stats.url.empty() ? "<not configured>" : stats.url) << "\n"
+           << "  TLS verify: " << (stats.verify_tls ? "yes" : "no") << "\n"
+           << "  content protocol: " << (stats.binary_content ? "sxbn-001" : "json-base64") << "\n"
+           << "  timeout: " << stats.timeout_seconds << " s\n"
+           << "  requests: " << stats.requests
+           << " (async " << stats.asynchronous_requests
+           << ", waiting " << stats.waiting_requests << ")\n"
+           << "  request types: actions " << stats.action_requests
+           << ", content " << stats.content_requests << "\n"
+           << "  accepted/rejected: " << stats.accepted << "/" << stats.rejected << "\n"
+           << "  in flight: " << inflight << "\n"
+           << "  completed: " << stats.completed
+           << " (ok " << stats.succeeded << ", failed " << stats.failed << ")\n"
+           << "  bytes: tx " << stats.request_bytes << ", rx " << stats.response_bytes << "\n"
+           << "  worker pool pending/dropped: "
+           << sx::http::AsyncRequest::pending_requests.load(std::memory_order_relaxed) << "/"
+           << sx::http::AsyncRequest::dropped_requests.load(std::memory_order_relaxed) << "\n"
+           << "  last request: " << age(stats.last_request_ms) << "\n"
+           << "  last response: " << age(stats.last_response_ms) << "\n"
+           << "  last status: " << (stats.last_status ? std::to_string(stats.last_status) : "n/a") << "\n"
+           << std::fixed << std::setprecision(3);
+    append_timing(output, "total delay", stats.total_delay);
+    append_timing(output, "queue delay", stats.queue_delay);
+    append_timing(output, "transport delay", stats.transport_delay);
+    if(!stats.actions.empty()) {
+        output << "  actions:";
+        for(auto const& [action, count]: stats.actions) {
+            output << " " << action << "=" << count;
+        }
+        output << "\n";
+    }
+    if(!stats.last_error.empty()) output << "  last error: " << stats.last_error;
+    cli_print(cli, "%s", output.str().c_str());
+    return CLI_OK;
+}
+
+int cli_diag_sys_sift_stats(DiagCli* cli, const char* command,
+                            char* argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+    const auto stats = sx::http::webhooks::sift_diagnostics();
+    const auto inflight = stats.accepted >= stats.completed
+        ? stats.accepted - stats.completed : 0;
+    const auto now_ms = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count());
+    const auto age = [now_ms](std::uint64_t timestamp) -> std::string {
+        if(timestamp == 0) return "never";
+        return std::to_string(now_ms >= timestamp ? now_ms - timestamp : 0) + " ms ago";
+    };
+    std::ostringstream output;
+    output << "Sift communication worker:\n";
+    if(sx::comm::sift::enabled()) {
+        output << "  mode: external\n"
+               << "  socket: " << sx::comm::sift::transport_path() << "\n";
+    } else {
+        output << "  mode: direct\n";
+    }
+    output << "  enabled: " << (stats.enabled ? "yes" : "no") << "\n"
+           << "  endpoint: " << (stats.url.empty() ? "<not configured>" : stats.url) << "\n"
+           << "  timeout: " << stats.timeout_seconds << " s\n"
+           << "  requests: " << stats.requests
+           << " (content " << stats.content_requests
+           << ", lifecycle " << stats.action_requests << ")\n"
+           << "  accepted/rejected: " << stats.accepted << "/" << stats.rejected << "\n"
+           << "  in flight: " << inflight << "\n"
+           << "  completed: " << stats.completed
+           << " (ok " << stats.succeeded << ", failed " << stats.failed << ")\n"
+           << "  bytes: tx " << stats.request_bytes << ", rx " << stats.response_bytes << "\n"
+           << "  last request: " << age(stats.last_request_ms) << "\n"
+           << "  last response: " << age(stats.last_response_ms) << "\n"
+           << "  last status: " << (stats.last_status ? std::to_string(stats.last_status) : "n/a") << "\n"
+           << std::fixed << std::setprecision(3)
+           << "  RTT ms: last " << stats.rtt_last_ms
+           << ", avg " << stats.rtt_average_ms
+           << ", min " << stats.rtt_min_ms
+           << ", max " << stats.rtt_max_ms;
+    if(!stats.last_error.empty()) output << "\n  last error: " << stats.last_error;
     cli_print(cli, "%s", output.str().c_str());
     return CLI_OK;
 }
@@ -2153,7 +2245,15 @@ int cli_diag_proxy_session_list_extra (DiagCli *cli, const char *command, std::v
                         suffix += " " + decor.warning("!" + fi.first);
                     }
                 }
-
+                if(auto classifications = curr_proxy->sift_classifications();
+                   !classifications.empty()) {
+                    suffix += " " + decor.muted("[sift:");
+                    for(std::size_t i = 0; i < classifications.size(); ++i) {
+                        if(i != 0) suffix += decor.muted(",");
+                        suffix += decor.muted(classifications[i]);
+                    }
+                    suffix += decor.muted("]");
+                }
                 auto const& io_info = get_io_info(lf, rg, sl_flags);
 
                 do_print |= std::get<0>(io_info);
@@ -2471,6 +2571,8 @@ int cli_diag_worker_proxy_list(DiagCli *cli, [[maybe_unused]] const char *comman
 
     list_acceptor("== socks acceptor", sx.socks_proxies, sx.socks_threads, verbosity);
     list_acceptor("== socks receiver", sx.socks_udp_proxies, sx.socks_udp_threads, verbosity);
+    list_acceptor("== http-connect acceptor", sx.http_connect_proxies,
+                  sx.http_connect_threads, verbosity);
 
     list_acceptor("== plain redirect acceptor", sx.redir_plain_proxies, sx.redir_plain_threads, verbosity);
     list_acceptor("== dns redirect receiver", sx.redir_udp_proxies, sx.redir_udp_threads, verbosity);
@@ -2788,6 +2890,8 @@ void register_diags(libcli2::Cli& native) {
             diag_register_command(cli, diag_sys_api, "stats", cli_diag_sys_api_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display API broker statistics");
         auto diag_sys_webhook = diag_register_command(cli, diag_sys, "webhook", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "webhook communication broker diagnostics");
             diag_register_command(cli, diag_sys_webhook, "stats", cli_diag_sys_webhook_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display webhook transport statistics");
+        auto diag_sys_sift = diag_register_command(cli, diag_sys, "sift", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "Sift communication broker diagnostics");
+            diag_register_command(cli, diag_sys_sift, "stats", cli_diag_sys_sift_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display Sift transport statistics");
     auto diag_ssl = diag_register_command(cli, diag, "tls", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "ssl related troubleshooting commands");
     auto diag_ssl_cache = diag_register_command(cli, diag_ssl, "cache", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl certificate cache");
     diag_register_command(cli, diag_ssl_cache, "stats", cli_diag_ssl_cache_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "display ssl cert cache statistics");
