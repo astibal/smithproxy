@@ -1855,7 +1855,7 @@ TEST_F(TLSIntegration, StapledOcspResponseVerifiesGoodAndRevokedStatus) {
     }
 }
 
-TEST_F(TLSIntegration, InvalidStapledOcspSignatureRequiresFailClosedFallback) {
+TEST_F(TLSIntegration, InvalidStapledOcspSignatureFallsBackWhenStaplingIsOptional) {
     auto issuer_key = generate_rsa_key();
     auto certificate_key = generate_rsa_key();
     ASSERT_NE(issuer_key, nullptr);
@@ -1906,8 +1906,9 @@ TEST_F(TLSIntegration, InvalidStapledOcspSignatureRequiresFailClosedFallback) {
     EXPECT_EQ(parsed.first, SSLCom::staple_code_t::BASIC_VERIFY_FAILED);
     EXPECT_TRUE(connection.opt.ocsp.enforce_in_verify);
     connection.verify_reset(SSLCom::verify_status_t::VRF_OK);
-    EXPECT_EQ(SSLCom::status_resp_callback(ssl.get(), nullptr), 0);
-    EXPECT_TRUE(connection.verify_bitcheck(SSLCom::verify_status_t::VRF_ALLFAILED));
+    EXPECT_EQ(SSLCom::status_resp_callback(ssl.get(), nullptr), 1);
+    EXPECT_TRUE(connection.verify_bitcheck(SSLCom::verify_status_t::VRF_OK));
+    EXPECT_FALSE(connection.verify_bitcheck(SSLCom::verify_status_t::VRF_ALLFAILED));
 }
 
 using ocsp_parameters = std::tuple<int, int, int, int>;
