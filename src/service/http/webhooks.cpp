@@ -36,6 +36,109 @@ namespace sx::http::webhooks {
     static std::mutex protocol_lock;
     static std::string sxbn_callback_url;
 
+    namespace {
+        struct sift_runtime_stats {
+            std::mutex lock;
+            std::uint64_t requests = 0;
+            std::uint64_t accepted = 0;
+            std::uint64_t rejected = 0;
+            std::uint64_t completed = 0;
+            std::uint64_t succeeded = 0;
+            std::uint64_t failed = 0;
+            std::uint64_t action_requests = 0;
+            std::uint64_t content_requests = 0;
+            std::uint64_t request_bytes = 0;
+            std::uint64_t response_bytes = 0;
+            std::uint64_t last_request_ms = 0;
+            std::uint64_t last_response_ms = 0;
+            long last_status = 0;
+            std::string last_error;
+            double rtt_last_ms = 0.0;
+            double rtt_total_ms = 0.0;
+            double rtt_min_ms = 0.0;
+            double rtt_max_ms = 0.0;
+        } sift_stats;
+
+        std::uint64_t wallclock_ms() {
+            return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count());
+        }
+
+        void sift_request_started(std::size_t bytes, bool content) {
+            auto lock = std::scoped_lock(sift_stats.lock);
+            ++sift_stats.requests;
+            if(content) ++sift_stats.content_requests;
+            else ++sift_stats.action_requests;
+            sift_stats.request_bytes += bytes;
+            sift_stats.last_request_ms = wallclock_ms();
+        }
+
+        void sift_request_accepted(bool accepted) {
+            auto lock = std::scoped_lock(sift_stats.lock);
+            if(accepted) ++sift_stats.accepted;
+            else {
+                ++sift_stats.rejected;
+                sift_stats.last_error = "request was not accepted by the worker";
+            }
+        }
+
+        void sift_request_completed(sx::http::expected_reply const& reply,
+                                    std::chrono::steady_clock::time_point started) {
+            const auto elapsed = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - started).count();
+            auto lock = std::scoped_lock(sift_stats.lock);
+            ++sift_stats.completed;
+            sift_stats.last_response_ms = wallclock_ms();
+            sift_stats.rtt_last_ms = elapsed;
+            sift_stats.rtt_total_ms += elapsed;
+            if(sift_stats.completed == 1) {
+                sift_stats.rtt_min_ms = elapsed;
+                sift_stats.rtt_max_ms = elapsed;
+            } else {
+                sift_stats.rtt_min_ms = std::min(sift_stats.rtt_min_ms, elapsed);
+                sift_stats.rtt_max_ms = std::max(sift_stats.rtt_max_ms, elapsed);
+            }
+
+            if(!reply.has_value()) {
+                ++sift_stats.failed;
+                sift_stats.last_status = 0;
+                sift_stats.last_error = "request completed without a reply";
+                return;
+            }
+
+            const auto status = reply->response.first;
+            sift_stats.last_status = status;
+            sift_stats.response_bytes += reply->response.second.size();
+            if(status >= 200 && status < 300) {
+                ++sift_stats.succeeded;
+                sift_stats.last_error.clear();
+            } else {
+                ++sift_stats.failed;
+                sift_stats.last_error = reply->response.second;
+                constexpr std::size_t max_error = 240;
+                if(sift_stats.last_error.size() > max_error) {
+                    sift_stats.last_error.resize(max_error);
+                    sift_stats.last_error += "...";
+                }
+            }
+        }
+
+        sx::http::AsyncRequest::reply_hook sift_tracked_hook(
+            sx::http::AsyncRequest::reply_hook hook,
+            std::chrono::steady_clock::time_point started) {
+            return [hook = std::move(hook), started](sx::http::expected_reply const& reply) {
+                // AsyncRequest emits an initialization callback with status -100
+                // before it performs I/O. It is useful to existing hooks, but it
+                // is not a completed request and must not distort Sift RTT/error
+                // diagnostics.
+                const auto initialization = reply.has_value() &&
+                                            reply->response.first == -100;
+                if(!initialization) sift_request_completed(reply, started);
+                if(hook) hook(reply);
+            };
+        }
+    }
+
     static std::string active_webhook_url() {
         auto lock = std::scoped_lock(CfgFactory::lock());
         return CfgFactory::get()->settings_webhook.active_url();
@@ -66,6 +169,40 @@ namespace sx::http::webhooks {
     bool sift_enabled() {
         auto lock = std::scoped_lock(CfgFactory::lock());
         return CfgFactory::get()->settings_webhook.sift;
+    }
+
+    static sx::http::AsyncRequest::request_settings sift_settings();
+
+    sift_diagnostics_snapshot sift_diagnostics() {
+        const auto settings = sift_settings();
+        auto lock = std::scoped_lock(sift_stats.lock);
+        sift_diagnostics_snapshot result;
+        result.enabled = settings.enabled;
+        result.url = settings.url;
+        result.unix_socket_path = settings.unix_socket_path;
+        result.timeout_seconds = sx::http::AsyncRequest::config::timeout;
+        result.requests = sift_stats.requests;
+        result.accepted = sift_stats.accepted;
+        result.rejected = sift_stats.rejected;
+        result.completed = sift_stats.completed;
+        result.succeeded = sift_stats.succeeded;
+        result.failed = sift_stats.failed;
+        result.action_requests = sift_stats.action_requests;
+        result.content_requests = sift_stats.content_requests;
+        result.request_bytes = sift_stats.request_bytes;
+        result.response_bytes = sift_stats.response_bytes;
+        result.last_request_ms = sift_stats.last_request_ms;
+        result.last_response_ms = sift_stats.last_response_ms;
+        result.last_status = sift_stats.last_status;
+        result.last_error = sift_stats.last_error;
+        result.rtt_last_ms = sift_stats.rtt_last_ms;
+        result.rtt_min_ms = sift_stats.rtt_min_ms;
+        result.rtt_max_ms = sift_stats.rtt_max_ms;
+        if(sift_stats.completed != 0) {
+            result.rtt_average_ms = sift_stats.rtt_total_ms /
+                                    static_cast<double>(sift_stats.completed);
+        }
+        return result;
     }
 
     static sx::http::AsyncRequest::request_settings sift_settings() {
@@ -117,8 +254,14 @@ namespace sx::http::webhooks {
             {"action", action}, {"id", action_id}, {"source", get_hostid()},
             {"identity", sift_identity()}, {"type", "proxy"}, {"details", details}
         };
-        return sx::http::AsyncRequest::enqueue(
-            std::move(settings), to_string(message), [](auto const&) {});
+        auto encoded = to_string(message);
+        sift_request_started(encoded.size(), false);
+        const auto started = std::chrono::steady_clock::now();
+        const auto accepted = sx::http::AsyncRequest::enqueue(
+            std::move(settings), std::move(encoded),
+            sift_tracked_hook({}, started));
+        sift_request_accepted(accepted);
+        return accepted;
     }
 
     static std::string encode_content(
@@ -153,8 +296,12 @@ namespace sx::http::webhooks {
         if(not settings.enabled or settings.url.empty() or not hook) return false;
         auto message = encode_content(action_id, std::move(details), payload);
         if(message.empty()) return false;
+        sift_request_started(message.size(), true);
+        sift_request_accepted(true);
+        const auto started = std::chrono::steady_clock::now();
         std::stringstream log;
-        sx::http::AsyncRequest::emit_url_wait_log(settings, message, log, std::move(hook));
+        sx::http::AsyncRequest::emit_url_wait_log(
+            settings, message, log, sift_tracked_hook(std::move(hook), started));
         return true;
     }
 

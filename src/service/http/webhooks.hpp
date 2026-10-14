@@ -149,6 +149,32 @@ namespace sx::http::webhooks {
     void set_hostid(std::string const& ref);
     std::string get_hostid();
     bool sift_enabled();
+    struct sift_diagnostics_snapshot {
+        bool enabled = false;
+        std::string url;
+        std::string unix_socket_path;
+        long timeout_seconds = 0;
+        std::uint64_t requests = 0;
+        std::uint64_t accepted = 0;
+        std::uint64_t rejected = 0;
+        std::uint64_t completed = 0;
+        std::uint64_t succeeded = 0;
+        std::uint64_t failed = 0;
+        std::uint64_t action_requests = 0;
+        std::uint64_t content_requests = 0;
+        std::uint64_t request_bytes = 0;
+        std::uint64_t response_bytes = 0;
+        std::uint64_t last_request_ms = 0;
+        std::uint64_t last_response_ms = 0;
+        long last_status = 0;
+        std::string last_error;
+        double rtt_last_ms = 0.0;
+        double rtt_average_ms = 0.0;
+        double rtt_min_ms = 0.0;
+        double rtt_max_ms = 0.0;
+    };
+
+    [[nodiscard]] sift_diagnostics_snapshot sift_diagnostics();
     bool send_sift_content_wait(
         std::string const& action_id, nlohmann::json details,
         std::string_view payload, sx::http::AsyncRequest::reply_hook hook);

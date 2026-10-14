@@ -44,6 +44,8 @@
 #include <cctype>
 #include <cstdio>
 #include <ctime>
+#include <chrono>
+#include <iomanip>
 #include <memory>
 #include <sstream>
 #include <pwd.h>
@@ -67,6 +69,7 @@
 #include <service/api/api_broker.hpp>
 #include <service/webhook/webhook_broker.hpp>
 #include <service/http/async_request.hpp>
+#include <service/http/webhooks.hpp>
 #include <inspect/engine/http.hpp>
 
 
@@ -1250,15 +1253,43 @@ int cli_diag_sys_webhook_stats(DiagCli* cli, const char* command,
 int cli_diag_sys_sift_stats(DiagCli* cli, const char* command,
                             char* argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
+    const auto stats = sx::http::webhooks::sift_diagnostics();
+    const auto inflight = stats.accepted >= stats.completed
+        ? stats.accepted - stats.completed : 0;
+    const auto now_ms = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count());
+    const auto age = [now_ms](std::uint64_t timestamp) -> std::string {
+        if(timestamp == 0) return "never";
+        return std::to_string(now_ms >= timestamp ? now_ms - timestamp : 0) + " ms ago";
+    };
     std::ostringstream output;
     output << "Sift communication worker:\n";
     if(sx::comm::sift::enabled()) {
         output << "  mode: external\n"
-               << "  socket: " << sx::comm::sift::transport_path() << "\n"
-               << "  broker stats: unavailable (external process)";
+               << "  socket: " << sx::comm::sift::transport_path() << "\n";
     } else {
-        output << "  mode: direct";
+        output << "  mode: direct\n";
     }
+    output << "  enabled: " << (stats.enabled ? "yes" : "no") << "\n"
+           << "  endpoint: " << (stats.url.empty() ? "<not configured>" : stats.url) << "\n"
+           << "  timeout: " << stats.timeout_seconds << " s\n"
+           << "  requests: " << stats.requests
+           << " (content " << stats.content_requests
+           << ", lifecycle " << stats.action_requests << ")\n"
+           << "  accepted/rejected: " << stats.accepted << "/" << stats.rejected << "\n"
+           << "  in flight: " << inflight << "\n"
+           << "  completed: " << stats.completed
+           << " (ok " << stats.succeeded << ", failed " << stats.failed << ")\n"
+           << "  bytes: tx " << stats.request_bytes << ", rx " << stats.response_bytes << "\n"
+           << "  last request: " << age(stats.last_request_ms) << "\n"
+           << "  last response: " << age(stats.last_response_ms) << "\n"
+           << "  last status: " << (stats.last_status ? std::to_string(stats.last_status) : "n/a") << "\n"
+           << std::fixed << std::setprecision(3)
+           << "  RTT ms: last " << stats.rtt_last_ms
+           << ", avg " << stats.rtt_average_ms
+           << ", min " << stats.rtt_min_ms
+           << ", max " << stats.rtt_max_ms;
+    if(!stats.last_error.empty()) output << "\n  last error: " << stats.last_error;
     cli_print(cli, "%s", output.str().c_str());
     return CLI_OK;
 }
