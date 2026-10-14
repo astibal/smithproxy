@@ -1575,16 +1575,19 @@ namespace sx::engine::http {
             }
 
             if(validate_push_promise) {
-                auto const has = [&](std::string_view name) {
-                    auto const it = decoder.headers().find(name);
-                    return it != decoder.headers().end() && !it->second.empty();
+                const auto& headers = decoder.headers();
+                auto const find_header = [&](std::string_view name) {
+                    return headers.find(name);
                 };
                 auto const value = [&](std::string_view name) -> std::string_view {
-                    auto const it = decoder.headers().find(name);
-                    return it == decoder.headers().end() || it->second.empty()
+                    auto const it = find_header(name);
+                    return it == headers.end() || it->second.empty()
                         ? std::string_view{} : std::string_view(it->second.back());
                 };
-                for(auto const& [name, values]: decoder.headers()) {
+
+                // PUSH_PROMISE describes a future request. Only request
+                // pseudo-headers are meaningful in its header block.
+                for(auto const& [name, values]: headers) {
                     (void)values;
                     if(!name.empty() && name.front() == ':' &&
                        name != ":method" && name != ":scheme" &&
@@ -1592,26 +1595,37 @@ namespace sx::engine::http {
                         return false;
                     }
                 }
+
+                const auto method = value(":method");
+                const auto scheme = value(":scheme");
                 const auto authority = value(":authority");
+                const auto path = value(":path");
                 const auto host = value("host");
-                const auto host_it = decoder.headers().find("host");
-                const bool duplicate_host = host_it != decoder.headers().end() &&
-                    host_it->second.size() != 1;
-                const bool valid = is_http_token(value(":method")) &&
-                    is_uri_scheme(value(":scheme")) &&
-                    sx::inspect::http_detail::is_valid_request_path(
-                        value(":method"), value(":path")) &&
-                    !authority.empty() &&
+
+                const auto host_it = find_header("host");
+                const bool has_single_host = host_it == headers.end() ||
+                    host_it->second.size() == 1;
+                const bool host_matches_authority = host.empty() ||
+                    ascii_equal_ci(host, authority);
+                const bool valid_authority = !authority.empty() &&
                     sx::inspect::http_detail::is_unambiguous_authority(authority) &&
-                    !duplicate_host &&
-                    (host.empty() || ascii_equal_ci(host, authority)) &&
-                    !has(":protocol");
+                    has_single_host && host_matches_authority;
+
+                // Extended CONNECT is negotiated on a live request stream;
+                // it is not a valid server-push request.
+                const auto protocol_it = find_header(":protocol");
+                const bool has_protocol = protocol_it != headers.end() &&
+                    !protocol_it->second.empty();
+                const bool valid = is_http_token(method) &&
+                    is_uri_scheme(scheme) &&
+                    sx::inspect::http_detail::is_valid_request_path(method, path) &&
+                    valid_authority && !has_protocol;
                 if(!valid) {
                     _err("invalid PUSH_PROMISE semantics method='%.*s' scheme='%.*s' authority='%.*s' path='%.*s'",
-                         static_cast<int>(value(":method").size()), value(":method").data(),
-                         static_cast<int>(value(":scheme").size()), value(":scheme").data(),
+                         static_cast<int>(method.size()), method.data(),
+                         static_cast<int>(scheme.size()), scheme.data(),
                          static_cast<int>(authority.size()), authority.data(),
-                         static_cast<int>(value(":path").size()), value(":path").data());
+                         static_cast<int>(path.size()), path.data());
                 }
                 return valid;
             }
