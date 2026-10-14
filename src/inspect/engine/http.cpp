@@ -173,12 +173,12 @@ namespace sx::engine::http {
                         message_.encoding.assign(value->data(), value->size());
                     const auto transfer_values = header_values(headers, "transfer-encoding");
                     const auto length_values = header_values(headers, "content-length");
-                    const auto transfer = transfer_values.empty()
-                        ? std::optional<std::string_view>{}
-                        : std::optional<std::string_view>{transfer_values.front()};
-                    const auto length = length_values.empty()
-                        ? std::optional<std::string_view>{}
-                        : std::optional<std::string_view>{length_values.front()};
+                    std::optional<std::string_view> transfer;
+                    if(!transfer_values.empty())
+                        transfer.emplace(transfer_values.front());
+                    std::optional<std::string_view> length;
+                    if(!length_values.empty())
+                        length.emplace(length_values.front());
                     const auto connection = header_value(headers, "connection");
                     const auto upgrade = header_value(headers, "upgrade");
 
