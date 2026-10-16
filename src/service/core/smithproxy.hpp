@@ -50,6 +50,7 @@
 #include <service/cfgapi/cfgapi.hpp>
 
 #include <service/core/service.hpp>
+#include <service/core/live_listener_lifecycle.hpp>
 #include <service/core/smithproxy_objapi.hpp>
 
 #include <service/daemon.hpp>
@@ -60,6 +61,7 @@
 #include <service/dnsupd/smithdnsupd.hpp>
 
 #include <atomic>
+#include <mutex>
 
 using theAcceptor = ThreadedAcceptor<MitmMasterProxy>;
 using theReceiver = ThreadedReceiver<MitmUdpProxy>;
@@ -74,7 +76,8 @@ class SmithProxy : public Service {
     virtual ~SmithProxy ();
 
 public:
-
+    using LiveListener = smithproxy::live::Listener;
+    using LiveWorkers = smithproxy::live::Workers;
     using vec_of_acceptors = std::vector<std::unique_ptr<theAcceptor>>;
     using vec_of_receivers = std::vector<std::unique_ptr<theReceiver>>;
 
@@ -133,6 +136,8 @@ public:
     void create_api_thread();
 
     bool create_listeners();
+    bool apply_listener_setting(LiveListener listener, bool previous_enabled);
+    bool apply_worker_setting(LiveWorkers workers);
 
     void run() override;
     void state_save() const;
@@ -151,6 +156,26 @@ public:
     bool load_config(std::string& config_f, bool reload = false);
 
     ObjAPI API;
+
+private:
+    bool listener_enabled(LiveListener listener) const;
+    bool create_listener_group(LiveListener listener);
+    void launch_listener_group(LiveListener listener);
+    void stop_listener_group(LiveListener listener);
+
+    bool create_tproxy_listeners();
+    void launch_tproxy_listeners();
+    void stop_tproxy_listeners();
+    bool create_socks_listeners();
+    bool create_http_connect_listeners();
+    bool create_redirect_listeners();
+    void launch_socks_listeners();
+    void launch_http_connect_listeners();
+    void launch_redirect_listeners();
+    void stop_socks_listeners();
+    void stop_http_connect_listeners();
+    void stop_redirect_listeners();
+    std::mutex listeners_mutex_;
 };
 
 

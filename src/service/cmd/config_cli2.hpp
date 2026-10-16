@@ -31,6 +31,8 @@ struct ConfigCli2Access {
     std::function<bool(std::string_view path)> can_add;
     std::function<bool(std::string_view path)> can_move;
     ValueOperation set;
+    std::function<std::string(std::string_view path, std::string_view property,
+                              const std::vector<std::string>& values)> set_confirmation;
     ValueOperation toggle;
     std::function<bool(std::string_view path, const std::vector<std::string>& arguments, std::string& error)> add;
     std::function<bool(std::string_view path, const std::vector<std::string>& entries, std::string& error)> remove;

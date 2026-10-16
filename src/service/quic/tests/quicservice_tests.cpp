@@ -85,6 +85,27 @@ TEST_F(QuicListenerService, PreparesAndStopsLoopbackListener) {
     EXPECT_EQ(service.connection_count(), 0U);
 }
 
+TEST_F(QuicListenerService, IdleListenerDrainsWithoutForcedStop) {
+    quic::listener_service service(0,
+                                   "etc/certs/default/srv-cert.pem",
+                                   "etc/certs/default/srv-key.pem",
+                                   false, 443, false);
+    if (!quic::openssl_quic_available()) {
+        EXPECT_FALSE(service.prepare());
+        return;
+    }
+
+    if (!service.prepare() && service.last_error().find("Operation not permitted") != std::string::npos)
+        GTEST_SKIP() << service.last_error();
+    ASSERT_TRUE(service.ready()) << service.last_error();
+    std::thread runner([&service]() { service.run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    service.drain();
+    runner.join();
+    EXPECT_TRUE(service.last_error().empty()) << service.last_error();
+    EXPECT_EQ(service.connection_count(), 0U);
+}
+
 #if SMITHPROXY_OPENSSL_QUIC
 TEST_F(QuicListenerService, IdleListenerSleepsUntilExplicitWakeup) {
     quic::listener_service service(0,

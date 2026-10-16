@@ -116,6 +116,8 @@ public:
     void run();
     /** Request loop termination; cleanup occurs in run() before it returns. */
     void stop();
+    /** Refuse new sessions and return after all active sessions finish. */
+    void drain();
 
     bool ready() const { return ready_; }
     std::uint16_t bound_port() const { return bound_port_; }
@@ -177,6 +179,7 @@ private:
     // for certificate results, while readers may sample from management code.
     std::atomic_uint64_t accepted_sessions_ = 0;
     std::atomic_uint64_t completed_sessions_ = 0;
+    std::atomic_bool draining_ = false;
     std::atomic_uint64_t handshake_timeouts_ = 0;
     std::atomic_uint64_t handshake_failures_ = 0;
     std::atomic_uint64_t idle_timeouts_ = 0;

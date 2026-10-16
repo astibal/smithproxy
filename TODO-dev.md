@@ -1,5 +1,9 @@
 ### developer's todo notes
 
+- Support transactional live reload of CA, trust-store and listener certificate material.
+  Build and validate replacement SSL contexts off to the side, atomically publish them
+  for new connections, and let existing TLS sessions retain their original contexts.
+
 - Revisit regex search functions which return single result per a go. 
 
     They should return a container of matches. We can be missing some signature hits!

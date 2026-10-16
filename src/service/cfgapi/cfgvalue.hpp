@@ -58,6 +58,16 @@
 
 
 struct CfgValue {
+    enum class live_apply_t {
+        none,
+        tproxy,
+        redirect,
+        socks,
+        http_connect,
+        workers_tproxy,
+        workers_socks,
+        workers_http_connect
+    };
 
     struct filter_retval {
 
@@ -100,6 +110,8 @@ struct CfgValue {
             may_be_empty_ = ref.may_be_empty_;
             value_filter_ = ref.value_filter_;
             gen_suggestions_ = ref.gen_suggestions_;
+            confirm_subject_ = ref.confirm_subject_;
+            live_apply_ = ref.live_apply_;
         }
         return *this;
     };
@@ -108,6 +120,8 @@ struct CfgValue {
     std::string help_;
     std::string help_quick_;
     bool may_be_empty_ = true;
+    std::string confirm_subject_;
+    live_apply_t live_apply_ = live_apply_t::none;
 
     // don't use std::function as reference
     std::list<std::function<value_filter_fn>> value_filter_= {CfgValue::VALUE_ANY };
@@ -126,6 +140,16 @@ struct CfgValue {
 
     CfgValue& may_be_empty(bool s) { may_be_empty_ = s; return *this; }
     [[ nodiscard ]] bool may_be_empty() const { return may_be_empty_; }
+
+    // Marks a setting that needs an explicit runtime transition after it is stored.
+    // The subject is also used to build the confirmation prompt.
+    CfgValue& live_action(std::string subject, live_apply_t action) {
+        confirm_subject_ = std::move(subject);
+        live_apply_ = action;
+        return *this;
+    }
+    [[nodiscard]] std::string const& confirm_subject() const { return confirm_subject_; }
+    [[nodiscard]] live_apply_t live_apply() const noexcept { return live_apply_; }
 
     [[ nodiscard ]] std::list<std::function<value_filter_fn>> const& value_filter() const { return value_filter_; };
     CfgValue& value_filter(std::function<value_filter_fn> v) { value_filter_.push_back(v); return *this; };

@@ -107,7 +107,21 @@ Command& Command::reset_definition() {
     arguments_.clear();
     handler_ = {};
     availability_ = {};
+    confirmation_ = {};
+    confirmation_answers_.clear();
     return *this;
+}
+
+Command& Command::confirm(Confirmation prompt, std::vector<std::string> accepted_answers) {
+    if (accepted_answers.empty()) throw std::invalid_argument("confirmation answers cannot be empty");
+    confirmation_ = std::move(prompt);
+    confirmation_answers_ = std::move(accepted_answers);
+    return *this;
+}
+
+Command& Command::confirm(std::string prompt, std::vector<std::string> accepted_answers) {
+    return confirm([prompt = std::move(prompt)](const Context&, const Invocation&) { return prompt; },
+                   std::move(accepted_answers));
 }
 
 Command& Command::argument(Argument specification) {
@@ -212,6 +226,15 @@ ExecuteResult Cli::execute(std::string_view line, Context& context) const {
         if (spec.validate && !spec.validate(invocation.arguments[i])) {
             return {ExecuteStatus::invalid_arguments, 0,
                     "invalid value for <" + spec.name + ">: " + invocation.arguments[i], {}};
+        }
+    }
+
+    if (current->confirmation_) {
+        const auto prompt = current->confirmation_(context, invocation);
+        if (!prompt.empty() && (!context.confirm ||
+            !context.confirm(prompt, current->confirmation_answers_))) {
+            context.print(Style::warning, "Command cancelled");
+            return {};
         }
     }
 

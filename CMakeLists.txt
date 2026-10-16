@@ -533,6 +533,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/service/core/sessionlist_state.cpp
                 src/service/core/sessionlist_tests.cpp
                 src/service/core/smithproxy_objapi_tests.cpp
+                src/service/core/live_listener_lifecycle_tests.cpp
+                src/service/cfgapi/cfgvalue.cpp
                 src/service/cfgapi/cfgvalue_tests.cpp
                 src/tests/smithlog_tests.cpp
                 src/service/core/authpam_tests.cpp
@@ -701,6 +703,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
         if(BUILD_TESTING)
             add_test(NAME unit.core COMMAND sx_gtests
                     --gtest_filter=-InetTest.*:PcapExperiments.*:DNS_tests.*)
+            add_test(NAME unit.listener_lifecycle COMMAND sx_gtests
+                    --gtest_filter=Libcli2.*Confirmation*:ConfigCli2Test.*Confirmation*:CfgValue.CopyAssignment*:CfgValue.LiveListenerMetadata*:CfgValue.LiveWorkerMetadata*:LiveListenerLifecycle.*:ThreadedWorkerLifecycle.*:QuicListenerService.*Drain*)
             add_test(NAME unit.http1 COMMAND sx_gtests_http1 --gtest_filter=-HTTP1.benchmark)
             add_test(NAME unit.startstoptls COMMAND sx_gtests_startstoptls)
             add_test(NAME unit.httpconnect COMMAND sx_gtests_httpconnect)
@@ -732,8 +736,10 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
             add_test(NAME platform.linux_distros
                     COMMAND ${PROJECT_SOURCE_DIR}/tools/test-linux-distros.sh)
             set_tests_properties(
-                    unit.core unit.http1 unit.startstoptls unit.httpconnect unit.reloadable
+                    unit.core unit.listener_lifecycle unit.http1 unit.startstoptls unit.httpconnect unit.reloadable
                     PROPERTIES LABELS "native;unit")
+            set_tests_properties(unit.listener_lifecycle
+                    PROPERTIES WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}")
             set_tests_properties(
                     unit.privsep unit.file_privsep unit.gre_broker unit.cli_broker unit.api_broker
                     unit.webhook_broker

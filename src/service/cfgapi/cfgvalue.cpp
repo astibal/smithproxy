@@ -180,18 +180,31 @@ void CfgValueHelp::init() {
     // worker setup
 
     add("settings.accept_tproxy", "whether to accept incoming connections via TPROXY")
-            .help_quick("<bool>: set to 'true' to disable tproxy acceptor (default: false)")
+            .live_action("tproxy", CfgValue::live_apply_t::tproxy)
+            .help_quick("<bool>: enable the TPROXY listener")
             .may_be_empty(false)
+            .suggestion_generator(CfgValue::SUGGESTION_BOOL)
             .value_filter(CfgValue::VALUE_BOOL);
 
     add("settings.accept_redirect", "whether to accept incoming connections via REDIRECT")
-            .help_quick("<bool>: set to 'true' to disable redirect acceptor (default: false)")
+            .live_action("redirect", CfgValue::live_apply_t::redirect)
+            .help_quick("<bool>: enable the REDIRECT listener")
             .may_be_empty(false)
+            .suggestion_generator(CfgValue::SUGGESTION_BOOL)
             .value_filter(CfgValue::VALUE_BOOL);
 
     add("settings.accept_socks", "whether to accept incoming connections via SOCKS")
-            .help_quick("<bool>: set to 'true' to disable socks acceptor (default: false)")
+            .live_action("socks", CfgValue::live_apply_t::socks)
+            .help_quick("<bool>: enable the SOCKS listener")
             .may_be_empty(false)
+            .suggestion_generator(CfgValue::SUGGESTION_BOOL)
+            .value_filter(CfgValue::VALUE_BOOL);
+
+    add("settings.accept_http_connect", "whether to accept incoming connections via HTTP CONNECT")
+            .live_action("http-connect", CfgValue::live_apply_t::http_connect)
+            .help_quick("<bool>: enable the explicit HTTP CONNECT listener")
+            .may_be_empty(false)
+            .suggestion_generator(CfgValue::SUGGESTION_BOOL)
             .value_filter(CfgValue::VALUE_BOOL);
 
     add("settings.policy_fail_open", "allow traffic when no policy rule matches")
@@ -214,32 +227,44 @@ void CfgValueHelp::init() {
     };
 
     add("settings.plaintext_workers", "non-SSL TCP traffic worker thread count")
+            .live_action("plaintext", CfgValue::live_apply_t::workers_tproxy)
             .help_quick("<number> acceptor subordinate worker threads count (max 4xCPU)")
             .may_be_empty(false)
             .value_filter(HW_FILTER);
 
 
     add("settings.ssl_workers", "SSL TCP traffic worker thread count")
+            .live_action("TLS", CfgValue::live_apply_t::workers_tproxy)
             .help_quick("<number> acceptor subordinate worker threads count (max 4xCPU)")
             .may_be_empty(false)
             .value_filter(HW_FILTER);
 
     add("settings.udp_workers", "non-DTLS traffic worker thread count")
+            .live_action("UDP", CfgValue::live_apply_t::workers_tproxy)
             .help_quick("<number> acceptor subordinate worker threads count (max 4xCPU)")
             .may_be_empty(false)
             .value_filter(HW_FILTER);
 
 
     add("settings.dtls_workers", "DTLS traffic worker thread count")
+            .live_action("DTLS", CfgValue::live_apply_t::workers_tproxy)
             .help_quick("<number> acceptor subordinate worker threads count (max 4xCPU)")
             .may_be_empty(false)
             .value_filter(HW_FILTER);
 
     add("settings.quic_workers", "experimental QUIC listener thread count")
+            .live_action("QUIC", CfgValue::live_apply_t::workers_tproxy)
             .help_quick("<number>: -1 disabled, 0 or 1 enables one event loop")
             .may_be_empty(false);
 
     add("settings.socks_workers", "SOCKS proxy traffic thread count")
+            .live_action("SOCKS", CfgValue::live_apply_t::workers_socks)
+            .help_quick("<number> acceptor subordinate worker threads count (max 4xCPU)")
+            .may_be_empty(false)
+            .value_filter(HW_FILTER);
+
+    add("settings.http_connect_workers", "HTTP CONNECT proxy traffic thread count")
+            .live_action("HTTP CONNECT", CfgValue::live_apply_t::workers_http_connect)
             .help_quick("<number> acceptor subordinate worker threads count (max 4xCPU)")
             .may_be_empty(false)
             .value_filter(HW_FILTER);

@@ -28,6 +28,7 @@ TEST(CfgValue, BooleanFilterNormalizesAcceptedSpellings) {
 TEST(CfgValue, CopyAssignmentPreservesValidationAndSuggestionPolicy) {
     CfgValue source("source");
     source.help("long").help_quick("short").may_be_empty(false)
+          .live_action("listener", CfgValue::live_apply_t::tproxy)
           .value_filter(CfgValue::VALUE_UINT)
           .suggestion_generator(CfgValue::SUGGESTION_BOOL);
 
@@ -37,10 +38,45 @@ TEST(CfgValue, CopyAssignmentPreservesValidationAndSuggestionPolicy) {
     EXPECT_EQ(copy.help(), "long");
     EXPECT_EQ(copy.help_quick(), "short");
     EXPECT_FALSE(copy.may_be_empty());
+    EXPECT_EQ(copy.confirm_subject(), "listener");
+    EXPECT_EQ(copy.live_apply(), CfgValue::live_apply_t::tproxy);
     EXPECT_EQ(copy.suggestion_generate("", ""),
               (std::vector<std::string>{"true", "false"}));
     ASSERT_EQ(copy.value_filter().size(), 2U);
     EXPECT_FALSE(copy.value_filter().back()("12x").accepted());
+}
+
+TEST(CfgValue, LiveListenerMetadataCoversEveryRuntimeSwitch) {
+    struct expected_t {
+        const char* path;
+        const char* subject;
+        CfgValue::live_apply_t action;
+    };
+    for (const auto& expected : std::vector<expected_t>{
+             {"settings.accept_tproxy", "tproxy", CfgValue::live_apply_t::tproxy},
+             {"settings.accept_redirect", "redirect", CfgValue::live_apply_t::redirect},
+             {"settings.accept_socks", "socks", CfgValue::live_apply_t::socks},
+             {"settings.accept_http_connect", "http-connect", CfgValue::live_apply_t::http_connect},
+         }) {
+        auto value = CfgValueHelp::get().find(expected.path);
+        ASSERT_TRUE(value) << expected.path;
+        EXPECT_EQ(value->get().confirm_subject(), expected.subject);
+        EXPECT_EQ(value->get().live_apply(), expected.action);
+        EXPECT_EQ(value->get().suggestion_generate("settings", expected.path),
+                  (std::vector<std::string>{"true", "false"}));
+    }
+}
+
+TEST(CfgValue, LiveWorkerMetadataCoversEveryWorkerSetting) {
+    for (const auto& path : {
+             "settings.plaintext_workers", "settings.ssl_workers", "settings.udp_workers",
+             "settings.dtls_workers", "settings.quic_workers", "settings.socks_workers",
+             "settings.http_connect_workers"}) {
+        auto value = CfgValueHelp::get().find(path);
+        ASSERT_TRUE(value) << path;
+        EXPECT_FALSE(value->get().confirm_subject().empty()) << path;
+        EXPECT_NE(value->get().live_apply(), CfgValue::live_apply_t::none) << path;
+    }
 }
 
 TEST(CfgFactorySerialization, LargeConfigurationCannotBlockOnPipeCapacity) {
