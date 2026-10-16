@@ -297,6 +297,7 @@ public:
 
     static std::atomic_uint64_t& current_sessions() { static std::atomic_uint64_t current; return current; };
     static std::atomic_uint64_t& total_sessions() { static std::atomic_uint64_t total; return total; };
+    static std::atomic_uint64_t& sift_payload_limit_per_direction();
     static socle::meter& total_mtr_up()  { static socle::meter t_up(12); return t_up; };
     static socle::meter& total_mtr_down() {static socle::meter t_down(12); return t_down; };
 
@@ -305,6 +306,15 @@ public:
     DECLARE_LOGGING(to_string)
 
 private:
+    struct sift_ctl_t {
+        std::uint64_t payload_left_bytes = 0;
+        std::uint64_t payload_right_bytes = 0;
+        static std::atomic_uint64_t& payload_limit_per_direction() {
+            static std::atomic_uint64_t value {256 * 1024};
+            return value;
+        }
+    } sift_ctl_;
+
     mutable std::mutex sift_classifications_lock_;
     std::set<std::string> sift_classifications_;
     StartStopTls start_stop_tls_;

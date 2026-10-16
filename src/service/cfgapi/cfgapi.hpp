@@ -201,7 +201,7 @@ class CfgFactory : public CfgFactoryBase {
 public:
     // Each version bump implies a config upgrade - we start on 1000
     // see upgrade_schema() - control config upgrade
-    constexpr static inline const int SCHEMA_VERSION  = 1047;
+    constexpr static inline const int SCHEMA_VERSION  = 1048;
 
     static inline std::atomic_bool LOAD_ERRORS = false;
     static constexpr std::string_view CT_UNAVAILABLE_WARNING =
@@ -360,6 +360,7 @@ public:
         std::string sift_url = "http://127.0.0.1:18081/webhook";
         std::string sift_tenant_id = "default";
         std::string sift_instance_id;
+        int sift_payload_limit_per_direction = 256 * 1024;
 
         bool allow_api_override = false;
         struct {

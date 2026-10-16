@@ -516,6 +516,11 @@ void CfgValueHelp::init() {
             .may_be_empty(true)
             .value_filter(CfgValue::VALUE_ANY);
 
+    add("settings.webhook.sift_payload_limit_per_direction", "soft Sift payload limit per flow direction")
+            .help_quick("<bytes>: stop before the next complete message after this L/R limit (default: 262144)")
+            .may_be_empty(false)
+            .value_filter(VALUE_UINT_RANGE<1,1073741824>);
+
     add("settings.webhook.hostid", "webhook identity value override")
             .help_quick("<string>:  override hostid string to custom value (default: <hostname>)")
             .may_be_empty(true)

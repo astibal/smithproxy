@@ -633,6 +633,10 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added SSH upstream host-key policy");
         return true;
     }
+    else if(upgrade_to_num == 1048) {
+        log.event(INF, "added per-direction Sift payload budget");
+        return true;
+    }
 
 
     return false;
@@ -1136,6 +1140,11 @@ bool CfgFactory::load_settings () {
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "sift_url", settings_webhook.sift_url);
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "sift_tenant_id", settings_webhook.sift_tenant_id);
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "sift_instance_id", settings_webhook.sift_instance_id);
+        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "sift_payload_limit_per_direction",
+                       settings_webhook.sift_payload_limit_per_direction);
+        MitmProxy::sift_payload_limit_per_direction().store(
+            static_cast<std::uint64_t>(std::max(0, settings_webhook.sift_payload_limit_per_direction)),
+            std::memory_order_relaxed);
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "api_override", settings_webhook.allow_api_override);
 
         sx::http::webhooks::set_enabled(settings_webhook.enabled);
@@ -6025,6 +6034,8 @@ int save_settings(Config& ex) {
     webhook_objects.add("sift_url", Setting::TypeString) = CfgFactory::get()->settings_webhook.sift_url;
     webhook_objects.add("sift_tenant_id", Setting::TypeString) = CfgFactory::get()->settings_webhook.sift_tenant_id;
     webhook_objects.add("sift_instance_id", Setting::TypeString) = CfgFactory::get()->settings_webhook.sift_instance_id;
+    webhook_objects.add("sift_payload_limit_per_direction", Setting::TypeInt) =
+        CfgFactory::get()->settings_webhook.sift_payload_limit_per_direction;
     webhook_objects.add("hostid", Setting::TypeString) = CfgFactory::get()->settings_webhook.hostid;
     webhook_objects.add("bind_interface", Setting::TypeString) = CfgFactory::get()->settings_webhook.bind_interface;
     webhook_objects.add("api_override", Setting::TypeBoolean) = CfgFactory::get()->settings_webhook.allow_api_override;

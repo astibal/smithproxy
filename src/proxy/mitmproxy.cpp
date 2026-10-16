@@ -107,6 +107,10 @@ MitmProxy::MitmProxy(baseCom* c): baseProxy(c), start_stop_tls_(*this) {
     session_id_ = total_sessions().fetch_add(1, std::memory_order_relaxed) + 1;
 }
 
+std::atomic_uint64_t& MitmProxy::sift_payload_limit_per_direction() {
+    return sift_ctl_t::payload_limit_per_direction();
+}
+
 bool MitmProxy::stage_stream_handler(std::unique_ptr<sx::StreamHandler> handler) {
     if (!handler || stream_handler_) {
         return false;
@@ -1204,10 +1208,20 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
         }
     };
     if(sift) {
-        sx::http::webhooks::send_sift_content_wait(
-            to_connection_ID(), j,
-            std::string_view(reinterpret_cast<const char*>(buffer.data()), buffer.size()),
-            response_hook);
+        const bool right_side = side == side_t::RIGHT;
+        auto& sent_bytes = right_side
+            ? sift_ctl_.payload_right_bytes
+            : sift_ctl_.payload_left_bytes;
+        const auto payload_limit =
+            sift_ctl_t::payload_limit_per_direction().load(std::memory_order_relaxed);
+
+        if(sent_bytes <= payload_limit) {
+            sent_bytes += buffer.size();
+            sx::http::webhooks::send_sift_content_wait(
+                to_connection_ID(), j,
+                std::string_view(reinterpret_cast<const char*>(buffer.data()), buffer.size()),
+                response_hook);
+        }
     }
     if(regular_webhook) {
         const auto binary_sent = sx::http::webhooks::send_content_wait(
