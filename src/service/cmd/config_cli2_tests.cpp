@@ -281,6 +281,50 @@ TEST_F(ConfigCli2Test, SetForwardsAllValuesIncludingQuotedTokens) {
     EXPECT_EQ(last_values, (std::vector<std::string>{"tcp", "two words", "udp"}));
 }
 
+TEST_F(ConfigCli2Test, SetConfirmationRunsBeforeMutationAndReceivesCanonicalLocation) {
+    std::string request;
+    access.set_confirmation = [&](std::string_view path, std::string_view property,
+                                  const std::vector<std::string>& values) {
+        request = std::string(path) + ":" + std::string(property) + "=" + values.front();
+        return std::string("Proceed? ");
+    };
+    state.reset(new ConfigCli2Session(access));
+    context.user_data = state.get();
+    libcli2::Cli confirmed_cli;
+    state->register_commands(confirmed_cli);
+
+    ASSERT_TRUE(confirmed_cli.execute("configure terminal", context));
+    ASSERT_TRUE(confirmed_cli.execute("edit policy 0", context));
+    EXPECT_TRUE(confirmed_cli.execute("set proto udp", context));
+    EXPECT_EQ(request, "policy.[0]:proto=udp");
+    EXPECT_TRUE(last_set.empty());
+
+    context.confirm = [](std::string_view prompt, const std::vector<std::string>& answers) {
+        return prompt == "Proceed? " && answers == std::vector<std::string>({"y", "Y"});
+    };
+    EXPECT_TRUE(confirmed_cli.execute("set proto udp", context));
+    EXPECT_EQ(last_set, "policy.[0]:proto=udp");
+}
+
+TEST_F(ConfigCli2Test, EmptyConfirmationPromptDoesNotRequireAConfirmer) {
+    int confirmation_requests = 0;
+    access.set_confirmation = [&](std::string_view, std::string_view,
+                                  const std::vector<std::string>&) {
+        ++confirmation_requests;
+        return std::string{};
+    };
+    state.reset(new ConfigCli2Session(access));
+    context.user_data = state.get();
+    libcli2::Cli confirmed_cli;
+    state->register_commands(confirmed_cli);
+
+    ASSERT_TRUE(confirmed_cli.execute("configure terminal", context));
+    ASSERT_TRUE(confirmed_cli.execute("edit policy 0", context));
+    EXPECT_TRUE(confirmed_cli.execute("set proto udp", context));
+    EXPECT_EQ(confirmation_requests, 1);
+    EXPECT_EQ(last_set, "policy.[0]:proto=udp");
+}
+
 TEST_F(ConfigCli2Test, EndWalksBackThenLeavesConfigurationMode) {
     ASSERT_TRUE(cli.execute("configure terminal", context));
     ASSERT_TRUE(cli.execute("edit settings cli", context));

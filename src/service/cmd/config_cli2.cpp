@@ -235,6 +235,13 @@ void ConfigCli2Session::register_commands(libcli2::Cli& cli) {
                            return std::vector<libcli2::CompletionItem>{};
                        return state.access_.values(state.path(), request.arguments.front());
                    }})
+        .confirm([](const libcli2::Context& context, const libcli2::Invocation& call) {
+            const auto& state = session(context);
+            if (!state.access_.set_confirmation || call.arguments.size() < 2) return std::string{};
+            return state.access_.set_confirmation(
+                state.path(), call.arguments.front(),
+                std::vector<std::string>(call.arguments.begin() + 1, call.arguments.end()));
+        }, {"y", "Y"})
         .handler([](libcli2::Context& context, const libcli2::Invocation& call) {
             auto& state = session(context);
             if (!state.access_.set || call.arguments.size() < 2) return -1;

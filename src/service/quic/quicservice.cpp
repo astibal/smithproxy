@@ -355,8 +355,9 @@ void listener_service::run() {
             break;
         }
 
-        // Accept first, then advance every retained session exactly once.
-        accept_connections();
+        // During live reconfiguration, keep servicing established sessions but
+        // stop admitting new ones until the listener can leave naturally.
+        if (!draining_) accept_connections();
         auto const now = std::chrono::steady_clock::now();
         for (auto& linked : sessions_) {
             progress_session(linked, now);
@@ -371,6 +372,9 @@ void listener_service::run() {
         // Publish only after removing objects whose grace period has elapsed.
         reap_expired(now);
         publish_session_snapshots(now);
+        if (draining_ && sessions_.empty() && certificate_jobs_.empty() &&
+            staged_upstreams_.empty() && pending_captures_.empty() &&
+            dispatcher_bindings_.empty()) stopping_ = true;
     }
     cleanup_sessions();
     log().inf("listener loop stopped on udp/*:%u", bound_port_);
@@ -1189,6 +1193,13 @@ void listener_service::stop() {
         // in that case it is already readable and poll() will still wake.
         ::eventfd_write(wake_fd_, 1);
     }
+#endif
+}
+
+void listener_service::drain() {
+    draining_ = true;
+#if SMITHPROXY_OPENSSL_QUIC
+    if (wake_fd_ >= 0) (void)::eventfd_write(wake_fd_, 1);
 #endif
 }
 

@@ -3,10 +3,12 @@
 
 #include <service/cfgapi/cfgapi.hpp>
 #include <service/cfgapi/cfgvalue.hpp>
+#include <service/core/smithproxy.hpp>
 #include <inspect/sigfactory.hpp>
 #include <utils/str.hpp>
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <sstream>
 
@@ -25,29 +27,86 @@ bool list_index(std::string_view value, int& result) {
     return parsed.ec == std::errc{} && parsed.ptr == value.data() + value.size() - 1 && result >= 0;
 }
 
+bool is_listener_action(CfgValue::live_apply_t action) {
+    return action == CfgValue::live_apply_t::tproxy ||
+           action == CfgValue::live_apply_t::redirect ||
+           action == CfgValue::live_apply_t::socks ||
+           action == CfgValue::live_apply_t::http_connect;
+}
+
+bool is_worker_action(CfgValue::live_apply_t action) {
+    return action == CfgValue::live_apply_t::workers_tproxy ||
+           action == CfgValue::live_apply_t::workers_socks ||
+           action == CfgValue::live_apply_t::workers_http_connect;
+}
+
+SmithProxy::LiveListener live_listener(CfgValue::live_apply_t action) {
+    switch (action) {
+        case CfgValue::live_apply_t::tproxy: return SmithProxy::LiveListener::tproxy;
+        case CfgValue::live_apply_t::redirect: return SmithProxy::LiveListener::redirect;
+        case CfgValue::live_apply_t::socks: return SmithProxy::LiveListener::socks;
+        case CfgValue::live_apply_t::http_connect: return SmithProxy::LiveListener::http_connect;
+        default: return SmithProxy::LiveListener::tproxy;
+    }
+}
+
+SmithProxy::LiveWorkers live_workers(CfgValue::live_apply_t action) {
+    switch (action) {
+        case CfgValue::live_apply_t::workers_socks: return SmithProxy::LiveWorkers::socks;
+        case CfgValue::live_apply_t::workers_http_connect: return SmithProxy::LiveWorkers::http_connect;
+        default: return SmithProxy::LiveWorkers::tproxy;
+    }
+}
+
 bool reload_section(const std::string& section) {
-    auto f = CfgFactory::get();
-    if (section == "proto_objects") { f->cleanup_db_proto(); return f->load_db_proto() >= 0; }
-    if (section == "port_objects") { f->cleanup_db_port(); return f->load_db_port() >= 0; }
-    if (section == "address_objects") { f->cleanup_db_address(); return f->load_db_address() >= 0; }
-    if (section == "detection_profiles") { f->cleanup_db_prof_detection(); return f->load_db_prof_detection() >= 0; }
-    if (section == "content_profiles") { f->cleanup_db_prof_content(); return f->load_db_prof_content() >= 0; }
-    if (section == "tls_ca") { f->cleanup_db_tls_ca(); return f->load_db_tls_ca() >= 0; }
-    if (section == "tls_profiles") { f->cleanup_db_prof_tls(); return f->load_db_prof_tls() >= 0; }
-    if (section == "ssh_profiles") { f->cleanup_db_prof_ssh(); return f->load_db_prof_ssh() >= 0; }
-    if (section == "alg_dns_profiles") { f->cleanup_db_prof_alg_dns(); return f->load_db_prof_alg_dns() >= 0; }
-    if (section == "auth_profiles") { f->cleanup_db_prof_auth(); return f->load_db_prof_auth() >= 0; }
-    if (section == "routing") { f->cleanup_db_routing(); return f->load_db_routing() >= 0; }
-    if (section == "policy") { f->cleanup_db_policy(); return f->load_db_policy() >= 0; }
+    using cleanup_fn = size_t (CfgFactory::*)();
+    using load_fn = int (CfgFactory::*)();
+    struct reload_handler {
+        std::string_view section;
+        cleanup_fn cleanup;
+        load_fn load;
+    };
+
+    static constexpr std::array handlers {
+        reload_handler{"proto_objects", &CfgFactory::cleanup_db_proto, &CfgFactory::load_db_proto},
+        reload_handler{"port_objects", &CfgFactory::cleanup_db_port, &CfgFactory::load_db_port},
+        reload_handler{"address_objects", &CfgFactory::cleanup_db_address, &CfgFactory::load_db_address},
+        reload_handler{"detection_profiles", &CfgFactory::cleanup_db_prof_detection,
+                       &CfgFactory::load_db_prof_detection},
+        reload_handler{"content_profiles", &CfgFactory::cleanup_db_prof_content,
+                       &CfgFactory::load_db_prof_content},
+        reload_handler{"tls_ca", &CfgFactory::cleanup_db_tls_ca, &CfgFactory::load_db_tls_ca},
+        reload_handler{"tls_profiles", &CfgFactory::cleanup_db_prof_tls, &CfgFactory::load_db_prof_tls},
+        reload_handler{"ssh_profiles", &CfgFactory::cleanup_db_prof_ssh, &CfgFactory::load_db_prof_ssh},
+        reload_handler{"alg_dns_profiles", &CfgFactory::cleanup_db_prof_alg_dns,
+                       &CfgFactory::load_db_prof_alg_dns},
+        reload_handler{"auth_profiles", &CfgFactory::cleanup_db_prof_auth, &CfgFactory::load_db_prof_auth},
+        reload_handler{"routing", &CfgFactory::cleanup_db_routing, &CfgFactory::load_db_routing},
+        reload_handler{"policy", &CfgFactory::cleanup_db_policy, &CfgFactory::load_db_policy},
+    };
+
+    auto factory = CfgFactory::get();
+    const auto handler = std::find_if(handlers.begin(), handlers.end(),
+                                      [&section](const auto& candidate) {
+                                          return candidate.section == section;
+                                      });
+    if (handler != handlers.end()) {
+        (factory.get()->*handler->cleanup)();
+        return (factory.get()->*handler->load)() >= 0;
+    }
+
+    // Signature sections share one tree, so either edit rebuilds both groups.
     if (signature_section(section)) {
         auto& tree = SigFactory::get().signature_tree();
         tree.reset();
         tree.group_add(true);
         tree.group_add(true);
-        f->load_signatures(CfgFactory::cfg_obj(), "starttls_signatures", tree, 0);
-        f->load_signatures(CfgFactory::cfg_obj(), "detection_signatures", tree);
+        factory->load_signatures(CfgFactory::cfg_obj(), "starttls_signatures", tree, 0);
+        factory->load_signatures(CfgFactory::cfg_obj(), "detection_signatures", tree);
         return true;
     }
+
+    // Scalar settings are already applied by cfg_write_value/apply_config_change.
     return true;
 }
 
@@ -125,18 +184,77 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
     };
     access.set = [subscriber_id](std::string_view path, std::string_view property,
                                        const std::vector<std::string>& values, std::string& error) {
-        std::scoped_lock<std::recursive_mutex> lock(CfgFactory::lock());
+        std::unique_lock<std::recursive_mutex> lock(CfgFactory::lock());
         const std::string section(path);
         std::string name(property);
+        auto metadata = CfgValueHelp::get().find(section + "." + name);
+        const auto live_apply = metadata ? metadata->get().live_apply() : CfgValue::live_apply_t::none;
+        bool previous_enabled = false;
+        switch (live_apply) {
+            case CfgValue::live_apply_t::tproxy: previous_enabled = CfgFactory::get()->accept_tproxy; break;
+            case CfgValue::live_apply_t::redirect: previous_enabled = CfgFactory::get()->accept_redirect; break;
+            case CfgValue::live_apply_t::socks: previous_enabled = CfgFactory::get()->accept_socks; break;
+            case CfgValue::live_apply_t::http_connect: previous_enabled = CfgFactory::get()->accept_http_connect; break;
+            case CfgValue::live_apply_t::workers_tproxy:
+            case CfgValue::live_apply_t::workers_socks:
+            case CfgValue::live_apply_t::workers_http_connect:
+            case CfgValue::live_apply_t::none: break;
+        }
         if (!CfgFactory::cfg_obj().exists(section)) { error = "unknown configuration section"; return false; }
         auto& setting = CfgFactory::cfg_obj().lookup(section);
         if (!setting.exists(name.c_str())) { error = "unknown property: " + name; return false; }
+        std::string previous_value;
+        if (is_worker_action(live_apply))
+            previous_value = std::to_string(static_cast<int>(setting[name.c_str()]));
         auto [written, message] = CfgFactory::get()->cfg_write_value(setting, false, name, values);
         if (!written) { error = message.empty() ? "cannot write value" : message; return false; }
         if (!CfgFactory::get()->apply_config_change(setting.getPath()))
             error = "value stored, but live apply failed";
+        lock.unlock();
+        // Listener operations may block for a drain, so never hold the configuration
+        // mutex while waiting for their threads.
+        if (is_listener_action(live_apply) &&
+            !SmithProxy::instance().apply_listener_setting(live_listener(live_apply),
+                                                            previous_enabled)) {
+            lock.lock();
+            auto& rollback_setting = CfgFactory::cfg_obj().lookup(section);
+            CfgFactory::get()->cfg_write_value(rollback_setting, false, name,
+                                               {previous_enabled ? "true" : "false"});
+            CfgFactory::get()->load_settings();
+            error = "listener change failed; value rolled back";
+            return false;
+        }
+        if (is_worker_action(live_apply)) {
+            const auto workers = live_workers(live_apply);
+            if (!SmithProxy::instance().apply_worker_setting(workers)) {
+                // Restore both the stored value and the running listener topology.
+                lock.lock();
+                auto& rollback_setting = CfgFactory::cfg_obj().lookup(section);
+                CfgFactory::get()->cfg_write_value(rollback_setting, false, name, {previous_value});
+                CfgFactory::get()->load_settings();
+                lock.unlock();
+                SmithProxy::instance().apply_worker_setting(workers);
+                error = "worker change failed; value rolled back";
+                return false;
+            }
+        }
         CfgFactory::board()->upgrade(subscriber_id);
         return true;
+    };
+    access.set_confirmation = [](std::string_view path, std::string_view property,
+                                 const std::vector<std::string>& values) {
+        if (values.size() != 1) return std::string{};
+        auto metadata = CfgValueHelp::get().find(std::string(path) + "." + std::string(property));
+        if (!metadata || metadata->get().confirm_subject().empty()) return std::string{};
+        auto checked = CfgValueHelp::get().value_check(metadata->get().name(), values.front());
+        if (!checked.first) return std::string{};
+        const auto action = metadata->get().live_apply();
+        if (is_worker_action(action))
+            return "You are about to change <" + metadata->get().confirm_subject() +
+                   "> worker count to " + *checked.first + ". Existing sessions will drain. You sure? [N/y] ";
+        const bool enable = *checked.first == "true";
+        return "You are about to " + std::string(enable ? "enable" : "disable") + " <" +
+               metadata->get().confirm_subject() + "> listener. You sure? [N/y] ";
     };
     access.toggle = [set = access.set](std::string_view path, std::string_view property,
                                        const std::vector<std::string>& values, std::string& error) mutable {

@@ -14,12 +14,14 @@ namespace libcli2 {
 
 struct Context {
     using Writer = std::function<void(std::string_view)>;
+    using Confirmer = std::function<bool(std::string_view, const std::vector<std::string>&)>;
 
     int privilege = 0;
     std::string mode = "exec";
     void* user_data = nullptr;
     int io_handle = -1;
     Writer write;
+    Confirmer confirm;
     ColorMode color_mode = ColorMode::off;
     ColorTheme color_theme = ColorTheme::classic;
     bool color_capable = false;
@@ -88,6 +90,7 @@ struct CompletionRequest {
 using ContextualCompleter = std::function<std::vector<CompletionItem>(const CompletionRequest&)>;
 using Validator = std::function<bool(std::string_view)>;
 using Availability = std::function<bool(const Context&)>;
+using Confirmation = std::function<std::string(const Context&, const Invocation&)>;
 
 struct Argument {
     Argument(std::string name, std::string help = {}, bool required = true, bool repeatable = false,
@@ -112,6 +115,8 @@ public:
     Command& handler(Handler callback);
     Command& argument(Argument specification);
     Command& available_if(Availability predicate);
+    Command& confirm(Confirmation prompt, std::vector<std::string> accepted_answers = {"y", "Y"});
+    Command& confirm(std::string prompt, std::vector<std::string> accepted_answers = {"y", "Y"});
 
     const std::string& name() const noexcept { return name_; }
     const std::string& description() const noexcept { return help_; }
@@ -130,6 +135,8 @@ private:
     std::vector<Argument> arguments_;
     Handler handler_;
     Availability availability_;
+    Confirmation confirmation_;
+    std::vector<std::string> confirmation_answers_;
 
     friend class Cli;
 };

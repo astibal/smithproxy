@@ -246,6 +246,11 @@ int libcli2_socket_loop(libcli2::FdTransport& transport, Libcli2SocketOptions op
         });
     if (options.register_commands) options.register_commands(cli);
     SocketEditor editor(transport, cli, context, options.regular);
+    context.confirm = [&editor](std::string_view prompt, const std::vector<std::string>& accepted_answers) {
+        std::string answer;
+        if (!editor.read_line(std::string(prompt), answer)) return false;
+        return std::find(accepted_answers.begin(), accepted_answers.end(), answer) != accepted_answers.end();
+    };
     if (!options.banner.empty()) sx::cli::write_all(transport, context.decor().heading(options.banner) + "\r\n");
 
     if (options.authenticate) {

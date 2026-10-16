@@ -128,6 +128,72 @@ TEST(Libcli2, ExecutesUniquePrefixesAndParsesQuotedArguments) {
     EXPECT_EQ(seen.arguments.front(), "client 7");
 }
 
+TEST(Libcli2, ConfirmationIsAReusableCommandAttributeWithExplicitAnswers) {
+    Cli cli;
+    bool invoked = false;
+    cli.command("dangerous action")
+        .confirm("Proceed? ", {"yes"})
+        .handler([&](Context&, const Invocation&) { invoked = true; return 0; });
+
+    Context context;
+    EXPECT_TRUE(cli.execute("dangerous action", context));
+    EXPECT_FALSE(invoked);
+
+    context.confirm = [](std::string_view prompt, const std::vector<std::string>& answers) {
+        return prompt == "Proceed? " && answers == std::vector<std::string>{"yes"};
+    };
+    EXPECT_TRUE(cli.execute("dangerous action", context));
+    EXPECT_TRUE(invoked);
+}
+
+TEST(Libcli2, DynamicConfirmationCanSkipUnrelatedInvocations) {
+    Cli cli;
+    int calls = 0;
+    cli.command("set")
+        .argument({"name"})
+        .confirm([](const Context&, const Invocation& invocation) {
+            return invocation.arguments.front() == "dangerous" ? "Sure? " : std::string{};
+        })
+        .handler([&](Context&, const Invocation&) { ++calls; return 0; });
+
+    Context context;
+    EXPECT_TRUE(cli.execute("set ordinary", context));
+    EXPECT_EQ(calls, 1);
+    EXPECT_TRUE(cli.execute("set dangerous", context));
+    EXPECT_EQ(calls, 1);
+}
+
+TEST(Libcli2, ConfirmationRejectsUnexpectedAnswersAndCanBeReset) {
+    Cli cli;
+    int calls = 0;
+    auto& command = cli.command("reload")
+        .confirm("Reload? ", {"yes"})
+        .handler([&](Context&, const Invocation&) { ++calls; return 0; });
+
+    Context context;
+    int confirmations = 0;
+    context.confirm = [&](std::string_view prompt, const std::vector<std::string>& answers) {
+        ++confirmations;
+        EXPECT_EQ(prompt, "Reload? ");
+        EXPECT_EQ(answers, (std::vector<std::string>{"yes"}));
+        return false;
+    };
+    EXPECT_TRUE(cli.execute("reload", context));
+    EXPECT_EQ(confirmations, 1);
+    EXPECT_EQ(calls, 0);
+
+    command.reset_definition()
+        .handler([&](Context&, const Invocation&) { ++calls; return 0; });
+    EXPECT_TRUE(cli.execute("reload", context));
+    EXPECT_EQ(confirmations, 1);
+    EXPECT_EQ(calls, 1);
+}
+
+TEST(Libcli2, ConfirmationRequiresAtLeastOneAcceptedAnswer) {
+    Cli cli;
+    EXPECT_THROW(cli.command("unsafe").confirm("Proceed? ", {}), std::invalid_argument);
+}
+
 TEST(Libcli2, ReportsAmbiguousPrefixes) {
     Cli cli;
     cli.command("show sessions").handler([](Context&, const Invocation&) { return 0; });
