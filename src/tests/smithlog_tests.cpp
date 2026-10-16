@@ -92,13 +92,12 @@ TEST(LogMux, WritesFilteredLocalAndRemoteTargets) {
 
     int pair[2] {-1, -1};
     ASSERT_EQ(::socketpair(AF_UNIX, SOCK_DGRAM, 0, pair), 0);
-    mux.remote_targets("remote", pair[0]);
-    auto remote_profile = std::make_unique<logger_profile>();
+    auto remote_profile = std::make_shared<logger_profile>();
     remote_profile->level_ = socle::log::level::INF;
     remote_profile->logger_type = logger_profile::REMOTE_SYSLOG;
     remote_profile->syslog_settings.facility = 16;
     remote_profile->syslog_settings.severity = 5;
-    mux.target_profiles()[static_cast<uint64_t>(pair[0])] = std::move(remote_profile);
+    ASSERT_TRUE(mux.add_remote_target("remote", pair[0], std::move(remote_profile)));
 
     std::string message = "mux coverage";
     EXPECT_EQ(mux.write_log(socle::log::level::INF, message), message.size());
@@ -119,6 +118,32 @@ TEST(LogMux, WritesFilteredLocalAndRemoteTargets) {
     EXPECT_EQ(std::string(mux.target_name(0xdeadbeef)), "unknown");
     ::close(pair[0]);
     ::close(pair[1]);
+}
+
+TEST(LogMux, RemoteTargetLifecycleIsSafeDuringConcurrentLogging) {
+    LogMux mux;
+    mux.dup2_cout(false);
+    int pair[2] {-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_DGRAM | SOCK_NONBLOCK, 0, pair), 0);
+    std::atomic_bool stop {false};
+    std::thread writer([&] {
+        std::string message = "concurrent target lifecycle";
+        while(!stop.load(std::memory_order_acquire))
+            mux.write_log(socle::log::level::INF, message);
+    });
+
+    for(unsigned attempt = 0; attempt < 1000; ++attempt) {
+        auto profile = std::make_shared<logger_profile>();
+        profile->level_ = socle::log::level::INF;
+        ASSERT_TRUE(mux.add_remote_target("temporary", pair[0], profile));
+        profile->level_.level(attempt % 11);
+        mux.remove_remote_target(pair[0]);
+    }
+    stop.store(true, std::memory_order_release);
+    writer.join();
+
+    EXPECT_EQ(::close(pair[0]), 0);
+    EXPECT_EQ(::close(pair[1]), 0);
 }
 
 TEST(LogLevel, ArithmeticComparisonAndMetadataRoundTrip) {

@@ -1097,10 +1097,7 @@ bool SmithProxy::init_syslog() {
         return false;
     } else {
 
-        Log::get()->remote_targets(string_format("syslog-udp%d-%d", CfgFactory::get()->syslog_family, syslog_socket),
-                                   syslog_socket);
-
-        auto lp = std::make_unique<logger_profile>();
+        auto lp = std::make_shared<logger_profile>();
 
         lp->logger_type = logger_profile::REMOTE_SYSLOG;
         lp->level_ = CfgFactory::get()->syslog_level;
@@ -1115,7 +1112,14 @@ bool SmithProxy::init_syslog() {
         lp->syslog_settings.severity = static_cast<int>(lp->level_.level());
         lp->syslog_settings.facility = CfgFactory::get()->syslog_facility;
 
-        Log::get()->target_profiles()[(uint64_t) syslog_socket] = std::move(lp);
+        const auto target_name = string_format("syslog-udp%d-%d", CfgFactory::get()->syslog_family,
+                                               syslog_socket);
+        if(!Log::get()->add_remote_target(target_name, syslog_socket, std::move(lp))) {
+            _err("cannot duplicate syslog socket %d: %s", syslog_socket, string_error().c_str());
+            ::close(syslog_socket);
+            return false;
+        }
+        ::close(syslog_socket);
     }
 
     return true;

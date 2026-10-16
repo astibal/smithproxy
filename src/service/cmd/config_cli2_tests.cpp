@@ -82,6 +82,26 @@ TEST(CliSocketIo, StalledNonblockingClientCannotTrapAWriter) {
     ::close(sockets[1]);
 }
 
+TEST(CliSocketIo, BlockingClientIsMadeNonblockingBeforeServing) {
+    int sockets[2] {-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
+    libcli2::FdTransport writer(libcli2::FdPair(sockets[0], sockets[0]));
+    ASSERT_EQ(::fcntl(writer.output_fd(), F_GETFL) & O_NONBLOCK, 0);
+    ASSERT_TRUE(sx::cli::make_nonblocking(writer));
+    EXPECT_NE(::fcntl(writer.output_fd(), F_GETFL) & O_NONBLOCK, 0);
+
+    std::string block(64 * 1024, 'x');
+    ssize_t result;
+    do {
+        result = writer.write_some(block.data(), block.size());
+    } while(result > 0);
+    ASSERT_LT(result, 0);
+    ASSERT_TRUE(errno == EAGAIN || errno == EWOULDBLOCK);
+    EXPECT_FALSE(sx::cli::write_all(writer, "must time out", 0));
+
+    ::close(sockets[1]);
+}
+
 class ConfigCli2Test : public testing::Test {
 protected:
     void SetUp() override {

@@ -706,6 +706,10 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                     --gtest_filter=-InetTest.*:PcapExperiments.*:DNS_tests.*)
             add_test(NAME unit.listener_lifecycle COMMAND sx_gtests
                     --gtest_filter=Libcli2.*Confirmation*:ConfigCli2Test.*Confirmation*:CfgValue.CopyAssignment*:CfgValue.LiveListenerMetadata*:CfgValue.LiveWorkerMetadata*:LiveListenerLifecycle.*:ThreadedWorkerLifecycle.*:QuicListenerService.*Drain*)
+            # Mandatory regression for CLI log-target churn. Keep this named
+            # separately so every native patch run reports it explicitly.
+            add_test(NAME unit.logging_concurrency COMMAND sx_gtests
+                    --gtest_filter=LogMux.RemoteTargetLifecycleIsSafeDuringConcurrentLogging)
             add_test(NAME unit.http1 COMMAND sx_gtests_http1 --gtest_filter=-HTTP1.benchmark)
             add_test(NAME unit.startstoptls COMMAND sx_gtests_startstoptls)
             add_test(NAME unit.httpconnect COMMAND sx_gtests_httpconnect)
@@ -860,6 +864,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                         integration.httpconnect integration.starttls_socks integration.socks5_udp integration.http_api
                         integration.libcli2_process integration.main_process integration.redirect integration.wireshark_spq1
                         PROPERTIES LABELS "native;integration")
+                set_tests_properties(unit.logging_concurrency PROPERTIES LABELS "native;unit" TIMEOUT 30)
                 set_tests_properties(stress.httpconnect PROPERTIES LABELS "native;integration;stress")
                 set_tests_properties(
                         integration.httpconnect stress.httpconnect integration.starttls_socks integration.socks5_udp integration.http_api

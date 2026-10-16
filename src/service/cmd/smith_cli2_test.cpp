@@ -143,7 +143,7 @@ void register_smithproxy_cli2_test(libcli2::Cli& cli) {
         .handler([](libcli2::Context& context, const libcli2::Invocation& invocation) {
             const int fd = context.io_handle;
             sx::http::AsyncRequest::emit_url(invocation.arguments.front(), R"({"key": "value"})", [fd](auto reply) {
-                if (Log::get()->target_profiles().find(static_cast<std::uint64_t>(fd)) == Log::get()->target_profiles().end()) return;
+                if (!Log::get()->remote_target_profile(fd)) return;
                 // AsyncRequest uses a negative response code for its internal
                 // initialization hook. It is not a remote HTTP response.
                 if (reply && reply->response.first <= 0) return;

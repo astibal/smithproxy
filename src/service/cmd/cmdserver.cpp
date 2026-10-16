@@ -2,6 +2,7 @@
 #include "cli_client_tasks.hpp"
 
 #include "cli_debug_state.hpp"
+#include "cli_socket_io.hpp"
 #include "config_cli2_smithproxy.hpp"
 #include "libcli2_socket.hpp"
 #include "smith_cli2_commands.hpp"
@@ -131,6 +132,11 @@ int regular(libcli2::Context& context) {
 
 void run_cli_session(int client_socket, const CliSessionMetadata& metadata) {
     libcli2::FdTransport transport(libcli2::FdPair(client_socket, client_socket));
+    if(!sx::cli::make_nonblocking(transport)) {
+        Log::get()->events().insert(ERR, "cannot make CLI client socket non-blocking: %s",
+                                    string_error().c_str());
+        return;
+    }
     std::string admin_group;
     std::string enable_password;
     {
@@ -142,10 +148,13 @@ void run_cli_session(int client_socket, const CliSessionMetadata& metadata) {
     Log::get()->events().insert(NOT, "admin CLI access via %s",
                                 metadata.broker.empty() ? "unknown transport"
                                                         : metadata.broker.c_str());
-    Log::get()->remote_targets(string_format("cli-%d", client_socket), client_socket);
-    auto profile = std::make_unique<logger_profile>();
+    auto profile = std::make_shared<logger_profile>();
     profile->level_ = CfgFactory::get()->cli_init_level;
-    Log::get()->target_profiles()[static_cast<std::uint64_t>(client_socket)] = std::move(profile);
+    if(!Log::get()->add_remote_target(string_format("cli-%d", client_socket), client_socket, profile)) {
+        Log::get()->events().insert(ERR, "cannot duplicate CLI client socket for logging: %s",
+                                    string_error().c_str());
+        return;
+    }
     load_defaults();
 
     Libcli2SocketOptions options;
@@ -169,8 +178,7 @@ void run_cli_session(int client_socket, const CliSessionMetadata& metadata) {
 #endif
     libcli2_socket_loop(transport, std::move(options));
 
-    Log::get()->remote_targets().remove_if([client_socket](const auto& entry) { return entry.first == client_socket; });
-    Log::get()->target_profiles().erase(client_socket);
+    Log::get()->remove_remote_target(client_socket);
 }
 
 } // namespace
