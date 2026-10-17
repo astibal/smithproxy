@@ -1,6 +1,6 @@
 # Smithproxy internal libcli
 
-Small C++17 command engine maintained as an internal Smithproxy library.
+Small C++23 command engine maintained as an internal Smithproxy library.
 It has no dependencies on Smithproxy runtime or configuration code.
 
 Implemented:
@@ -51,6 +51,6 @@ cli.command("show session")
 Build and run the interactive example without the rest of Smithproxy:
 
 ```sh
-g++ -std=c++17 -Wall -Wextra -Werror -pedantic cli.cpp line_editor.cpp examples/example.cpp -o libcli-demo
+g++ -std=c++23 -Wall -Wextra -Werror -pedantic cli.cpp line_editor.cpp examples/example.cpp -o libcli-demo
 ./libcli-demo
 ```

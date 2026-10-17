@@ -11,7 +11,7 @@ namespace {
 void check_ranges(std::string_view block,
                   sx::engine::http::L7PayloadHints const& ranges) {
     std::int64_t previous_end = 0;
-    for(const auto [start, end] : ranges) {
+    for(const auto& [start, end] : ranges) {
         if(start == -1 && end == -1) continue;
         if(start < 0 || end < start ||
            static_cast<std::size_t>(end) > block.size() ||

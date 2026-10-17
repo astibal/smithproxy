@@ -1590,7 +1590,7 @@ int cli_diag_mem_trace_list (DiagCli *cli, const char *command, char **argv, int
         cli_print(cli, "Allocation traces: parsed %ld unique entries.", occ.size());
 
         used_hashmap2 ordered;
-        for(auto [ bt, bt_stat ]: occ) {
+        for(const auto& [bt, bt_stat] : occ) {
             ordered[bt_stat] = bt;
         }
 

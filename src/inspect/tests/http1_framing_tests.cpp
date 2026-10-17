@@ -388,7 +388,7 @@ TEST(Http1Framing, RandomGarbageNeverReturnsOutOfBoundsRanges) {
         for(char& byte : data) byte = static_cast<char>(byte_distribution(random));
         const auto ranges = direction.observe(data, (iteration & 1U) != 0);
         std::int64_t previous_end = 0;
-        for(const auto [start, finish] : ranges) {
+        for(const auto& [start, finish] : ranges) {
             if(start == -1 && finish == -1) continue;
             EXPECT_GE(start, 0);
             EXPECT_GE(finish, start);

@@ -19,7 +19,7 @@ Ales Stibal `<astib@mag0.net>`
 * git: [https://github.com/astibal/smithproxy](https://github.com/astibal/smithproxy)
 
 To build smithproxy from source, please download source tarball and read instructions in `tools/README.md`.  
-It should compile on any recent Linux system with C++17 compiler (GCC and Clang is used and tested).
+It requires a C++23 compiler. GCC and Clang are used and tested.
 
 ### Getting support
 

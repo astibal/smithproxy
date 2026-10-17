@@ -1,8 +1,6 @@
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.20)
 
-set(SMITHPROXY_CXX_STANDARD 20 CACHE STRING "C++ standard used to build Smithproxy")
-set_property(CACHE SMITHPROXY_CXX_STANDARD PROPERTY STRINGS 20 23)
-set(CMAKE_CXX_STANDARD ${SMITHPROXY_CXX_STANDARD})
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -173,9 +171,7 @@ if(UNIX)
         SET(CMAKE_BUILD_TYPE Debug)
     ENDIF(NOT CMAKE_BUILD_TYPE)
 
-    # Pedantic complains about designated initializers (C++20)
-    # SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wconversion -Wpedantic -Wno-unused-parameter -Wno-psabi -std=c++17")
-    # SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror -Wno-unused-parameter -Werror -Wno-unused-function -Wconversion -Wno-psabi -std=c++17")
+    # Pedantic complains about designated initializers.
     SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror -Wno-unused-variable -Wno-unused-parameter -Wno-unused-function -Wno-psabi")
     SET(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_DEBUG} -g3 -fno-stack-protector")
 

@@ -49,7 +49,7 @@ Observation observe(std::string_view wire, std::vector<std::size_t> cuts,
         if(block.empty()) continue;
         const auto ranges = direction.observe(block, client_side);
         std::int64_t previous = 0;
-        for(const auto [start, end] : ranges) {
+        for(const auto& [start, end] : ranges) {
             if(start == -1 && end == -1) {
                 result.unknown = true;
                 continue;

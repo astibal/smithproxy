@@ -31,19 +31,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: Ubuntu 22.04, slug: ubuntu-22.04 }
           - { name: Ubuntu 24.04, slug: ubuntu-24.04 }
           - { name: Ubuntu 26.04, slug: ubuntu-26.04 }
-          - { name: Debian 12, slug: debian-12 }
           - { name: Debian 13, slug: debian-13 }
           - { name: Alpine 3.20, slug: alpine-3.20 }
           - { name: Alpine 3.22, slug: alpine-3.22 }
           - { name: Fedora 42, slug: fedora-42 }
           - { name: Fedora 43, slug: fedora-43 }
           - { name: openSUSE Tumbleweed, slug: opensuse-tumbleweed }
-          - { name: AlmaLinux 9, slug: almalinux-9 }
           - { name: AlmaLinux 10, slug: almalinux-10 }
-          - { name: Rocky Linux 9, slug: rockylinux-9 }
 
     steps:
       - name: Checkout code

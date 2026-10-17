@@ -317,7 +317,7 @@ TEST(HTTP2, PositiveWindowUpdateOnIdleStreamTerminatesConnectionSemantics) {
         return result;
     };
 
-    for(auto const [side, stream] : {
+    for(auto const& [side, stream] : {
             std::pair{socle::side_t::LEFT, 3U},
             std::pair{socle::side_t::RIGHT, 5U},
             std::pair{socle::side_t::LEFT, 2U},

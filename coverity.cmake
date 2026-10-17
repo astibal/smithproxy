@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.20)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/helpers.cmake)
 
@@ -6,6 +6,10 @@ SET(SOCLE_DIR "socle")
 SET(SOCLE_COMMON_DIR "socle/common")
 
 project(smithproxy CXX)
+
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 SET(CMAKE_SOURCE_DIR "src/")
 SET(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}")
@@ -24,7 +28,7 @@ if(UNIX)
         SET(CMAKE_BUILD_TYPE Debug)
     ENDIF(NOT CMAKE_BUILD_TYPE)
 
-    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wno-psabi -std=c++17")
+    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wno-psabi")
     SET(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g3 -fno-stack-protector")
 
     IF (CMAKE_BUILD_TYPE STREQUAL "Debug")

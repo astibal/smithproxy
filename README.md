@@ -1,7 +1,7 @@
 
 [**Smithproxy**](https://www.smithproxy.org) is highly configurable, fast and transparent TCP/UDP/TLS (SSL) proxy
- written in C++17.  
-It uses our C++17 socket proxying library called [*socle*](https://github.com/astibal/socle). 
+ written in C++23.
+It uses our C++23 socket proxying library called [*socle*](https://github.com/astibal/socle).
 
 ## Testing policy
 

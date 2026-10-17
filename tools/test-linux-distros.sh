@@ -7,19 +7,15 @@ BUILD_JOBS=${BUILD_JOBS:-2}
 DOCKER_PLATFORM=${DOCKER_PLATFORM:-}
 
 DISTROS=(
-    "ubuntu-22.04|ubuntu:22.04"
     "ubuntu-24.04|ubuntu:24.04"
     "ubuntu-26.04|ubuntu:26.04"
-    "debian-12|debian:12"
     "debian-13|debian:13"
     "alpine-3.20|alpine:3.20"
     "alpine-3.22|alpine:3.22"
     "fedora-42|fedora:42"
     "fedora-43|fedora:43"
     "opensuse-tumbleweed|opensuse/tumbleweed:latest"
-    "almalinux-9|almalinux:9"
     "almalinux-10|almalinux:10"
-    "rockylinux-9|rockylinux:9"
 )
 
 usage() {
