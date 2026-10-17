@@ -7,10 +7,8 @@ BUILD_JOBS=${BUILD_JOBS:-2}
 DOCKER_PLATFORM=${DOCKER_PLATFORM:-}
 
 DISTROS=(
-    "ubuntu-22.04|ubuntu:22.04"
     "ubuntu-24.04|ubuntu:24.04"
     "ubuntu-26.04|ubuntu:26.04"
-    "debian-12|debian:12"
     "debian-13|debian:13"
 )
 

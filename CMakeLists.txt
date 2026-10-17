@@ -180,7 +180,9 @@ if(UNIX)
     SET(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_DEBUG} -g3 -fno-stack-protector")
 
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-stringop-truncation ")
+        # GCC 15 LTO can report free-nonheap-object inside a valid
+        # std::vector::reserve()/insert() sequence.
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-stringop-truncation -Wno-free-nonheap-object ")
         if("${OPT_GCC_UNROLL}" STREQUAL "Y")
             set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-stringop-truncation -funroll-loops --param  max-unrolled-insns=4")
         endif()

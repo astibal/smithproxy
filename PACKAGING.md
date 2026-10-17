@@ -11,9 +11,8 @@ The build has one payload definition and two packaging paths:
               developer build     production DEB
 ```
 
-`tools/linux-*.sh` and `tools/sx-builder.py` remain supported entry points.
-They are useful for distro setup, smoke tests and the existing container build
-farm. The new commands below are the lower-level, deterministic interface.
+`tools/linux-*.sh` remain supported entry points for distro setup and smoke
+tests. The commands below are the lower-level, deterministic interface.
 
 All build and packaging commands in this document start in the repository
 root: the directory containing `CMakeLists.txt`, `debian/` and `tools/`.
@@ -148,7 +147,7 @@ container for any supported Debian-family target:
 ```sh
 cd /path/to/smithproxy       # repository root
 tools/test-deb-package.sh --list
-tools/test-deb-package.sh debian-12
+tools/test-deb-package.sh debian-13
 ```
 
 The package must be rebuilt on every target distribution. Shared-library
@@ -188,7 +187,6 @@ debian/                          Debian dependencies, upgrades and services
 CMakePresets.json                repeatable developer configurations
 tools/package-deb.sh             small command-line wrapper only
 tools/linux-*.sh                 cross-distribution convenience and CI
-tools/sx-builder.py              existing multi-host/container orchestrator
 ```
 
 Do not add upload credentials or repository publication to the package build.
