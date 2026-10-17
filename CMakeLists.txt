@@ -1,7 +1,10 @@
 cmake_minimum_required(VERSION 3.14)
 
-## To be set in the (near!) future
-# set(CMAKE_CXX_STANDARD 20)
+set(SMITHPROXY_CXX_STANDARD 20 CACHE STRING "C++ standard used to build Smithproxy")
+set_property(CACHE SMITHPROXY_CXX_STANDARD PROPERTY STRINGS 20 23)
+set(CMAKE_CXX_STANDARD ${SMITHPROXY_CXX_STANDARD})
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Avoid warning about DOWNLOAD_EXTRACT_TIMESTAMP in CMake 3.24:
 if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.24.0")
@@ -173,7 +176,7 @@ if(UNIX)
     # Pedantic complains about designated initializers (C++20)
     # SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wconversion -Wpedantic -Wno-unused-parameter -Wno-psabi -std=c++17")
     # SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror -Wno-unused-parameter -Werror -Wno-unused-function -Wconversion -Wno-psabi -std=c++17")
-    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror -Wno-unused-variable -Wno-unused-parameter -Wno-unused-function -Wno-psabi -std=c++17")
+    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror -Wno-unused-variable -Wno-unused-parameter -Wno-unused-function -Wno-psabi")
     SET(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_DEBUG} -g3 -fno-stack-protector")
 
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")

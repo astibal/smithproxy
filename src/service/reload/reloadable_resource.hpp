@@ -95,7 +95,7 @@ public:
     }
 
     std::shared_ptr<const snapshot_type> snapshot() const noexcept {
-        return std::atomic_load_explicit(&snapshot_, std::memory_order_acquire);
+        return snapshot_.load(std::memory_order_acquire);
     }
 
     std::string last_error() const {
@@ -132,8 +132,8 @@ private:
         }
         auto result_version = version();
         if(not options_.keep_last_on_error and snapshot()) {
-            std::atomic_store_explicit(
-                &snapshot_, std::shared_ptr<const snapshot_type>{}, std::memory_order_release);
+            snapshot_.store(
+                std::shared_ptr<const snapshot_type>{}, std::memory_order_release);
             result_version++;
             version_.store(result_version, std::memory_order_release);
         }
@@ -213,7 +213,7 @@ private:
 
         // Publish the immutable object before the flag. A worker which observes
         // next_version with acquire semantics can then load the matching snapshot.
-        std::atomic_store_explicit(&snapshot_, std::move(published), std::memory_order_release);
+        snapshot_.store(std::move(published), std::memory_order_release);
         version_.store(next_version, std::memory_order_release);
         successful_reloads_.fetch_add(1, std::memory_order_relaxed);
         {
@@ -228,7 +228,7 @@ private:
     mutable std::mutex reload_lock_;
     mutable std::mutex state_lock_;
     std::optional<FileSignature> attempted_signature_;
-    std::shared_ptr<const snapshot_type> snapshot_;
+    std::atomic<std::shared_ptr<const snapshot_type>> snapshot_;
     std::atomic<version_type> version_{0};
     std::atomic_uint64_t successful_reloads_{0};
     std::atomic_uint64_t failed_reloads_{0};
