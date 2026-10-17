@@ -494,6 +494,7 @@ void print_help() {
     std::cerr << "    --version, -v                :  print version and exit with 0" << std::endl;
     std::cerr << "    --config-file, -c <filename> :  specify/override configuration file" << std::endl;
     std::cerr << "    --config-check-only, -o      :  perform configuration file check" << std::endl;
+    std::cerr << "    --no-pidfile                 :  disable PID file management (for service managers)" << std::endl;
     std::cerr << "    --run-as <user>              :  drop core identity after starting privileged helper" << std::endl;
     std::cerr << "    --comm-gre <path>            :  use an external GRE comm broker" << std::endl;
     std::cerr << "    --comm-cli <path>            :  use an external CLI comm broker" << std::endl;
@@ -538,6 +539,7 @@ int main(int argc, char *argv[]) {
     constexpr int option_comm_api = 1003;
     constexpr int option_comm_webhook = 1004;
     constexpr int option_comm_sift = 1005;
+    constexpr int option_no_pidfile = 1006;
     static struct option long_options[] =
             {
                     /* These options set a flag. */
@@ -549,6 +551,7 @@ int main(int argc, char *argv[]) {
                     {"config-file", required_argument, nullptr, 'c'},
                     {"config-check-only", no_argument, nullptr, 'o'},
                     {"daemonize", no_argument, nullptr, 'D'},
+                    {"no-pidfile", no_argument, nullptr, option_no_pidfile},
                     {"version", no_argument, nullptr, 'v'},
                     {"run-as", required_argument, nullptr, option_run_as},
                     {"comm-gre", required_argument, nullptr, option_comm_gre},
@@ -626,6 +629,10 @@ int main(int argc, char *argv[]) {
                     return EXIT_FAILURE;
                 }
                 command_line_run_as = optarg;
+                break;
+
+            case option_no_pidfile:
+                this_daemon->pid_file_enabled = false;
                 break;
 
             case option_comm_gre:

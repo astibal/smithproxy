@@ -128,6 +128,9 @@ int DaemonFactory::daemonize () {
 }
 
 bool DaemonFactory::write_pidfile() {
+    if(!pid_file_enabled) {
+        return true;
+    }
     if(sx::privsep::files::pid_write(pid_file, ::getpid()) != 0) {
         std::cerr << "cannot claim pid file: " << string_error() << std::endl;
         _err("cannot claim pid file: %s", string_error().c_str());
@@ -138,6 +141,10 @@ bool DaemonFactory::write_pidfile() {
 }
 
 void DaemonFactory::unlink_pidfile(bool force) {
+
+    if(!pid_file_enabled) {
+        return;
+    }
 
     if(pid_file_owned || force) {
         if(sx::privsep::files::pid_remove(pid_file) != 0 && errno != ENOENT) {
@@ -150,6 +157,9 @@ void DaemonFactory::unlink_pidfile(bool force) {
 }
 
 bool DaemonFactory::exists_pidfile() const {
+    if(!pid_file_enabled) {
+        return false;
+    }
     bool exists = false;
     return sx::privsep::files::pid_exists(pid_file, exists) == 0 && exists;
 }

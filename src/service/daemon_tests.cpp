@@ -136,6 +136,23 @@ TEST_F(DaemonPidfile, MetadataExistenceAndForcedCleanupAreObservable) {
     daemon.unlink_pidfile(true);  // missing-path error handling remains harmless
 }
 
+TEST_F(DaemonPidfile, DisabledPidfileSkipsExistenceWriteAndCleanup) {
+    DaemonFactory daemon;
+    daemon.pid_file = pidfile_;
+    daemon.pid_file_enabled = false;
+    {
+        std::ofstream output(pidfile_);
+        output << "foreign";
+    }
+
+    EXPECT_FALSE(daemon.exists_pidfile());
+    EXPECT_TRUE(daemon.write_pidfile());
+    EXPECT_FALSE(daemon.pid_file_owned);
+    daemon.unlink_pidfile(true);
+    EXPECT_TRUE(std::filesystem::exists(pidfile_));
+    EXPECT_EQ(contents(pidfile_), "foreign");
+}
+
 TEST_F(DaemonPidfile, SignalInstallationSupportsHandlerAndIgnoreModes) {
     struct sigaction previous {};
     ASSERT_EQ(::sigaction(SIGUSR2, nullptr, &previous), 0);
