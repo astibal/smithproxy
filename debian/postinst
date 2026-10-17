@@ -1,0 +1,18 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = configure ]; then
+    if ! getent group _sxy >/dev/null; then
+        addgroup --system --quiet _sxy
+    fi
+    if ! getent passwd _sxy >/dev/null; then
+        adduser --system --quiet --ingroup _sxy --home /nonexistent \
+            --no-create-home --disabled-login --disabled-password _sxy
+    fi
+
+    install -d -o _sxy -g _sxy -m 0770 /var/log/smithproxy
+    install -d -o _sxy -g _sxy -m 0750 /var/smithproxy
+    install -d -o _sxy -g _sxy -m 0770 /var/smithproxy/data
+fi
+
+#DEBHELPER#

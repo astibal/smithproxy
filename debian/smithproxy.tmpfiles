@@ -1,0 +1,3 @@
+d /var/log/smithproxy 0770 _sxy _sxy -
+d /var/smithproxy 0750 _sxy _sxy -
+d /var/smithproxy/data 0770 _sxy _sxy -

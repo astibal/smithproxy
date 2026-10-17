@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+
+smithproxy --version
+test -x /usr/bin/sx_network
+test -x /usr/bin/sx_cli
+test -f /usr/lib/systemd/system/sx-core@.service
+test -f /usr/lib/systemd/system/sx-network@.service
+test -f /etc/smithproxy/smithproxy.cfg
+
+if ldd /usr/bin/smithproxy | grep -q 'not found'; then
+    ldd /usr/bin/smithproxy >&2
+    exit 1
+fi

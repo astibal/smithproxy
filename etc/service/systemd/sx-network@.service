@@ -1,5 +1,6 @@
 [Unit]
 Description=Smithproxy Networking - tenant %i
+Documentation=https://smithproxy.readthedocs.io/
 After=network.target remote-fs.target nss-lookup.target
 
 [Service]
@@ -10,3 +11,4 @@ RemainAfterExit=yes
 
 [Install]
 WantedBy=multi-user.target
+DefaultInstance=default

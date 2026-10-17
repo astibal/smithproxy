@@ -1,0 +1,6 @@
+smithproxy (0.9.32+git20261009.6688819-1) UNRELEASED; urgency=medium
+
+  * Replace the legacy packaging scripts with debhelper 13 packaging.
+  * Use the CMake install manifest as the single payload definition.
+
+ -- Ales Stibal <astib@mag0.net>  Fri, 09 Oct 2026 15:00:00 +0200

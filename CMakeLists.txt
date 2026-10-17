@@ -19,7 +19,7 @@ ProcessorCount(CPUs)
 SET(SOCLE_DIR "socle")
 SET(SOCLE_COMMON_DIR "socle/common")
 
-project(smithproxy C CXX)
+project(smithproxy VERSION 0.9.32 LANGUAGES C CXX)
 include(CTest)
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}")
 
@@ -103,7 +103,11 @@ if("${USE_PAM}" STREQUAL "Y")
 endif()
 
 
-create_git_hooks()
+option(SMITHPROXY_INSTALL_GIT_HOOKS
+       "Install Smithproxy development hooks into the source repository" OFF)
+if(SMITHPROXY_INSTALL_GIT_HOOKS)
+    create_git_hooks()
+endif()
 
 include_directories ("${SOCLE_DIR}")
 include_directories ("${SOCLE_COMMON_DIR}")
@@ -258,10 +262,15 @@ message(STATUS "Git commit smithproxy version: ${SX_GIT_VERSION}")
 
 message(STATUS "Generating smithproxy_version.h")
 
+set(SMITHPROXY_GENERATED_INCLUDE_DIR
+    "${CMAKE_CURRENT_BINARY_DIR}/generated")
+file(MAKE_DIRECTORY "${SMITHPROXY_GENERATED_INCLUDE_DIR}")
+
 configure_file(
         ${PROJECT_SOURCE_DIR}/src/smithproxy_version.h.in
-        ${PROJECT_SOURCE_DIR}/src/smithproxy_version.h
+        ${SMITHPROXY_GENERATED_INCLUDE_DIR}/smithproxy_version.h
 )
+include_directories(BEFORE "${SMITHPROXY_GENERATED_INCLUDE_DIR}")
 message(STATUS "compiler flags: ${CMAKE_CXX_FLAGS}")
 message(STATUS "compiler debug flags: ${CMAKE_CXX_FLAGS_DEBUG}")
 
@@ -1075,6 +1084,32 @@ if("${OPT_DEBUG_ASAN_LEAKS}" STREQUAL "Y")
 endif()
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/install.cmake)
+
+option(SMITHPROXY_ENABLE_CPACK "Generate CPack package targets" ON)
+if(SMITHPROXY_ENABLE_CPACK)
+    set(CPACK_PACKAGE_NAME "smithproxy")
+    set(CPACK_PACKAGE_VENDOR "Smithproxy")
+    set(CPACK_PACKAGE_CONTACT "Smithproxy Support <support@smithproxy.org>")
+    set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
+        "Transparent TCP/UDP/TLS proxy with inspection capabilities")
+    set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+    set(CPACK_PACKAGE_FILE_NAME
+        "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-${CMAKE_SYSTEM_PROCESSOR}")
+    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+    set(CPACK_STRIP_FILES ON)
+    # Several configuration destinations are absolute (/etc). Force every
+    # CPack generator to stage them below its private temporary root.
+    set(CPACK_SET_DESTDIR ON)
+
+    set(CPACK_DEBIAN_PACKAGE_SECTION "net")
+    set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+    set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+    set(CPACK_DEBIAN_PACKAGE_DEPENDS
+        "python3, python3-cryptography, python3-pyroute2, iproute2, iptables")
+
+    set(CPACK_GENERATOR "TGZ")
+    include(CPack)
+endif()
 
 if("${USE_EXPERIMENT}" STREQUAL "Y")
     message(" >> !!! EXPERIMENTS ENABLED !!!" )

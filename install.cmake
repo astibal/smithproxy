@@ -1,142 +1,122 @@
+include(GNUInstallDirs)
+
+# Both debhelper and CPack consume this manifest. Keep package-specific
+# lifecycle policy in debian/, not in CMake install-time code.
 if(UNIX)
-    SET(CMAKE_INSTALL_PREFIX /usr)
-    install(TARGETS smithproxy DESTINATION bin)
-    install(FILES man/smithproxy.1 DESTINATION share/man/man1)
-    install(FILES man/smithproxy.cfg.5 DESTINATION share/man/man5)
-    install(FILES man/smithproxy-mitm.7 DESTINATION share/man/man7)
-    install(FILES
-            man/smithproxy-policy.7
-            man/smithproxy-capture.7
-            man/smithproxy-topology.7
-            DESTINATION share/man/man7)
-    install_if_not_exists(etc/smithproxy.cfg /etc/smithproxy)
-    install_if_not_exists(etc/users.cfg /etc/smithproxy)
-    install_if_not_exists(etc/users.key /etc/smithproxy)
-    install_if_not_exists(etc/smithproxy.startup.cfg /etc/smithproxy)
-    install_if_not_exists(etc/apparmor/usr.bin.smithproxy /etc/apparmor.d/)
+    install(TARGETS smithproxy
+            RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+            COMPONENT runtime)
 
-    install(DIRECTORY DESTINATION /etc/smithproxy/certs/)
-    install(DIRECTORY DESTINATION /etc/smithproxy/certs/default)
-    install_if_not_exists(etc/certs/default/ca-cert.pem /etc/smithproxy/certs/default)
-    install_if_not_exists(etc/certs/default/ca-key.pem /etc/smithproxy/certs/default)
-    install_if_not_exists(etc/certs/default/srv-cert.pem /etc/smithproxy/certs/default)
-    install_if_not_exists(etc/certs/default/srv-key.pem /etc/smithproxy/certs/default)
-    install_if_not_exists(etc/certs/default/cl-cert.pem /etc/smithproxy/certs/default)
-    install_if_not_exists(etc/certs/default/cl-key.pem /etc/smithproxy/certs/default)
-    install_if_not_exists(etc/certs/default/portal-gen.info /etc/smithproxy/certs/default)
+    install(FILES man/smithproxy.1
+            DESTINATION "${CMAKE_INSTALL_MANDIR}/man1"
+            COMPONENT runtime)
 
-    install_if_not_exists(etc/logrotate.d/smithproxy /etc/logrotate.d)
+    set(SMITHPROXY_SYSCONFDIR "${CMAKE_INSTALL_FULL_SYSCONFDIR}/smithproxy")
 
-    install(FILES etc/smithproxy.startup.sh DESTINATION bin
-            PERMISSIONS
-            OWNER_READ OWNER_WRITE OWNER_EXECUTE
-            GROUP_READ GROUP_EXECUTE
-            WORLD_READ WORLD_EXECUTE
+    foreach(config_file
+            etc/smithproxy.cfg
+            etc/users.cfg
+            etc/users.key
+            etc/smithproxy.startup.cfg)
+        install_if_not_exists("${config_file}" "${SMITHPROXY_SYSCONFDIR}")
+    endforeach()
+
+    install_if_not_exists(etc/apparmor/usr.bin.smithproxy
+                          "${CMAKE_INSTALL_FULL_SYSCONFDIR}/apparmor.d")
+
+    install(DIRECTORY etc/certs/default/
+            DESTINATION "${SMITHPROXY_SYSCONFDIR}/certs/default"
+            COMPONENT runtime
+            FILES_MATCHING
+            PATTERN "*-cert.pem"
+            PATTERN "portal-gen.info"
+            PATTERN "sslca.json")
+
+    install(DIRECTORY etc/certs/default/
+            DESTINATION "${SMITHPROXY_SYSCONFDIR}/certs/default"
+            COMPONENT runtime
+            FILE_PERMISSIONS OWNER_READ OWNER_WRITE
+            FILES_MATCHING PATTERN "*-key.pem")
+
+    install(CODE "
+        file(CHMOD
+             \"\$ENV{DESTDIR}${SMITHPROXY_SYSCONFDIR}/users.key\"
+             PERMISSIONS OWNER_READ OWNER_WRITE)
+    ")
+
+    install(FILES etc/logrotate.d/smithproxy
+            DESTINATION "${CMAKE_INSTALL_FULL_SYSCONFDIR}/logrotate.d"
+            COMPONENT runtime)
+
+    install(PROGRAMS etc/smithproxy.startup.sh
+            DESTINATION "${CMAKE_INSTALL_BINDIR}"
             RENAME sx_network
-            )
-    install(FILES etc/service/systemd/sx-core@.service DESTINATION /usr/lib/systemd/system
-            PERMISSIONS
-            OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
+            COMPONENT runtime)
 
-    install(FILES etc/service/systemd/sx-network@.service DESTINATION /usr/lib/systemd/system
-            PERMISSIONS
-            OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
-
-
-    install(FILES etc/smithproxy_cli.sh DESTINATION bin
-            PERMISSIONS
-            OWNER_READ OWNER_WRITE OWNER_EXECUTE
-            GROUP_READ GROUP_EXECUTE
-            WORLD_READ WORLD_EXECUTE
+    install(PROGRAMS etc/smithproxy_cli.sh
+            DESTINATION "${CMAKE_INSTALL_BINDIR}"
             RENAME sx_cli
-            )
+            COMPONENT runtime)
 
-    install(FILES tools/sx_certinfo_ca DESTINATION bin
-            PERMISSIONS
-            OWNER_READ OWNER_WRITE OWNER_EXECUTE
-            GROUP_READ GROUP_EXECUTE
-            WORLD_READ WORLD_EXECUTE
-            )
+    install(PROGRAMS
+            tools/sx_certinfo_ca
+            tools/sx_certinfo_portal
+            tools/sx_download_ctlog
+            tools/sx_download_ca_bundle
+            DESTINATION "${CMAKE_INSTALL_BINDIR}"
+            COMPONENT runtime)
 
-    install(FILES tools/sx_certinfo_portal DESTINATION bin
-            PERMISSIONS
-            OWNER_READ OWNER_WRITE OWNER_EXECUTE
-            GROUP_READ GROUP_EXECUTE
-            WORLD_READ WORLD_EXECUTE
-    )
+    # This path is intentionally not CMAKE_INSTALL_LIBDIR: systemd units are
+    # architecture-independent and belong in /usr/lib/systemd/system.
+    install(FILES
+            etc/service/systemd/sx-core@.service
+            etc/service/systemd/sx-network@.service
+            DESTINATION "lib/systemd/system"
+            COMPONENT runtime)
 
-    install(FILES tools/sx_download_ctlog DESTINATION bin
-            PERMISSIONS
-            OWNER_READ OWNER_WRITE OWNER_EXECUTE
-            GROUP_READ GROUP_EXECUTE
-            WORLD_READ WORLD_EXECUTE
-            )
+    install(FILES man/TESTING_README.txt
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/smithproxy/docs"
+            COMPONENT runtime)
 
-    install(FILES tools/sx_download_ca_bundle DESTINATION bin
-            PERMISSIONS
-            OWNER_READ OWNER_WRITE OWNER_EXECUTE
-            GROUP_READ GROUP_EXECUTE
-            WORLD_READ WORLD_EXECUTE
-            )
-
-    install(FILES man/TESTING_README.txt DESTINATION share/smithproxy/docs)
-
-    # Preserve notices for the QPACK code statically linked into smithproxy.
     install(FILES
             src/ext/ls-qpack/LICENSE.ls-qpack
             src/ext/ls-qpack/LICENSE.xxhash
-            DESTINATION share/smithproxy/docs/licenses)
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/smithproxy/docs/licenses"
+            COMPONENT runtime)
 
-    # Optional dissector for synthetic plaintext QUIC records in PCAP/GRE.
     install(FILES
             tools/wireshark/spquic.lua
             tools/wireshark/README.md
-            DESTINATION share/smithproxy/wireshark)
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/smithproxy/wireshark"
+            COMPONENT runtime)
 
-    # install infra/
-    file(GLOB infra_py "src/infra/*.py")
-    install(FILES ${infra_py} DESTINATION share/smithproxy/infra)
+    file(GLOB infra_py CONFIGURE_DEPENDS "src/infra/*.py")
+    install(FILES ${infra_py}
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/smithproxy/infra"
+            COMPONENT runtime)
 
-    install(DIRECTORY src/infra/sslca DESTINATION share/smithproxy/infra)
+    install(DIRECTORY src/infra/sslca
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/smithproxy/infra"
+            COMPONENT runtime
+            PATTERN "__pycache__" EXCLUDE
+            PATTERN "*.pyc" EXCLUDE)
 
-    file(GLOB sslca_makecerts "src/infra/sslca/make*.py")
-    install(FILES ${sslca_makecerts} DESTINATION share/smithproxy/infra/sslca
-            PERMISSIONS
-            OWNER_READ OWNER_WRITE OWNER_EXECUTE
-            GROUP_READ GROUP_EXECUTE
-            WORLD_READ WORLD_EXECUTE
-            )
+    file(GLOB sslca_makecerts CONFIGURE_DEPENDS "src/infra/sslca/make*.py")
+    install(PROGRAMS ${sslca_makecerts}
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/smithproxy/infra/sslca"
+            COMPONENT runtime)
 
-
-
-    install(FILES src/infra/sslca/makecerts.py DESTINATION bin
-            PERMISSIONS
-            OWNER_READ OWNER_WRITE OWNER_EXECUTE
-            GROUP_READ GROUP_EXECUTE
-            WORLD_READ WORLD_EXECUTE
+    install(PROGRAMS src/infra/sslca/makecerts.py
+            DESTINATION "${CMAKE_INSTALL_BINDIR}"
             RENAME sx_regencerts
-            )
+            COMPONENT runtime)
 
-
-    # portal installation
-    install(FILES src/infra/sslca/makeportalcert.py DESTINATION bin
-            PERMISSIONS
-            OWNER_READ OWNER_WRITE OWNER_EXECUTE
-            GROUP_READ GROUP_EXECUTE
-            WORLD_READ WORLD_EXECUTE
+    install(PROGRAMS src/infra/sslca/makeportalcert.py
+            DESTINATION "${CMAKE_INSTALL_BINDIR}"
             RENAME sx_autoportalcert
-            )
+            COMPONENT runtime)
 
-
-
-
-    install(DIRECTORY etc/msg DESTINATION /etc/smithproxy)
-
-    create_dir("/var/log/smithproxy/")
-    create_dir("/var/smithproxy/data/")
-
-    install(CODE "MESSAGE(\" +----------------------------------------------------------------------------------------+\")")
-    install(CODE "MESSAGE(\" | Installation complete!                                                                 |\")")
-    install(CODE "MESSAGE(\" +----------------------------------------------------------------------------------------+\")")
-
+    install(DIRECTORY etc/msg
+            DESTINATION "${SMITHPROXY_SYSCONFDIR}"
+            COMPONENT runtime)
 endif()

@@ -26,8 +26,9 @@ endfunction(install_if_not_exists)
 
 function (create_dir _dirpath)
     install(CODE "
-        message(STATUS \"Directory : ${_dirpath}\")
-        execute_process(COMMAND \"${CMAKE_COMMAND}\" -E make_directory ${_dirpath})
+        set(_staged_dir \"\$ENV{DESTDIR}${_dirpath}\")
+        message(STATUS \"Directory : \${_staged_dir}\")
+        file(MAKE_DIRECTORY \"\${_staged_dir}\")
     ")
 endfunction (create_dir)
 

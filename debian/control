@@ -1,0 +1,42 @@
+Source: smithproxy
+Section: net
+Priority: optional
+Maintainer: Ales Stibal <astib@mag0.net>
+Build-Depends:
+ cmake (>= 3.21),
+ debhelper-compat (= 13),
+ libconfig++-dev,
+ libcurl4-openssl-dev,
+ libmicrohttpd-dev,
+ libpam0g-dev,
+ libssh-dev,
+ libssl-dev,
+ libunwind-dev,
+ pkgconf,
+Standards-Version: 4.7.2
+Homepage: https://www.smithproxy.org/
+Vcs-Git: https://github.com/astibal/smithproxy.git
+Vcs-Browser: https://github.com/astibal/smithproxy
+Rules-Requires-Root: no
+
+Package: smithproxy
+Architecture: any
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends},
+ adduser,
+ iproute2,
+ iptables,
+ python3,
+ python3-cryptography,
+ python3-pyroute2,
+Recommends:
+ apparmor,
+ ca-certificates,
+ curl,
+ logrotate,
+ telnet,
+Description: transparent TCP, UDP and TLS inspection proxy
+ Smithproxy is a multi-process transparent proxy for TCP, UDP, TLS and
+ related protocols. It provides traffic inspection, policy enforcement,
+ a command-line interface, SOCKS support and certificate-management tools.

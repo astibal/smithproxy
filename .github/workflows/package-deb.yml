@@ -1,0 +1,93 @@
+name: Debian package
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/package-deb.yml'
+      - 'CMakeLists.txt'
+      - 'CMakePresets.json'
+      - 'debian/**'
+      - 'install.cmake'
+      - 'src/**'
+      - 'socle'
+      - 'tools/package-deb.sh'
+      - 'tools/test-deb-package.sh'
+  push:
+    branches:
+      - master
+      - 'release/**'
+    paths:
+      - '.github/workflows/package-deb.yml'
+      - 'CMakeLists.txt'
+      - 'CMakePresets.json'
+      - 'debian/**'
+      - 'install.cmake'
+      - 'src/**'
+      - 'socle'
+      - 'tools/package-deb.sh'
+      - 'tools/test-deb-package.sh'
+  workflow_dispatch:
+
+jobs:
+  binary-package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install package build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get build-dep -y .
+          sudo apt-get install -y lintian
+
+      - name: Build packages
+        run: DEB_BUILD_OPTIONS=terse tools/package-deb.sh
+
+      - name: Check package policy
+        run: lintian --fail-on error ../smithproxy_*.changes
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p artifacts
+          find .. -maxdepth 1 -type f \( \
+            -name 'smithproxy_*.deb' -o \
+            -name 'smithproxy-dbgsym_*.deb' -o \
+            -name 'smithproxy_*.ddeb' -o \
+            -name 'smithproxy_*.buildinfo' -o \
+            -name 'smithproxy_*.changes' \
+          \) -exec cp {} artifacts/ \;
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: smithproxy-debian-${{ github.sha }}
+          path: artifacts/
+          if-no-files-found: error
+
+  package-lifecycle:
+    name: Lifecycle / ${{ matrix.distro }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        distro:
+          - ubuntu-22.04
+          - ubuntu-24.04
+          - ubuntu-26.04
+          - debian-12
+          - debian-13
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build and test package lifecycle
+        run: BUILD_JOBS=2 tools/test-deb-package.sh ${{ matrix.distro }}
