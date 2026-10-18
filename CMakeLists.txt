@@ -588,6 +588,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
         )
         add_executable(sx_gtests_startstoptls
                 src/proxy/tests/startstoptls_test.cpp
+                src/proxy/tests/flowmatch_test.cpp
         )
         add_executable(sx_gtests_httpconnect
                 src/proxy/httpconnect/tests/httpconnectrequest_test.cpp
@@ -649,7 +650,10 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
             target_link_libraries(sx_gtests ${LIBCONFIGPP_LIBRARIES})
         endif()
         target_link_libraries(sx_gtests_http1 gtest gtest_main socle_lib pthread crypto ssl)
-        target_link_libraries(sx_gtests_startstoptls gtest gtest_main)
+        target_link_libraries(sx_gtests_startstoptls
+                gtest gtest_main
+                "$<LINK_GROUP:RESCAN,socle_lib,socle_common_lib>"
+                pthread crypto ssl)
         target_link_libraries(sx_gtests_httpconnect gtest gtest_main)
         target_link_libraries(sx_gtests_reloadable gtest gtest_main pthread)
         target_link_libraries(sx_gtests_privsep gtest gtest_main socle_lib pthread crypto ssl)
