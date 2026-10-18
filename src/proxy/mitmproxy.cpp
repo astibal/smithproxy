@@ -82,10 +82,10 @@ using HttpApplication = sx::engine::http::app_HttpRequest;
 std::shared_ptr<HttpApplication> ensure_http_application(MitmHostCX* context) {
     if(!context) return {};
     auto app = std::dynamic_pointer_cast<HttpApplication>(
-        context->engine_ctx.application_data);
+        context->engine().application_data);
     if(!app) {
         app = std::make_shared<HttpApplication>();
-        context->engine_ctx.application_data = app;
+        context->engine().application_data = app;
     }
     return app;
 }
@@ -94,17 +94,25 @@ std::string_view content_payload_layer(baseHostCX* context) {
     auto const* current = MitmHostCX::from_baseHostCX(context);
     if(!current) return "tcp";
     auto const app = std::dynamic_pointer_cast<HttpApplication>(
-        current->engine_ctx.application_data);
+        current->engine().application_data);
     return app && app->version == HttpApplication::HTTP_VER::HTTP3
         ? std::string_view{"http3"} : std::string_view{"tcp"};
 }
 
 } // namespace
 
-MitmProxy::MitmProxy(baseCom* c): baseProxy(c), start_stop_tls_(*this) {
+MitmProxy::MitmProxy(baseCom* c):
+    baseProxy(c),
+    flow_ctx_(std::make_shared<FlowCtx>()),
+    start_stop_tls_(*this) {
 
     current_sessions()++;
     session_id_ = total_sessions().fetch_add(1, std::memory_order_relaxed) + 1;
+}
+
+void MitmProxy::attach_flow(MitmHostCX& host, char leg) {
+    host.flow_context(flow_ctx_);
+    flow_ctx_->attach(host, leg);
 }
 
 std::atomic_uint64_t& MitmProxy::sift_payload_limit_per_direction() {
@@ -457,7 +465,7 @@ std::optional<std::string> MitmProxy::get_application() const {
     if(not mh) return std::nullopt;
 
     std::string connection_protocol;
-    auto app = mh->engine_ctx.application_data;
+    auto app = mh->engine().application_data;
 
     if(app) {
         return app->protocol();
@@ -483,7 +491,7 @@ void MitmProxy::webhook_session_stop() const {
         uB = l->meter_read_bytes;
         dB = l->meter_write_bytes;
 
-        if(auto app = l->engine_ctx.application_data; app) {
+        if(auto app = l->engine().application_data; app) {
             l7 =  { { "app", app->protocol() },
                     { "details", app->requests_all() },
                     { "signatures", l->matched_signatures() }
@@ -838,8 +846,8 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
     // Publish the origin server's selected ALPN into the inspection context
     // once it becomes available. Application engines consume this metadata;
     // they never have to reach back into SSLCom or the proxy topology.
-    if(scom && mh->engine_ctx.negotiated_alpn.empty()) {
-        mh->engine_ctx.negotiated_alpn = scom->negotiated_alpn();
+    if(scom && mh->engine().negotiated_alpn.empty()) {
+        mh->engine().negotiated_alpn = scom->negotiated_alpn();
     }
 
     if(not wh_sni and scom and not scom->get_sni().empty()) {
@@ -952,7 +960,7 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
                 if(mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP2) {
                     auto* connection =
                         std::any_cast<sx::engine::http::v2::Http2Connection>(
-                            &mh->engine_ctx.state_data);
+                            &mh->engine().state_data);
                     h2_request_ready =
                         connection && connection->latest_request_stream_id > 0;
                 }
@@ -1087,23 +1095,22 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
     auto publish_matching_observation = [&](MitmHostCX const* context) {
         if(!context) return false;
         auto const app = std::dynamic_pointer_cast<HttpApplication>(
-            context->engine_ctx.application_data);
+            context->engine().application_data);
         if(!app || !app->l7_payload_matches(buffer.string_view(),
                                              cx->meter_read_bytes)) return false;
         publish_l7_ranges(app->l7_payload, app->l7_encoding,
                           app->payload_annotations);
         return true;
     };
-    // TCP HTTP/1 and HTTP/2 framing is owned by the authoritative left
-    // context (see proxy() immediately before this webhook).  The current
-    // side context may still contain an outer HTTP/1 CONNECT application;
+    // TCP HTTP/1 and HTTP/2 framing is owned by the connection FlowCtx. The
+    // current side context may still contain an outer HTTP/1 CONNECT application;
     // consulting it first can therefore attach HTTP/1 annotations to inner
     // HTTP/2 bytes.  HTTP/3 is the exception: its transport adapter stores
     // observations on the current QUIC stream context.
     auto const* current = MitmHostCX::from_baseHostCX(cx);
     auto const current_app = current
         ? std::dynamic_pointer_cast<HttpApplication>(
-              current->engine_ctx.application_data)
+              current->engine().application_data)
         : nullptr;
     if(current_app && current_app->version == HttpApplication::HTTP_VER::HTTP3) {
         publish_matching_observation(current);
@@ -1121,7 +1128,7 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
 
     if(auto const* left = first_left(); left != nullptr) {
         auto const app = std::dynamic_pointer_cast<sx::engine::http::app_HttpRequest>(
-            left->engine_ctx.application_data);
+            left->engine().application_data);
 
         if(app && app->populated()) {
             auto const http2 = app->version == sx::engine::http::app_HttpRequest::HTTP_VER::HTTP2;
@@ -1308,11 +1315,13 @@ bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t 
 }
 
 void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected,
-                      bool consume_source) {
+                      bool consume_source, FlowCtx::Tx const* tx) {
 
     if(not to or not from or from->to_read().empty()) return;
 
     if(redirected) {
+        if(tx) flow_ctx_->discard(*tx);
+
         if(tls_replacement_pending) {
             // Upstream application data must not reach the client after a
             // failed certificate decision. Keep the client leg alive until
@@ -1329,23 +1338,13 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
         return;
     }
 
-    // Application framing runs before consumers can inspect or replace this
-    // block. HTTP/1 owns one duplex parser in the authoritative left context.
-    if(auto* engine_context = first_left(); engine_context != nullptr) {
-        auto& ctx = engine_context->engine_ctx;
-        sx::engine::http::observe_content(
-            ctx, side == side_t::RIGHT ? 1U : 0U,
-            from->to_read().string_view(), from->meter_read_bytes,
-            side == side_t::LEFT);
-    }
-
     // Transport adapters may enrich the ordinary application state before
     // the same content webhook path used by TCP-based inspection engines.
     if(traffic_log_adapter_) {
         if(auto metadata = traffic_log_adapter_->inspect_content(side, from->to_read())) {
             if(auto* current = MitmHostCX::from_baseHostCX(from); current != nullptr) {
                 auto app = std::dynamic_pointer_cast<HttpApplication>(
-                    current->engine_ctx.application_data);
+                    current->engine().application_data);
                 if(!app && metadata->payload_layer == "http3") {
                     app = ensure_http_application(current);
                 }
@@ -1383,6 +1382,7 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
 
             // after marking dead, session is not getting on_error anymore
             webhook_session_stop();
+            if(tx) flow_ctx_->discard(*tx);
             shutdown();
             return;
         }
@@ -1401,6 +1401,8 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
     }
 
     if(replacement.has_value()) {
+        if(tx) flow_ctx_->commit(*tx, *replacement);
+
         to->to_write(replacement.value());
         write_traffic_log(side, from, &replacement.value());
 
@@ -1409,6 +1411,8 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
         _dia("mitmproxy::proxy-%c: %dB replaced with %dB (content rule)", from_side(side), orig_sz, sz);
     }
     else {
+        if(tx) flow_ctx_->commit(*tx, from->to_read());
+
         write_traffic_log(side, from);
         to->to_write(from->to_read(), consume_source);
 
@@ -1474,6 +1478,9 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
 
     if(not cx or state().dead()) return;
 
+    auto tx = flow_ctx_->begin(
+        FlowCtx::Dir::I2R, cx->to_read(), cx->meter_read_bytes);
+
     bool redirected = handle_requirements(cx);
 
     if(tls_replacement_pending) {
@@ -1483,6 +1490,7 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
             tls_replacement_pending = false;
             ssl_handled = true;
             state().dead(true);
+            flow_ctx_->discard(tx);
             return;
         }
     }
@@ -1508,8 +1516,9 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
             right_sockets.end(),
             [&](auto* to) {
                 if(not state().dead()) {
+                    const bool final = destinations_remaining == 1;
                     proxy(cx, to, side_t::LEFT, redirected,
-                          destinations_remaining == 1);
+                          final, final ? &tx : nullptr);
                     --destinations_remaining;
                 }
             });
@@ -1520,11 +1529,17 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
             right_delayed_accepts.end(),
             [&](auto* to) {
                 if(not state().dead()) {
+                    const bool final = destinations_remaining == 1;
                     proxy(cx, to, side_t::LEFT, redirected,
-                          destinations_remaining == 1);
+                          final, final ? &tx : nullptr);
                     --destinations_remaining;
                 }
             });
+
+    if(destinations_remaining != 0 ||
+       (right_sockets.empty() && right_delayed_accepts.empty())) {
+        flow_ctx_->discard(tx);
+    }
 
 }
 
@@ -1548,6 +1563,9 @@ bool MitmProxy::handle_requirements(baseHostCX* cx) {
 void MitmProxy::on_right_bytes(baseHostCX* cx) {
 
     if(not cx or state().dead()) return;
+
+    auto tx = flow_ctx_->begin(
+        FlowCtx::Dir::R2I, cx->to_read(), cx->meter_read_bytes);
 
     bool redirected = handle_requirements(cx->peer());
 
@@ -1573,8 +1591,9 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
             left_sockets.end(),
             [&](auto* to) {
                 if(not state().dead()) {
+                    const bool final = destinations_remaining == 1;
                     proxy(cx, to, side_t::RIGHT, redirected,
-                          destinations_remaining == 1);
+                          final, final ? &tx : nullptr);
                     --destinations_remaining;
                 }
             });
@@ -1585,11 +1604,17 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
             left_delayed_accepts.end(),
             [&](auto* to) {
                 if(not state().dead()) {
+                    const bool final = destinations_remaining == 1;
                     proxy(cx, to, side_t::RIGHT, redirected,
-                          destinations_remaining == 1);
+                          final, final ? &tx : nullptr);
                     --destinations_remaining;
                 }
             });
+
+    if(destinations_remaining != 0 ||
+       (left_sockets.empty() && left_delayed_accepts.empty())) {
+        flow_ctx_->discard(tx);
+    }
 
 }
 
@@ -1684,14 +1709,14 @@ std::string get_connection_details_str(MitmProxy* px, baseHostCX* cx, char side)
             detail << string_format("sni=%s ", sc->get_sni().c_str());
         }
     }
-    if(mh && mh->engine_ctx.application_data) {
+    if(mh && mh->engine().application_data) {
 
-        auto* app = dynamic_cast<sx::engine::http::app_HttpRequest*>(mh->engine_ctx.application_data.get());
+        auto* app = dynamic_cast<sx::engine::http::app_HttpRequest*>(mh->engine().application_data.get());
         if(app) {
             detail << "app=" << app->http_data.proto << app->http_data.host << " ";
         }
         else {
-            detail << "app=" << mh->engine_ctx.application_data->str() << " ";
+            detail << "app=" << mh->engine().application_data->str() << " ";
         }
     }
 
@@ -2090,12 +2115,12 @@ bool MitmProxy::write_replacement_response(MitmHostCX* cx,
     if(!cx) return false;
 
     auto* app_request = dynamic_cast<sx::engine::http::app_HttpRequest*>(
-        cx->engine_ctx.application_data.get());
+        cx->engine().application_data.get());
     bool const head_only = app_request && app_request->http_data.method == "HEAD";
 
     if(cx->replacement_type() == MitmHostCX::REPLACETYPE_HTTP2) {
         auto* connection = std::any_cast<sx::engine::http::v2::Http2Connection>(
-            &cx->engine_ctx.state_data);
+            &cx->engine().state_data);
         auto const stream_id = connection ? connection->latest_request_stream_id : -1;
         if(stream_id > 0) {
             auto response = sx::engine::http::v2::make_response(
@@ -2138,7 +2163,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
     }
 
 
-    auto* app_request = dynamic_cast<sx::engine::http::app_HttpRequest*>(cx->engine_ctx.application_data.get());
+    auto* app_request = dynamic_cast<sx::engine::http::app_HttpRequest*>(cx->engine().application_data.get());
     if(app_request != nullptr) {
         log.event(INF, "[%s]: HTTP replacement active", socle::com::ssl::connection_name(scom, true).c_str());
 

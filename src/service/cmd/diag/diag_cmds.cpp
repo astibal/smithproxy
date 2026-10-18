@@ -1935,7 +1935,7 @@ auto get_tls_info(MitmHostCX const* lf, MitmHostCX const* rg, int sl_flags, int 
                         tls_ss << "\n    sni: " << sni;
 
                         if (lf) {
-                            auto *app = lf->engine_ctx.application_data.get();
+                            auto *app = lf->engine().application_data.get();
                             auto http_app = dynamic_cast<sx::engine::http::app_HttpRequest *>(app);
                             if (http_app) {
 
@@ -2082,9 +2082,9 @@ auto get_more_info(MitmProxy const* curr_proxy, MitmHostCX* lf, MitmHostCX* rg, 
                     }
                 }
             }
-            if (lf->engine_ctx.signature) {
+            if (lf->engine().signature) {
 
-                auto mysig = std::dynamic_pointer_cast<MyDuplexFlowMatch>(lf->engine_ctx.signature);
+                auto mysig = std::dynamic_pointer_cast<MyDuplexFlowMatch>(lf->engine().signature);
                 if (mysig) {
                     info_ss << "\n    L7_engine: " << mysig->sig_engine;
                     info_ss << "\n    L7_signature: " << mysig->name() << ", group: "
@@ -2096,8 +2096,8 @@ auto get_more_info(MitmProxy const* curr_proxy, MitmHostCX* lf, MitmHostCX* rg, 
                 info_ss << "\n    L7_engine: none";
             }
 
-            if (lf->engine_ctx.application_data) {
-                auto const app = lf->engine_ctx.application_data;
+            if (lf->engine().application_data) {
+                auto const app = lf->engine().application_data;
                 std::string desc = app->to_string(verbosity);
                 if (verbosity < DEB && desc.size() > 120) {
                     desc = desc.substr(0, 117);
@@ -2237,8 +2237,8 @@ int cli_diag_proxy_session_list_extra (DiagCli *cli, const char *command, std::v
                     do_print = true;
                 }
 
-                if(lf and lf->engine_ctx.application_data) {
-                    suffix += " (" + decor.muted(lf->engine_ctx.application_data->protocol()) + ")";
+                if(lf and lf->engine().application_data) {
+                    suffix += " (" + decor.muted(lf->engine().application_data->protocol()) + ")";
                 }
                 if(curr_proxy and not curr_proxy->filters_.empty()) {
                     for(auto const& fi: curr_proxy->filters_) {

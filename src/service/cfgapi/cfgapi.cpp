@@ -3241,7 +3241,7 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, MitmProxy *mitm_pro
                 cfgapi_detail::apply_ja4_http_option(
                     pc->ja4_http,
                     mitm_proxy->acct_opts,
-                    mh->engine_ctx.options.http);
+                    mh->engine().options.http);
             } else {
                 mitm_proxy->acct_opts.ja4_http = pc->ja4_http;
             }
