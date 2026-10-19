@@ -125,6 +125,36 @@ TEST(AppHostFlowState, UnrecoverablePreReadGapFailsClosedBeforeCreatingAView) {
     EXPECT_EQ(host.inspect_calls, 0U);
 }
 
+TEST(AppHostFlowState, SharedContextHasOneCanonicalDuplexFlow) {
+    DNSInspectorTestHost initiator(new DNSInspectorTestCom());
+    DNSInspectorTestHost responder(new DNSInspectorTestCom());
+    auto shared = initiator.app_context();
+
+    initiator.app_context(shared, true);
+    responder.app_context(shared, true);
+    initiator.mode(AppHostCX::mode_t::PRE);
+
+    buffer request("request", 7);
+    buffer response("response", 8);
+
+    ASSERT_TRUE(initiator.ingest('r', request));
+    ASSERT_TRUE(initiator.ingest('w', response));
+
+    ASSERT_EQ(initiator.flow().flow_queue().size(), 2U);
+    EXPECT_EQ(&initiator.flow(), &responder.flow());
+    EXPECT_EQ(initiator.flow().flow_queue().at(0).source(), 'r');
+    EXPECT_EQ(initiator.flow().flow_queue().at(1).source(), 'w');
+    EXPECT_EQ(initiator.inspect_calls, 2U);
+    EXPECT_EQ(responder.inspect_calls, 0U);
+
+    initiator.writebuf()->append(response);
+    initiator.run_pre_write();
+    initiator.run_post_write();
+
+    EXPECT_EQ(initiator.flow().flow_queue().size(), 2U);
+    EXPECT_EQ(initiator.flow().flow_queue().back().size(), response.size());
+}
+
 static buffer dns_tcp_frame(const buffer& packet) {
     buffer framed;
     const auto length = htons(static_cast<uint16_t>(packet.size()));

@@ -43,6 +43,7 @@
 #include <inspect/engine.hpp>
 #include <apphostcx.hpp>
 #include <policy/inspectors.hpp>
+#include <proxy/flowctx.hpp>
 
 class MitmHostCX : public AppHostCX {
 public:
@@ -52,7 +53,8 @@ public:
     MitmHostCX( baseCom* c, int s );
 
     std::size_t process_in() override;
-    std::size_t process_out() override;
+    using AppHostCX::parent_proxy;
+    void parent_proxy(Proxy* p, unsigned char flag) override;
     void load_signatures();
 
     static MitmHostCX* from_baseHostCX(baseHostCX* ptr);
@@ -61,7 +63,16 @@ public:
     void inspect(char side) override;
     void on_detect(std::shared_ptr<duplexFlowMatch> x_sig, flowMatchState& s, vector_range& r) override;
 
-    sx::engine::EngineCtx engine_ctx;
+    void flow_context(std::shared_ptr<FlowCtx> ctx) { flow_ctx_ = std::move(ctx); }
+
+    sx::engine::EngineCtx& engine() {
+        return flow_ctx_ ? flow_ctx_->engine() : local_engine_;
+    }
+    sx::engine::EngineCtx const& engine() const {
+        return flow_ctx_ ? flow_ctx_->engine() : local_engine_;
+    }
+
+    void run_engine();
     void engine_run(std::string const& name, sx::engine::EngineCtx &e) const;
 
     void on_starttls() override;
@@ -114,6 +125,9 @@ private:
     std::shared_ptr<buffer> inspect_verdict_response;
 
     std::vector<std::string> matched_signatures_;
+
+    std::shared_ptr<FlowCtx> flow_ctx_;
+    sx::engine::EngineCtx local_engine_;
 
 public:
     TYPENAME_OVERRIDE("MitmHostCX")

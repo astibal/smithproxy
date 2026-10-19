@@ -39,6 +39,8 @@
 
 #include <proxy/mitmhost.hpp>
 #include <proxy/mitmcom.hpp>
+#include <proxy/flowctx.hpp>
+#include <proxy/mitmproxy.hpp>
 #include <proxy/nbrhood.hpp>
 #include <display.hpp>
 #include <log/logger.hpp>
@@ -101,28 +103,24 @@ std::size_t MitmHostCX::process_in() {
         _dum("Incoming data(%s):\r\n %s", this->c_type(), hex_dump(ptr, static_cast<int>(len), 4, 0, true).c_str());
     }
 
-    if(opt_engines_enabled and engine_ctx.signature) {
-        auto sig = std::dynamic_pointer_cast<MyDuplexFlowMatch>(engine_ctx.signature);
-
-        if(sig and not sig->sig_engine.empty()) {
-            engine_run(sig->sig_engine, engine_ctx);
-        }
-    }
-
     return baseHostCX::process_in();
 }
 
-std::size_t MitmHostCX::process_out() {
+void MitmHostCX::parent_proxy(Proxy* p, unsigned char flag) {
+    AppHostCX::parent_proxy(p, flag);
 
-    if(opt_engines_enabled and engine_ctx.signature) {
-        auto sig = std::dynamic_pointer_cast<MyDuplexFlowMatch>(engine_ctx.signature);
+    auto* owner = dynamic_cast<MitmProxy*>(p);
+    if(owner) owner->attach_flow(*this, static_cast<char>(flag));
+}
 
-        if(sig and not sig->sig_engine.empty()) {
-            engine_run(sig->sig_engine, engine_ctx);
-        }
+void MitmHostCX::run_engine() {
+    auto& ctx = engine();
+    if(not opt_engines_enabled or not ctx.signature) return;
+
+    auto sig = std::dynamic_pointer_cast<MyDuplexFlowMatch>(ctx.signature);
+    if(sig and not sig->sig_engine.empty()) {
+        engine_run(sig->sig_engine, ctx);
     }
-
-    return baseHostCX::process_out();
 }
 
 void MitmHostCX::load_signatures() {
@@ -191,8 +189,9 @@ void MitmHostCX::inspect(char side) {
         }
 
         auto set_app_name = [this](auto const& inspector) {
-            if( not engine_ctx.application_data ) {
-                engine_ctx.application_data = std::make_shared<sx::engine::CustomApplicationData>(inspector->proto_name());
+            auto& ctx = engine();
+            if(not ctx.application_data) {
+                ctx.application_data = std::make_shared<sx::engine::CustomApplicationData>(inspector->proto_name());
             }
         };
 
@@ -285,9 +284,10 @@ void MitmHostCX::on_detect(std::shared_ptr<duplexFlowMatch> x_sig, flowMatchStat
 
 
     auto prep_ctx = [&]() {
-        engine_ctx.origin = this;
-        engine_ctx.signature = x_sig;
-        // don't touch engine_ctx.options
+        auto& ctx = engine();
+        ctx.origin = this;
+        ctx.signature = x_sig;
+        // Don't touch caller-supplied engine options.
     };
 
     if(not sig_sig->sig_engine.empty()) {

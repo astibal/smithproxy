@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import html
 import http.server
+import json
 import os
 from pathlib import Path
 import re
@@ -105,10 +107,27 @@ def validate_h2_replacement(response: bytes, allow_goaway_only: bool = False,
 
 class WebhookHandler(http.server.BaseHTTPRequestHandler):
     requests = 0
+    lock = threading.Lock()
+    content: list[tuple[dict[str, object], bytes]] = []
 
     def do_POST(self) -> None:
-        self.rfile.read(int(self.headers.get("Content-Length", "0")))
-        self.__class__.requests += 1
+        body_in = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        info: dict[str, object] | None = None
+        payload = b""
+
+        try:
+            message = json.loads(body_in)
+            if message.get("action") == "connection-content":
+                info = message["details"]["info"]
+                payload = base64.b64decode(info.get("content", ""))
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            pass
+
+        with self.__class__.lock:
+            self.__class__.requests += 1
+            if info is not None:
+                self.__class__.content.append((info, payload))
+
         body = b'{"access-response":"accept"}'
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -218,6 +237,28 @@ class EchoOrigin:
                             raise AssertionError(
                                 f"rejected TLS request reached origin: {forwarded!r}")
                         return
+
+                    if self.alpn == "h2":
+                        request = bytearray()
+                        stream.settimeout(3)
+                        while True:
+                            request.extend(stream.recv(4096))
+                            if request.startswith(H2_PREFACE):
+                                offset = len(H2_PREFACE)
+                                while len(request) - offset >= 9:
+                                    length = int.from_bytes(request[offset:offset + 3], "big")
+                                    end = offset + 9 + length
+                                    if end > len(request):
+                                        break
+                                    if request[offset + 3] == 1:
+                                        response = (h2_frame(4, 0, 0)
+                                                    + h2_frame(1, 0x04, 1, b"\x88")
+                                                    + h2_frame(0, 0x01, 1,
+                                                               b"redirect reply"))
+                                        stream.sendall(response)
+                                        return
+                                    offset = end
+
                     request = bytearray()
                     while b"\r\n\r\n" not in request:
                         chunk = stream.recv(4096)
@@ -293,6 +334,8 @@ def run_case(binary: Path, source: Path, runtime: Path, tls: bool,
                 case_name += "-multi"
     elif tls and not listener_tls:
         case_name = "tls-autodetect"
+    elif http2:
+        case_name = "tls-h2"
     elif half_close:
         case_name = "plain-half-close"
     else:
@@ -553,6 +596,8 @@ def main() -> None:
                 return
             run_case(args.smithproxy.resolve(), args.source.resolve(), Path(temp), False, port)
             run_case(args.smithproxy.resolve(), args.source.resolve(), Path(temp), True, port)
+            run_case(args.smithproxy.resolve(), args.source.resolve(), Path(temp), True, port,
+                     http2=True)
             run_case(args.smithproxy.resolve(), args.source.resolve(), Path(temp), True, port, True)
             run_case(args.smithproxy.resolve(), args.source.resolve(), Path(temp), True, port, True,
                      http2=True)
@@ -580,6 +625,34 @@ def main() -> None:
                      override_scope=True)
         if WebhookHandler.requests == 0:
             raise AssertionError("enabled content webhook received no requests")
+
+        def has_response_annotations(item: tuple[dict[str, object], bytes]) -> bool:
+            info, payload = item
+            annotations = info.get("content_annotations", [])
+            kinds = [entry[2] for entry in annotations
+                     if isinstance(entry, list) and len(entry) >= 3]
+            return (info.get("side") == "R" and b"redirect reply" in payload
+                    and "http1.body" in kinds
+                    and info.get("L7_payload_start") != [-1]
+                    and info.get("L7_payload_end") != [-1])
+
+        def has_h2_response_annotations(item: tuple[dict[str, object], bytes]) -> bool:
+            info, payload = item
+            annotations = info.get("content_annotations", [])
+            kinds = [entry[2] for entry in annotations
+                     if isinstance(entry, list) and len(entry) >= 3]
+            return (info.get("side") == "R" and b"redirect reply" in payload
+                    and "h2.data" in kinds
+                    and info.get("L7_payload_start") != [-1]
+                    and info.get("L7_payload_end") != [-1])
+
+        with WebhookHandler.lock:
+            if not any(map(has_response_annotations, WebhookHandler.content)):
+                raise AssertionError(
+                    "first HTTP/1 response reached the webhook without L7 annotations")
+            if not any(map(has_h2_response_annotations, WebhookHandler.content)):
+                raise AssertionError(
+                    "first HTTP/2 response reached the webhook without L7 annotations")
     finally:
         webhook.shutdown()
         webhook.server_close()

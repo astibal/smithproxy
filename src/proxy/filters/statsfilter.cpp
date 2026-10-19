@@ -14,7 +14,7 @@ void StatsFilter::update(socle::side_t side, buffer const& buf) {
     // update application information
     if(parent() and parent()->first_left()) {
         auto const* mh = parent()->first_left();
-        auto app = mh->engine_ctx.application_data;
+        auto app = mh->engine().application_data;
 
         if(app) {
             auto protocol = app->protocol();
@@ -124,4 +124,3 @@ nlohmann::json StatsFilter::to_json(int verbosity) const {
 StatsFilter::~StatsFilter() {
     // there used to be useful code here
 }
-

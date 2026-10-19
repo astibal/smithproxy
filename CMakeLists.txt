@@ -284,6 +284,7 @@ add_executable(smithproxy
         src/staticcontent.cpp
 
         src/proxy/mitmhost.cpp
+        src/proxy/flowctx.cpp
         src/proxy/mitmproxy.cpp
         src/proxy/mitmcom.hpp
         src/proxy/mitmcom.cpp

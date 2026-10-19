@@ -53,6 +53,7 @@
 #include <hostcx.hpp>
 
 #include <proxy/socks5/sockshostcx.hpp>
+#include <proxy/flowctx.hpp>
 #include <proxy/trafficcapture.hpp>
 #include <proxy/startstoptls.hpp>
 
@@ -202,6 +203,8 @@ public:
     explicit MitmProxy(baseCom* c);
     ~MitmProxy() override;
 
+    void attach_flow(MitmHostCX& host, char leg);
+
     StartStopTls& start_stop_tls() noexcept { return start_stop_tls_; }
     StartStopTls const& start_stop_tls() const noexcept { return start_stop_tls_; }
 
@@ -211,7 +214,7 @@ public:
     void write_stream_event(sx::stream_direction direction, std::string_view event);
     void proxy_dump_packet(side_t sid, buffer const& buf);
     void proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected,
-               bool consume_source = true);
+               bool consume_source = true, FlowCtx::Tx const* tx = nullptr);
 
     // makes a synchronous API call letting webhook modify the content
     bool content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
@@ -306,6 +309,10 @@ public:
     DECLARE_LOGGING(to_string)
 
 private:
+    // A content webhook may permanently decline the rest of this connection.
+    // SIFT has its own path and is deliberately unaffected.
+    bool webhook_content_wanted_ = true;
+
     struct sift_ctl_t {
         std::uint64_t payload_left_bytes = 0;
         std::uint64_t payload_right_bytes = 0;
@@ -317,6 +324,7 @@ private:
 
     mutable std::mutex sift_classifications_lock_;
     std::set<std::string> sift_classifications_;
+    std::shared_ptr<FlowCtx> flow_ctx_;
     StartStopTls start_stop_tls_;
     logan_lite log {"proxy"};
     logan_lite log_dump {"proxy.payload"};
