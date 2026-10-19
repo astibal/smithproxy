@@ -309,6 +309,10 @@ public:
     DECLARE_LOGGING(to_string)
 
 private:
+    // A content webhook may permanently decline the rest of this connection.
+    // SIFT has its own path and is deliberately unaffected.
+    bool webhook_content_wanted_ = true;
+
     struct sift_ctl_t {
         std::uint64_t payload_left_bytes = 0;
         std::uint64_t payload_right_bytes = 0;

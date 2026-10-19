@@ -1184,7 +1184,11 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
                         }
                     }
                     if(json_obj.contains("action")) {
-                        if(json_obj["action"] == "discard") {
+                        if(regular_webhook && json_obj["action"] == "not-interested") {
+                            webhook_content_wanted_ = false;
+                            _dia("webhook content: peer declined future content for this connection");
+                        }
+                        else if(json_obj["action"] == "discard") {
                             // data sent to webhook shall be discarded
                             buffer.size(0);
                             was_modified = true;
@@ -1257,7 +1261,7 @@ bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t 
             from, side, from->to_read(), payload_layer, false, true)) {
         return true;
     }
-    if(not webhook_enabled) return false;
+    if(not webhook_enabled or not webhook_content_wanted_) return false;
 
     if(writer_opts()->webhook_lock_traffic) {
 
