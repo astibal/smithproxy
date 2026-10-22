@@ -208,8 +208,15 @@ TEST(InterfaceMonitor, StartAttemptCanAlwaysBeStoppedCleanly) {
         EXPECT_FALSE(monitor.last_error().empty());
     }
 
+    const auto running_stats = monitor.stats();
+    EXPECT_TRUE(running_stats.running);
+    EXPECT_GE(running_stats.synchronization_attempts, 1U);
+    EXPECT_GE(running_stats.synchronization_attempts,
+              running_stats.synchronization_successes);
+
     monitor.stop();
     EXPECT_FALSE(monitor.running());
+    EXPECT_FALSE(monitor.stats().running);
 }
 
 } // namespace

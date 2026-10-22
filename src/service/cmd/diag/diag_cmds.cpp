@@ -60,6 +60,7 @@
 
 #include <service/core/smithproxy.hpp>
 #include <service/core/sessionlist.hpp>
+#include <service/interface_monitor.hpp>
 #include <service/cmd/diag/diag_cmds.hpp>
 #include <service/httpd/httpd.hpp>
 #include <service/cfgapi/cfgapi.hpp>
@@ -1138,6 +1139,68 @@ int cli_diag_sys_priv_stats(DiagCli* cli, const char* command, char* argv[], int
               static_cast<unsigned long long>(stats.drains),
               static_cast<unsigned long long>(stats.max_ops_per_drain));
     return CLI_OK;
+}
+
+int cli_diag_sys_netlink_info(DiagCli* cli, const char* command,
+                              char* argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+
+    const auto& monitor = sx::net::InterfaceMonitor::instance();
+    const auto stats = monitor.stats();
+    const auto snapshot = monitor.snapshot();
+    if(!snapshot) {
+        cli_print(cli, "Netlink interface monitor snapshot unavailable");
+        return CLI_ERROR;
+    }
+
+    const auto ipv4_count = std::count_if(
+        snapshot->addresses.begin(), snapshot->addresses.end(),
+        [](const sx::net::InterfaceAddress& address) { return address.family == AF_INET; });
+    const auto ipv6_count = std::count_if(
+        snapshot->addresses.begin(), snapshot->addresses.end(),
+        [](const sx::net::InterfaceAddress& address) { return address.family == AF_INET6; });
+
+    std::ostringstream output;
+    output << "Netlink interface monitor:\n"
+           << "  running: " << (stats.running ? "yes" : "no") << '\n'
+           << "  snapshot valid: " << (snapshot->valid ? "yes" : "no") << '\n'
+           << "  generation: " << snapshot->generation << '\n'
+           << "  synchronization attempts: " << stats.synchronization_attempts << '\n'
+           << "  synchronization successes: " << stats.synchronization_successes << '\n'
+           << "  errors: " << stats.errors << '\n'
+           << "  event datagrams: " << stats.event_datagrams << '\n'
+           << "  changed event datagrams: " << stats.changed_event_datagrams << '\n'
+           << "  interfaces: " << snapshot->interfaces.size() << '\n'
+           << "  addresses: " << snapshot->addresses.size()
+           << " (IPv4 " << ipv4_count << ", IPv6 " << ipv6_count << ")\n";
+
+    const auto last_error = monitor.last_error();
+    if(!last_error.empty()) output << "  last error: " << last_error << '\n';
+
+    output << "\nIP addresses:\n"
+           << "  " << std::left << std::setw(7) << "index"
+           << std::setw(18) << "interface"
+           << std::setw(8) << "family"
+           << std::setw(44) << "address/prefix"
+           << std::setw(7) << "scope" << "flags\n";
+
+    for(const auto& address : snapshot->addresses) {
+        const char* family = address.family == AF_INET ? "IPv4" :
+                             address.family == AF_INET6 ? "IPv6" : "other";
+        std::ostringstream address_with_prefix;
+        address_with_prefix << address.text() << '/'
+                            << static_cast<unsigned>(address.prefix_length);
+        output << "  " << std::left << std::setw(7) << address.interface_index
+               << std::setw(18) << address.interface_name
+               << std::setw(8) << family
+               << std::setw(44) << address_with_prefix.str()
+               << std::setw(7) << static_cast<unsigned>(address.scope)
+               << "0x" << std::hex << address.flags << std::dec << '\n';
+    }
+    if(snapshot->addresses.empty()) output << "  (none)\n";
+
+    cli_print(cli, "%s", output.str().c_str());
+    return snapshot->valid ? CLI_OK : CLI_ERROR;
 }
 
 int cli_diag_sys_gre_stats(DiagCli* cli, const char* command,
@@ -2882,6 +2945,8 @@ void register_diags(libcli2::Cli& native) {
                                           "system service diagnostics");
         auto diag_sys_priv = diag_register_command(cli, diag_sys, "priv", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "privileged helper diagnostics");
             diag_register_command(cli, diag_sys_priv, "stats", cli_diag_sys_priv_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display effective identity and privileged helper statistics");
+        auto diag_sys_netlink = diag_register_command(cli, diag_sys, "netlink", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "netlink interface monitor diagnostics");
+            diag_register_command(cli, diag_sys_netlink, "info", cli_diag_sys_netlink_info, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display monitor statistics and local IP addresses");
         auto diag_sys_gre = diag_register_command(cli, diag_sys, "gre", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "GRE communication broker diagnostics");
             diag_register_command(cli, diag_sys_gre, "stats", cli_diag_sys_gre_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display GRE transport and broker statistics");
         auto diag_sys_cli = diag_register_command(cli, diag_sys, "cli", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "CLI communication broker diagnostics");

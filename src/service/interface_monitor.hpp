@@ -45,6 +45,15 @@ struct InterfaceSnapshot {
                                         std::size_t address_size) const noexcept;
 };
 
+struct InterfaceMonitorStats {
+    bool running = false;
+    std::uint64_t synchronization_attempts = 0;
+    std::uint64_t synchronization_successes = 0;
+    std::uint64_t errors = 0;
+    std::uint64_t event_datagrams = 0;
+    std::uint64_t changed_event_datagrams = 0;
+};
+
 namespace detail {
 
 struct NetlinkBatchResult {
@@ -100,6 +109,7 @@ public:
 
     [[nodiscard]] bool running() const noexcept;
     [[nodiscard]] std::shared_ptr<const InterfaceSnapshot> snapshot() const noexcept;
+    [[nodiscard]] InterfaceMonitorStats stats() const noexcept;
     [[nodiscard]] std::string last_error() const;
 
 private:
@@ -121,6 +131,11 @@ private:
     bool initial_success_ = false;
     std::atomic<bool> stop_requested_{false};
     std::atomic<bool> running_{false};
+    std::atomic<std::uint64_t> synchronization_attempts_{0};
+    std::atomic<std::uint64_t> synchronization_successes_{0};
+    std::atomic<std::uint64_t> errors_{0};
+    std::atomic<std::uint64_t> event_datagrams_{0};
+    std::atomic<std::uint64_t> changed_event_datagrams_{0};
     std::shared_ptr<const InterfaceSnapshot> snapshot_;
     std::string last_error_;
     std::uint64_t generation_ = 0;

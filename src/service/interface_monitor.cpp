@@ -622,6 +622,17 @@ std::shared_ptr<const InterfaceSnapshot> InterfaceMonitor::snapshot() const noex
     return std::atomic_load_explicit(&snapshot_, std::memory_order_acquire);
 }
 
+InterfaceMonitorStats InterfaceMonitor::stats() const noexcept {
+    return {
+        running_.load(std::memory_order_acquire),
+        synchronization_attempts_.load(std::memory_order_relaxed),
+        synchronization_successes_.load(std::memory_order_relaxed),
+        errors_.load(std::memory_order_relaxed),
+        event_datagrams_.load(std::memory_order_relaxed),
+        changed_event_datagrams_.load(std::memory_order_relaxed),
+    };
+}
+
 std::string InterfaceMonitor::last_error() const {
     std::lock_guard lock(error_mutex_);
     return last_error_;
@@ -659,9 +670,11 @@ void InterfaceMonitor::run() noexcept {
     std::uint32_t sequence = 0;
 
     while(!stop_requested()) {
+        synchronization_attempts_.fetch_add(1, std::memory_order_relaxed);
         std::string error;
         const int netlink_fd = open_route_socket(error);
         if(netlink_fd < 0) {
+            errors_.fetch_add(1, std::memory_order_relaxed);
             publish_invalid(error);
             if(!initial_reported) {
                 signal_initial_result(false);
@@ -679,6 +692,7 @@ void InterfaceMonitor::run() noexcept {
         }
         if(sync == SyncStatus::failed) {
             ::close(netlink_fd);
+            errors_.fetch_add(1, std::memory_order_relaxed);
             publish_invalid(error);
             if(!initial_reported) {
                 signal_initial_result(false);
@@ -689,6 +703,7 @@ void InterfaceMonitor::run() noexcept {
         }
 
         table_ = std::move(fresh);
+        synchronization_successes_.fetch_add(1, std::memory_order_relaxed);
         {
             std::lock_guard lock(error_mutex_);
             last_error_.clear();
@@ -707,11 +722,16 @@ void InterfaceMonitor::run() noexcept {
                     break;
                 case ReceiveStatus::failed:
                     error = std::move(received.error);
+                    errors_.fetch_add(1, std::memory_order_relaxed);
                     publish_invalid(error);
                     resynchronize = true;
                     break;
                 case ReceiveStatus::received:
-                    if(received.batch.changed) publish(true);
+                    event_datagrams_.fetch_add(1, std::memory_order_relaxed);
+                    if(received.batch.changed) {
+                        changed_event_datagrams_.fetch_add(1, std::memory_order_relaxed);
+                        publish(true);
+                    }
                     break;
                 case ReceiveStatus::would_block:
                     break;
