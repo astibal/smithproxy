@@ -413,8 +413,14 @@ void ExplicitProxy::explicit_handoff(ExplicitProxyCX* cx) {
     // Check the final routed address before opening the socket. The connected
     // peer is checked again below because this text is not the security
     // boundary and a future transport may transform it.
-    if(sx::proxy::local_destination::prohibited(target_cx->host())) {
-        _war("ExplicitProxy::explicit_handoff: refusing local destination %s:%s",
+    extended_local_destination_protection_ =
+        CfgFactory::get()->extended_local_destination_protection;
+    const auto destination = sx::proxy::local_destination::inspect(
+        target_cx->host(), extended_local_destination_protection_);
+    if(destination != sx::proxy::local_destination::inspection_result::allowed) {
+        _war("ExplicitProxy::explicit_handoff: refusing %s destination %s:%s",
+             destination == sx::proxy::local_destination::inspection_result::blocked
+                 ? "local" : "unverifiable",
              target_cx->host().c_str(), target_cx->port().c_str());
         config_lock.unlock();
         pending_connect_response_ = upstream_policy_failure_response_;
@@ -527,10 +533,10 @@ bool ExplicitProxy::handle_cx_write(unsigned char side, baseHostCX* cx,
 
             if(status == 0 && connect_error == 0) {
                 const auto peer = sx::proxy::local_destination::inspect_connected_peer(
-                    cx->socket());
-                if(peer != sx::proxy::local_destination::peer_status::allowed) {
+                    cx->socket(), extended_local_destination_protection_);
+                if(peer != sx::proxy::local_destination::inspection_result::allowed) {
                     _war("ExplicitProxy::handle_cx_write: refusing %s upstream peer",
-                         peer == sx::proxy::local_destination::peer_status::blocked
+                         peer == sx::proxy::local_destination::inspection_result::blocked
                              ? "local" : "unverifiable");
                     cx->shutdown();
                     pending_connect_response_ = upstream_policy_failure_response_;
@@ -657,8 +663,12 @@ void SocksProxy::socks5_handoff_udp(socksServerCX* cx) {
         }
     }
 
-    if(sx::proxy::local_destination::prohibited(target_cx->host())) {
-        _war("SocksProxy::socks5_handoff_udp: refusing local destination %s:%s",
+    const auto destination = sx::proxy::local_destination::inspect(
+        target_cx->host(), CfgFactory::get()->extended_local_destination_protection);
+    if(destination != sx::proxy::local_destination::inspection_result::allowed) {
+        _war("SocksProxy::socks5_handoff_udp: refusing %s destination %s:%s",
+             destination == sx::proxy::local_destination::inspection_result::blocked
+                 ? "local" : "unverifiable",
              target_cx->host().c_str(), target_cx->port().c_str());
         config_lock.unlock();
         state().dead(true);

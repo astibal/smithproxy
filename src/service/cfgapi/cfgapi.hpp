@@ -265,6 +265,7 @@ public:
     bool accept_api = true;
     bool policy_fail_open = false;
     bool policy_access_request_fail_open = false;
+    bool extended_local_destination_protection = true;
 
     std::string admin_group;
 

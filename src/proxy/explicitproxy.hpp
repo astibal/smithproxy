@@ -38,6 +38,7 @@ private:
     std::size_t pending_connect_response_offset_ = 0;
     bool connect_response_ready_ = false;
     bool close_after_connect_response_ = false;
+    bool extended_local_destination_protection_ = true;
 
     logan_lite log {"com.explicit.proxy"};
 };

@@ -79,6 +79,16 @@ TEST(CfgValue, LiveWorkerMetadataCoversEveryWorkerSetting) {
     }
 }
 
+TEST(CfgValue, ExtendedLocalDestinationProtectionIsBoolean) {
+    auto value = CfgValueHelp::get().find(
+        "settings.extended_local_destination_protection");
+    ASSERT_TRUE(value);
+    EXPECT_EQ(value->get().suggestion_generate("settings", ""),
+              (std::vector<std::string>{"true", "false"}));
+    EXPECT_EQ(value->get().value_filter().back()("TRUE").get_value(), "true");
+    EXPECT_FALSE(value->get().value_filter().back()("invalid").accepted());
+}
+
 TEST(CfgFactorySerialization, LargeConfigurationCannotBlockOnPipeCapacity) {
     libconfig::Config config;
     auto& entries = config.getRoot().add("entries", libconfig::Setting::TypeList);

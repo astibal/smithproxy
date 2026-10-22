@@ -847,6 +847,9 @@ bool CfgFactory::load_settings () {
     load_if_exists(cfgapi.getRoot()["settings"], "accept_socks", accept_socks);
     load_if_exists(cfgapi.getRoot()["settings"], "accept_http_connect", accept_http_connect);
     load_if_exists(cfgapi.getRoot()["settings"], "accept_api", accept_api);
+    load_if_exists(cfgapi.getRoot()["settings"],
+                   "extended_local_destination_protection",
+                   extended_local_destination_protection);
     bool configured_fail_open = false;
     policy_fail_open = cfgapi_detail::fail_open_setting(
         load_if_exists(cfgapi.getRoot()["settings"], "policy_fail_open",
@@ -5912,6 +5915,8 @@ int save_settings(Config& ex) {
     objects.add("accept_redirect", Setting::TypeBoolean) = CfgFactory::get()->accept_redirect;
     objects.add("accept_socks", Setting::TypeBoolean) = CfgFactory::get()->accept_socks;
     objects.add("accept_http_connect", Setting::TypeBoolean) = CfgFactory::get()->accept_http_connect;
+    objects.add("extended_local_destination_protection", Setting::TypeBoolean) =
+        CfgFactory::get()->extended_local_destination_protection;
     objects.add("policy_fail_open", Setting::TypeBoolean) = CfgFactory::get()->policy_fail_open;
     objects.add("policy_access_request_fail_open", Setting::TypeBoolean) = CfgFactory::get()->policy_access_request_fail_open;
 

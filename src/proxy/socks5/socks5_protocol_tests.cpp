@@ -344,7 +344,55 @@ TEST(Socks5TargetSetup, LocalServiceTargetsAreRecognized) {
 
 TEST(Socks5TargetSetup, ConnectedPeerInspectionFailsClosed) {
     EXPECT_EQ(sx::proxy::local_destination::inspect_connected_peer(-1),
-              sx::proxy::local_destination::peer_status::unavailable);
+              sx::proxy::local_destination::inspection_result::unavailable);
+}
+
+TEST(Socks5TargetSetup, InterfaceSnapshotExtendsLocalAddressProtection) {
+    sx::net::InterfaceSnapshot interfaces;
+    interfaces.valid = true;
+
+    sx::net::InterfaceAddress local;
+    local.family = AF_INET;
+    local.address_size = sizeof(in_addr);
+    ASSERT_EQ(::inet_pton(AF_INET, "192.0.2.45", local.address.data()), 1);
+    interfaces.addresses.push_back(local);
+
+    sockaddr_in candidate {};
+    candidate.sin_family = AF_INET;
+    ASSERT_EQ(::inet_pton(AF_INET, "192.0.2.45", &candidate.sin_addr), 1);
+
+    auto const* address = reinterpret_cast<const sockaddr*>(&candidate);
+    EXPECT_EQ(sx::proxy::local_destination::inspect(
+                  address, sizeof(candidate), false, nullptr),
+              sx::proxy::local_destination::inspection_result::allowed);
+    EXPECT_EQ(sx::proxy::local_destination::inspect(
+                  address, sizeof(candidate), true, &interfaces),
+              sx::proxy::local_destination::inspection_result::blocked);
+
+    sockaddr_in6 mapped_candidate {};
+    mapped_candidate.sin6_family = AF_INET6;
+    ASSERT_EQ(::inet_pton(AF_INET6, "::ffff:192.0.2.45",
+                          &mapped_candidate.sin6_addr), 1);
+    EXPECT_EQ(sx::proxy::local_destination::inspect(
+                  reinterpret_cast<const sockaddr*>(&mapped_candidate),
+                  sizeof(mapped_candidate), true, &interfaces),
+              sx::proxy::local_destination::inspection_result::blocked);
+
+    ASSERT_EQ(::inet_pton(AF_INET, "192.0.2.46", &candidate.sin_addr), 1);
+    EXPECT_EQ(sx::proxy::local_destination::inspect(
+                  address, sizeof(candidate), true, &interfaces),
+              sx::proxy::local_destination::inspection_result::allowed);
+
+    ASSERT_EQ(::inet_pton(AF_INET, "127.0.0.1", &candidate.sin_addr), 1);
+    EXPECT_EQ(sx::proxy::local_destination::inspect(
+                  address, sizeof(candidate), false, nullptr),
+              sx::proxy::local_destination::inspection_result::blocked);
+
+    interfaces.valid = false;
+    ASSERT_EQ(::inet_pton(AF_INET, "192.0.2.45", &candidate.sin_addr), 1);
+    EXPECT_EQ(sx::proxy::local_destination::inspect(
+                  address, sizeof(candidate), true, &interfaces),
+              sx::proxy::local_destination::inspection_result::unavailable);
 }
 
 TEST(Socks5UdpFraming, StoresNetworkFieldsWithoutAlignedTypedWrites) {

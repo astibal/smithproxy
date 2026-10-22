@@ -466,6 +466,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/service/gre_broker.cpp
                 src/service/cli/cli_broker.cpp
                 src/service/netservice.cpp
+                src/service/interface_monitor.cpp
                 src/service/core/authpam.cpp
 
                 src/utils/tests/str_test.cpp

@@ -207,6 +207,13 @@ void CfgValueHelp::init() {
             .suggestion_generator(CfgValue::SUGGESTION_BOOL)
             .value_filter(CfgValue::VALUE_BOOL);
 
+    add("settings.extended_local_destination_protection",
+        "block explicit proxy connections to addresses assigned to this host")
+            .help_quick("<bool>: protect local services on every host interface")
+            .may_be_empty(false)
+            .suggestion_generator(CfgValue::SUGGESTION_BOOL)
+            .value_filter(CfgValue::VALUE_BOOL);
+
     add("settings.policy_fail_open", "allow traffic when no policy rule matches")
             .help_quick("<bool>: legacy no-match allow; default false (deny)")
             .may_be_empty(false)
