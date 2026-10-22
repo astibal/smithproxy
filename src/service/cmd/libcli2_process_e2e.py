@@ -273,6 +273,7 @@ def main() -> None:
             ("accept_tproxy", "FALSE;"),
             ("accept_redirect", "FALSE;"),
             ("accept_socks", "TRUE;"),
+            ("extended_local_destination_protection", "FALSE;"),
             ("certs_path", f'"{source / "etc/certs/default"}/";'),
             ("messages_dir", f'"{source / "etc/msg/en"}/";'),
             ("log_file", '"";'),

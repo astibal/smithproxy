@@ -175,9 +175,12 @@ bool socksServerCX::prepare_udp_handoff_datagram() {
 ExplicitProxyCX::ExplicitProxyCX(baseCom* c, unsigned int s) : MitmHostCX(c,s) {
     state_ = explicit_state::INIT;
 
-    // copy setting from global/static variable - don't allow to change async
-    // flag on the background during the object life
+    // Keep request parsing, routing and connected-peer verification on one
+    // configuration generation for the lifetime of this explicit session.
+    auto config_lock = std::scoped_lock(CfgFactory::lock());
     async_dns_ = global_async_dns;
+    local_destination_protection_ =
+        CfgFactory::get()->extended_local_destination_protection;
 }
 
 void ExplicitProxyCX::wait_policy() {
@@ -326,7 +329,8 @@ bool ExplicitProxyCX::choose_server_ip(std::vector<std::string>& target_ips) {
     target_ips.erase(std::remove_if(
         target_ips.begin(), target_ips.end(),
         [this](std::string const& target) {
-            const bool rejected = sx::proxy::local_destination::prohibited(target);
+            const bool rejected = local_destination_protection_ &&
+                sx::proxy::local_destination::prohibited(target);
             local_destination_rejected_ |= rejected;
             return rejected;
         }), target_ips.end());
@@ -495,10 +499,11 @@ explicit_request_error ExplicitProxyCX::resolve_connect_target() {
             return socks5_request_error::NONE;
         } else {
             _err("handle5_connect: unable to find destination address for the request");
+            if(local_destination_rejected_)
+                return socks5_request_error::LOCAL_DESTINATION;
+
             error(true);
-            return local_destination_rejected_
-                ? socks5_request_error::LOCAL_DESTINATION
-                : socks5_request_error::MALFORMED_DATA;
+            return socks5_request_error::MALFORMED_DATA;
         }
     }
 
@@ -537,7 +542,8 @@ socks5_request_error socksServerCX::handle4_connect() {
 
     req_addr.unpack();
 
-    if(sx::proxy::local_destination::prohibited(req_addr.str_host))
+    if(local_destination_protection_ &&
+       sx::proxy::local_destination::prohibited(req_addr.str_host))
         return socks5_request_error::LOCAL_DESTINATION;
 
     com()->nonlocal_dst_host() = req_addr.str_host;
@@ -668,6 +674,7 @@ socks5_request_error socksServerCX::socks5_parse_request() {
         }
 
         if(req_cmd != socks5_cmd::UDP_ASSOCIATE &&
+           local_destination_protection_ &&
            sx::proxy::local_destination::prohibited(req_addr.str_host))
             return socks5_request_error::LOCAL_DESTINATION;
 

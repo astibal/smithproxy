@@ -134,6 +134,9 @@ public:
     virtual bool setup_target();
     explicit_request_error prepare_connect_target(std::string const& host,
                                                    unsigned short port);
+    [[nodiscard]] bool local_destination_protection() const noexcept {
+        return local_destination_protection_;
+    }
 
     void wait_policy();
     void pre_write() override;
@@ -155,6 +158,7 @@ protected:
     std::string req_str_addr;
     unsigned short req_port = 0;
     std::size_t req_hdr_size = 0;
+    bool local_destination_protection_ = true;
 
 private:
     using dns_response_t = std::pair<std::shared_ptr<DNS_Response>, ssize_t>;

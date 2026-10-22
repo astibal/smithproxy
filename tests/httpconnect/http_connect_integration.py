@@ -128,6 +128,8 @@ def make_config(source, destination, worktree, runtime, listener_port, cli_port,
         "accept_redirect = TRUE;": "accept_redirect = FALSE;",
         "accept_socks = TRUE;": "accept_socks = FALSE;",
         "accept_http_connect = FALSE;": "accept_http_connect = TRUE;",
+        "extended_local_destination_protection = TRUE;":
+            "extended_local_destination_protection = FALSE;",
         'nameservers = [ "8.8.8.8", "8.8.4.4" ];':
             f'nameservers = [ "{system_nameserver()}" ];',
         'http_connect_port = "3128";': f'http_connect_port = "{listener_port}";',
@@ -378,6 +380,43 @@ def run(args):
                 output, _ = process.communicate(timeout=5)
             if sys.exc_info()[0] is not None:
                 print(output, file=sys.stderr)
+
+        protected_config = runtime / "smithproxy-protected.cfg"
+        protected_listener_port = free_port()
+        make_config(worktree / "etc/smithproxy.cfg", protected_config,
+                    worktree, runtime, protected_listener_port, free_port())
+        protected_config.write_text(protected_config.read_text().replace(
+            "extended_local_destination_protection = FALSE;",
+            "extended_local_destination_protection = TRUE;", 1))
+        protected_process = subprocess.Popen(
+            [str(executable), "--config-file", str(protected_config), "--debug"],
+            cwd=worktree,
+            env=process_env(runtime, "smithproxy-protected.pid"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        try:
+            wait_for_listener(protected_process, protected_listener_port)
+            with socket.create_connection(
+                    ("127.0.0.1", protected_listener_port), timeout=10) as client:
+                client.settimeout(15)
+                client.sendall(
+                    b"CONNECT 127.0.0.1:443 HTTP/1.1\r\n"
+                    b"Host: 127.0.0.1:443\r\n\r\n")
+                response = recv_until(client, b"\r\n\r\n")
+                if not response.startswith(b"HTTP/1.1 403 Forbidden\r\n"):
+                    raise RuntimeError(
+                        f"local destination protection did not return 403: {response!r}")
+        finally:
+            protected_process.terminate()
+            try:
+                protected_output, _ = protected_process.communicate(timeout=60)
+            except subprocess.TimeoutExpired:
+                protected_process.kill()
+                protected_output, _ = protected_process.communicate(timeout=5)
+            if sys.exc_info()[0] is not None:
+                print(protected_output, file=sys.stderr)
 
         reject_config = runtime / "smithproxy-reject.cfg"
         reject_listener_port = free_port()

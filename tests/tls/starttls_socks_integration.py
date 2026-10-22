@@ -175,6 +175,8 @@ def make_config(source, destination, worktree, runtime, socks_port, cli_port):
         "accept_tproxy = TRUE;": "accept_tproxy = FALSE;",
         "accept_redirect = TRUE;": "accept_redirect = FALSE;",
         "accept_socks = TRUE;": "accept_socks = TRUE;\n    accept_api = FALSE;",
+        "extended_local_destination_protection = TRUE;":
+            "extended_local_destination_protection = FALSE;",
         "async_dns = TRUE;":
             "async_dns = TRUE;\n        ipver_mixing = TRUE;\n        prefer_ipv6 = TRUE;",
         'certs_path = "/etc/smithproxy/certs/default/";':

@@ -208,7 +208,7 @@ void CfgValueHelp::init() {
             .value_filter(CfgValue::VALUE_BOOL);
 
     add("settings.extended_local_destination_protection",
-        "block explicit proxy connections to addresses assigned to this host")
+        "block explicit proxy connections to local and loopback addresses")
             .help_quick("<bool>: protect local services on every host interface")
             .may_be_empty(false)
             .suggestion_generator(CfgValue::SUGGESTION_BOOL)
