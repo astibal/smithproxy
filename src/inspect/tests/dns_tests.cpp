@@ -981,6 +981,38 @@ TEST(DNS_Inspector, stores_address_responses_and_domain_hierarchy) {
     }
 }
 
+TEST(DNS_Inspector, PublishesClientScopedDnsObservationAfterValidatedResponse) {
+    auto* com = new DNSInspectorTestCom();
+    com->l4_proto(SOCK_DGRAM);
+    com->nonlocal_dst_port() = 53;
+    DNSInspectorTestHost host(com);
+    host.host("10.0.0.42");
+    ASSERT_EQ(host.chost(), "10.0.0.42");
+    DNS_Inspector inspector;
+
+    std::optional<DNS_Inspector::dns_observation> observed;
+    DNS_Inspector::set_dns_observer(
+        [&observed](DNS_Inspector::dns_observation const& value) { observed = value; });
+
+    buffer request;
+    ASSERT_NE(DNSFactory::get().generate_dns_request(
+                  0xf31a, request, "pcdn.brave.com", A), 0U);
+    host.flow().append('r', request);
+    inspector.update(&host);
+
+    host.flow().append('w', dns_response1, sizeof(dns_response1));
+    inspector.update(&host);
+    DNS_Inspector::set_dns_observer({});
+
+    ASSERT_NE(DNS::get_dns_cache().get("A:pcdn.brave.com"), nullptr);
+    ASSERT_TRUE(observed.has_value());
+    EXPECT_EQ(observed->client_address, "10.0.0.42");
+    EXPECT_EQ(observed->hostname, "pcdn.brave.com");
+    EXPECT_EQ(observed->addresses, std::vector<std::string>({"172.65.10.226"}));
+    ASSERT_EQ(observed->cname_chain.size(), 1U);
+    EXPECT_EQ(observed->ttl_seconds, 300U);
+}
+
 TEST(DNS_Inspector, rejects_non_address_response_and_unknown_transaction) {
     buffer packet(const_cast<unsigned char*>(dns_response1), sizeof(dns_response1),
                   sizeof(dns_response1), false);

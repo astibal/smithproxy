@@ -39,7 +39,10 @@
 
 #include <inspect/dnsinspector.hpp>
 
+#include <algorithm>
 #include <cctype>
+#include <limits>
+#include <unordered_set>
 
 namespace {
 bool dns_names_equal(std::string_view left, std::string_view right) {
@@ -52,6 +55,72 @@ bool dns_names_equal(std::string_view left, std::string_view right) {
         if(std::tolower(l) != std::tolower(r)) return false;
     }
     return true;
+}
+
+std::string normalized_dns_name(std::string value) {
+    while(!value.empty() && value.back() == '.') value.pop_back();
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return value;
+}
+
+std::optional<DNS_Inspector::dns_observation> make_dns_observation(
+    AppHostCX const& cx, DNS_Response const& response) {
+    if(response.questions().size() != 1) return std::nullopt;
+
+    auto const& question = response.questions().front();
+    if(question.rec_class != 1 || (question.rec_type != A && question.rec_type != AAAA))
+        return std::nullopt;
+
+    DNS_Inspector::dns_observation observation;
+    observation.client_address = cx.chost();
+    observation.hostname = normalized_dns_name(question.rec_str);
+    if(observation.client_address.empty() || observation.hostname.empty()) return std::nullopt;
+
+    std::unordered_set<std::string> permitted_names {observation.hostname};
+    std::unordered_set<std::string> seen_cnames;
+    uint32_t minimum_ttl = std::numeric_limits<uint32_t>::max();
+
+    // CNAME records are not required to be ordered on the wire. Grow the set
+    // from the queried name until no additional trusted edge is discovered.
+    for(std::size_t pass = 0; pass < response.answers().size(); ++pass) {
+        bool changed = false;
+        for(auto const& answer : response.answers()) {
+            if(answer.class_ != 1 || answer.type_ != CNAME || answer.ttl_ == 0 ||
+               answer.rdata_name_.empty() ||
+               permitted_names.count(normalized_dns_name(answer.qname_)) == 0) {
+                continue;
+            }
+
+            auto target = normalized_dns_name(answer.rdata_name_);
+            if(target.empty()) continue;
+            if(seen_cnames.insert(target).second) observation.cname_chain.push_back(target);
+            changed |= permitted_names.insert(std::move(target)).second;
+            minimum_ttl = std::min(minimum_ttl, answer.ttl_);
+        }
+        if(!changed) break;
+    }
+
+    std::unordered_set<std::string> seen_addresses;
+    for(auto const& answer : response.answers()) {
+        if(answer.class_ != 1 || answer.type_ != question.rec_type || answer.ttl_ == 0 ||
+           permitted_names.count(normalized_dns_name(answer.qname_)) == 0) {
+            continue;
+        }
+
+        auto address = answer.ip(false);
+        if(!address.empty() && seen_addresses.insert(address).second) {
+            observation.addresses.push_back(std::move(address));
+            minimum_ttl = std::min(minimum_ttl, answer.ttl_);
+        }
+    }
+
+    if(observation.addresses.empty() || minimum_ttl == std::numeric_limits<uint32_t>::max())
+        return std::nullopt;
+
+    observation.ttl_seconds = minimum_ttl;
+    return observation;
 }
 }
 
@@ -350,6 +419,12 @@ void DNS_Inspector::update(AppHostCX* cx) {
                     stored_ = true;
                     // DNS response is interesting (A record present) - we stored it , ptr is VALID
                     _dia("DNS_Inspector::update[%s]: contains interesting info, stored", cx->c_type());
+
+                    if(dns_observer_) {
+                        if(auto observation = make_dns_observation(*cx, *ptr_response)) {
+                            dns_observer_(*observation);
+                        }
+                    }
 
                 } else {
                     _dia("DNS_Inspector::update[%s]: no interesting info there, deleted", cx->c_type());

@@ -52,6 +52,7 @@
 
 #include <nlohmann/json.hpp>
 #include <service/http/async_request.hpp>
+#include <inspect/dnsinspector.hpp>
 
 
 namespace sx::http::webhooks {
@@ -223,6 +224,7 @@ namespace sx::http::webhooks {
     bool send_sift_action(
         std::string const& action, std::string const& action_id,
         nlohmann::json const& details);
+    bool send_sift_dns_observation(DNS_Inspector::dns_observation const& observation);
 
     void neighbor_state(std::string const& address_str, std::string const& state);
     void neighbor_state(std::vector<std::string> const& address_vec, std::string const& state);

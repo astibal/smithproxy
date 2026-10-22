@@ -300,6 +300,7 @@ public:
     inline std::vector<DNS_Question>& questions() { return questions_list_; };
     inline std::vector<DNS_Question> const& questions() const { return questions_list_; };
     inline std::vector<DNS_Answer>& answers() { return answers_list_; };
+    inline std::vector<DNS_Answer> const& answers() const { return answers_list_; };
     inline std::vector<DNS_Answer>& authorities() { return authorities_list_; };
     inline std::vector<DNS_Answer>& additionals() { return additionals_list_; };
     

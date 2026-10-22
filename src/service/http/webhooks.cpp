@@ -454,6 +454,33 @@ namespace sx::http::webhooks {
         return identity;
     }
 
+    static std::string with_path(std::string url, std::string_view path) {
+        auto const scheme = url.find("://");
+        auto const authority = scheme == std::string::npos ? 0 : scheme + 3;
+        auto const current_path = url.find('/', authority);
+        if(current_path == std::string::npos) url.append(path);
+        else url.replace(current_path, std::string::npos, path);
+        return url;
+    }
+
+    bool send_sift_dns_observation(DNS_Inspector::dns_observation const& observation) {
+        auto settings = sift_settings();
+        if(not settings.enabled or settings.url.empty()) return false;
+        settings.url = with_path(std::move(settings.url), "/api/dns-observation");
+
+        nlohmann::json message = {
+            {"format", "sift-dns-observation/1"},
+            {"identity", sift_identity()},
+            {"client_address", observation.client_address},
+            {"hostname", observation.hostname},
+            {"addresses", observation.addresses},
+            {"cname_chain", observation.cname_chain},
+            {"ttl_seconds", observation.ttl_seconds}
+        };
+        return sx::http::AsyncRequest::enqueue(
+            std::move(settings), to_string(message), [](auto const&) {});
+    }
+
     bool send_sift_action(
         std::string const& action, std::string const& action_id,
         nlohmann::json const& details) {

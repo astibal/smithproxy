@@ -93,6 +93,10 @@ void SmithProxy::create_dns_thread() {
            std::string const& hostname) {
             sx::http::webhooks::hostname_info(origin, addresses, hostname);
         });
+    DNS_Inspector::set_dns_observer(
+        [](DNS_Inspector::dns_observation const& observation) {
+            sx::http::webhooks::send_sift_dns_observation(observation);
+        });
     dns_thread = std::shared_ptr<std::thread>(create_dns_updater());
     if(dns_thread) {
         pthread_setname_np( dns_thread->native_handle(),

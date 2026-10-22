@@ -45,6 +45,14 @@
 
 class DNS_Inspector : public Inspector {
 public:
+    struct dns_observation {
+        std::string client_address;
+        std::string hostname;
+        std::vector<std::string> addresses;
+        std::vector<std::string> cname_chain;
+        uint32_t ttl_seconds = 0;
+    };
+
     explicit DNS_Inspector() : Inspector("dns") {};
     ~DNS_Inspector() override = default;
 
@@ -59,6 +67,11 @@ public:
         std::string const&, std::vector<std::string> const&, std::string const&)>;
     static void set_hostname_observer(hostname_observer_t observer) {
         hostname_observer_ = std::move(observer);
+    }
+
+    using dns_observer_t = std::function<void(dns_observation const&)>;
+    static void set_dns_observer(dns_observer_t observer) {
+        dns_observer_ = std::move(observer);
     }
 
     bool opt_match_id = false;
@@ -89,6 +102,7 @@ private:
     bool stored_ = false;
 
     static inline hostname_observer_t hostname_observer_;
+    static inline dns_observer_t dns_observer_;
 
     TYPENAME_OVERRIDE("DNS_Inspector")
     DECLARE_LOGGING(to_string)
