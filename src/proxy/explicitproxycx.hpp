@@ -2,6 +2,7 @@
 #define SMITHPROXY_EXPLICITPROXYCX_HPP
 
 #include <proxy/mitmhost.hpp>
+#include <proxy/local_destination.hpp>
 #include <async/asyncdns.hpp>
 #include <socketinfo.hpp>
 #include <algorithm>
@@ -16,19 +17,6 @@ namespace sx::explicit_proxy {
     // baseCom reserves zero as its "no descriptor" sentinel. DNSFactory
     // promotes a raw fd 0 before handing a query to this event-loop path.
     inline bool valid_dns_socket(int fd) { return fd > 0; }
-
-    inline bool is_unspecified_address(std::string_view text) noexcept {
-        if(text.empty() || text.size() >= INET6_ADDRSTRLEN) return false;
-        std::array<char, INET6_ADDRSTRLEN> terminated {};
-        std::memcpy(terminated.data(), text.data(), text.size());
-
-        in_addr v4 {};
-        if(::inet_pton(AF_INET, terminated.data(), &v4) == 1)
-            return v4.s_addr == htonl(INADDR_ANY);
-        in6_addr v6 {};
-        return ::inet_pton(AF_INET6, terminated.data(), &v6) == 1 &&
-               IN6_IS_ADDR_UNSPECIFIED(&v6);
-    }
 
     inline std::vector<std::string> fresh_dns_addresses(
             std::shared_ptr<DNS_Response> const& response,
@@ -122,7 +110,7 @@ using explicit_state = enum class explicit_state_ {
 };
 using explicit_request_error = enum class explicit_request_error_ {
     NONE = 0, UNSUPPORTED_VERSION, UNSUPPORTED_ATYPE, UNSUPPORTED_METHOD,
-    MALFORMED_DATA, UNAUTHORIZED
+    MALFORMED_DATA, UNAUTHORIZED, LOCAL_DESTINATION
 };
 using explicit_policy = enum class explicit_policy_ { PENDING, ACCEPT, REJECT };
 
@@ -141,6 +129,7 @@ public:
     virtual std::size_t process_proxy_reply() = 0;
     virtual std::string_view upstream_success_response() const { return {}; }
     virtual std::string_view upstream_failure_response() const { return {}; }
+    virtual std::string_view upstream_policy_failure_response() const { return {}; }
 
     virtual bool setup_target();
     explicit_request_error prepare_connect_target(std::string const& host,
@@ -174,6 +163,8 @@ private:
     void dns_response_callback(dns_response_t const& resp);
     bool process_dns_response(std::shared_ptr<DNS_Response> resp);
     bool choose_server_ip(std::vector<std::string>& target_ips);
+
+    bool local_destination_rejected_ = false;
 
     bool async_dns_ = true;
     std::unique_ptr<AsyncDnsQuery> async_dns_query_;

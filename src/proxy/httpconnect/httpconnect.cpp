@@ -130,7 +130,10 @@ std::size_t HttpConnectServerCX::process_in() {
     req_hdr_size = request_size;
     request_error_ = prepare_connect_target(request->host, request->port);
     if(request_error_ != explicit_request_error::NONE) {
-        send_error(502, "Bad Gateway");
+        if(request_error_ == explicit_request_error::LOCAL_DESTINATION)
+            send_error(403, "Forbidden");
+        else
+            send_error(502, "Bad Gateway");
     }
 
     return request_size;
@@ -164,6 +167,11 @@ std::string_view HttpConnectServerCX::upstream_success_response() const {
 
 std::string_view HttpConnectServerCX::upstream_failure_response() const {
     return "HTTP/1.1 502 Bad Gateway\r\n"
+           "Connection: close\r\nContent-Length: 0\r\n\r\n";
+}
+
+std::string_view HttpConnectServerCX::upstream_policy_failure_response() const {
+    return "HTTP/1.1 403 Forbidden\r\n"
            "Connection: close\r\nContent-Length: 0\r\n\r\n";
 }
 

@@ -159,6 +159,7 @@ public:
     virtual std::size_t process_socks_reply_v5();
     std::string_view upstream_success_response() const override;
     std::string_view upstream_failure_response() const override;
+    std::string_view upstream_policy_failure_response() const override;
     void verdict(socks5_policy) override;
 
     // Compatibility names local to SOCKS framing.

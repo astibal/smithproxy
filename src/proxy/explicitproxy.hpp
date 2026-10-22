@@ -34,6 +34,7 @@ private:
 
     std::string pending_connect_response_;
     std::string upstream_failure_response_;
+    std::string upstream_policy_failure_response_;
     std::size_t pending_connect_response_offset_ = 0;
     bool connect_response_ready_ = false;
     bool close_after_connect_response_ = false;

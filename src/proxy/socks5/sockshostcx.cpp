@@ -322,11 +322,13 @@ std::size_t socksServerCX::process_socks_hello() {
 }
 
 bool ExplicitProxyCX::choose_server_ip(std::vector<std::string>& target_ips) {
-
+    local_destination_rejected_ = false;
     target_ips.erase(std::remove_if(
         target_ips.begin(), target_ips.end(),
-        [](std::string const& target) {
-            return sx::explicit_proxy::is_unspecified_address(target);
+        [this](std::string const& target) {
+            const bool rejected = sx::proxy::local_destination::prohibited(target);
+            local_destination_rejected_ |= rejected;
+            return rejected;
         }), target_ips.end());
 
     if(target_ips.empty()) {
@@ -494,7 +496,9 @@ explicit_request_error ExplicitProxyCX::resolve_connect_target() {
         } else {
             _err("handle5_connect: unable to find destination address for the request");
             error(true);
-            return socks5_request_error::MALFORMED_DATA;
+            return local_destination_rejected_
+                ? socks5_request_error::LOCAL_DESTINATION
+                : socks5_request_error::MALFORMED_DATA;
         }
     }
 
@@ -533,8 +537,8 @@ socks5_request_error socksServerCX::handle4_connect() {
 
     req_addr.unpack();
 
-    if(sx::explicit_proxy::is_unspecified_address(req_addr.str_host))
-        return socks5_request_error::MALFORMED_DATA;
+    if(sx::proxy::local_destination::prohibited(req_addr.str_host))
+        return socks5_request_error::LOCAL_DESTINATION;
 
     com()->nonlocal_dst_host() = req_addr.str_host;
     com()->nonlocal_dst_port() = req_port;
@@ -664,8 +668,8 @@ socks5_request_error socksServerCX::socks5_parse_request() {
         }
 
         if(req_cmd != socks5_cmd::UDP_ASSOCIATE &&
-           sx::explicit_proxy::is_unspecified_address(req_addr.str_host))
-            return socks5_request_error::MALFORMED_DATA;
+           sx::proxy::local_destination::prohibited(req_addr.str_host))
+            return socks5_request_error::LOCAL_DESTINATION;
 
         com()->nonlocal_dst_host() = req_addr.str_host;
         com()->nonlocal_dst_port() = req_port;
@@ -1017,6 +1021,7 @@ std::size_t socksServerCX::process_socks_reply_v5() {
                 break;
             case socks5_request_error::NONE:
             case socks5_request_error::UNAUTHORIZED:
+            case socks5_request_error::LOCAL_DESTINATION:
                 break;
         }
         response[3] = static_cast<uint8_t>(socks5_atype::IPV4);
@@ -1194,6 +1199,18 @@ std::string_view socksServerCX::upstream_success_response() const {
 std::string_view socksServerCX::upstream_failure_response() const {
     static constexpr char socks5[] = {
         0x05, 0x05, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    };
+    static constexpr char socks4[] = {
+        0x00, 0x5b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    };
+    if(version == 5) return {socks5, sizeof(socks5)};
+    if(version == 4) return {socks4, sizeof(socks4)};
+    return {};
+}
+
+std::string_view socksServerCX::upstream_policy_failure_response() const {
+    static constexpr char socks5[] = {
+        0x05, 0x02, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     };
     static constexpr char socks4[] = {
         0x00, 0x5b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,

@@ -324,14 +324,27 @@ TEST(Socks5TargetSetup, ZeroPortIsReservedForUdpAssociateControlRequest) {
     EXPECT_TRUE(sx::socks5::target_port_is_valid(connect, 65535));
 }
 
-TEST(Socks5TargetSetup, UnspecifiedConnectTargetsAreRecognized) {
-    EXPECT_TRUE(sx::explicit_proxy::is_unspecified_address("0.0.0.0"));
-    EXPECT_TRUE(sx::explicit_proxy::is_unspecified_address("::"));
-    EXPECT_TRUE(sx::explicit_proxy::is_unspecified_address(
-        "0:0:0:0:0:0:0:0"));
-    EXPECT_FALSE(sx::explicit_proxy::is_unspecified_address("127.0.0.1"));
-    EXPECT_FALSE(sx::explicit_proxy::is_unspecified_address("::1"));
-    EXPECT_FALSE(sx::explicit_proxy::is_unspecified_address("example.test"));
+TEST(Socks5TargetSetup, LocalServiceTargetsAreRecognized) {
+    using sx::proxy::local_destination::prohibited;
+
+    EXPECT_TRUE(prohibited("0.0.0.0"));
+    EXPECT_TRUE(prohibited("127.0.0.1"));
+    EXPECT_TRUE(prohibited("127.255.255.255"));
+    EXPECT_TRUE(prohibited("::"));
+    EXPECT_TRUE(prohibited("::1"));
+    EXPECT_TRUE(prohibited("0:0:0:0:0:0:0:0"));
+    EXPECT_TRUE(prohibited("::ffff:127.0.0.1"));
+    EXPECT_TRUE(prohibited("::ffff:0.0.0.0"));
+
+    EXPECT_FALSE(prohibited("192.0.2.1"));
+    EXPECT_FALSE(prohibited("2001:db8::1"));
+    EXPECT_FALSE(prohibited("::ffff:192.0.2.1"));
+    EXPECT_FALSE(prohibited("example.test"));
+}
+
+TEST(Socks5TargetSetup, ConnectedPeerInspectionFailsClosed) {
+    EXPECT_EQ(sx::proxy::local_destination::inspect_connected_peer(-1),
+              sx::proxy::local_destination::peer_status::unavailable);
 }
 
 TEST(Socks5UdpFraming, StoresNetworkFieldsWithoutAlignedTypedWrites) {
