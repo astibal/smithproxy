@@ -112,6 +112,8 @@ namespace sx::engine::http {
             std::string referer;
             std::string proto;
             std::string sub_proto;
+            std::string content_type;
+            std::string accept;
 
             std::string ja4h;
 
@@ -122,6 +124,9 @@ namespace sx::engine::http {
                 params.clear();
                 referer.clear();
                 proto.clear();
+                sub_proto.clear();
+                content_type.clear();
+                accept.clear();
                 ja4h.clear();
             }
         } http_data;

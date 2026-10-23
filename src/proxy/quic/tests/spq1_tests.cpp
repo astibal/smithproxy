@@ -124,8 +124,13 @@ TEST(Spq1, ConvertsInitialH3RequestHeadersToFlowObservations) {
     request.side = socle::side_t::RIGHT;
     EXPECT_TRUE(sx::quic::spq1::h3_flow_observations(request).empty());
     request.side = socle::side_t::LEFT;
-    request.fields = {{"content-type", "application/example"}};
-    EXPECT_TRUE(sx::quic::spq1::h3_flow_observations(request).empty());
+    request.fields = {{":method", "POST"}, {":scheme", "https"},
+                      {":authority", "resolver.example"}, {":path", "/dns-query"},
+                      {"content-type", "application/dns-message"},
+                      {"accept", "application/dns-message"}};
+    auto const doh = sx::quic::spq1::h3_flow_observations(request);
+    EXPECT_EQ("application/dns-message", doh.at("flow.http3.content_type"));
+    EXPECT_EQ("application/dns-message", doh.at("flow.http3.accept"));
 }
 
 TEST(Spq1, SplitsGreSafeChunksAndEmitsOneFin) {

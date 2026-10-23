@@ -105,7 +105,8 @@ std::unordered_map<std::string, std::string> h3_flow_observations(
 
     for(auto const& field : record.fields) {
         if(field.name == ":method" || field.name == ":scheme" ||
-           field.name == ":authority" || field.name == ":path") {
+           field.name == ":authority" || field.name == ":path" ||
+           field.name == "content-type" || field.name == "accept") {
             headers[field.name] = field.value;
         }
     }
@@ -125,6 +126,8 @@ std::unordered_map<std::string, std::string> h3_flow_observations(
     copy(":scheme", "flow.http3.scheme");
     copy(":authority", "flow.http3.authority");
     copy(":path", "flow.http3.path");
+    copy("content-type", "flow.http3.content_type");
+    copy("accept", "flow.http3.accept");
 
     auto const scheme = headers.find(":scheme");
     auto const authority = headers.find(":authority");

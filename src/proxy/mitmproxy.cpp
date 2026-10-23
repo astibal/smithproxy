@@ -1155,6 +1155,9 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
             put("path", path);
             put("scheme", scheme);
             put("url", app->request());
+            put("content_type", app->http_data.content_type);
+            put("accept", app->http_data.accept);
+            put("subprotocol", app->http_data.sub_proto);
         }
     }
 

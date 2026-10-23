@@ -1356,6 +1356,20 @@ TEST(HTTP1, trivial) {
     test();
 }
 
+TEST(HTTP1, RequestMetadataRetainsContentNegotiation) {
+    auto request = parse(
+        "POST /dns-query HTTP/1.1\r\n"
+        "Host: resolver.example\r\n"
+        "Content-Type: application/dns-message\r\n"
+        "Accept: application/dns-message\r\n"
+        "Content-Length: 0\r\n\r\n",
+        false);
+
+    ASSERT_TRUE(request);
+    EXPECT_EQ(request->http_data.content_type, "application/dns-message");
+    EXPECT_EQ(request->http_data.accept, "application/dns-message");
+}
+
 TEST(HTTP1, benchmark) {
 
     const size_t repetitions = 1000;
@@ -1566,6 +1580,8 @@ TEST(HTTP1, ApplicationDataMaintainsHistoryAndPresentation) {
         .referer = "https://ref.example/",
         .proto = "https://",
         .sub_proto = "dns",
+        .content_type = "application/dns-message",
+        .accept = "application/dns-message",
         .ja4h = "fingerprint-one",
     };
     app.mark_populated();

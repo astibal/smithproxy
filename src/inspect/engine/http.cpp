@@ -821,6 +821,15 @@ namespace sx::engine::http {
 
                 if(app_request) {
 
+                    if(auto value = exact_header_value(data, "content-type")) {
+                        app_request->http_data.content_type.assign(
+                            value->data(), value->size());
+                    }
+                    if(auto value = exact_header_value(data, "accept")) {
+                        app_request->http_data.accept.assign(
+                            value->data(), value->size());
+                    }
+
                     if(ctx.options.http.ja4h) {
                         sx::ja4::HTTP h;
                         h.version = "11";
@@ -2077,6 +2086,8 @@ namespace sx::engine::http {
             std::string request_host;
             std::string request_path;
             std::string request_referer;
+            std::string request_content_type;
+            std::string request_accept;
             if(side == side_t::LEFT && !trailer && my_app_data) {
                 request_method = value(":method");
                 auto const scheme = value(":scheme");
@@ -2087,6 +2098,8 @@ namespace sx::engine::http {
                 request_host = authority;
                 request_path = value(":path");
                 request_referer = value("referer");
+                request_content_type = value("content-type");
+                request_accept = value("accept");
             }
 
             std::optional<sx::ja4::HTTP> ja4h;
@@ -2146,6 +2159,8 @@ namespace sx::engine::http {
                 my_app_data->http_data.host = std::move(request_host);
                 my_app_data->http_data.uri = std::move(request_path);
                 my_app_data->http_data.referer = std::move(request_referer);
+                my_app_data->http_data.content_type = std::move(request_content_type);
+                my_app_data->http_data.accept = std::move(request_accept);
                 my_app_data->mark_populated();
             }
             if(ja4h.has_value() && my_app_data) {
