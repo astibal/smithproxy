@@ -528,6 +528,16 @@ void CfgValueHelp::init() {
             .may_be_empty(false)
             .value_filter(VALUE_UINT_RANGE<1,1073741824>);
 
+    add("settings.webhook.sift_lored_mode", "request LoreD enrichment through Sift")
+            .help_quick("<disabled|optional|required>: per-request LoreD policy (default: disabled)")
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_ANY);
+
+    add("settings.webhook.sift_lored_include_url", "allow Sift to send observed URLs to LoreD")
+            .help_quick("<bool>: opt in to URL/path disclosure to LoreD (default: false)")
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_BOOL);
+
     add("settings.webhook.hostid", "webhook identity value override")
             .help_quick("<string>:  override hostid string to custom value (default: <hostname>)")
             .may_be_empty(true)

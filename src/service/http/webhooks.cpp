@@ -454,6 +454,18 @@ namespace sx::http::webhooks {
         return identity;
     }
 
+    static nlohmann::json sift_requirements() {
+        auto lock = std::scoped_lock(CfgFactory::lock());
+        auto const& settings = CfgFactory::get()->settings_webhook;
+        if(settings.sift_lored_mode != "optional" &&
+           settings.sift_lored_mode != "required") return nlohmann::json::object();
+
+        return {{"lored", {
+            {"mode", settings.sift_lored_mode},
+            {"include_url", settings.sift_lored_include_url},
+        }}};
+    }
+
     static std::string with_path(std::string url, std::string_view path) {
         auto const scheme = url.find("://");
         auto const authority = scheme == std::string::npos ? 0 : scheme + 3;
@@ -490,6 +502,8 @@ namespace sx::http::webhooks {
             {"action", action}, {"id", action_id}, {"source", get_hostid()},
             {"identity", sift_identity()}, {"type", "proxy"}, {"details", details}
         };
+        if(auto requirements = sift_requirements(); !requirements.empty())
+            message["requirements"] = std::move(requirements);
         auto encoded = to_string(message);
         sift_request_started(encoded.size(), false);
         const auto started = std::chrono::steady_clock::now();
@@ -512,6 +526,8 @@ namespace sx::http::webhooks {
             {"source", get_hostid()}, {"identity", sift_identity()},
             {"type", "proxy"}, {"details", std::move(details)}
         };
+        if(auto requirements = sift_requirements(); !requirements.empty())
+            metadata["requirements"] = std::move(requirements);
         const auto encoded = to_string(metadata);
         if(encoded.size() > std::numeric_limits<std::uint32_t>::max() ||
            payload.size() > std::numeric_limits<std::uint32_t>::max()) return {};

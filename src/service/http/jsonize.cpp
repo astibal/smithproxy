@@ -137,6 +137,12 @@ namespace jsonize {
         if(auto classifications = what->sift_classifications(); !classifications.empty()) {
             ret["classification"]["sift"] = std::move(classifications);
         }
+        if(auto classifications = what->lored_classifications(); !classifications.empty()) {
+            ret["classification"]["lored"] = std::move(classifications);
+        }
+        if(auto status = what->lored_status(); !status.empty()) {
+            ret["classification"]["lored_status"] = std::move(status);
+        }
 
         if (auto const protocol = what->session_protocol(); !protocol.empty()) {
             for (auto& endpoint : left) endpoint["com"] = protocol;

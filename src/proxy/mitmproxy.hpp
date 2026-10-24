@@ -267,7 +267,11 @@ public:
     [[nodiscard]] std::string_view session_protocol() const noexcept;
     std::optional<std::string> get_application() const;
     bool add_sift_classification(std::string classification);
+    bool add_lored_classification(std::string classification);
     [[nodiscard]] std::vector<std::string> sift_classifications() const;
+    [[nodiscard]] std::vector<std::string> lored_classifications() const;
+    [[nodiscard]] std::string lored_status() const;
+    bool apply_sift_reply(nlohmann::json const& reply);
     void publish_sift_classifications() const;
     void submit_flow_observation(
         sx::traffic_log_adapter::flow_observation fields,
@@ -324,6 +328,8 @@ private:
 
     mutable std::mutex sift_classifications_lock_;
     std::set<std::string> sift_classifications_;
+    std::set<std::string> lored_classifications_;
+    std::string lored_status_;
     std::shared_ptr<FlowCtx> flow_ctx_;
     StartStopTls start_stop_tls_;
     logan_lite log {"proxy"};

@@ -362,6 +362,8 @@ public:
         std::string sift_tenant_id = "default";
         std::string sift_instance_id;
         int sift_payload_limit_per_direction = 256 * 1024;
+        std::string sift_lored_mode = "disabled";
+        bool sift_lored_include_url = false;
 
         bool allow_api_override = false;
         struct {

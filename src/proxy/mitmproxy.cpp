@@ -356,22 +356,84 @@ bool MitmProxy::add_sift_classification(std::string classification) {
     return sift_classifications_.insert(std::move(classification)).second;
 }
 
+bool MitmProxy::add_lored_classification(std::string classification) {
+    if(classification.empty()) return false;
+
+    auto lock = std::scoped_lock(sift_classifications_lock_);
+    return lored_classifications_.insert(std::move(classification)).second;
+}
+
 std::vector<std::string> MitmProxy::sift_classifications() const {
     auto lock = std::scoped_lock(sift_classifications_lock_);
     return {sift_classifications_.begin(), sift_classifications_.end()};
+}
+
+std::vector<std::string> MitmProxy::lored_classifications() const {
+    auto lock = std::scoped_lock(sift_classifications_lock_);
+    return {lored_classifications_.begin(), lored_classifications_.end()};
+}
+
+std::string MitmProxy::lored_status() const {
+    auto lock = std::scoped_lock(sift_classifications_lock_);
+    return lored_status_;
+}
+
+bool MitmProxy::apply_sift_reply(nlohmann::json const& reply) {
+    bool changed = false;
+    if(auto matches = reply.find("matches");
+       matches != reply.end() && matches->is_array()) {
+        for(auto const& match : *matches) {
+            if(!match.is_object()) continue;
+            if(auto signature = match.find("signature");
+               signature != match.end() && signature->is_string()) {
+                changed |= add_sift_classification(signature->get<std::string>());
+            }
+        }
+    }
+
+    if(auto lored = reply.find("lored");
+       lored != reply.end() && lored->is_object()) {
+        if(auto status = lored->find("status");
+           status != lored->end() && status->is_string()) {
+            auto value = status->get<std::string>();
+            auto lock = std::scoped_lock(sift_classifications_lock_);
+            if(lored_status_ != value) {
+                lored_status_ = std::move(value);
+                changed = true;
+            }
+        }
+
+        if(auto candidates = lored->find("candidates");
+           candidates != lored->end() && candidates->is_array()) {
+            for(auto const& candidate : *candidates) {
+                if(!candidate.is_object()) continue;
+                if(auto value = candidate.find("value");
+                   value != candidate.end() && value->is_string()) {
+                    changed |= add_lored_classification(value->get<std::string>());
+                }
+            }
+        }
+    }
+
+    return changed;
 }
 
 void MitmProxy::publish_sift_classifications() const {
     if(!sx::http::webhooks::is_enabled()) return;
 
     auto const classifications = sift_classifications();
-    if(classifications.empty()) return;
+    auto const lored = lored_classifications();
+    auto const lored_state = lored_status();
+    if(classifications.empty() && lored.empty() && lored_state.empty()) return;
 
     nlohmann::json details;
-    details["info"] = {
-        {"session", to_connection_label()},
-        {"classification", {{"sift", classifications}}}
-    };
+    details["info"]["session"] = to_connection_label();
+    if(!classifications.empty())
+        details["info"]["classification"]["sift"] = classifications;
+    if(!lored.empty())
+        details["info"]["classification"]["lored"] = lored;
+    if(!lored_state.empty())
+        details["info"]["classification"]["lored_status"] = lored_state;
     sx::http::webhooks::send_action(
         "connection-info", to_connection_ID(), details);
 }
@@ -418,26 +480,11 @@ void MitmProxy::submit_flow_observation(
         [this](sx::http::expected_reply reply) {
             if(!reply.has_value()) return;
 
-            auto const status = reply.value().response.first;
-            if(status < 200 || status >= 300) return;
-
             auto body = nlohmann::json::parse(
                 reply.value().response.second, nullptr, false);
             if(body.is_discarded()) return;
 
-            auto const matches = body.find("matches");
-            if(matches == body.end() || !matches->is_array()) return;
-
-            bool changed = false;
-            for(auto const& match : *matches) {
-                if(!match.is_object()) continue;
-
-                auto const signature = match.find("signature");
-                if(signature != match.end() && signature->is_string()) {
-                    changed |= add_sift_classification(signature->get<std::string>());
-                }
-            }
-            if(changed) publish_sift_classifications();
+            if(apply_sift_reply(body)) publish_sift_classifications();
         });
 }
 
@@ -524,6 +571,9 @@ void MitmProxy::webhook_session_stop() const {
     if(l7.has_value())  j["info"]["l7"] = l7.value();
     if(auto classifications = sift_classifications(); !classifications.empty()) {
         j["info"]["classification"]["sift"] = std::move(classifications);
+    }
+    if(auto classifications = lored_classifications(); !classifications.empty()) {
+        j["info"]["classification"]["lored"] = std::move(classifications);
     }
 
 
@@ -1173,18 +1223,7 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
                 }
                 else {
                     if(sift) {
-                        if(auto matches = json_obj.find("matches");
-                           matches != json_obj.end() && matches->is_array()) {
-                            bool changed = false;
-                            for(auto const& match : *matches) {
-                                if(!match.is_object()) continue;
-                                if(auto signature = match.find("signature");
-                                   signature != match.end() && signature->is_string()) {
-                                    changed |= add_sift_classification(signature->get<std::string>());
-                                }
-                            }
-                            if(changed) publish_sift_classifications();
-                        }
+                        if(apply_sift_reply(json_obj)) publish_sift_classifications();
                     }
                     if(json_obj.contains("action")) {
                         if(regular_webhook && json_obj["action"] == "not-interested") {
@@ -1865,9 +1904,15 @@ void MitmProxy::on_error(baseHostCX* cx, char side, const char* side_label) {
             } else {
                 _log_closed_on(DIA, "half-closing, peer dead");
                 state().dead(true);
+                }
             }
-        }
-    } else {
+            else if(sift) {
+                auto json_obj = nlohmann::json::parse(
+                    reply.response.second, nullptr, false);
+                if(!json_obj.is_discarded() && apply_sift_reply(json_obj))
+                    publish_sift_classifications();
+            }
+        } else {
         // DEAD before calling us!
         // maybe even dead or unnecessary code
 
