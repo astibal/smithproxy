@@ -1258,6 +1258,12 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
                     }
                 }
             }
+            else if(sift) {
+                auto json_obj = nlohmann::json::parse(
+                    reply.response.second, nullptr, false);
+                if(!json_obj.is_discarded() && apply_sift_reply(json_obj))
+                    publish_sift_classifications();
+            }
         }
     };
     if(sift) {
@@ -1904,15 +1910,9 @@ void MitmProxy::on_error(baseHostCX* cx, char side, const char* side_label) {
             } else {
                 _log_closed_on(DIA, "half-closing, peer dead");
                 state().dead(true);
-                }
             }
-            else if(sift) {
-                auto json_obj = nlohmann::json::parse(
-                    reply.response.second, nullptr, false);
-                if(!json_obj.is_discarded() && apply_sift_reply(json_obj))
-                    publish_sift_classifications();
-            }
-        } else {
+        }
+    } else {
         // DEAD before calling us!
         // maybe even dead or unnecessary code
 
