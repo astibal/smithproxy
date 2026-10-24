@@ -1238,6 +1238,15 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
                             buffer.size(0);
                             was_modified = true;
                         }
+                        else if(regular_webhook && json_obj["action"] == "need-more") {
+                            // The webhook owns these bytes now: consume this chunk
+                            // without forwarding it or retaining another copy here.
+                            // Keep future content callbacks enabled. The webhook may
+                            // return the accumulated content with a later replacement.
+                            buffer.size(0);
+                            was_modified = true;
+                            _dia("webhook content: chunk consumed; awaiting more content");
+                        }
                         else {
                             // catch-all code to decode response if present
                             if(json_obj.contains("content")) {
