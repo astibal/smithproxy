@@ -844,6 +844,18 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                         ${PROJECT_SOURCE_DIR}/tests/httpapi/http_api_integration.py
                         --smithproxy $<TARGET_FILE:smithproxy>
                         --source ${PROJECT_SOURCE_DIR})
+                add_test(NAME integration.webhook_need_more
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/httpapi/need_more_integration.py
+                        --smithproxy $<TARGET_FILE:smithproxy>
+                        --source ${PROJECT_SOURCE_DIR})
+                add_test(NAME integration.webhook_need_more_binary
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/httpapi/need_more_integration.py
+                        --smithproxy $<TARGET_FILE:smithproxy>
+                        --source ${PROJECT_SOURCE_DIR} --binary)
+                set_tests_properties(integration.webhook_need_more integration.webhook_need_more_binary
+                        PROPERTIES LABELS "native;integration" TIMEOUT 120)
                 add_test(NAME integration.libcli2_process
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/src/service/cmd/libcli2_process_e2e.py
