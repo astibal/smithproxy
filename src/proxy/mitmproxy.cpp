@@ -1107,6 +1107,9 @@ static std::string b64_encode(buffer &buffer) {
 }
 
 static std::string b64_decode(std::string const& encoded) {
+    // An empty replacement consumes the whole chunk. The decoder below expects
+    // at least one base64 block, so handle this valid zero-byte value directly.
+    if(encoded.empty()) return {};
     return libbase64::decode<std::string, char, unsigned char, false>(encoded);
 }
 
@@ -1455,24 +1458,30 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
     if(replacement.has_value()) {
         if(tx) flow_ctx_->commit(*tx, *replacement);
 
-        to->to_write(replacement.value());
         write_traffic_log(side, from, &replacement.value());
 
         auto orig_sz = from->to_read().size();
         auto sz = replacement.value().size();
+        to->to_write(replacement.value());
         _dia("mitmproxy::proxy-%c: %dB replaced with %dB (content rule)", from_side(side), orig_sz, sz);
     }
     else {
         if(tx) flow_ctx_->commit(*tx, from->to_read());
 
         write_traffic_log(side, from);
+        auto sz = from->to_read().size();
         to->to_write(from->to_read(), consume_source);
 
-        auto sz = from->to_read().size();
         auto fastlane = sz > 0 and from->to_read().empty();
         _dia("mitmproxy::proxy-%c: %dB copied %s", from_side(side), sz, fastlane ? "(fastlane)": "");
     }
 
+    // All current bytes have now been queued (or deliberately discarded).
+    // finish() still counts the original input bytes, not a webhook's resized
+    // replacement. Leaving a copied replacement here would replay its tail on
+    // the next read. A fastlane swap already emptied it; clear is then a no-op.
+    // Preserve the source until the final destination has received its copy.
+    if(consume_source) from->to_read().clear();
 }
 
 
