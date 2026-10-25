@@ -202,6 +202,24 @@ def require_oversized_cli_line_disconnect(port: int) -> None:
         raise AssertionError("oversized CLI line did not close the session")
 
 
+def require_oversized_cli_password_disconnect(port: int) -> None:
+    """Hidden input must have the same bound as an ordinary command line."""
+    cli = Cli(port)
+    try:
+        require(cli.command("enable"), "Password:")
+        cli.sock.sendall(b"X" * 4097)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            try:
+                if not cli.sock.recv(65536):
+                    return
+            except TimeoutError:
+                continue
+        raise AssertionError("oversized CLI password did not close the session")
+    finally:
+        cli.sock.close()
+
+
 def free_port() -> int:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
@@ -283,6 +301,7 @@ def main() -> None:
             ("allow_untrusted_issuers", "TRUE;"),
             ("allow_invalid_certs", "TRUE;"),
             ("allow_self_signed", "TRUE;"),
+            ("enable_password", '"libcli2-test-password";'),
         ):
             text = replace_setting(text, name, value)
         text = replace_setting(text, "socks_workers", "1;")
@@ -354,11 +373,14 @@ script_profiles = {
             wait_for_port(process, args.port)
             wait_for_port(process, socks_port)
             require_oversized_cli_line_disconnect(args.port)
+            require_oversized_cli_password_disconnect(args.port)
             cli = Cli(args.port, args.verbose)
             require(cli.tab("en"), "enable")
-            require(cli.command("enable"), "#")
+            require(cli.command("enable"), "Password:")
+            require(cli.command("libcli2-test-password"), "#")
             require(cli.command("disable"), ">")
-            require(cli.command("en"), "#")
+            require(cli.command("en"), "Password:")
+            require(cli.command("libcli2-test-password"), "#")
             require(cli.command_ok("show"), "Version:")
             require(cli.command_ok("show status"), "Total sessions:")
             require(cli.command_ok("execute events clear"), "Events cleared")
@@ -702,7 +724,8 @@ script_profiles = {
             )
             wait_for_port(process, args.port)
             cli = Cli(args.port, args.verbose)
-            require(cli.command("enable"), "#")
+            require(cli.command("enable"), "Password:")
+            require(cli.command("libcli2-test-password"), "#")
             require(cli.command_ok("execute shutdown"), "terminating smithproxy")
             process.wait(timeout=10)
             schema = re.search(

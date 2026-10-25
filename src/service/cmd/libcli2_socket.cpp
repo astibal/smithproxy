@@ -61,7 +61,11 @@ public:
             }
             if (!echo) {
                 if (key == 127 || key == 8) { if (!line.empty()) line.pop_back(); }
-                else if (key >= 32) line.push_back(static_cast<char>(key));
+                else if (key >= 32) {
+                    // Passwords are untrusted pre-authentication input too.
+                    if (line.size() >= max_input_line_size) return false;
+                    line.push_back(static_cast<char>(key));
+                }
                 continue;
             }
             if (key == 4 && line.empty()) return false;
