@@ -1659,7 +1659,7 @@ namespace sx::engine::http {
                 return false;
             }
 
-            DNS_Inspector::store(response);
+            if (!ctx.protocol_only) DNS_Inspector::store(response);
             if(auto http = std::dynamic_pointer_cast<app_HttpRequest>(
                    ctx.application_data)) {
                 http->http_data.sub_proto = "dns";

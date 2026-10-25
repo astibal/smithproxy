@@ -42,12 +42,46 @@
 
 
 #include <any>
+#include <functional>
+#include <stdexcept>
 
 #include <inspect/sxsignature.hpp>
 
 class MitmHostCX;
 
 namespace sx::engine {
+
+    struct EngineCtx;
+
+    // An explicit, protocol-owned rollback point, not an application snapshot.
+    // It must not outlive its EngineCtx. Restoring invalidates references into
+    // protocol state. External effects are deliberately excluded. The overload
+    // taking a flow also rolls back append/pop operations, retaining evicted
+    // blocks until the checkpoint is released. Neither overload permits edits
+    // to an existing byte prefix or performs replacement reconciliation.
+    class ProtocolCheckpoint {
+    public:
+        void restore(EngineCtx& engine) const {
+            if (&engine != owner_) {
+                throw std::invalid_argument("Protocol checkpoint belongs to another engine");
+            }
+
+            restore_(engine, rewind_flow_);
+        }
+
+    private:
+        friend struct EngineCtx;
+
+        using RewindFlow = std::function<void()>;
+        using Restore = std::function<void(EngineCtx&, RewindFlow const&)>;
+
+        ProtocolCheckpoint(EngineCtx const* owner, Restore restore)
+            : owner_(owner), restore_(std::move(restore)) {}
+
+        EngineCtx const* owner_;
+        Restore restore_;
+        RewindFlow rewind_flow_;
+    };
 
     struct ApplicationData {
         virtual ~ApplicationData() = default;
@@ -137,6 +171,20 @@ namespace sx::engine {
     };
 
     struct EngineCtx {
+
+        // Unsupported protocols fail explicitly. The protocol implementation
+        // selects its state and deep-copies mutable shared objects. These
+        // rollback primitives remain available, but endpoint views use a
+        // forward-only fork instead; they never restore the input history.
+        [[nodiscard]] ProtocolCheckpoint protocol_snapshot() const;
+        [[nodiscard]] ProtocolCheckpoint protocol_snapshot(duplexFlow& flow) const;
+
+        // Independent protocol/app state for an endpoint view. Unlike a
+        // checkpoint this is a forward-only fork, with no flow journal.
+        [[nodiscard]] std::unique_ptr<EngineCtx> protocol_fork() const;
+
+        // Output observation must not repeat external inspector effects.
+        bool protocol_only = false;
 
         struct {
             struct {

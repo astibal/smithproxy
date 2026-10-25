@@ -83,6 +83,53 @@ TEST(Http2ContentFraming, DataSurvivesEverySingleSplit) {
     every_single_split(frame(0, 0, 1, "hello world"), "hello world");
 }
 
+TEST(Http2ContentFraming, InjectionIntoPendingDataIsNotANewFrame) {
+    // A webhook boundary is not a frame boundary. The peer still owes 13
+    // DATA bytes when our locally generated WINDOW_UPDATE becomes available.
+    const auto data = frame(0, 0, 1, std::string(14, 'x'));
+    const auto update = frame(8, 0, 0, std::string("\0\0\0\1", 4));
+    Http2Direction direction;
+    direction.observe(std::string_view(data).substr(0, 10), false);
+
+    // Feeding the injection into the input tracker consumes it as DATA.
+    // This characterizes why replay through FlowCtx::begin is not sufficient.
+    const auto ranges = direction.observe(update, false);
+    const L7PayloadHints expected {{0, 13}};
+    EXPECT_EQ(ranges, expected);
+}
+
+TEST(Http2ContentFraming, SeparateInjectionObservationPreservesPendingPeerData) {
+    const auto data = frame(0, 0, 1, "hello world");
+    const auto update = frame(8, 0, 0, std::string("\0\0\0\1", 4));
+
+    for(std::size_t split = 1; split < data.size(); ++split) {
+        SCOPED_TRACE(split);
+        Http2Direction peer;
+        Http2Direction synthetic;
+        std::string body;
+
+        const auto consume = [&](std::string_view bytes) {
+            for(const auto [start, end] : peer.observe(bytes, false)) {
+                ASSERT_GE(start, 0);
+                ASSERT_GE(end, start);
+                ASSERT_LE(static_cast<std::size_t>(end), bytes.size());
+                body.append(bytes.substr(start, end - start));
+            }
+        };
+
+        consume(std::string_view(data).substr(0, split));
+
+        // Independent observation is safe for this self-contained control
+        // frame. This does not claim independent HPACK contexts are sufficient
+        // for arbitrary injected HEADERS, or authorize mid-frame wire writes.
+        const L7PayloadHints no_body {{0, 0}};
+        EXPECT_EQ(synthetic.observe(update, false), no_body);
+
+        consume(std::string_view(data).substr(split));
+        EXPECT_EQ(body, "hello world");
+    }
+}
+
 TEST(Http2ContentFraming, ClientPrefaceAndDataSurviveEverySingleSplit) {
     const std::string wire = std::string(sx::engine::http::v2::txt::magic) +
                              frame(4, 0, 0, {}) + frame(0, 1, 1, "body");

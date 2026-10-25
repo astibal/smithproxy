@@ -112,6 +112,39 @@ running every unrelated section at once.
 Run `tests/patch-runner/test-patch.sh --help` for the authoritative option
 syntax.
 
+### Protocol endpoint views
+
+The native gate includes `unit.protocol_views` and the two real-proxy webhook
+tests `integration.protocol_views_json` / `integration.protocol_views_binary`.
+The live tests use a deterministic webhook stand-in, not a running Spider.
+
+`FlowCtx` and `ProtocolViews` coordinate endpoint routing and callback lifetime;
+they do not select H2 types or parse frames. `ProtocolAdapter` owns detection,
+initialization, observation and independent state copying. The first production
+adapter is HTTP/2; a non-HTTP ledger adapter tests that the coordinator does not
+depend on its wire format. Unsupported protocols retain their legacy path.
+Output observation suppresses external inspector effects and never invokes a
+second webhook. Snapshot/journal primitives remain separate from this runtime
+path. The current pre-split deep copy is intentionally still unoptimized.
+
+Measure the pre-split copy cost separately from parser cost in an optimized
+build; the ordinary native runner intentionally uses Debug:
+
+```bash
+cmake -S . -B /tmp/sx-protocol-benchmark -DCMAKE_BUILD_TYPE=Release \
+  -DSMITHPROXY_OPTIMIZED_TESTS=ON -DBUILD_TESTING=ON \
+  -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+cmake --build /tmp/sx-protocol-benchmark --target sx_gtests_http1 -j2
+ctest --test-dir /tmp/sx-protocol-benchmark -R '^benchmark.protocol_fork$' -V
+```
+
+Do not run the measurement alongside the full runner, builds or other load.
+Its CSV-style rows report median/min/max microseconds per operation over seven
+batches, not request latency percentiles. They distinguish one parser, unchanged
+traffic with a pre-input fork, the first split, two parsers after splitting, and
+fork alone. Separate fixtures measure retained header/gzip storage and completed
+request history. These are in-process costs, not network throughput claims.
+
 ## Options
 
 | Option | Meaning |

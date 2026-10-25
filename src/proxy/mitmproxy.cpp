@@ -1409,7 +1409,12 @@ bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t 
 void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected,
                       bool consume_source, FlowCtx::Tx const* tx) {
 
-    if(not to or not from or from->to_read().empty()) return;
+    if(not to or not from or from->to_read().empty()) {
+        // Even an early exit must close the observation transaction. In
+        // particular, a preceding destination may have consumed the source.
+        if(tx) flow_ctx_->discard(*tx);
+        return;
+    }
 
     if(redirected) {
         if(tx) flow_ctx_->discard(*tx);

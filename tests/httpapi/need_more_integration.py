@@ -58,6 +58,7 @@ class Hook(http.server.BaseHTTPRequestHandler):
                         self.server.sequences[event['id']] = control['sequence']
                         assert control['mode'] in ('regular', 'strict')
                     self.server.received.append((event['id'], info['side'], data))
+                    self.server.metadata.append(info)
                     status, result = self.server.reply(data)
                     self.server.condition.notify_all()
 
@@ -104,6 +105,7 @@ def main():
     parser.add_argument('--binary', action='store_true')
     parser.add_argument('--control-only', action='store_true')
     parser.add_argument('--replace-only', action='store_true', help='Reproduce resize handling without need-more')
+    parser.add_argument('--h2-views', action='store_true', help='Exercise lazy endpoint views through real forwarding')
     args = parser.parse_args()
     source = args.source.resolve()
     with tempfile.TemporaryDirectory(prefix='need-more-') as directory:
@@ -111,6 +113,7 @@ def main():
         server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Hook)
         server.condition = threading.Condition()
         server.received, server.errors = [], []
+        server.metadata = []
         server.actions = []
         server.binary_enabled, server.binary_count = args.binary, 0
         server.verify_control, server.sequences = args.control_only, {}
@@ -150,7 +153,7 @@ def main():
                 return observed
 
         @contextlib.contextmanager
-        def connection():
+        def connection(warmup=True):
             with socket.socket() as listener:
                 listener.bind(('127.0.0.1', 0))
                 listener.listen()
@@ -161,8 +164,9 @@ def main():
                         # Complete protocol sniffing before testing one-byte chunks
                         # or a server-first content callback.
                         set_reply(lambda data: (200, {'action': 'unchanged'}))
-                        send(client, b'WARMUP PLAINTEXT\r\n')
-                        assert receive(origin, 18) == b'WARMUP PLAINTEXT\r\n'
+                        if warmup:
+                            send(client, b'WARMUP PLAINTEXT\r\n')
+                            assert receive(origin, 18) == b'WARMUP PLAINTEXT\r\n'
                         yield client, origin
 
         count = 0
@@ -185,6 +189,11 @@ def main():
                     assert time.monotonic() < deadline, 'No protocol negotiation'
                     time.sleep(.05)
                 time.sleep(.1)
+
+            if args.h2_views:
+                from protocol_views_integration import run
+                run(connection, send, set_reply, server)
+                return
 
             if args.control_only:
                 for failure in ((503, {'control': {'mode': 'regular'}}),

@@ -285,6 +285,9 @@ add_executable(smithproxy
 
         src/proxy/mitmhost.cpp
         src/proxy/flowctx.cpp
+        src/inspect/protocol_checkpoint.cpp
+        src/inspect/protocol_adapter.cpp
+        src/inspect/protocol_views.cpp
         src/proxy/mitmproxy.cpp
         src/proxy/mitmcom.hpp
         src/proxy/mitmcom.cpp
@@ -449,7 +452,10 @@ target_include_directories(smithproxy-webhook-broker PRIVATE ${PROJECT_SOURCE_DI
 target_link_libraries(smithproxy-webhook-broker pthread)
 
 
-IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
+# Keep release packages unchanged, but allow an explicitly requested optimized
+# native test build for benchmarks. Measuring parser cost in Debug is misleading.
+option(SMITHPROXY_OPTIMIZED_TESTS "Build native tests outside Debug" OFF)
+IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
     find_package(GTest)
     if(GTEST_FOUND)
         add_executable(sx_gtests
@@ -578,6 +584,12 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/inspect/tests/http1_tests.cpp
                 src/inspect/tests/http1_framing_tests.cpp
                 src/inspect/tests/http2_content_framing_tests.cpp
+                src/inspect/tests/protocol_checkpoint_tests.cpp
+                src/inspect/tests/protocol_views_tests.cpp
+                src/inspect/tests/protocol_fork_benchmark.cpp
+                src/inspect/protocol_checkpoint.cpp
+                src/inspect/protocol_adapter.cpp
+                src/inspect/protocol_views.cpp
 
                 src/inspect/engine.hpp
                 src/inspect/engine/http.cpp
@@ -663,6 +675,15 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
             target_link_libraries(sx_gtests ${LIBCONFIGPP_LIBRARIES})
         endif()
         target_link_libraries(sx_gtests_http1 gtest gtest_main socle_lib pthread crypto ssl)
+        # Independent HPACK oracle is optional, but its absence is a visible
+        # skipped test, never silently counted as protocol verification.
+        find_path(CHECKPOINT_NGHTTP2_INCLUDE nghttp2/nghttp2.h)
+        find_library(CHECKPOINT_NGHTTP2_LIBRARY nghttp2)
+        if(CHECKPOINT_NGHTTP2_INCLUDE AND CHECKPOINT_NGHTTP2_LIBRARY)
+            target_include_directories(sx_gtests_http1 PRIVATE ${CHECKPOINT_NGHTTP2_INCLUDE})
+            target_link_libraries(sx_gtests_http1 ${CHECKPOINT_NGHTTP2_LIBRARY})
+            target_compile_definitions(sx_gtests_http1 PRIVATE CHECKPOINT_NGHTTP2=1)
+        endif()
         target_link_libraries(sx_gtests_startstoptls
                 gtest gtest_main
                 "$<LINK_GROUP:RESCAN,socle_lib,socle_common_lib>"
@@ -728,7 +749,14 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
             # separately so every native patch run reports it explicitly.
             add_test(NAME unit.logging_concurrency COMMAND sx_gtests
                     --gtest_filter=LogMux.RemoteTargetLifecycleIsSafeDuringConcurrentLogging)
-            add_test(NAME unit.http1 COMMAND sx_gtests_http1 --gtest_filter=-HTTP1.benchmark)
+            add_test(NAME unit.http1 COMMAND sx_gtests_http1
+                    --gtest_filter=-HTTP1.benchmark:ProtocolForkBenchmark.*)
+            add_test(NAME unit.protocol_checkpoint COMMAND sx_gtests_http1
+                    --gtest_filter=*ProtocolCheckpoint*
+                    --gtest_output=xml:protocol-checkpoint-results.xml)
+            add_test(NAME unit.protocol_views COMMAND sx_gtests_http1
+                    --gtest_filter=*ProtocolViews*
+                    --gtest_output=xml:protocol-views-results.xml)
             add_test(NAME unit.startstoptls COMMAND sx_gtests_startstoptls)
             add_test(NAME unit.httpconnect COMMAND sx_gtests_httpconnect)
             add_test(NAME unit.reloadable COMMAND sx_gtests_reloadable)
@@ -743,6 +771,10 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
             add_test(NAME integration.transfer_testbed COMMAND transfer_testbed)
             add_test(NAME integration.quic_testbed COMMAND quic_testbed)
             add_test(NAME benchmark.http1 COMMAND sx_gtests_http1 --gtest_filter=HTTP1.benchmark)
+            add_test(NAME benchmark.protocol_fork COMMAND sx_gtests_http1
+                    --gtest_filter=ProtocolForkBenchmark.*)
+            set_tests_properties(benchmark.protocol_fork PROPERTIES
+                    LABELS "benchmark" TIMEOUT 300 RUN_SERIAL TRUE)
             add_test(NAME external.inet COMMAND sx_gtests --gtest_filter=InetTest.*)
             add_test(NAME external.pcap_experiments COMMAND sx_gtests
                     --gtest_filter=PcapExperiments.*)
@@ -873,6 +905,19 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                         --source ${PROJECT_SOURCE_DIR} --binary)
                 set_tests_properties(integration.webhook_need_more integration.webhook_need_more_binary
                         PROPERTIES LABELS "native;integration" TIMEOUT 120)
+                foreach(webhook_format json binary)
+                    set(views_arguments --h2-views)
+                    if(webhook_format STREQUAL "binary")
+                        list(APPEND views_arguments --binary)
+                    endif()
+                    add_test(NAME integration.protocol_views_${webhook_format}
+                            COMMAND ${Python3_EXECUTABLE}
+                            ${PROJECT_SOURCE_DIR}/tests/httpapi/need_more_integration.py
+                            --smithproxy $<TARGET_FILE:smithproxy>
+                            --source ${PROJECT_SOURCE_DIR} ${views_arguments})
+                    set_tests_properties(integration.protocol_views_${webhook_format}
+                            PROPERTIES LABELS "native;integration;http2" TIMEOUT 180)
+                endforeach()
                 add_test(NAME integration.libcli2_process
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/src/service/cmd/libcli2_process_e2e.py
