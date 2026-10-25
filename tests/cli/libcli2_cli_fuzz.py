@@ -96,7 +96,7 @@ def write_reproducer(seed: int, cases: list[bytes], reason: BaseException) -> Pa
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("binary", type=Path)
-    parser.add_argument("--source", type=Path, default=Path(__file__).resolve().parents[3])
+    parser.add_argument("--source", type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument("--port", type=int, default=59124)
     parser.add_argument("--cases", type=int, default=5000)
     parser.add_argument("--duration", type=float, default=0.0,

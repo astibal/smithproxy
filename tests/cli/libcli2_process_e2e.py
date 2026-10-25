@@ -270,7 +270,7 @@ def config_check(binary: Path, config: Path, env: dict[str, str]) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("binary", type=Path)
-    parser.add_argument("--source", type=Path, default=Path(__file__).resolve().parents[3])
+    parser.add_argument("--source", type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument("--port", type=int, default=59123)
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()

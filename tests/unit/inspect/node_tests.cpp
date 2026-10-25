@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "src/inspect/kb/node.hpp"
+#include <inspect/kb/node.hpp>
 
 using namespace sx;
 
