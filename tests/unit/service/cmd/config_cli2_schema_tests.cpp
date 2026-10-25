@@ -1,4 +1,4 @@
-#include "config_cli2_schema.hpp"
+#include <service/cmd/config_cli2_schema.hpp>
 
 #include <gtest/gtest.h>
 

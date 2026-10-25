@@ -475,83 +475,83 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 src/service/interface_monitor.cpp
                 src/service/core/authpam.cpp
 
-                src/utils/tests/str_test.cpp
-                src/utils/tests/fs_test.cpp
-                src/tests/staticcontent_tests.cpp
-                src/ext/nltemplate/nltemplate_tests.cpp
-                src/inspect/tests/dns_tests.cpp
-                src/inspect/tests/node_tests.cpp
-                src/inspect/tests/ja4_tests.cpp
+                tests/unit/utils/str_test.cpp
+                tests/unit/utils/fs_test.cpp
+                tests/unit/base/staticcontent_tests.cpp
+                tests/unit/ext/nltemplate/nltemplate_tests.cpp
+                tests/unit/inspect/dns_tests.cpp
+                tests/unit/inspect/node_tests.cpp
+                tests/unit/inspect/ja4_tests.cpp
                 src/ext/libcidr/cidr.cpp
 
                 src/policy/policy.cpp
                 src/policy/profile_routing_state.cpp
-                src/policy/tests/addrobj_test.cpp
-                src/policy/tests/policy_test.cpp
-                src/policy/tests/profile_routing_test.cpp
-                src/policy/tests/profile_types_test.cpp
+                tests/unit/policy/addrobj_test.cpp
+                tests/unit/policy/policy_test.cpp
+                tests/unit/policy/profile_routing_test.cpp
+                tests/unit/policy/profile_types_test.cpp
 
                 src/utils/tenants.cpp
-                src/tests/test_misc.cpp
+                tests/unit/base/test_misc.cpp
 
-                src/proxy/multiflow/tests/fake_tests.cpp
+                tests/unit/proxy/multiflow/fake_tests.cpp
                 src/proxy/multiflow/mfflowcom.cpp
-                src/proxy/multiflow/tests/mfflowcom_tests.cpp
+                tests/unit/proxy/multiflow/mfflowcom_tests.cpp
                 src/proxy/multiflow/mfproxy.cpp
-                src/proxy/multiflow/tests/mfproxy_tests.cpp
+                tests/unit/proxy/multiflow/mfproxy_tests.cpp
                 src/proxy/quic/wire.cpp
-                src/proxy/quic/tests/wire_tests.cpp
+                tests/unit/proxy/quic/wire_tests.cpp
                 src/proxy/quic/h3capture.cpp
                 src/proxy/quic/spq1.cpp
-                src/proxy/quic/tests/h3capture_tests.cpp
-                src/proxy/quic/tests/spq1_tests.cpp
-                src/proxy/quic/tests/qpack_vendor_tests.cpp
+                tests/unit/proxy/quic/h3capture_tests.cpp
+                tests/unit/proxy/quic/spq1_tests.cpp
+                tests/unit/proxy/quic/qpack_vendor_tests.cpp
                 src/proxy/quic/openssl.cpp
-                src/proxy/quic/tests/openssl_tests.cpp
+                tests/unit/proxy/quic/openssl_tests.cpp
                 src/proxy/ssh/sshprotocol.cpp
-                src/proxy/ssh/tests/sshprotocol_test.cpp
-                src/proxy/tests/streamhandler_test.cpp
-                src/proxy/tests/mitmproxy_identity_tests.cpp
-                src/proxy/socks5/socks5_protocol_tests.cpp
-                src/proxy/tests/explicitproxy_dns_state_tests.cpp
-                src/proxy/tests/proxymaker_utils_tests.cpp
-                src/proxy/tests/proxystats_tests.cpp
+                tests/unit/proxy/ssh/sshprotocol_test.cpp
+                tests/unit/proxy/streamhandler_test.cpp
+                tests/unit/proxy/mitmproxy_identity_tests.cpp
+                tests/unit/proxy/socks5/socks5_protocol_tests.cpp
+                tests/unit/proxy/explicitproxy_dns_state_tests.cpp
+                tests/unit/proxy/proxymaker_utils_tests.cpp
+                tests/unit/proxy/proxystats_tests.cpp
                 src/proxy/filters/statistics/entropy.cpp
                 src/proxy/filters/statistics/flowanalysis.cpp
-                src/proxy/filters/statistics/statistics_tests.cpp
-                src/proxy/filters/access_filter_tests.cpp
+                tests/unit/proxy/filters/statistics/statistics_tests.cpp
+                tests/unit/proxy/filters/access_filter_tests.cpp
                 src/proxy/filters/sinkhole.cpp
-                src/proxy/filters/sinkhole_tests.cpp
+                tests/unit/proxy/filters/sinkhole_tests.cpp
                 src/proxy/filters/statsfilter.cpp
-                src/proxy/filters/statsfilter_tests.cpp
+                tests/unit/proxy/filters/statsfilter_tests.cpp
                 src/service/quic/quicservice.cpp
-                src/service/quic/tests/quicservice_tests.cpp
+                tests/unit/service/quic/quicservice_tests.cpp
 
                 src/ext/hpack/hpack.hpp
-                src/ext/hpack/hpack_tests.cpp
+                tests/unit/ext/hpack/hpack_tests.cpp
 
-                src/service/libcli/tests/cli_tests.cpp
-                src/service/libcli/tests/fd_transport_tests.cpp
+                tests/unit/service/libcli/cli_tests.cpp
+                tests/unit/service/libcli/fd_transport_tests.cpp
                 src/service/cmd/config_cli2.cpp
-                src/service/cmd/config_cli2_tests.cpp
+                tests/unit/service/cmd/config_cli2_tests.cpp
                 src/service/cmd/config_cli2_schema.cpp
-                src/service/cmd/config_cli2_schema_tests.cpp
-                src/service/http/jsonize_tests.cpp
+                tests/unit/service/cmd/config_cli2_schema_tests.cpp
+                tests/unit/service/http/jsonize_tests.cpp
                 src/service/http/jsonize_x509.cpp
                 src/service/http/jsonize_config.cpp
-                src/service/http/webhooks_tests.cpp
+                tests/unit/service/http/webhooks_tests.cpp
                 src/service/core/sessionlist_state.cpp
-                src/service/core/sessionlist_tests.cpp
-                src/service/core/smithproxy_objapi_tests.cpp
-                src/service/core/live_listener_lifecycle_tests.cpp
+                tests/unit/service/core/sessionlist_tests.cpp
+                tests/unit/service/core/smithproxy_objapi_tests.cpp
+                tests/unit/service/core/live_listener_lifecycle_tests.cpp
                 src/service/cfgapi/cfgvalue.cpp
-                src/service/cfgapi/cfgvalue_tests.cpp
-                src/tests/smithlog_tests.cpp
-                src/service/core/authpam_tests.cpp
-                src/service/daemon_tests.cpp
-                src/service/netservice_tests.cpp
-                src/service/httpd/httpd_tests.cpp
-                src/proxy/nbrhood_tests.cpp
+                tests/unit/service/cfgapi/cfgvalue_tests.cpp
+                tests/unit/base/smithlog_tests.cpp
+                tests/unit/service/core/authpam_tests.cpp
+                tests/unit/service/daemon_tests.cpp
+                tests/unit/service/netservice_tests.cpp
+                tests/unit/service/httpd/httpd_tests.cpp
+                tests/unit/proxy/nbrhood_tests.cpp
 
                 src/inspect/engine.hpp
                 src/inspect/engine/http.cpp
@@ -581,12 +581,12 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 socle/common/tests/cast_tests.cpp
                 )
         add_executable(sx_gtests_http1
-                src/inspect/tests/http1_tests.cpp
-                src/inspect/tests/http1_framing_tests.cpp
-                src/inspect/tests/http2_content_framing_tests.cpp
-                src/inspect/tests/protocol_checkpoint_tests.cpp
-                src/inspect/tests/protocol_views_tests.cpp
-                src/inspect/tests/protocol_fork_benchmark.cpp
+                tests/unit/inspect/http1_tests.cpp
+                tests/unit/inspect/http1_framing_tests.cpp
+                tests/unit/inspect/http2_content_framing_tests.cpp
+                tests/unit/inspect/protocol_checkpoint_tests.cpp
+                tests/unit/inspect/protocol_views_tests.cpp
+                tests/unit/inspect/protocol_fork_benchmark.cpp
                 src/inspect/protocol_checkpoint.cpp
                 src/inspect/protocol_adapter.cpp
                 src/inspect/protocol_views.cpp
@@ -602,23 +602,23 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 src/policy/addrobj.cpp
         )
         add_executable(sx_gtests_startstoptls
-                src/proxy/tests/startstoptls_test.cpp
-                src/proxy/tests/flowmatch_test.cpp
+                tests/unit/proxy/startstoptls_test.cpp
+                tests/unit/proxy/flowmatch_test.cpp
         )
         add_executable(sx_gtests_httpconnect
-                src/proxy/httpconnect/tests/httpconnectrequest_test.cpp
-                src/proxy/tests/explicitproxyport_test.cpp
+                tests/unit/proxy/httpconnect/httpconnectrequest_test.cpp
+                tests/unit/proxy/explicitproxyport_test.cpp
                 src/proxy/httpconnect/httpconnectrequest.cpp
         )
 
         add_executable(sx_gtests_reloadable
                 src/service/reload/file_reload_service.cpp
-                src/service/reload/tests/reloadable_resource_test.cpp
+                tests/unit/service/reload/reloadable_resource_test.cpp
         )
 
         add_executable(sx_gtests_interface_monitor
                 src/service/interface_monitor.cpp
-                src/service/tests/interface_monitor_tests.cpp
+                tests/unit/service/interface_monitor_tests.cpp
         )
 
         add_executable(webhook_control_test tests/webhook_control_test.cpp)
@@ -633,29 +633,29 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
         add_executable(sx_gtests_file_privsep
                 src/service/comm.cpp
                 src/service/privileged_file.cpp
-                src/service/tests/comm_tests.cpp
-                src/service/tests/privileged_file_tests.cpp
+                tests/unit/service/comm_tests.cpp
+                tests/unit/service/privileged_file_tests.cpp
         )
 
         add_executable(sx_gtests_gre_broker
                 src/service/comm.cpp
                 src/service/gre_broker.cpp
-                src/service/tests/gre_broker_tests.cpp
+                tests/unit/service/gre_broker_tests.cpp
         )
         add_executable(sx_gtests_cli_broker
                 src/service/cli/cli_broker.cpp
-                src/service/tests/cli_broker_tests.cpp
+                tests/unit/service/cli_broker_tests.cpp
         )
         add_executable(sx_gtests_api_broker
                 src/service/cli/cli_broker.cpp
                 src/service/api/api_broker.cpp
-                src/service/tests/api_broker_tests.cpp
+                tests/unit/service/api_broker_tests.cpp
         )
         add_executable(sx_gtests_webhook_broker
                 src/service/cli/cli_broker.cpp
                 src/service/stream/tcp_relay.cpp
                 src/service/webhook/webhook_broker.cpp
-                src/service/tests/webhook_broker_tests.cpp
+                tests/unit/service/webhook_broker_tests.cpp
         )
         target_compile_definitions(sx_gtests_webhook_broker PRIVATE
                 SMITHPROXY_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
@@ -708,23 +708,23 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
         # unrelated application tests while keeping the complete MultiFlow,
         # wire-format, adapter, listener, and end-to-end stack in one runner.
         add_executable(quic_testbed
-                src/proxy/multiflow/tests/fake_tests.cpp
+                tests/unit/proxy/multiflow/fake_tests.cpp
                 src/proxy/multiflow/mfflowcom.cpp
-                src/proxy/multiflow/tests/mfflowcom_tests.cpp
+                tests/unit/proxy/multiflow/mfflowcom_tests.cpp
                 src/proxy/multiflow/mfproxy.cpp
-                src/proxy/multiflow/tests/mfproxy_tests.cpp
+                tests/unit/proxy/multiflow/mfproxy_tests.cpp
                 src/proxy/quic/wire.cpp
-                src/proxy/quic/tests/wire_tests.cpp
+                tests/unit/proxy/quic/wire_tests.cpp
                 src/proxy/quic/h3capture.cpp
                 src/proxy/quic/spq1.cpp
-                src/proxy/quic/tests/h3capture_tests.cpp
-                src/proxy/quic/tests/spq1_tests.cpp
-                src/proxy/quic/tests/qpack_vendor_tests.cpp
+                tests/unit/proxy/quic/h3capture_tests.cpp
+                tests/unit/proxy/quic/spq1_tests.cpp
+                tests/unit/proxy/quic/qpack_vendor_tests.cpp
                 src/proxy/quic/openssl.cpp
-                src/proxy/quic/tests/openssl_tests.cpp
+                tests/unit/proxy/quic/openssl_tests.cpp
                 src/service/quic/quicservice.cpp
-                src/service/quic/tests/quicservice_tests.cpp
-                src/service/quic/testbed/quic_testbed.cpp
+                tests/unit/service/quic/quicservice_tests.cpp
+                tests/quic/testbed/quic_testbed.cpp
         )
         target_link_libraries(quic_testbed gtest smithproxy_qpack socle_lib pthread crypto ssl)
 
@@ -736,7 +736,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 src/proxy/quic/spq1.cpp
                 src/proxy/quic/openssl.cpp
                 src/service/quic/quicservice.cpp
-                src/service/quic/testbed/quic_test_node.cpp
+                tests/quic/testbed/quic_test_node.cpp
         )
         target_link_libraries(quic_test_node smithproxy_qpack socle_lib pthread crypto ssl)
 
@@ -920,11 +920,11 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 endforeach()
                 add_test(NAME integration.libcli2_process
                         COMMAND ${Python3_EXECUTABLE}
-                        ${PROJECT_SOURCE_DIR}/src/service/cmd/libcli2_process_e2e.py
+                        ${PROJECT_SOURCE_DIR}/tests/cli/libcli2_process_e2e.py
                         $<TARGET_FILE:smithproxy> --source ${PROJECT_SOURCE_DIR})
                 add_test(NAME integration.main_process
                         COMMAND ${Python3_EXECUTABLE}
-                        ${PROJECT_SOURCE_DIR}/src/main_process_e2e.py
+                        ${PROJECT_SOURCE_DIR}/tests/process/main_process_e2e.py
                         $<TARGET_FILE:smithproxy> --source ${PROJECT_SOURCE_DIR})
                 add_test(NAME integration.redirect
                         COMMAND ${Python3_EXECUTABLE}
@@ -945,6 +945,10 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 add_test(NAME unit.patch_runner_session_list_probe
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-session-list-probe.py)
+                add_test(NAME unit.sslca_private_key_permissions
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/sslca/private_key_permissions.py
+                        --source ${PROJECT_SOURCE_DIR})
                 add_test(NAME unit.patch_runner_native_parallel
                         COMMAND ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-native-parallel.sh)
                 add_test(NAME integration.wireshark_spq1
@@ -962,6 +966,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 set_tests_properties(
                         unit.patch_runner_fuzz_areas unit.patch_runner_fuzz_seeds
                         unit.patch_runner_pplay unit.patch_runner_native_parallel
+                        unit.sslca_private_key_permissions
                         PROPERTIES LABELS "native;unit")
             endif()
         endif()
@@ -995,25 +1000,25 @@ if(SMITHPROXY_FUZZING)
 
     add_executable(quic_wire_fuzzer
             src/proxy/quic/wire.cpp
-            src/proxy/quic/fuzz/wire_fuzzer.cpp)
+            tests/fuzz/proxy/quic/wire_fuzzer.cpp)
     smithproxy_fuzzer(quic_wire_fuzzer)
 
     add_executable(multiflow_fuzzer
             src/proxy/multiflow/mfflowcom.cpp
             src/proxy/multiflow/mfproxy.cpp
-            src/proxy/multiflow/fuzz/multiflow_fuzzer.cpp)
+            tests/fuzz/proxy/multiflow/multiflow_fuzzer.cpp)
     target_link_libraries(multiflow_fuzzer socle_lib pthread)
     smithproxy_fuzzer(multiflow_fuzzer)
 
     add_executable(quic_lifecycle_fuzzer
             src/proxy/quic/openssl.cpp
             src/proxy/quic/wire.cpp
-            src/proxy/quic/fuzz/lifecycle_fuzzer.cpp)
+            tests/fuzz/proxy/quic/lifecycle_fuzzer.cpp)
     target_link_libraries(quic_lifecycle_fuzzer socle_lib pthread crypto ssl)
     smithproxy_fuzzer(quic_lifecycle_fuzzer)
 
     add_executable(http1_framing_fuzzer
-            src/inspect/fuzz/http1_framing_fuzzer.cpp
+            tests/fuzz/inspect/http1_framing_fuzzer.cpp
             src/inspect/engine/http.cpp
             src/inspect/fp/ja4.cpp
             src/inspect/dns.cpp
@@ -1027,7 +1032,7 @@ if(SMITHPROXY_FUZZING)
     smithproxy_fuzzer(http1_framing_fuzzer)
 
     add_executable(http2_content_framing_fuzzer
-            src/inspect/fuzz/http2_content_framing_fuzzer.cpp
+            tests/fuzz/inspect/http2_content_framing_fuzzer.cpp
             src/inspect/engine/http.cpp
             src/inspect/fp/ja4.cpp
             src/inspect/dns.cpp
@@ -1057,9 +1062,9 @@ if(SMITHPROXY_TLS_FUZZING)
     endforeach()
 
     add_executable(tls_clienthello_fuzzer
-            src/proxy/tls/fuzz/clienthello_fuzzer.cpp)
+            tests/fuzz/proxy/tls/clienthello_fuzzer.cpp)
     add_executable(tls_revocation_fuzzer
-            src/proxy/tls/fuzz/revocation_fuzzer.cpp)
+            tests/fuzz/proxy/tls/revocation_fuzzer.cpp)
     target_compile_definitions(tls_revocation_fuzzer PRIVATE
             SMITHPROXY_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     foreach(fuzz_target tls_clienthello_fuzzer tls_revocation_fuzzer)
@@ -1131,7 +1136,7 @@ if("${USE_LIBSSH}" STREQUAL "Y")
     if(TARGET sx_gtests)
         target_sources(sx_gtests PRIVATE
                 src/proxy/ssh/sshmitm.cpp
-                src/proxy/ssh/tests/sshmitm_test.cpp)
+                tests/unit/proxy/ssh/sshmitm_test.cpp)
         target_link_libraries(sx_gtests LibSSH::LibSSH)
     endif()
 endif()

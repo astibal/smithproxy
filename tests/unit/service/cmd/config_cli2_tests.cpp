@@ -1,6 +1,6 @@
-#include "config_cli2.hpp"
-#include "cli_client_tasks.hpp"
-#include "cli_socket_io.hpp"
+#include <service/cmd/config_cli2.hpp>
+#include <service/cmd/cli_client_tasks.hpp>
+#include <service/cmd/cli_socket_io.hpp>
 #include <service/cfgapi/cfg_numeric.hpp>
 
 #include <gtest/gtest.h>

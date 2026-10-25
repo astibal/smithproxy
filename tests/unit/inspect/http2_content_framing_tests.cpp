@@ -1,5 +1,5 @@
-#include "../inspect/engine/http.hpp"
-#include "../../proxy/content_webhook_metadata.hpp"
+#include <inspect/engine/http.hpp>
+#include <proxy/content_webhook_metadata.hpp>
 
 #include <gtest/gtest.h>
 

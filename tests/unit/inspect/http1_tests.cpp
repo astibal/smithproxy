@@ -7,9 +7,9 @@
 #include <openssl/sha.h>
 #include <openssl/rand.h>
 
-#include "../engine.hpp"
-#include "../inspect/engine/http.hpp"
-#include "../inspect/fp/ja4.hpp"
+#include <inspect/engine.hpp>
+#include <inspect/engine/http.hpp>
+#include <inspect/fp/ja4.hpp>
 #include <ext/hpack/hpack.hpp>
 
 #include <gtest/gtest.h>

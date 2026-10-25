@@ -8,7 +8,7 @@
 
 #include <gtest/gtest.h>
 
-#include "src/inspect/fp/ja4.hpp"
+#include <inspect/fp/ja4.hpp>
 
 using namespace sx::ja4;
 
