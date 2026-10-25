@@ -42,6 +42,7 @@ import datetime
 import ipaddress
 import json
 import os
+import tempfile
 
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
@@ -169,16 +170,28 @@ def save_key(key, keyfile, passphrase=None):
             return serialization.NoEncryption()
         return serialization.BestAvailableEncryption(pwd)
 
-    try:
-        with open(os.path.join(SETTINGS['path'], keyfile), "wb") as f:
-            f.write(key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.TraditionalOpenSSL,
-                encryption_algorithm=choose_enc(passphrase),
-            ))
+    encoded_key = key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=choose_enc(passphrase),
+    )
 
-    except Exception as e:
-        print(Options.indent*" " + "save_key: exception caught: " + str(e))
+    target = os.path.abspath(os.path.join(SETTINGS["path"], keyfile))
+    target_dir = os.path.dirname(target)
+    descriptor, temporary = tempfile.mkstemp(prefix=".private-key-", dir=target_dir)
+
+    try:
+        # The temporary file is private from birth. Atomic replacement also
+        # replaces a destination symlink instead of writing through it.
+        with os.fdopen(descriptor, "wb") as output:
+            os.fchmod(output.fileno(), 0o600)
+            output.write(encoded_key)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, target)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 NameOIDMap = {

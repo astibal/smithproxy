@@ -900,6 +900,10 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 add_test(NAME unit.patch_runner_session_list_probe
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-session-list-probe.py)
+                add_test(NAME unit.sslca_private_key_permissions
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/sslca/private_key_permissions.py
+                        --source ${PROJECT_SOURCE_DIR})
                 add_test(NAME unit.patch_runner_native_parallel
                         COMMAND ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-native-parallel.sh)
                 add_test(NAME integration.wireshark_spq1
@@ -917,6 +921,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 set_tests_properties(
                         unit.patch_runner_fuzz_areas unit.patch_runner_fuzz_seeds
                         unit.patch_runner_pplay unit.patch_runner_native_parallel
+                        unit.sslca_private_key_permissions
                         PROPERTIES LABELS "native;unit")
             endif()
         endif()
