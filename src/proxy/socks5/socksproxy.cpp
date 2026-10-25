@@ -512,7 +512,11 @@ bool ExplicitProxy::send_pending_connect_response() {
 bool ExplicitProxy::handle_cx_write(unsigned char side, baseHostCX* cx,
                                     bool cross_direction_retry) {
     if(not pending_connect_response_.empty()) {
-        if((side == 'r' || side == 'R') && cx->opening()) {
+        if((side == 'r' || side == 'R') && !connect_response_ready_) {
+            // CONNECT completion belongs to the explicit protocol. Delayed
+            // TLS accept may already have cleared the transport's opening
+            // flag while the client still waits for this reply before sending
+            // ClientHello. Validate once; later events preserve partial replies.
             // This callback is driven by the upstream socket's write event.
             // Do not call is_connected() here: it performs another zero-time
             // epoll probe which can miss the event that brought us here and

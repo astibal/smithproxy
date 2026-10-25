@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""End-to-end STARTTLS test through Smithproxy's SOCKS frontend.
+"""End-to-end STARTTLS and implicit TLS tests through Smithproxy's SOCKS frontend.
 
 The upstream first behaves as a plaintext HTTP CONNECT proxy and then switches
 the same socket to TLS. Smithproxy must observe the CONNECT/200 exchange,
@@ -28,6 +28,7 @@ class Scenario:
     fragmented: bool = False
     upgrades: bool = True
     nested: bool = False
+    implicit: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -112,7 +113,7 @@ def send_data(sock, data, fragmented):
 
 class StartTlsOrigin:
     def __init__(self, certificate, key, scenario, address):
-        self.port = free_port(address.family, address.bind_host)
+        self.port = 443 if scenario.implicit else free_port(address.family, address.bind_host)
         self.certificate = certificate
         self.key = key
         self.scenario = scenario
@@ -141,10 +142,11 @@ class StartTlsOrigin:
                 raw, _ = listener.accept()
                 with raw:
                     raw.settimeout(15)
-                    request = recv_until(raw, self.scenario.request)
-                    if not request.startswith(self.scenario.request):
-                        raise RuntimeError(f"unexpected STARTTLS request: {request!r}")
-                    send_data(raw, self.scenario.response, self.scenario.fragmented)
+                    if not self.scenario.implicit:
+                        request = recv_until(raw, self.scenario.request)
+                        if not request.startswith(self.scenario.request):
+                            raise RuntimeError(f"unexpected STARTTLS request: {request!r}")
+                        send_data(raw, self.scenario.response, self.scenario.fragmented)
                     if not self.scenario.upgrades:
                         self.request = recv_until(raw, b"PING\r\n")
                         raw.sendall(b"PONG\r\n")
@@ -266,14 +268,18 @@ def exercise_scenario(name, scenario, address_name, address, worktree, socks_por
     )
     origin.start()
 
+    # PXM-017: consume the entire CONNECT reply before sending ClientHello.
+    # Implicit TLS must release this reply even if delayed accept has already
+    # cleared the upstream transport's opening flag.
     raw = socks_connect(socks_port, origin.port, address)
     with raw:
-        send_data(raw, scenario.request, scenario.fragmented)
-        response = recv_until(raw, scenario.response)
-        if not response.startswith(scenario.response):
-            raise RuntimeError(
-                f"{name}/{address_name}: unexpected plaintext response: {response!r}"
-            )
+        if not scenario.implicit:
+            send_data(raw, scenario.request, scenario.fragmented)
+            response = recv_until(raw, scenario.response)
+            if not response.startswith(scenario.response):
+                raise RuntimeError(
+                    f"{name}/{address_name}: unexpected plaintext response: {response!r}"
+                )
 
         if not scenario.upgrades:
             raw.sendall(b"PING\r\n")
@@ -290,7 +296,8 @@ def exercise_scenario(name, scenario, address_name, address, worktree, socks_por
         context = ssl.create_default_context()
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
-        with context.wrap_socket(raw, server_hostname="integration.invalid") as tls:
+        hostname = "Smithproxy-Server-Certificate" if scenario.implicit else "integration.invalid"
+        with context.wrap_socket(raw, server_hostname=hostname) as tls:
             if scenario.nested:
                 tls.sendall(b"STARTTLS\r\n")
                 nested_response = recv_until(
@@ -339,6 +346,14 @@ def run(args):
         cli_port = free_port()
         make_config(worktree / "etc/smithproxy.cfg", config, worktree, runtime,
                     socks_port, cli_port)
+        if args.implicit_tls:
+            # The stable repository origin certificate may be expired and is
+            # self-signed. Exercise transport ordering without trust checks.
+            text = config.read_text()
+            for option in ("allow_invalid_certs", "allow_untrusted_issuers", "allow_self_signed"):
+                text = text.replace(f"{option} = FALSE;", f"{option} = TRUE;")
+            text = text.replace("inspect = TRUE;", "inspect = TRUE; ct_enable = FALSE;", 1)
+            config.write_text(text)
 
         process = subprocess.Popen(
             [str(executable), "--config-file", str(config), "--debug"],
@@ -354,6 +369,8 @@ def run(args):
             selected = SCENARIOS if args.protocol == "all" else {
                 args.protocol: SCENARIOS[args.protocol]
             }
+            if args.implicit_tls:
+                selected = {"implicit-tls": Scenario(b"", b"", implicit=True)}
             addresses = ADDRESSES if args.address == "all" else {
                 args.address: ADDRESSES[args.address]
             }
@@ -402,4 +419,6 @@ if __name__ == "__main__":
                         default=pathlib.Path(__file__).resolve().parents[2])
     parser.add_argument("--protocol", choices=["all", *SCENARIOS], default="all")
     parser.add_argument("--address", choices=["all", *ADDRESSES], default="ipv4-ip")
+    parser.add_argument("--implicit-tls", action="store_true",
+                        help="Test PXM-017 on origin port 443; use an isolated network namespace")
     run(parser.parse_args())

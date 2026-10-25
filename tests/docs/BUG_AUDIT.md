@@ -182,3 +182,31 @@ percentage change.
 | POL-006 | Degraded enforcement profiles | An accept rule that named a missing content, detection, TLS, DNS ALG, script or routing profile—or the removed authentication profile—was retained as degraded and continued matching with its original allow verdict. Traffic was therefore accepted without the explicitly requested enforcement. A valid script profile was loaded but never applied at all. | Force a degraded rule to deny within its original match scope, make structurally invalid rules terminal deny barriers instead of falling through to later allows, invoke configured script profiles during policy application and reject the connection if runtime attachment fails. | Policy configuration fallback case, focused policy tests and production build. |
 | POL-007 | Port-object lookup | Looking up an unknown port object returned a synthetic `0-0` range rather than “not found”. Policy loading therefore considered the reference valid; the rule silently failed to match normal traffic and could fall through to a later allow. Port objects also accepted values outside the transport range, including a negative-to-large interval that could unexpectedly match every real port. | Return a null lookup result so an unresolved reference becomes a fail-closed selection barrier, and reject port-object endpoints outside `0..65535`. | Policy configuration fallback coverage and production build. |
 | POL-008 | Default authorization posture | A missing policy match and a non-positive access-request webhook result historically favored availability. This made transient configuration or webhook failures indistinguishable from authorization and could pass traffic without an affirmative decision. | Default both paths to deny. `settings.policy_fail_open=true` restores no-match allow, and `settings.policy_access_request_fail_open=true` restores webhook failure allow; neither option overrides an explicit deny/reject. Schema 1040 records the compatibility change. | `PolicyTest.*`, `AccessFilterDecision.MalformedAndNonSuccessRepliesFailClosedByDefault`, `LegacyFailOpenMustBeExplicit`, policy dataplane matrix and production build. |
+
+## PXM-017 — SOCKS/implicit TLS CONNECT reply stalls
+
+Delayed TLS accept can clear the upstream transport's `opening` flag before
+the explicit proxy handles write readiness. Using that flag to gate CONNECT
+completion leaves the success reply pending: the client waits for CONNECT
+while TLS waits for ClientHello.
+
+CONNECT completion now uses `connect_response_ready_`, independently of TCP
+opening state. The existing SO_ERROR/connect-failure and destination checks
+still run before the reply becomes ready. Partial replies retain their offset
+and are not revalidated or replaced on subsequent upstream events.
+
+Verified on origin/master `ae0bfe6` with Socle `62dee06`: the implicit TLS
+regression times out reading the SOCKS reply with the original condition and
+passes the handshake and HTTP transfer with the fix. The 15-case IPv4 SOCKS
+STARTTLS matrix and HTTP CONNECT integration (including failed upstream and
+local-destination protection) also pass. See `tests/tls/README.md` for the
+isolated-network regression command.
+
+Full P3 subsequently passed all 43 sections (39/39 native CTest entries and
+remote dataplane/fuzz coverage). The first native attempt failed the unrelated
+`QuicTestbed.RepeatedVerifiedReconnectsReleaseEveryIdleSession` handshake-count
+assertion (22 instead of 24); ten isolated repetitions and both subsequent
+full native gates passed. One remote smoke attempt stopped at process startup
+because libconfig++ and libmicrohttpd runtime libraries were missing; after
+installing them, the complete unchanged P3 run passed. The successful run is
+recorded in `tests/docs/patch-run-history`; preceding failed reports are retained.

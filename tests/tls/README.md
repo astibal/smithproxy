@@ -38,3 +38,15 @@ python3 tests/tls/starttls_socks_integration.py \
 
 The FQDN matrix uses `sslip.io` loopback names and therefore needs DNS access.
 Use `--address ipv4-ip` or `--address ipv6-ip` for an entirely offline run.
+
+PXM-017 covers implicit TLS on origin port 443. The client waits for the whole
+SOCKS CONNECT success reply before sending ClientHello, then verifies a real
+TLS handshake and bidirectional HTTP transfer. Run in an isolated network
+namespace so port 443 cannot conflict with a host service:
+
+```sh
+unshare -Urn -- sh -c 'ip link set lo up && python3 tests/tls/starttls_socks_integration.py --smithproxy build/smithproxy --implicit-tls --address ipv4-ip'
+```
+
+`--implicit-tls` selects this single scenario instead of the STARTTLS matrix.
+It permits the stable test origin certificate regardless of expiry or trust.
