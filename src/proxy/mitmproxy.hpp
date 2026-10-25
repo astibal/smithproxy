@@ -42,6 +42,8 @@
  #define MITMPROXY_HPP
 
 #include <atomic>
+#include <memory>
+#include <service/http/webhook_control.hpp>
 #include <ctime>
 #include <mutex>
 #include <set>
@@ -316,6 +318,8 @@ private:
     // A content webhook may permanently decline the rest of this connection.
     // SIFT has its own path and is deliberately unaffected.
     bool webhook_content_wanted_ = true;
+    std::shared_ptr<sx::http::webhooks::webhook_control_t> webhook_control_ =
+        std::make_shared<sx::http::webhooks::webhook_control_t>();
 
     struct sift_ctl_t {
         std::uint64_t payload_left_bytes = 0;

@@ -795,7 +795,8 @@ namespace sx::http::webhooks {
 
     static void send_action_impl(std::string const& action,
                                  std::optional<std::string> const& action_id,
-                                 nlohmann::json const& details) {
+                                 nlohmann::json const& details,
+                                 std::shared_ptr<webhook_control_t> control = {}) {
         if(enabled) {
 
 
@@ -828,7 +829,15 @@ namespace sx::http::webhooks {
             if(not msg_str.empty()) {
 
                 struct action_hook : public default_callback {
+                    std::shared_ptr<webhook_control_t> control;
+
+                    explicit action_hook(std::shared_ptr<webhook_control_t> value)
+                        : control(std::move(value)) {}
+
                     void on_reply([[maybe_unused]] sx::http::expected_reply const &rep) const override {
+                        if(control && rep && rep->response.first >= 200 && rep->response.first < 300)
+                            control->apply(nlohmann::json::parse(rep->response.second, nullptr, false));
+
                         const auto now = std::chrono::duration_cast<std::chrono::seconds>(
                             std::chrono::steady_clock::now().time_since_epoch()).count();
                         if(rep.has_value() and rep.value().response.first == 202
@@ -838,7 +847,7 @@ namespace sx::http::webhooks {
                         }
                     }
                 };
-                webhook_emit(std::move(msg_str), action, action_hook(),
+                webhook_emit(std::move(msg_str), action, action_hook(std::move(control)),
                              action == "connection-content");
 
             }
@@ -850,8 +859,8 @@ namespace sx::http::webhooks {
     }
 
     void send_action(std::string const& action, std::string const& action_id,
-                     nlohmann::json const& details) {
-        send_action_impl(action, action_id, details);
+                     nlohmann::json const& details, std::shared_ptr<webhook_control_t> control) {
+        send_action_impl(action, action_id, details, std::move(control));
     }
 
     // send action and wait - use hook,

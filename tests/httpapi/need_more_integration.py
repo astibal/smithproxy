@@ -50,6 +50,13 @@ class Hook(http.server.BaseHTTPRequestHandler):
                 info = event['details']['info']
                 data = payload if binary else base64.b64decode(info['content'], validate=True)
                 with self.server.condition:
+                    if self.server.verify_control:
+                        control = info['webhook_control']
+                        assert control['version'] == 1
+                        previous = self.server.sequences.get(event['id'], 0)
+                        assert control['sequence'] == previous + 1
+                        self.server.sequences[event['id']] = control['sequence']
+                        assert control['mode'] in ('regular', 'strict')
                     self.server.received.append((event['id'], info['side'], data))
                     status, result = self.server.reply(data)
                     self.server.condition.notify_all()
@@ -95,6 +102,7 @@ def main():
     parser.add_argument('--smithproxy', type=pathlib.Path, required=True)
     parser.add_argument('--source', type=pathlib.Path, required=True)
     parser.add_argument('--binary', action='store_true')
+    parser.add_argument('--control-only', action='store_true')
     parser.add_argument('--replace-only', action='store_true', help='Reproduce resize handling without need-more')
     args = parser.parse_args()
     source = args.source.resolve()
@@ -105,6 +113,7 @@ def main():
         server.received, server.errors = [], []
         server.actions = []
         server.binary_enabled, server.binary_count = args.binary, 0
+        server.verify_control, server.sequences = args.control_only, {}
         server.reply = lambda data: (200, {'action': 'unchanged'})
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -176,6 +185,44 @@ def main():
                     assert time.monotonic() < deadline, 'No protocol negotiation'
                     time.sleep(.05)
                 time.sleep(.1)
+
+            if args.control_only:
+                for failure in ((503, {'control': {'mode': 'regular'}}),
+                                (200, b'invalid-json'), (200, [])):
+                    with connection() as (client, origin):
+                        set_reply(lambda data: (200, {'control': {'mode': 'strict'}}))
+                        send(client, b'ARM')
+                        assert receive(origin, 3) == b'ARM'
+                        set_reply(lambda data: (200, {'control': {'mode': 'unknown'}}))
+                        send(client, b'KEEP')
+                        assert receive(origin, 4) == b'KEEP'
+                        set_reply(lambda data: failure)
+                        send(client, b'MUST-NOT-PASS')
+                        origin.settimeout(5)
+                        try:
+                            assert origin.recv(1) == b'', 'Strict content leaked'
+                        except ConnectionResetError:
+                            pass
+
+                with connection() as (client, origin):
+                    for mode in ('strict', 'regular'):
+                        set_reply(lambda data, mode=mode: (200, {'control': {'mode': mode}}))
+                        send(client, b'MODE')
+                        assert receive(origin, 4) == b'MODE'
+                    set_reply(lambda data: (503, {}))
+                    send(client, b'FAIL-OPEN')
+                    assert receive(origin, 9) == b'FAIL-OPEN'
+
+                with connection() as (client, origin):
+                    set_reply(lambda data: (200, {'action': 'not-interested',
+                                                  'control': {'mode': 'strict'}}))
+                    send(client, b'ARM')
+                    assert receive(origin, 3) == b'ARM'
+                    set_reply(lambda data: (200, {'action': 'unchanged'}))
+                    send(client, b'STILL-CALLING')
+                    assert receive(origin, 13) == b'STILL-CALLING'
+                print('PASS control strict/regular, failure closure and not-interested guard', flush=True)
+                return
 
             if args.replace_only:
                 with connection() as (client, origin):

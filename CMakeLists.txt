@@ -609,6 +609,11 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/service/tests/interface_monitor_tests.cpp
         )
 
+        add_executable(webhook_control_test tests/webhook_control_test.cpp)
+        target_include_directories(webhook_control_test PRIVATE ${PROJECT_SOURCE_DIR}/src)
+        target_compile_options(webhook_control_test PRIVATE -UNDEBUG)
+        add_test(NAME unit.webhook_control COMMAND webhook_control_test)
+
         add_executable(sx_gtests_privsep
                 socle/tests/privileged_socket_tests.cpp
         )
@@ -849,6 +854,18 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                         ${PROJECT_SOURCE_DIR}/tests/httpapi/need_more_integration.py
                         --smithproxy $<TARGET_FILE:smithproxy>
                         --source ${PROJECT_SOURCE_DIR})
+                add_test(NAME integration.webhook_control
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/httpapi/need_more_integration.py
+                        --smithproxy $<TARGET_FILE:smithproxy>
+                        --source ${PROJECT_SOURCE_DIR} --control-only)
+                add_test(NAME integration.webhook_control_binary
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/httpapi/need_more_integration.py
+                        --smithproxy $<TARGET_FILE:smithproxy>
+                        --source ${PROJECT_SOURCE_DIR} --control-only --binary)
+                set_tests_properties(integration.webhook_control integration.webhook_control_binary
+                        PROPERTIES LABELS "native;integration" TIMEOUT 120)
                 add_test(NAME integration.webhook_need_more_binary
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/tests/httpapi/need_more_integration.py

@@ -323,7 +323,7 @@ MitmProxy::~MitmProxy() {
         }
 
         if(got_something) {
-            sx::http::webhooks::send_action("connection-info", to_connection_ID(), event);
+            sx::http::webhooks::send_action("connection-info", to_connection_ID(), event, webhook_control_);
             _dia("webhook sent");
         } else {
             _dia("nothing to sent to webhook");
@@ -435,7 +435,7 @@ void MitmProxy::publish_sift_classifications() const {
     if(!lored_state.empty())
         details["info"]["classification"]["lored_status"] = lored_state;
     sx::http::webhooks::send_action(
-        "connection-info", to_connection_ID(), details);
+        "connection-info", to_connection_ID(), details, webhook_control_);
 }
 
 void MitmProxy::submit_flow_observation(
@@ -470,7 +470,7 @@ void MitmProxy::submit_flow_observation(
 
     if(sx::http::webhooks::is_enabled()) {
         sx::http::webhooks::send_action(
-            "connection-info", to_connection_ID(), details);
+            "connection-info", to_connection_ID(), details, webhook_control_);
     }
 
     if(!sx::http::webhooks::sift_enabled()) return;
@@ -500,7 +500,7 @@ void MitmProxy::webhook_session_start() const {
     auto cl = to_connection_label();
     j["info"] = { {"session", cl } };
     if(sx::http::webhooks::is_enabled())
-        sx::http::webhooks::send_action("connection-start", to_connection_ID(), j);
+        sx::http::webhooks::send_action("connection-start", to_connection_ID(), j, webhook_control_);
     sx::http::webhooks::send_sift_action("connection-start", to_connection_ID(), j);
 
     wh_start = true;
@@ -579,7 +579,7 @@ void MitmProxy::webhook_session_stop() const {
 
 
     if(sx::http::webhooks::is_enabled())
-        sx::http::webhooks::send_action("connection-stop", to_connection_ID(), j);
+        sx::http::webhooks::send_action("connection-stop", to_connection_ID(), j, webhook_control_);
     sx::http::webhooks::send_sift_action("connection-stop", to_connection_ID(), j);
 
     wh_stop = true;
@@ -1135,6 +1135,13 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
         { "L7_encoding", nlohmann::json::array({""}) },
         { "content_annotations", nlohmann::json::array() }
     };
+    if(regular_webhook) {
+        // Advertise support before Spider may publish its first stateful rewrite.
+        j["info"]["webhook_control"] = {
+            {"version", 1}, {"mode", webhook_control_->strict() ? "strict" : "regular"},
+            {"sequence", ++webhook_control_->content_sequence}
+        };
+    }
 
     auto publish_l7_ranges = [&j](auto const& ranges,
                                   std::vector<std::string> const& known_encodings,
@@ -1214,6 +1221,7 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
         }
     }
 
+    bool content_reply_received = false;
     auto response_hook = [&, sift](sx::http::expected_reply r){
         if(r.has_value()) {
             auto reply = r.value();
@@ -1221,15 +1229,20 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
 
             if(reply.response.first >= 200 and reply.response.first < 300) {
                 auto json_obj = nlohmann::json::parse(reply.response.second, nullptr, false);
-                if(json_obj.is_discarded()) {
+                if(!json_obj.is_object()) {
                     _err("MitmProxy::content_webhook: response body is invalid");
                 }
                 else {
+                    if(regular_webhook) {
+                        webhook_control_->apply(json_obj);
+                        content_reply_received = true;
+                    }
                     if(sift) {
                         if(apply_sift_reply(json_obj)) publish_sift_classifications();
                     }
                     if(json_obj.contains("action")) {
-                        if(regular_webhook && json_obj["action"] == "not-interested") {
+                        if(regular_webhook && json_obj["action"] == "not-interested" &&
+                           !webhook_control_->strict()) {
                             webhook_content_wanted_ = false;
                             _dia("webhook content: peer declined future content for this connection");
                         }
@@ -1305,6 +1318,14 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
         }
     }
 
+    // No response (including a skipped request), HTTP failure or invalid JSON:
+    // strict connections must not forward the unprocessed content.
+    if(regular_webhook && !content_reply_received && webhook_control_->strict()) {
+        buffer.size(0);
+        state().dead(true);
+        return true;
+    }
+
     return was_modified;
 }
 
@@ -1319,9 +1340,14 @@ bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t 
 
     if(sift_is_enabled and content_webhook(
             from, side, from->to_read(), payload_layer, false, true)) {
-        return true;
+        if(!webhook_control_->strict()) return true;
     }
-    if(not webhook_enabled or not webhook_content_wanted_) return false;
+    if(!webhook_enabled) {
+        if(webhook_control_->strict()) state().dead(true);
+        return false;
+    }
+
+    if(!webhook_content_wanted_ && !webhook_control_->strict()) return false;
 
     if(writer_opts()->webhook_lock_traffic) {
 
@@ -1370,6 +1396,8 @@ bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t 
              to_string(iNOT).c_str());
         log.event(ERR, "[%s]: content_webhook: previous webhook takes too long to complete, content NOT sent to webhook.",
              to_string(iNOT).c_str());
+
+        if(webhook_control_->strict()) state().dead(true);
 
     }
     else {
@@ -1427,12 +1455,18 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
     }
 
     // 1. content webhook first (potentially modifies from->to_read() buffer
-    if(writer_opts()->webhook_enable or sx::http::webhooks::sift_enabled()) {
+    if(writer_opts()->webhook_enable or sx::http::webhooks::sift_enabled() or webhook_control_->strict()) {
         auto orig_sz = from->to_read().size();
         if(handle_content_webhook(from, to, side)) {
             auto sz = from->to_read().size();
             _dia("mitmproxy::proxy-%c: %dB replaced with %dB (webhook)", from_side(side), orig_sz, sz);
         }
+    }
+
+    if(state().dead()) {
+        if(tx) flow_ctx_->discard(*tx);
+        shutdown();
+        return;
     }
 
     // 2. do filtering (stats, access, etc.)
