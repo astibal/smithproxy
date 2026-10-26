@@ -285,8 +285,9 @@ add_executable(smithproxy
 
         src/proxy/mitmhost.cpp
         src/proxy/flowctx.cpp
-        src/inspect/protocol_checkpoint.cpp
+        src/inspect/protocol_fork.cpp
         src/inspect/protocol_adapter.cpp
+        src/inspect/engine/http2_adapter.cpp
         src/inspect/protocol_views.cpp
         src/proxy/mitmproxy.cpp
         src/proxy/mitmcom.hpp
@@ -520,6 +521,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 src/proxy/filters/statistics/flowanalysis.cpp
                 tests/unit/proxy/filters/statistics/statistics_tests.cpp
                 tests/unit/proxy/filters/access_filter_tests.cpp
+                tests/unit/proxy/connection_start_test.cpp
                 src/proxy/filters/sinkhole.cpp
                 tests/unit/proxy/filters/sinkhole_tests.cpp
                 src/proxy/filters/statsfilter.cpp
@@ -581,14 +583,16 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 socle/common/tests/cast_tests.cpp
                 )
         add_executable(sx_gtests_http1
+                tests/unit/proxy/connection_start_test.cpp
                 tests/unit/inspect/http1_tests.cpp
                 tests/unit/inspect/http1_framing_tests.cpp
                 tests/unit/inspect/http2_content_framing_tests.cpp
-                tests/unit/inspect/protocol_checkpoint_tests.cpp
                 tests/unit/inspect/protocol_views_tests.cpp
+                tests/unit/inspect/protocol_fork_tests.cpp
                 tests/unit/inspect/protocol_fork_benchmark.cpp
-                src/inspect/protocol_checkpoint.cpp
+                src/inspect/protocol_fork.cpp
                 src/inspect/protocol_adapter.cpp
+                src/inspect/engine/http2_adapter.cpp
                 src/inspect/protocol_views.cpp
 
                 src/inspect/engine.hpp
@@ -675,15 +679,6 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
             target_link_libraries(sx_gtests ${LIBCONFIGPP_LIBRARIES})
         endif()
         target_link_libraries(sx_gtests_http1 gtest gtest_main socle_lib pthread crypto ssl)
-        # Independent HPACK oracle is optional, but its absence is a visible
-        # skipped test, never silently counted as protocol verification.
-        find_path(CHECKPOINT_NGHTTP2_INCLUDE nghttp2/nghttp2.h)
-        find_library(CHECKPOINT_NGHTTP2_LIBRARY nghttp2)
-        if(CHECKPOINT_NGHTTP2_INCLUDE AND CHECKPOINT_NGHTTP2_LIBRARY)
-            target_include_directories(sx_gtests_http1 PRIVATE ${CHECKPOINT_NGHTTP2_INCLUDE})
-            target_link_libraries(sx_gtests_http1 ${CHECKPOINT_NGHTTP2_LIBRARY})
-            target_compile_definitions(sx_gtests_http1 PRIVATE CHECKPOINT_NGHTTP2=1)
-        endif()
         target_link_libraries(sx_gtests_startstoptls
                 gtest gtest_main
                 "$<LINK_GROUP:RESCAN,socle_lib,socle_common_lib>"
@@ -751,9 +746,6 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                     --gtest_filter=LogMux.RemoteTargetLifecycleIsSafeDuringConcurrentLogging)
             add_test(NAME unit.http1 COMMAND sx_gtests_http1
                     --gtest_filter=-HTTP1.benchmark:ProtocolForkBenchmark.*)
-            add_test(NAME unit.protocol_checkpoint COMMAND sx_gtests_http1
-                    --gtest_filter=*ProtocolCheckpoint*
-                    --gtest_output=xml:protocol-checkpoint-results.xml)
             add_test(NAME unit.protocol_views COMMAND sx_gtests_http1
                     --gtest_filter=*ProtocolViews*
                     --gtest_output=xml:protocol-views-results.xml)
@@ -918,6 +910,13 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                     set_tests_properties(integration.protocol_views_${webhook_format}
                             PROPERTIES LABELS "native;integration;http2" TIMEOUT 180)
                 endforeach()
+                add_test(NAME integration.connection_start
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/httpapi/need_more_integration.py
+                        --smithproxy $<TARGET_FILE:smithproxy>
+                        --source ${PROJECT_SOURCE_DIR} --setup-only)
+                set_tests_properties(integration.connection_start
+                        PROPERTIES LABELS "native;integration;webhook" TIMEOUT 180)
                 add_test(NAME integration.libcli2_process
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/tests/cli/libcli2_process_e2e.py

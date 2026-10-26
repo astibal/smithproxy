@@ -16,7 +16,10 @@ Optional top-level response block, independent of `action`:
   use the same JSON response. Global ping/info/hostname notifications have no
   connection policy; the separate SIFT classification service does not control it.
 - Missing, malformed or unknown control values leave policy unchanged.
-- Async responses keep only shared atomic policy state, never a proxy pointer.
+- `connection-start` is now a synchronous setup gate before the first content
+  callback. Its control response takes effect before content sequence 1.
+  See [connection-start contract and validation](connection-start.txt).
+- Remaining async responses keep only shared atomic policy state, never a proxy pointer.
   Updates take effect when processed; overlapping replies use arrival order.
   This is not a negotiated activation barrier or acknowledgement protocol.
 - In strict mode, missing content replies, non-2xx status, or non-object JSON
@@ -24,7 +27,9 @@ Optional top-level response block, independent of `action`:
   and unavailable traffic lock also close it. `not-interested` cannot disable
   strict content delivery. A successful regular downgrade restores fail-open.
 - Closure uses existing proxy shutdown, not a promise of an on-wire TCP RST.
-  No new `drop` action, translation engine, or idle watchdog is introduced.
+  `connection-start` separately supports `action: "drop"`; this does not change
+  the meanings of content actions such as `discard`. No translation engine or
+  idle watchdog is introduced by the control block.
 - An empty JSON object is a successful unchanged response. This minimal policy
   is transport fail-closed, not validation of every semantic action or HPACK state.
 
@@ -43,8 +48,10 @@ suites passed (31.15 s): the three above plus both existing need-more JSON/SXBN
 regressions. Live cases cover HTTP error, invalid JSON, non-object JSON,
 unknown mode preservation, rejection of downgrade on HTTP error, regular
 fail-open restoration, and continued callbacks after strict + not-interested.
-Async connection notification routing is compiled; its ordering/activation
-race is not covered by the live tests and is not an acknowledgement guarantee.
+At that validation point all connection notifications were asynchronous, and
+their ordering/activation race was not covered. The later synchronous start
+gate is separately tested and documented in connection-start.txt; other async
+notifications still do not provide an acknowledgement guarantee.
 
 The same five suites passed again after adding capability/sequence metadata
 (28.47 s). Control integration checks version, mode and consecutive sequence

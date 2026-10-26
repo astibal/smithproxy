@@ -23,6 +23,11 @@ public:
 
     void attach(MitmHostCX& host, char leg);
 
+    void allow_rewrite(bool allowed) {
+        using Mode = sx::engine::ProtocolViews::Mode;
+        views_.set_mode(allowed ? Mode::Rewrite : Mode::Observe);
+    }
+
     Tx begin(Dir dir, buffer const& data, std::uint64_t read_bytes);
     void commit(Tx const& tx, buffer const& data);
     void discard(Tx const& tx);

@@ -63,22 +63,42 @@ void initialize(ProtocolViews& views, unsigned streams) {
     ASSERT_FALSE(state(views).connection_invalid);
 }
 
-enum class Path { SingleParser, Unchanged, AfterSplit, ForkOnly, FirstSplit };
+enum class Path { SingleParser, Observe, TwoFromStart, TwoShared, TwoSelective,
+                  AfterSplit, ForkOnly, FirstRewrite };
 
 const char* name(Path path) {
     switch (path) {
         case Path::SingleParser: return "single_parser";
-        case Path::Unchanged: return "unchanged_with_fork";
+        case Path::Observe: return "observe_no_fork";
+        case Path::TwoFromStart: return "two_contexts_from_start";
+        case Path::TwoShared: return "two_contexts_shared_analysis";
+        case Path::TwoSelective: return "two_contexts_no_output_fingerprint";
         case Path::AfterSplit: return "after_split_two_parsers";
         case Path::ForkOnly: return "fork_only";
-        case Path::FirstSplit: return "first_split";
+        case Path::FirstRewrite: return "setup_rewrite_first_payload";
     }
     return "unknown";
 }
 
 double sample(Path path, unsigned streams, unsigned payload, unsigned iterations) {
-    ProtocolViews views;
+    const bool rewrite = path == Path::AfterSplit || path == Path::FirstRewrite;
+    ProtocolViews views(rewrite ? ProtocolViews::Mode::Rewrite : ProtocolViews::Mode::Observe);
     initialize(views, streams);
+    // Benchmark-only eager strategy. Each coordinator stays unsplit and owns
+    // one independent engine. Feed BOTH the same setup from the beginning;
+    // do not manufacture the second context by copying initialized state.
+    std::unique_ptr<ProtocolViews> receiver;
+
+    if (path == Path::TwoFromStart || path == Path::TwoShared || path == Path::TwoSelective) {
+        receiver = std::make_unique<ProtocolViews>();
+        initialize(*receiver, streams);
+        EXPECT_NE(&state(views), &state(*receiver));
+#ifdef USE_HPACK
+        EXPECT_NE(state(views).request_decoder, state(*receiver).request_decoder);
+        EXPECT_NE(state(views).response_decoder, state(*receiver).response_decoder);
+#endif
+    }
+
     auto input = frame(0, 0, 1, std::string(payload, 'a'));
     auto replacement = frame(0, 0, 1, std::string(payload, 'b'));
 
@@ -89,8 +109,8 @@ double sample(Path path, unsigned streams, unsigned payload, unsigned iterations
     }
 
     // Initialization and payload allocation are outside the timed interval.
-    // The first split is measured once per newly initialized conversation.
-    if (path == Path::FirstSplit) iterations = 1;
+    // Setup's first rewrite-capable payload includes the one-time context fork.
+    if (path == Path::FirstRewrite) iterations = 1;
     const auto start = Clock::now();
 
     for (unsigned i = 0; i < iterations; ++i) {
@@ -98,13 +118,34 @@ double sample(Path path, unsigned streams, unsigned payload, unsigned iterations
             auto copy = views.context(E::Client).protocol_fork();
             // Copy construction AND destruction belong to the measured cost.
             if (!copy) std::abort();
-        } else if (path == Path::SingleParser) {
+        } else if (path == Path::SingleParser || path == Path::TwoFromStart ||
+                   path == Path::TwoShared || path == Path::TwoSelective) {
+            // Include snapshot allocation, byte copy, equality checks and
+            // cache destruction in the timing. Reuse only within this pair.
+            std::optional<sx::engine::PayloadAnalysis> analysis;
+            sx::engine::PayloadAnalysis uncached;
+            auto protocol_only = sx::engine::PayloadAnalysis::protocol_only();
+
+            if (path == Path::TwoShared || path == Path::TwoSelective)
+                analysis.emplace(input.string_view());
+
+            auto* shared = analysis ? &*analysis : &uncached;
             // seed() runs the same parser and annotation pass without forking.
             // With no host/DNS payload, its output-only effect guard is inert.
-            views.seed(E::Client, input);
+            views.seed(E::Client, input, shared);
+
+            // The receiver observes the actual outgoing bytes in the same
+            // wire direction. No fork, rollback, journal or second webhook.
+            // seed() suppresses external effects, inert for this DATA fixture.
+            // Explicit publication requests keep the historical controls
+            // hashing on both passes. Only the new path suppresses output.
+            if (receiver) {
+                receiver->seed(E::Client, input,
+                    path == Path::TwoSelective ? &protocol_only : shared);
+            }
         } else {
             auto token = views.begin(E::Client, input, input.size());
-            views.finish(token, path == Path::FirstSplit ? replacement : input);
+            views.finish(token, path == Path::FirstRewrite ? replacement : input);
         }
     }
 
@@ -120,7 +161,40 @@ double sample(Path path, unsigned streams, unsigned payload, unsigned iterations
         EXPECT_FALSE(connection.streams.at(1).request_invalid_);
     }
 
+    if (receiver) {
+        const auto& connection = state(*receiver);
+        EXPECT_FALSE(connection.connection_invalid);
+        EXPECT_EQ(connection.streams.at(1).request_body_bytes_, expected);
+        EXPECT_FALSE(connection.streams.at(1).request_invalid_);
+        EXPECT_EQ(connection.client_connection_window, state(views).client_connection_window);
+        EXPECT_TRUE(connection.left_frame_pending.empty());
+        EXPECT_FALSE(receiver->split());
+        EXPECT_FALSE(views.split());
+
+        const auto source_app = std::dynamic_pointer_cast<sx::engine::http::app_HttpRequest>(
+            views.context(E::Client).application_data);
+        const auto target_app = std::dynamic_pointer_cast<sx::engine::http::app_HttpRequest>(
+            receiver->context(E::Client).application_data);
+        EXPECT_TRUE(source_app && source_app->l7_payload_observed);
+        EXPECT_TRUE(target_app);
+
+        if (target_app) {
+            EXPECT_EQ(target_app->l7_payload_observed, path != Path::TwoSelective);
+        }
+    }
+
     return elapsed / iterations;
+}
+
+// Exercise every measurement path in the correctness gate without running a
+// benchmark-scale workload or treating Debug timings as performance evidence.
+TEST(ProtocolViewsBenchmark, MeasurementPathsPreserveProtocolState) {
+    for (auto path : {Path::SingleParser, Path::Observe, Path::TwoFromStart,
+                      Path::TwoShared, Path::TwoSelective, Path::AfterSplit,
+                      Path::ForkOnly, Path::FirstRewrite}) {
+        SCOPED_TRACE(name(path));
+        EXPECT_GE(sample(path, 2, 64, 2), 0.0);
+    }
 }
 
 TEST(ProtocolForkBenchmark, CostByActiveStreamsAndPayload) {
@@ -128,8 +202,9 @@ TEST(ProtocolForkBenchmark, CostByActiveStreamsAndPayload) {
     // build on an otherwise idle machine; these are per-batch samples, not a
     // distribution of individual request latencies or end-to-end throughput.
     constexpr unsigned repetitions = 7;
-    const std::vector<Path> paths = {Path::SingleParser, Path::Unchanged,
-        Path::AfterSplit, Path::ForkOnly, Path::FirstSplit};
+    const std::vector<Path> paths = {Path::SingleParser, Path::Observe,
+        Path::TwoFromStart, Path::TwoShared, Path::TwoSelective,
+        Path::AfterSplit, Path::ForkOnly, Path::FirstRewrite};
     std::cout << "BENCH,streams,payload_bytes,path,iterations,samples,median_us,min_us,max_us\n";
     std::cout << std::fixed << std::setprecision(3);
 
@@ -152,7 +227,7 @@ TEST(ProtocolForkBenchmark, CostByActiveStreamsAndPayload) {
                 auto& values = timings[i];
                 std::sort(values.begin(), values.end());
                 std::cout << "BENCH," << streams << ',' << payload << ',' << name(paths[i])
-                          << ',' << (paths[i] == Path::FirstSplit ? 1 : iterations)
+                          << ',' << (paths[i] == Path::FirstRewrite ? 1 : iterations)
                           << ',' << repetitions << ',' << values[repetitions / 2]
                           << ',' << values.front() << ',' << values.back() << '\n';
             }
@@ -171,7 +246,7 @@ TEST(ProtocolForkBenchmark, RetainedStorageCost) {
     // are copied by protocol_fork even when the next callback carries no body.
     for (bool compressed : {false, true}) {
         for (unsigned retained : {0U, 16384U, 262144U, 1048576U}) {
-            ProtocolViews views;
+            ProtocolViews views(ProtocolViews::Mode::Rewrite);
             initialize(views, 1);
             auto& connection = state(views);
 
@@ -226,7 +301,7 @@ TEST(ProtocolForkBenchmark, ClosedRequestHistoryCost) {
     // A long-lived connection can retain HTTP metadata even after all but one
     // stream have closed. Do not confuse active stream count with fork size.
     for (unsigned requests : {0U, 100U, 1000U, 10000U}) {
-        ProtocolViews views;
+        ProtocolViews views(ProtocolViews::Mode::Rewrite);
         initialize(views, 1);
         const auto headers = std::string("\x83\x87\x84\x01\x0c", 5) + "example.test";
 

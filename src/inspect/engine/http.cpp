@@ -1,6 +1,7 @@
 #include <sslcom.hpp>
 
 #include <inspect/engine/http.hpp>
+#include <inspect/protocol_adapter.hpp>
 #include <inspect/fp/ja4.hpp>
 #include <inspect/http_identity.hpp>
 #include <proxy/mitmhost.hpp>
@@ -13,6 +14,17 @@
 #include <inspect/kb/kb.hpp>
 
 #include <charconv>
+
+namespace sx::engine {
+
+// Compatibility entry point for HTTP engines without endpoint-view support.
+void observe_unadapted_content(EngineCtx& ctx, bool from_client,
+                               buffer const& bytes, std::uint64_t read_bytes) {
+    http::observe_content(ctx, from_client ? 0U : 1U,
+                          bytes.string_view(), read_bytes, from_client);
+}
+
+} // namespace sx::engine
 
 namespace sx::engine::http {
 
@@ -364,7 +376,8 @@ namespace sx::engine::http {
         auto ranges = connection->observe(direction, data, response_side);
         app->observe_l7_payload(data, read_bytes, std::move(ranges),
                                 connection->encodings(direction),
-                                connection->directions.at(direction).annotations());
+                                connection->directions.at(direction).annotations(),
+                                ctx.payload_analysis);
     }
 
     L7PayloadHints http2_payload_hint(std::string_view block,
@@ -1082,7 +1095,8 @@ namespace sx::engine::http {
                                     ? "gzip" : "");
             }
             app->observe_l7_payload(data, read_bytes, std::move(ranges),
-                                    std::move(encodings), tracker.annotations());
+                                    std::move(encodings), tracker.annotations(),
+                                    ctx.payload_analysis);
         }
 
     }

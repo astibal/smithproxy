@@ -1,4 +1,6 @@
 PROTOCOL ENDPOINT VIEWS — VALIDATION AND COST
+Historical report: the checkpoint/journal and speculative fork were retired
+on 2026-10-26. Sources and tests: docs/design-history/protocol-checkpoints-20261026/.
 Date: 2026-10-25
 Source: ddb5ce1fbc34 + uncommitted checkpoint, journal and endpoint-view changes.
 This is a local test report, NOT approval to merge or a full P3 pass.

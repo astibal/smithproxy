@@ -1,0 +1,83 @@
+{
+  "direction": "restore patches: cleaned tree -> pre-retirement working files",
+  "smithproxy_head": "d7aaef2406640d12b14c9d652d9584718f7c184e",
+  "socle_head": "decc93fe2957f89f2cf508fe90118710ab224729",
+  "round_trip": "PASS: each exported patch applied and reversed in a disposable tree; bytes compared",
+  "files": [
+    {
+      "path": "CMakeLists.txt",
+      "before_sha256": "56223f233f6cddebe4eda7b65c6e03b709872fa5256bfff5c605fee37133488d",
+      "after_sha256": "2af35075fd24d5d45e40c37000c4f53e6c8b3c130f26e7bdbf8e95cec634faa1"
+    },
+    {
+      "path": "socle/common/signature.hpp",
+      "before_sha256": "9c4fff08ca3c3c29d918b13a9ba8cb3330cc94851557cb1fe4261006cdc6f948",
+      "after_sha256": "da4bbdb9ec133b0e2a3b14d9c22be21e7690e11e05eda5e138677c6803efa031"
+    },
+    {
+      "path": "src/inspect/engine.hpp",
+      "before_sha256": "489d294a5d65e09873cce93988d59463eb39f4787a30ab386c237ea25e4434ec",
+      "after_sha256": "3672d6f1cb1d71c69c019b7e9d74e12d3b3ebc53947a40118139e7df6e7301b8"
+    },
+    {
+      "path": "src/inspect/engine/http.cpp",
+      "before_sha256": "1caa7deba2788a30ee458ebd9add406a6afcbe7d2293d6b175c414a39568288f",
+      "after_sha256": "1ed39c6071a862501003967841f7da53890823ceef7855c6efa2e13d45063e6b"
+    },
+    {
+      "path": "src/inspect/engine/http2_adapter.cpp",
+      "before_sha256": null,
+      "after_sha256": "810d45838c9dd45e7cf0a61ee1407d36a3d4ae19a900a545b10e947aa76cdfd3"
+    },
+    {
+      "path": "src/inspect/engine/http2_adapter.hpp",
+      "before_sha256": null,
+      "after_sha256": "64a95e8b4eefbdc67b1713928bb9a00377ada865cef4c27d1d09c64abe56725f"
+    },
+    {
+      "path": "src/inspect/protocol_adapter.cpp",
+      "before_sha256": "b4936f5ac32dd991cba3b17da6ea5f04aefee267a5b810fb8f71613b4aebc1c9",
+      "after_sha256": "0118243e932b598e69eca7c9effd6b124149706b79f1fe5678fa0c7ad28fd66c"
+    },
+    {
+      "path": "src/inspect/protocol_checkpoint.cpp",
+      "before_sha256": "78898ab9113ea36e59598bc76d0f56ce9d81df1855f71555463fc17852d6d108",
+      "after_sha256": null
+    },
+    {
+      "path": "src/inspect/protocol_fork.cpp",
+      "before_sha256": null,
+      "after_sha256": "6f10401343fe0132bcae553b1579816a7d3c812978c17bb4f54a81ead0d6f510"
+    },
+    {
+      "path": "src/inspect/protocol_views.cpp",
+      "before_sha256": "a7aeae8eeef935a7d77233c2451047df27b62fa830c32bac1895a5c2ceb19485",
+      "after_sha256": "b351582eeb1e2dc3442cbd879dc84c28215df4cd909047184de9358970993eda"
+    },
+    {
+      "path": "src/inspect/protocol_views.hpp",
+      "before_sha256": "2e233a619126e79ef749a79566ec2e90eb6fcb576dcf04aac17ed035ef3cb2a2",
+      "after_sha256": "e923df0282e9021a3035da6b3cf4131e4d465512b9805699a419982ce1d47b42"
+    },
+    {
+      "path": "tests/unit/inspect/protocol_checkpoint_tests.cpp",
+      "before_sha256": "009e846669f1cead20f359c1b9e1e7914bd5ca96d79da2093d9bd9a4b2fdc76c",
+      "after_sha256": null
+    },
+    {
+      "path": "tests/unit/inspect/protocol_fork_benchmark.cpp",
+      "before_sha256": "328c065f68576c673cf5ab474a003ea65e6164f4a59b381707856a6dfad47ee4",
+      "after_sha256": "e931b7a0bdac795ba4a6cbbac5a57f28d4b597571849c1bae9b0d083c6d298e8"
+    },
+    {
+      "path": "tests/unit/inspect/protocol_fork_tests.cpp",
+      "before_sha256": null,
+      "after_sha256": "98ca6152b327c8ca346c2fcdd7f654eabab64e30fdabb44767220ee0cd89ca02"
+    },
+    {
+      "path": "tests/unit/inspect/protocol_views_tests.cpp",
+      "before_sha256": "c3751ca3ec5683af48e8e395b9cc23bcd460d2821acb3c0a06da2ff895cbb687",
+      "after_sha256": "526609d1a02a78b11aeeff80dca305db1bf7db1ac5b01230df4de65642c57296"
+    }
+  ]
+}

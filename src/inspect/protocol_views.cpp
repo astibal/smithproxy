@@ -7,8 +7,11 @@ namespace {
 // cache publication must not run a second time. Restore even if parsing throws.
 class ObservationScope {
 public:
-    ObservationScope(EngineCtx& ctx, bool output)
-        : ctx_(ctx), origin_(ctx.origin), only_(ctx.protocol_only) {
+    ObservationScope(EngineCtx& ctx, bool output, PayloadAnalysis* analysis)
+        : ctx_(ctx), origin_(ctx.origin), only_(ctx.protocol_only),
+          analysis_(ctx.payload_analysis) {
+        ctx_.payload_analysis = analysis ? analysis : (output ? &protocol_only_ : nullptr);
+
         if (output) {
             ctx_.origin = nullptr;
             ctx_.protocol_only = true;
@@ -17,20 +20,42 @@ public:
     ~ObservationScope() {
         ctx_.origin = origin_;
         ctx_.protocol_only = only_;
+        ctx_.payload_analysis = analysis_;
     }
 private:
     EngineCtx& ctx_;
     MitmHostCX* origin_;
     bool only_;
+    PayloadAnalysis* analysis_;
+    PayloadAnalysis protocol_only_ = PayloadAnalysis::protocol_only();
 };
 
 } // namespace
 
+void ProtocolViews::set_mode(Mode mode) {
+    if (mode == mode_) return;
+
+    if (sequence_ || split()) {
+        throw std::logic_error("Protocol mode must be selected before input analysis");
+    }
+
+    mode_ = mode;
+}
+
+void ProtocolViews::prepare_output() {
+    if (mode_ != Mode::Rewrite || split()) return;
+
+    // Clone once, before the first adapted input. Protocol discovery may have
+    // replayed a retained prefix, but the current read is not in this state yet.
+    // Immutable protocol tables remain shared by the adapter's fork operation.
+    other_ = adapter(shared_).fork(shared_);
+}
+
 void ProtocolViews::observe(EngineCtx& ctx, Endpoint sender, buffer const& bytes,
-                            std::uint64_t read_bytes, bool output) {
+                            std::uint64_t read_bytes, bool output, PayloadAnalysis* analysis) {
     if (bytes.empty()) return;
 
-    ObservationScope scope(ctx, output);
+    ObservationScope scope(ctx, output, analysis);
     adapter(ctx).observe(ctx, sender == Endpoint::Client, bytes, read_bytes);
 }
 
@@ -85,20 +110,10 @@ std::uint64_t ProtocolViews::begin(Endpoint sender, buffer const& bytes,
                                   std::uint64_t read_bytes) {
     if (pending_) throw std::logic_error("Protocol callback is already active");
 
+    prepare_output();
     auto& source = context(sender);
-    Pending pending{++sequence_, sender, {}, nullptr};
-
-    if (!split()) {
-        // Preserve the PRE-input state, not a copy made after the webhook.
-        // Current parser structures are mutable, not copy-on-write. This is
-        // deliberately a deep copy until the first split; afterwards no copy
-        // is needed. Unchanged output releases it without a second parse.
-        pending.before = adapter(source).fork(source);
-        pending.original = bytes.string_view();
-    }
-
-    pending_ = std::move(pending);
-    observe(source, sender, bytes, read_bytes, false);
+    pending_.emplace(Pending{++sequence_, sender, PayloadAnalysis()});
+    observe(source, sender, bytes, read_bytes, false, &pending_->analysis);
     return pending_->token;
 }
 
@@ -112,18 +127,17 @@ void ProtocolViews::finish(std::uint64_t token, buffer const& bytes) {
     check_token(token);
     const auto sender = pending_->sender;
 
-    if (!split() && pending_->original == bytes.string_view()) {
+    if (mode_ == Mode::Observe) {
+        // Mutation permission is enforced at the webhook boundary. This path
+        // needs neither a copy nor a second parse nor a byte-by-byte comparison.
         pending_.reset();
         return;
     }
 
-    if (!split()) {
-        owner_ = sender;
-        other_ = std::move(pending_->before);
-    }
-
-    // Empty output (need-more) still splits the views, but the receiver must
-    // not advance until bytes are actually queued for it.
+    // Rewrite prepared both views before input. Empty output (need-more)
+    // must not advance the receiver until bytes are actually queued for it.
+    // No webhook follows this pass. The observation scope supplies an explicit
+    // protocol-only analysis request, not a cache miss requiring another hash.
     observe(context(sender, Phase::Output), sender, bytes, 0, true);
     pending_.reset();
 }
@@ -135,11 +149,11 @@ void ProtocolViews::abandon(std::uint64_t token) {
     finish(token, empty);
 }
 
-void ProtocolViews::seed(Endpoint sender, buffer const& bytes) {
+void ProtocolViews::seed(Endpoint sender, buffer const& bytes, PayloadAnalysis* analysis) {
     if (sequence_ != 0 || split()) {
         throw std::logic_error("Cannot seed an active protocol conversation");
     }
-    observe(shared_, sender, bytes, 0, true);
+    observe(shared_, sender, bytes, 0, true, analysis);
 }
 
 } // namespace sx::engine

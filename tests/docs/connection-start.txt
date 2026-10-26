@@ -1,0 +1,249 @@
+Synchronous connection-start setup gate
+======================================
+
+Scope
+-----
+Setup negotiates rewrite capability before content analysis. The default is
+one protocol context with no speculative forks. An accepted setup reply with
+control.rewrite=true selects two endpoint views before the first adapted input.
+The existing access-request filter remains separate and unchanged. Its reject
+response is still {"access-response":"reject"}; setup uses action: "drop".
+
+Timing
+------
+The regular connection-start webhook used to be an asynchronous notification
+at the beginning of a socket-processing cycle. It is now synchronous:
+
+  first application bytes available (either direction)
+      -> connection-start -> wait for setup reply
+      -> FlowCtx content analysis -> content webhook -> forwarding
+
+An exclusive stream handler instead passes the gate immediately before
+activation, before handing it the sockets. The output protocol pass does not
+emit another start event. A per-connection guard prevents duplicate starts.
+
+This is not a pre-connect veto: transport establishment and any initial TLS
+handshake can already have happened. For ordinary byte processing, the gate
+is before FlowCtx::begin, not before every possible transport/protocol action.
+An idle session with no application bytes may produce no start notification;
+it does not produce an orphan stop notification either. Handshake failures can
+also occur before start. STARTTLS starts in its initial plaintext phase: later
+TLS information cannot be promised at connection-start.
+
+Waiting uses the existing synchronous webhook transport and its timeout.
+The worker waits once per connection; this is intentionally not an async
+dispatch which could let the first payload race ahead of its setup decision.
+SIFT retains an asynchronous notification and has no setup decision authority.
+
+Request metadata
+----------------
+The existing action/id/source/type envelope is retained. details.info contains:
+
+  session             existing readable connection label
+  phase               "setup" (there are no payload bytes in this event)
+  policy              matched policy id
+  source              {host, port}, port uses the existing string representation
+  destination         {host, port}
+  transport           "tcp" or "udp" when known
+  protocol            only when already available from session_protocol()
+  webhook_control     {version: 1, mode: "regular"|"strict", sequence: 0, rewrite: false}
+  tls.client/server   available TLS legs, with nonempty sni/alpn if known
+  ja4_ch / ja4_sh      only if already computed
+
+Absent information is not synthesized. In particular, setup is before content
+analysis, so full L7 detection/HTTP fields are not promised. TLS SNI/ALPN is
+validated by the post-merge setup tests below; the earlier blocker is retained
+in the historical results.
+
+Successful 2xx replies
+---------------------
+  {"action":"accept"}            continue
+  {"action":"unchanged"}         continue (legacy compatibility)
+  {} or empty/whitespace body     continue (including HTTP 204)
+  {"action":"drop"}              close both sides; do not forward pending content
+  {"action":"not-interested"}    continue without regular content callbacks
+
+not-interested does not disable protocol processing, independent SIFT
+classification, or lifecycle notifications. It is incompatible with strict
+content delivery; strict + not-interested fails closed.
+
+The optional control block remains independent:
+  {"action":"accept","control":{"mode":"strict"}}
+  {"action":"accept","control":{"rewrite":true}}
+
+Only an accepted successful setup may grant rewrite. The flag must be a JSON
+boolean; absent/false keeps the single input context. Drop, not-interested and
+invalid replies grant nothing. Later content replies cannot change permission.
+Content metadata reports the negotiated flag. Without permission, an explicit
+action: replace is nevertheless accepted silently when its decoded content
+has exactly the same byte length as the input of that callback. This deliberate
+low-level escape hatch can change ANY bytes, including headers and protocol
+state fields. It does not fork, reanalyze output, reserve future rewrites, or
+promise protocol consistency; the script owns any resulting mismatch.
+
+Length-changing replace, need-more, discard and other content-bearing actions
+without permission close the connection without forwarding the pending input
+or unauthorized output. Supplying same-size content alongside need-more or
+discard does not grant permission. action: drop remains available without
+rewrite permission. SIFT has no mutation authority, including same-size edits.
+
+ProtocolViews chooses the mode generically; the datapath has no H2 selection
+logic. Rewrite mode clones once before the first input handled by an adapter,
+then observes input and output in their endpoint contexts. Retained protocol
+detection prefixes are seeded before that first input. No payload snapshots,
+byte comparisons or per-payload forks run on this production path. The old
+SnapshotFork experiment and rollback journal are now archived under
+docs/design-history/protocol-checkpoints-20261026/, not compiled. Local
+configured replacement rules also select rewrite-capable views at setup.
+
+That policy is applied before the first content callback, whose sequence is 1.
+Malformed/unknown control values retain the old mode. Non-2xx replies cannot
+apply control. A valid control block in a 2xx object is applied even if its
+action is invalid, so invalid action + strict fails closed.
+
+Content actions replace, discard and need-more are NOT setup decisions.
+Unknown/non-string actions, malformed/non-object JSON, HTTP failures and a
+missing response are invalid setup replies: regular mode logs and continues;
+strict mode closes. A failed initial request cannot negotiate strict mode.
+The default remains regular/fail-open. Closure uses existing shutdown; this
+is not a guarantee of an on-wire TCP RST.
+
+Compatibility boundary
+----------------------
+Receivers accepting the old notification with empty/unchanged responses keep
+working. Timing and coverage intentionally change: start is later, blocks
+content, and no longer reports every idle or pre-content failed connection.
+Existing applications relying on those early lifecycle events need review.
+Receivers changing length or holding content must opt in at setup. Spider scripts use
+api.phase == 'setup', api.connection.request_rewrite(), and return None.
+Both Easy and Expert require permission for length changes, hold and Translate;
+both permit same-size raw replacements without it. Typed commit checks remain
+unchanged. Setup exposes metadata, not a fake
+payload (api.message is None). It does not activate Translate or bypass its
+explicit per-content callback. No new early access filter is introduced.
+
+Post-master-merge validation, 2026-10-26
+-------------------------------------
+Merge d7aaef2 integrates origin/master 3de21bd, including the PXM-017 CONNECT
+readiness fix and the tests/unit source relocation. Existing setup/rewrite
+working changes were restored, not discarded. Socle and Spider were unchanged.
+
+PASS: smithproxy and sx_gtests_http1 build; 270 correctness tests (16 suites).
+PASS: seven proxy webhook integration suites: need-more, control and endpoint
+      views over JSON/SXBN, plus synchronous connection-start.
+PASS: 47 setup scenarios over JSON and 47 over SXBN, including implicit TLS
+      with SNI and negotiated http/1.1 ALPN available before content forwarding.
+PASS: upstream implicit-TLS regression, STARTTLS matrix, HTTP CONNECT suite,
+      and private-key file-permission regression.
+PASS: all 41 Spider CTest suites (152.89 seconds), including all seven live
+      Translate suites against the freshly built merged proxy.
+
+The initial TLS setup run exposed a fixture error: example.test did not match
+the repository origin certificate SAN. The fixture now uses its actual name,
+Smithproxy-Server-Certificate. Production certificate checks were not weakened.
+The first HTTP CONNECT run could not resolve localtest.me inside a loopback-only
+network namespace; it passed with the system resolver available on the host.
+Both initial failures and successful reruns are retained in
+/tmp/master-merge-20261026/ alongside JSON status, JUnit XML and review diffs.
+
+This is a local targeted regression run, not full P3, fresh sanitizer coverage,
+or a performance measurement. QUIC remains outside this run's scope.
+
+Same-size replacement exception validation, 2026-10-26
+----------------------------------------------------
+PASS: all 41 Spider CTest suites in one run (149.39 seconds), including the
+      embedded backend setup/content path, executable examples, and all seven
+      real-proxy Translate integration suites. Both production binaries build.
+PASS: 270 proxy correctness tests, including no fork/output reanalysis after
+      repeated same-size edits and intentionally unchanged H2 input state.
+PASS: real-proxy setup suite: 46 scenarios with JSON and 46 with SXBN.
+      Unreserved same-size edits work in both directions and strict/regular
+      modes, including arbitrary binary content and subsequent callbacks.
+      Shrink/grow checks compare decoded sizes even when base64 sizes match;
+      same-size content cannot disguise need-more/discard/accept as replace.
+PASS: nine sandboxed setup API tests, including Easy/Expert no-op commits,
+      raw H1/H2/opaque edits, bytes/bytearray/memoryview/string results,
+      byte counts versus Unicode characters or typed memoryview elements,
+      rejected resize/hold, and unchanged setup-only reservation semantics.
+
+No new full P3, sanitizer, TLS or performance run is claimed for this exception.
+
+Rewrite negotiation validation, 2026-10-25
+----------------------------------------
+PASS: production builds of Smithproxy and Spider.
+PASS: all 41 Spider CTest suites in one final run (151.40 seconds), including
+      setup API, sandbox, flow instances, executable cookbook, Easy/Expert,
+      and seven real-proxy Translate integration suites.
+PASS: 268 proxy correctness tests (16 suites), benchmarks excluded.
+      Observer mode performs zero forks/output passes. Setup Rewrite performs
+      one fork, including a fragmented detection prefix, and keeps distinct
+      endpoint histories through unchanged, replaced and held content.
+PASS: real-proxy setup tests, 29 scenarios each with JSON and SXBN content.
+      Includes omitted/false/malformed permissions, attempted late opt-in,
+      unauthorized replace/discard/need-more, and valid rewrites both ways.
+PASS: SXBN need-more suite, 36 scenarios, 138 content callbacks, no continuation
+      failures; strict/regular control suite; endpoint-view suite with six
+      bidirectional scenarios and 71 input callbacks, no output callbacks.
+PASS: fragmented Expert DATA translation through actual Spider and Smithproxy,
+      245 content callbacks, setup reservation, bidirectional header indices,
+      and strict exception handling without leaking pending content.
+
+Scope limits of that run: this was not full P3, a new sanitizer run, or a fresh
+latency measurement. TLS/SNI/ALPN was then unverified (PXM-017 below). The production
+endpoint adapter currently covers H2; the generic selection interface does
+not claim output-state reconstruction for all protocols. Rewrites before
+protocol discovery are not covered by these tests. The prefix test covers
+an unchanged partial H2 preface before detection, not arbitrary edited history.
+
+Previous gate-only validation, 2026-10-25 (before rewrite negotiation)
+-------------------------------------------------------------------
+PASS: production executable builds.
+PASS: all 263 correctness tests in the reduced engine/webhook unit suite,
+      Release and ASan+UBSan, including 24 new setup parser/control tests.
+      Final direct runs also included benchmarks: Release 267/267, ASan+UBSan
+      264/264 (only the small HTTP1 benchmark, not ProtocolForkBenchmark).
+      Leak detection was disabled. This is not a full P3 suite or a new
+      performance measurement; an accidental ASan fork benchmark was stopped
+      before rerunning the correctness suite.
+PASS: seven real-proxy integration suites: need-more JSON/SXBN, control
+      JSON/SXBN, protocol views JSON/SXBN, and connection-start.
+
+The final setup suite has 17 scenarios. It exercises real SOCKS forwarding and
+a loopback HTTP webhook; only the receiver and remote application are fixtures:
+  - held setup response blocks forwarding and content callback, both directions
+  - setup occurs once and shares the content connection id
+  - endpoint/transport/phase metadata, no content, setup sequence zero
+  - dropped HTTP response retains regular fail-open
+  - empty/204/unchanged/accept compatibility
+  - non-2xx/malformed/content-only replies retain regular fail-open
+  - drop closes both peers, client-first and server-first, no content callback
+  - not-interested forwards both directions without content callbacks
+  - invalid action plus strict closes without forwarding
+  - accepted strict is visible in the first content callback (sequence 1)
+  - strict plus not-interested closes without forwarding
+
+PASS: all 17 setup scenarios repeated five times (85 cases), plus all 17 with
+SXBN content transport enabled. Start itself always uses the JSON envelope.
+
+TLS/SNI/ALPN at that time: NOT VERIFIED. The optional isolated-namespace test failed during
+SOCKS CONNECT before the TLS setup callback, with an origin handshake timeout.
+The same failure reproduces with the previous production test executable at
+/tmp/protocol-views-validation-E80DfL/native/native-build/smithproxy using a
+TLS-only probe. Thus this is not introduced by the new setup gate, but it is
+not evidence that the new TLS metadata path works. No TLS workaround is added
+to the production code. Exclusive handlers, UDP, access-filter ordering and
+idle lifecycle are not covered by the new live scenarios.
+
+Commands (from the worktree root)
+--------------------------------
+  ctest --test-dir build --output-on-failure -R '^integration.connection_start$'
+  python3 tests/httpapi/need_more_integration.py --smithproxy build/smithproxy \
+      --source . --setup-only --binary
+
+Optional TLS reproducer, isolated from host listeners and network services:
+  unshare -Urn -- sh -c 'ip link set lo up && python3 \
+      tests/httpapi/need_more_integration.py --smithproxy build/smithproxy \
+      --source . --setup-only --setup-tls'
+
+Port 443 is deliberate: the explicit SOCKS path selects implicit TLS by port.
+A random high-port origin would only test an opaque TLS tunnel, not SNI/ALPN.

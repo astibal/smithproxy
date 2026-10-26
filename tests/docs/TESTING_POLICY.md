@@ -180,6 +180,15 @@ reproduction command and are not written to the successful-run history.
 
 ## Planned research labs
 
+The retired protocol-checkpoint/flow-journal experiment (2026-10-26) is preserved
+with its tests as reversible patches under `docs/design-history/`. It is not a
+runtime feature or a native gate. Endpoint rewrite/hold/HPACK/SETTINGS scenarios
+remain in `unit.protocol_views`, now using the supported setup-selected Rewrite
+mode. Forward-fork ownership and ordinary flow append/pop tests run in
+`unit.http1`; historical checkpoint pass counts must not be reported as current
+coverage. The old speculative-fork benchmark is archived, not silently measured
+under its former labels.
+
 - [ ] Add an isolated, explicitly non-production split-engine TLS lab in which
   one running Smithproxy can use a pinned older OpenSSL release on a selected
   TLS leg while retaining the current OpenSSL on the other leg. The preferred
