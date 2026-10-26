@@ -582,7 +582,6 @@ int ExplicitProxy::handle_sockets_once(baseCom* xcom) {
         // Activating libssh first makes each peer wait for a different banner:
         // the client still waits for SOCKS success while the origin waits for
         // the client's SSH identification.
-        webhook_session_start();
         return baseProxy::handle_sockets_once(xcom);
     }
     return MitmProxy::handle_sockets_once(xcom);

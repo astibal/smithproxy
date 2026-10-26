@@ -1,6 +1,5 @@
 #include <proxy/flowctx.hpp>
 
-#include <inspect/engine/http.hpp>
 #include <proxy/mitmhost.hpp>
 
 void FlowCtx::attach(MitmHostCX& host, char leg) {
@@ -9,7 +8,7 @@ void FlowCtx::attach(MitmHostCX& host, char leg) {
     if(initiator) {
         i_ = &host;
         app_ = host.app_context();
-        engine_.origin = i_;
+        engine().origin = i_;
 
         if(r_) r_->app_context(app_, true);
     } else {
@@ -28,15 +27,22 @@ FlowCtx::Tx FlowCtx::begin(Dir dir, buffer const& data,
     auto& count = stats(dir);
     count.raw_bytes += data.size();
 
+    active_endpoint_ = dir == Dir::I2R ? Endpoint::Client : Endpoint::Server;
     const char side = dir == Dir::I2R ? 'r' : 'w';
-    i_->ingest(side, data);
+    const bool ingested = i_->ingest(side, data);
+
+    if ((views_.active() || i_->opt_engines_enabled) &&
+        views_.prepare(active_endpoint_, data, i_->flow(), ingested)) {
+        tx.protocol_token = views_.begin(active_endpoint_, data, read_bytes);
+        return tx;
+    }
+
+    // Other protocol engines retain their existing raw-flow path.
     i_->run_engine();
 
     // Framing works on the exact block delivered to content consumers.
     // The protocol engine above supplies connection state and classification.
-    sx::engine::http::observe_content(
-        engine_, dir == Dir::I2R ? 0U : 1U,
-        data.string_view(), read_bytes, dir == Dir::I2R);
+    sx::engine::observe_unadapted_content(engine(), dir == Dir::I2R, data, read_bytes);
 
     return tx;
 }
@@ -48,13 +54,15 @@ void FlowCtx::commit(Tx const& tx, buffer const& data) {
     count.out_bytes += data.size();
     if(data.size() != tx.raw_size) ++count.changed;
 
-    // This is the transaction boundary for future state rollback/replay.
-    // Analysis deliberately precedes modifiers so webhooks see full metadata.
+    // This is called after ALL modifiers and before queueing to the peer.
+    // No ingest(), inspector, webhook or payload rewriting on this pass.
+    if (tx.protocol_token) views_.finish(tx.protocol_token, data);
 }
 
 void FlowCtx::discard(Tx const& tx) {
     if(not tx.active) return;
     ++stats(tx.dir).dropped;
+    if (tx.protocol_token) views_.abandon(tx.protocol_token);
 }
 
 FlowCtx::Stats& FlowCtx::stats(Dir dir) {

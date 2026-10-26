@@ -11,3 +11,7 @@ Feature documentation:
 
   * [SSH MITM configuration and diagnostics](ssh-mitm.md)
   * [Privilege separation](privilege-separation.md)
+
+Design history:
+
+  * [Protocol snapshots and journals: a useful detour, retired 2026-10-26](design-history/protocol-checkpoints-20261026/README.txt)

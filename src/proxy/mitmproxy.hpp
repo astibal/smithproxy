@@ -279,8 +279,12 @@ public:
         sx::traffic_log_adapter::flow_observation fields,
         std::string_view payload_layer);
 
-    mutable bool wh_start = false;
-    void webhook_session_start() const;
+    bool wh_start = false;
+    bool webhook_rewrite_allowed_ = false;
+    // Synchronous setup gate, before application content is analyzed/forwarded.
+    // False means the connection must not proceed.
+    bool webhook_session_start();
+    nlohmann::json connection_start_details() const;
 
     mutable bool wh_stop = false;
     void webhook_session_stop() const;

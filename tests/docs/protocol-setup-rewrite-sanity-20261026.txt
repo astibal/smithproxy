@@ -1,0 +1,70 @@
+SETUP / REWRITE / ENDPOINT VIEWS -- FINAL SANITY
+Date: 2026-10-26
+
+Tested source state
+-------------------
+Smithproxy: d7aaef2406640d12b14c9d652d9584718f7c184e plus the staged
+setup/rewrite, protocol-local H2 adapter and checkpoint-retirement changes.
+Spider: 8b7a9aa65821f75d29e38f931e19c05e9992c491 plus the staged
+setup, Easy/Expert, digest, PUSH_PROMISE, worker packaging and documentation.
+Socle: decc93fe2957f89f2cf508fe90118710ab224729, clean and UNMODIFIED.
+
+The Socle source tree and Smithproxy gitlink have zero net changes against
+the pre-ProtocolViews baseline. No new Socle commit or history rewrite is needed.
+Its experimental journal remains recoverable from docs/design-history/.
+
+Build and static checks
+-----------------------
+PASS: Smithproxy production + sx_gtests_http1, rebuilt with original Socle.
+PASS: fresh CMake configuration reports Socle decc93f, without a dirty suffix.
+PASS: all Spider build targets.
+PASS: API example generator --check; JavaScript syntax checks.
+PASS: editor bundle rebuilt in memory and compared byte-for-byte to the staged file.
+PASS: staged whitespace checks. Archived .patch context lines have a scoped
+      blank-at-eol exemption; live source whitespace rules are unchanged.
+PASS: both archival restoration patches applied and reversed in disposable
+      fixtures with byte equality; apply checks also pass on the final tree.
+
+Final local regression
+----------------------
+PASS  setup-tls-json             2.67 s
+PASS  proxy-protocol-unit        3.07 s
+PASS  socks-implicit-tls         2.47 s
+PASS  setup-tls-sxbn             12.79 s
+PASS  proxy-connect-regression   7.18 s
+PASS  proxy-webhook-regression   53.32 s
+PASS  spider-all                 148.30 s
+
+Coverage:
+- 218 protocol unit cases across 15 suites, including generic adapter routing,
+  independent fork ownership, frame boundaries, SETTINGS/ACK and hold paths;
+- 47 connection-start scenarios over JSON and another 47 over SXBN, with TLS
+  SNI/ALPN, decisions, reservation and same-size replacement behavior;
+- 7 webhook/setup/control/need-more/protocol-view CTest integration suites;
+- implicit TLS over SOCKS plus HTTP CONNECT, SOCKS STARTTLS and key permissions;
+- all 41 Spider CTest suites, including separate Easy/Expert coverage,
+  digest/setup/hold/PUSH_PROMISE cases and 7 real-proxy Translate E2E suites.
+
+No failing or skipped CTest cases were reported. This is bounded engine/API
+sanity, NOT a full P3, sanitizer, new performance benchmark or browser UX pass.
+QUIC was not included.
+
+Reproduction and evidence
+-------------------------
+Local runner: /tmp/run-protocol-retirement-tests.py, with output redirected to
+/tmp/fc-api-sanity-final-20261026. results.json records exact commands, working
+directories, exit codes and timings; the same directory contains logs/JUnit XML.
+The earlier /tmp/fc-api-sanity-20261026 run also passed, but preceded removal
+of the four residual Socle lines. Only the final run above is the stock-Socle gate.
+
+Network lanes used isolated user/network namespaces with loopback. The existing
+HTTP CONNECT fixture used host DNS for localtest.me and local origins/listeners.
+No SASlik installation was modified.
+
+Review artifacts: /tmp/protocol-views-final-20261026/
+  final-clean-v3-implementation.diff -- cumulative code, no tests/docs/archive
+  final-clean-v3-manifest.json       -- original baselines and source hashes
+  socle-baseline-build*.log          -- rebuild evidence
+  socle-baseline-configure.log       -- original Socle version confirmation
+
+Temporary evidence paths are local artifacts, not permanent repository assets.

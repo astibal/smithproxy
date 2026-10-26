@@ -1,0 +1,74 @@
+Protocol-only output: omit webhook publication fingerprint
+=========================================================
+Date: 2026-10-25
+Follow-up to protocol-shared-analysis-comparison.txt, same base/worktree.
+
+Change
+------
+PayloadAnalysis now represents an explicit protocol-only request as well as
+cached/uncached publication work. publication_fingerprint() returns nullopt
+immediately for protocol-only work: no hash, no comparison, no byte snapshot.
+This is deliberately distinct from a cache miss, which computes a result.
+
+ProtocolViews output and history-seeding passes supply that request. Protocol
+parsing and L7 ranges/encoding remain intact; only publication identity is
+omitted. Any previous l7_payload_observed flag and fingerprint are cleared.
+The observation scope restores the borrowed workspace pointer. When this same
+endpoint receives the next input it computes publication identity normally.
+Production remains lazy-fork; the eager alternatives are benchmark-only.
+
+The input workspace still owns its original bytes, including after split.
+Its copy/allocation/comparison costs remain included, intentionally unchanged
+for this comparison. No broad pruning of other analysis work was attempted.
+
+Measurement
+-----------
+Same Release target, CPU 14, seven warmed samples with rotated path order,
+1000 iterations for 1/32 streams and 128 for 256/1024 streams. No concurrent
+build/test workload was started during timing. DATA bodies, same setup as
+the previous benchmark. Initialization and teardown are outside timing.
+
+Historical benchmark controls explicitly request publication on BOTH passes;
+otherwise the new default protocol-only seed would silently change the
+baseline. The new path requests publication only on input. Both contexts'
+body counters/window/parser validity are checked, and publication identity
+is asserted present on input and absent on output in the new path.
+
+Median microseconds per input (both passes included for two engines):
+
+streams  body    single   two/full   two/shared   two/no-output-hash
+      1     64     1.926      3.851        3.807                3.790
+     32     64     1.938      3.863        3.898                3.829
+    256     64     1.962      3.920        4.113                3.912
+   1024     64     1.991      3.954        3.997                4.003
+      1  16384    31.988     63.998       35.436               35.045
+     32  16384    32.039     64.123       35.409               35.084
+    256  16384    32.151     64.381       35.618               35.163
+   1024  16384    32.096     64.100       35.532               35.272
+
+At one active stream, the new second-pass overhead is 1.864 us for 64 bytes
+and 3.057 us for 16 KiB (9.6% over a single parser in the latter case).
+Versus cached output fingerprinting, the additional saving at 16 KiB is
+0.391 us, about 1.1%. At 64 bytes the difference is within measurement noise.
+This supports a substantial fixed overhead, but two sizes do not establish
+a cost model. Copying, equality checks and parsing still have size-dependent
+work. These are not whole-proxy throughput or webhook latency measurements.
+
+Validation
+----------
+Release unit suite: 239/239 passed.
+Benchmark suite: 3/3 passed.
+ASan/UBSan unit suite: 239/239 passed, leak detection disabled.
+ASan/UBSan views/checkpoint: 97 tests x 10 shuffled repetitions passed.
+Live integration: 4/4 passed, need-more and protocol views, each JSON/binary.
+Production smithproxy target rebuilt successfully. QUIC was not rerun.
+
+Artifacts
+---------
+/tmp/protocol-selective-unit.xml
+/tmp/protocol-selective-benchmark.log
+/tmp/protocol-selective-benchmark.xml
+/tmp/protocol-selective-benchmark-time.txt
+/tmp/protocol-selective-sanitized-unit.xml
+/tmp/protocol-selective-sanitized-repeat.log
+/tmp/protocol-selective-integration.log

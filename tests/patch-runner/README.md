@@ -112,6 +112,70 @@ running every unrelated section at once.
 Run `tests/patch-runner/test-patch.sh --help` for the authoritative option
 syntax.
 
+### Protocol endpoint views
+
+The native gate includes `unit.protocol_views` and the two real-proxy webhook
+tests `integration.protocol_views_json` / `integration.protocol_views_binary`.
+The live tests use a deterministic webhook stand-in, not a running Spider.
+
+`FlowCtx` and `ProtocolViews` coordinate endpoint routing and callback lifetime;
+they do not select H2 types or parse frames. `ProtocolAdapter` owns detection,
+initialization, observation and independent state copying. The first production
+adapter is HTTP/2; a non-HTTP ledger adapter tests that the coordinator does not
+depend on its wire format. Unsupported protocols retain their legacy path.
+Output observation suppresses external inspector effects and never invokes a
+second webhook. Setup selects Observe (one input context) or Rewrite (one
+initial fork, then two endpoint-local contexts). The retired snapshot/journal
+and speculative per-callback fork live only in the
+[design archive](../../docs/design-history/protocol-checkpoints-20261026/README.txt).
+
+Measure the one-time setup fork cost separately from parser cost in an optimized
+build; the ordinary native runner intentionally uses Debug:
+
+```bash
+cmake -S . -B /tmp/sx-protocol-benchmark -DCMAKE_BUILD_TYPE=Release \
+  -DSMITHPROXY_OPTIMIZED_TESTS=ON -DBUILD_TESTING=ON \
+  -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+cmake --build /tmp/sx-protocol-benchmark --target sx_gtests_http1 -j2
+ctest --test-dir /tmp/sx-protocol-benchmark -R '^benchmark.protocol_fork$' -V
+```
+
+Do not run the measurement alongside the full runner, builds or other load.
+Its CSV-style rows report median/min/max microseconds per operation over seven
+batches, not request latency percentiles. They distinguish one parser, Observe
+without a fork, the first Rewrite payload (including its setup fork), steady
+Rewrite with two parsers, and fork alone. Separate fixtures measure retained header/gzip storage and completed
+request history. These are in-process costs, not network throughput claims.
+
+The `two_contexts_from_start` row is a benchmark-only eager alternative: two
+independent engines receive the same initialization traffic, then each parses
+the current DATA block once. It uses neither a fork nor a delta. Initialization
+and teardown remain outside the timing, as for the other paths. The fixture's
+output-only observation guard is inert (no host/DNS side effects); this is not
+an alternate production forwarding path. Both contexts' body counters and
+protocol validity are checked. DATA timings do not measure repeated HPACK header
+decoding, connection setup, webhook latency or per-connection memory overhead.
+
+`two_contexts_shared_analysis` adds a callback-local `PayloadAnalysis` shared
+by the two observations. Its owned byte snapshot, allocation, equality checks
+and destruction are included in timing. Only the byte fingerprint is reused;
+L7 boundaries, encoding and protocol validity still come from each context's
+own state. A same-size in-place replacement must miss the cache.
+
+`two_contexts_no_output_fingerprint` retains that input workspace but passes
+an explicit protocol-only `PayloadAnalysis` to the receiver. Its absent
+publication fingerprint means "not needed", not "compute on cache miss".
+The normal ProtocolViews output/seed pass uses this policy too; input still
+creates a publication identity. The historical single/two/shared benchmark
+controls explicitly request publication so they remain comparable. Stateful
+parsing is not skipped and old publication identities are invalidated.
+Production uses the setup-selected Observe/Rewrite strategy, not these diagnostic
+alternatives. The old `unchanged_with_fork` and `first_split` rows are archived;
+do not compare them as if they were the new `observe_no_fork` and
+`setup_rewrite_first_payload` rows.
+HPACK decoders share an immutable process-wide Huffman tree independently of
+this workspace; dynamic compression tables remain private to each context.
+
 ## Options
 
 | Option | Meaning |

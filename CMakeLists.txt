@@ -285,6 +285,10 @@ add_executable(smithproxy
 
         src/proxy/mitmhost.cpp
         src/proxy/flowctx.cpp
+        src/inspect/protocol_fork.cpp
+        src/inspect/protocol_adapter.cpp
+        src/inspect/engine/http2_adapter.cpp
+        src/inspect/protocol_views.cpp
         src/proxy/mitmproxy.cpp
         src/proxy/mitmcom.hpp
         src/proxy/mitmcom.cpp
@@ -449,7 +453,10 @@ target_include_directories(smithproxy-webhook-broker PRIVATE ${PROJECT_SOURCE_DI
 target_link_libraries(smithproxy-webhook-broker pthread)
 
 
-IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
+# Keep release packages unchanged, but allow an explicitly requested optimized
+# native test build for benchmarks. Measuring parser cost in Debug is misleading.
+option(SMITHPROXY_OPTIMIZED_TESTS "Build native tests outside Debug" OFF)
+IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
     find_package(GTest)
     if(GTEST_FOUND)
         add_executable(sx_gtests
@@ -514,6 +521,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/proxy/filters/statistics/flowanalysis.cpp
                 tests/unit/proxy/filters/statistics/statistics_tests.cpp
                 tests/unit/proxy/filters/access_filter_tests.cpp
+                tests/unit/proxy/connection_start_test.cpp
                 src/proxy/filters/sinkhole.cpp
                 tests/unit/proxy/filters/sinkhole_tests.cpp
                 src/proxy/filters/statsfilter.cpp
@@ -575,9 +583,17 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 socle/common/tests/cast_tests.cpp
                 )
         add_executable(sx_gtests_http1
+                tests/unit/proxy/connection_start_test.cpp
                 tests/unit/inspect/http1_tests.cpp
                 tests/unit/inspect/http1_framing_tests.cpp
                 tests/unit/inspect/http2_content_framing_tests.cpp
+                tests/unit/inspect/protocol_views_tests.cpp
+                tests/unit/inspect/protocol_fork_tests.cpp
+                tests/unit/inspect/protocol_fork_benchmark.cpp
+                src/inspect/protocol_fork.cpp
+                src/inspect/protocol_adapter.cpp
+                src/inspect/engine/http2_adapter.cpp
+                src/inspect/protocol_views.cpp
 
                 src/inspect/engine.hpp
                 src/inspect/engine/http.cpp
@@ -728,7 +744,11 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
             # separately so every native patch run reports it explicitly.
             add_test(NAME unit.logging_concurrency COMMAND sx_gtests
                     --gtest_filter=LogMux.RemoteTargetLifecycleIsSafeDuringConcurrentLogging)
-            add_test(NAME unit.http1 COMMAND sx_gtests_http1 --gtest_filter=-HTTP1.benchmark)
+            add_test(NAME unit.http1 COMMAND sx_gtests_http1
+                    --gtest_filter=-HTTP1.benchmark:ProtocolForkBenchmark.*)
+            add_test(NAME unit.protocol_views COMMAND sx_gtests_http1
+                    --gtest_filter=*ProtocolViews*
+                    --gtest_output=xml:protocol-views-results.xml)
             add_test(NAME unit.startstoptls COMMAND sx_gtests_startstoptls)
             add_test(NAME unit.httpconnect COMMAND sx_gtests_httpconnect)
             add_test(NAME unit.reloadable COMMAND sx_gtests_reloadable)
@@ -743,6 +763,10 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
             add_test(NAME integration.transfer_testbed COMMAND transfer_testbed)
             add_test(NAME integration.quic_testbed COMMAND quic_testbed)
             add_test(NAME benchmark.http1 COMMAND sx_gtests_http1 --gtest_filter=HTTP1.benchmark)
+            add_test(NAME benchmark.protocol_fork COMMAND sx_gtests_http1
+                    --gtest_filter=ProtocolForkBenchmark.*)
+            set_tests_properties(benchmark.protocol_fork PROPERTIES
+                    LABELS "benchmark" TIMEOUT 300 RUN_SERIAL TRUE)
             add_test(NAME external.inet COMMAND sx_gtests --gtest_filter=InetTest.*)
             add_test(NAME external.pcap_experiments COMMAND sx_gtests
                     --gtest_filter=PcapExperiments.*)
@@ -873,6 +897,26 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                         --source ${PROJECT_SOURCE_DIR} --binary)
                 set_tests_properties(integration.webhook_need_more integration.webhook_need_more_binary
                         PROPERTIES LABELS "native;integration" TIMEOUT 120)
+                foreach(webhook_format json binary)
+                    set(views_arguments --h2-views)
+                    if(webhook_format STREQUAL "binary")
+                        list(APPEND views_arguments --binary)
+                    endif()
+                    add_test(NAME integration.protocol_views_${webhook_format}
+                            COMMAND ${Python3_EXECUTABLE}
+                            ${PROJECT_SOURCE_DIR}/tests/httpapi/need_more_integration.py
+                            --smithproxy $<TARGET_FILE:smithproxy>
+                            --source ${PROJECT_SOURCE_DIR} ${views_arguments})
+                    set_tests_properties(integration.protocol_views_${webhook_format}
+                            PROPERTIES LABELS "native;integration;http2" TIMEOUT 180)
+                endforeach()
+                add_test(NAME integration.connection_start
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/httpapi/need_more_integration.py
+                        --smithproxy $<TARGET_FILE:smithproxy>
+                        --source ${PROJECT_SOURCE_DIR} --setup-only)
+                set_tests_properties(integration.connection_start
+                        PROPERTIES LABELS "native;integration;webhook" TIMEOUT 180)
                 add_test(NAME integration.libcli2_process
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/tests/cli/libcli2_process_e2e.py

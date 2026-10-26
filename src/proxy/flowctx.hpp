@@ -6,7 +6,7 @@
 #include <memory>
 
 #include <apphostcx.hpp>
-#include <inspect/engine.hpp>
+#include <inspect/protocol_views.hpp>
 
 class MitmHostCX;
 
@@ -18,16 +18,24 @@ public:
         Dir dir {Dir::I2R};
         std::size_t raw_size = 0;
         bool active = false;
+        std::uint64_t protocol_token = 0;
     };
 
     void attach(MitmHostCX& host, char leg);
+
+    void allow_rewrite(bool allowed) {
+        using Mode = sx::engine::ProtocolViews::Mode;
+        views_.set_mode(allowed ? Mode::Rewrite : Mode::Observe);
+    }
 
     Tx begin(Dir dir, buffer const& data, std::uint64_t read_bytes);
     void commit(Tx const& tx, buffer const& data);
     void discard(Tx const& tx);
 
-    sx::engine::EngineCtx& engine() { return engine_; }
-    sx::engine::EngineCtx const& engine() const { return engine_; }
+    // Existing metadata consumers see the current INPUT endpoint. Output
+    // observation never switches this selector or publishes another webhook.
+    sx::engine::EngineCtx& engine() { return views_.context(active_endpoint_); }
+    sx::engine::EngineCtx const& engine() const { return views_.context(active_endpoint_); }
 
 private:
     struct Stats {
@@ -43,7 +51,9 @@ private:
     MitmHostCX* i_ = nullptr;
     MitmHostCX* r_ = nullptr;
 
-    sx::engine::EngineCtx engine_;
+    using Endpoint = sx::engine::ProtocolViews::Endpoint;
+    sx::engine::ProtocolViews views_;
+    Endpoint active_endpoint_ = Endpoint::Client;
     Stats i2r_;
     Stats r2i_;
 };

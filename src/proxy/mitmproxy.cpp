@@ -46,6 +46,7 @@
 
 #include <proxy/mitmproxy.hpp>
 #include <proxy/content_webhook_metadata.hpp>
+#include <proxy/connection_start.hpp>
 #include <proxy/mitmhost.hpp>
 #include <proxy/streamhandler.hpp>
 #include <proxy/mitmproxy_utils.hpp>
@@ -132,6 +133,8 @@ bool MitmProxy::activate_stream_handler() {
     if (!stream_handler_ || stream_handler_attached_) {
         return false;
     }
+
+    if (!webhook_session_start()) return false;
 
     tap();
     stream_handler_->observe_plaintext(
@@ -492,18 +495,116 @@ std::string MitmProxy::to_connection_ID() const {
     return sx::proxy::connection_id(StaticContent::boot_random, session_id_);
 }
 
-void MitmProxy::webhook_session_start() const {
-    if(wh_start or (not sx::http::webhooks::is_enabled() and
-                    not sx::http::webhooks::sift_enabled())) return;
+nlohmann::json MitmProxy::connection_start_details() const {
+    nlohmann::json info = {
+        {"session", to_connection_label()}, {"phase", "setup"},
+        {"policy", matched_policy()},
+        {"webhook_control", {{"version", 1},
+            {"mode", webhook_control_->strict() ? "strict" : "regular"},
+            {"sequence", 0}, {"rewrite", false}}}
+    };
 
-    nlohmann::json j;
-    auto cl = to_connection_label();
-    j["info"] = { {"session", cl } };
-    if(sx::http::webhooks::is_enabled())
-        sx::http::webhooks::send_action("connection-start", to_connection_ID(), j, webhook_control_);
-    sx::http::webhooks::send_sift_action("connection-start", to_connection_ID(), j);
+    auto endpoint = [](auto const* host) {
+        if (!host) return nlohmann::json(nullptr);
 
+        return nlohmann::json{{"host", host->host()}, {"port", host->port()}};
+    };
+    info["source"] = endpoint(first_left());
+    info["destination"] = endpoint(first_right());
+
+    if (auto* left = first_left(); left && left->com()) {
+        const auto type = left->com()->l4_proto();
+
+        if (type == SOCK_STREAM) info["transport"] = "tcp";
+        else if (type == SOCK_DGRAM) info["transport"] = "udp";
+    }
+    if (auto protocol = session_protocol(); !protocol.empty())
+        info["protocol"] = std::string(protocol);
+
+    // Preserve the distinction between the two TLS legs. Missing information
+    // stays absent: plaintext/STARTTLS sessions need not have TLS metadata yet.
+    auto tls_leg = [&](auto const* host, const char* name) {
+        if (!host) return;
+
+        auto* tls = dynamic_cast<SSLCom*>(host->com());
+
+        if (!tls) return;
+
+        auto& leg = info["tls"][name];
+        leg = nlohmann::json::object();
+
+        if (!tls->get_sni().empty()) leg["sni"] = tls->get_sni();
+        if (auto alpn = tls->negotiated_alpn(); !alpn.empty()) leg["alpn"] = alpn;
+    };
+    tls_leg(first_left(), "client");
+    tls_leg(first_right(), "server");
+
+    if (!ja4.ClientHello.empty()) info["ja4_ch"] = ja4.ClientHello;
+    if (!ja4.ServerHello.empty()) info["ja4_sh"] = ja4.ServerHello;
+
+    return {{"info", std::move(info)}};
+}
+
+bool MitmProxy::webhook_session_start() {
+    if (state().dead()) return false;
+    if (wh_start) return true;
+
+    // Local replacement rules are known before content arrives. They need the
+    // same two views, independently of a remote receiver's rewrite permission.
+    const bool local_rewrite = content_rule() && !content_rule()->empty();
+    flow_ctx_->allow_rewrite(local_rewrite);
+
+    const bool enabled = sx::http::webhooks::is_enabled();
+    if (!enabled && !sx::http::webhooks::sift_enabled()) return true;
+
+    auto& log = log_content;
+    const auto details = connection_start_details();
     wh_start = true;
+
+    // Unlike the old asynchronous notification, this gate completes before
+    // FlowCtx::begin or an exclusive stream handler can consume content.
+    // The reply callback runs within send_action_wait, not after this returns.
+    bool valid_reply = false;
+
+    if (enabled) {
+        sx::http::webhooks::send_action_wait("connection-start", to_connection_ID(), details,
+            [&](sx::http::expected_reply reply) {
+                if (!reply) return;
+
+                auto result = sx::proxy::parse_setup_reply(
+                    reply->response.first, reply->response.second);
+                webhook_control_->apply(result.body);
+
+                using action = sx::proxy::setup_action;
+                valid_reply = result.action != action::invalid;
+
+                if (result.action == action::accept) {
+                    webhook_rewrite_allowed_ = result.rewrite;
+                    flow_ctx_->allow_rewrite(local_rewrite || result.rewrite);
+                }
+
+                if (result.action == action::drop) {
+                    state().dead(true);
+                } else if (result.action == action::not_interested) {
+                    // Strict mode requires continued content delivery.
+                    if (webhook_control_->strict()) valid_reply = false;
+                    else webhook_content_wanted_ = false;
+                }
+            });
+
+        if (!valid_reply) {
+            _war("connection-start: missing or invalid setup reply (%s)",
+                 webhook_control_->strict() ? "fail-closed" : "fail-open");
+            if (webhook_control_->strict()) state().dead(true);
+        }
+    }
+
+    // SIFT remains a notification consumer, not a second setup authority.
+    sx::http::webhooks::send_sift_action("connection-start", to_connection_ID(), details);
+
+    if (state().dead()) shutdown();
+
+    return !state().dead();
 }
 
 std::optional<std::string> MitmProxy::get_application() const {
@@ -522,7 +623,7 @@ std::optional<std::string> MitmProxy::get_application() const {
 }
 
 void MitmProxy::webhook_session_stop() const {
-    if(wh_stop or (not sx::http::webhooks::is_enabled() and
+    if(!wh_start or wh_stop or (not sx::http::webhooks::is_enabled() and
                    not sx::http::webhooks::sift_enabled())) return;
 
     nlohmann::json j;
@@ -656,8 +757,6 @@ void MitmProxy::add_filter(std::string const& name, FilterProxy* fp) {
 
 
 int MitmProxy::handle_sockets_once(baseCom* xcom) {
-
-    webhook_session_start();
 
     // A policy stages the handler before the non-blocking upstream connect.
     // Activate it at the first worker cycle where the upstream is connected,
@@ -1139,7 +1238,8 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
         // Advertise support before Spider may publish its first stateful rewrite.
         j["info"]["webhook_control"] = {
             {"version", 1}, {"mode", webhook_control_->strict() ? "strict" : "regular"},
-            {"sequence", ++webhook_control_->content_sequence}
+            {"sequence", ++webhook_control_->content_sequence},
+            {"rewrite", webhook_rewrite_allowed_}
         };
     }
 
@@ -1241,6 +1341,35 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
                         if(apply_sift_reply(json_obj)) publish_sift_classifications();
                     }
                     if(json_obj.contains("action")) {
+                        const auto& action = json_obj["action"];
+                        const bool changes_stream = action == "replace" || action == "discard" ||
+                            action == "need-more" || json_obj.contains("content");
+
+                        if (action == "drop") {
+                            state().dead(true);
+                            return;
+                        }
+
+                        std::optional<std::string> replacement;
+                        const auto content = json_obj.find("content");
+
+                        if (content != json_obj.end() && content->is_string()) {
+                            replacement = b64_decode(content->get_ref<const std::string&>());
+                        }
+
+                        // Same-size replace is an intentional low-level escape
+                        // hatch, not a claim of protocol safety. Keep the input
+                        // context as-is: the script owns any resulting mismatch.
+                        // Compare decoded bytes, not the base64 envelope size.
+                        const bool same_size_replace = action == "replace" && replacement &&
+                            replacement->size() == buffer.size();
+
+                        if (changes_stream && (sift || (!webhook_rewrite_allowed_ && !same_size_replace))) {
+                            _err("content mutation requires setup rewrite permission or a same-size replace");
+                            state().dead(true);
+                            return;
+                        }
+
                         if(regular_webhook && json_obj["action"] == "not-interested" &&
                            !webhook_control_->strict()) {
                             webhook_content_wanted_ = false;
@@ -1262,9 +1391,8 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
                         }
                         else {
                             // catch-all code to decode response if present
-                            if(json_obj.contains("content")) {
-                                std::string body = json_obj["content"];
-                                auto decoded = b64_decode(body);
+                            if(replacement) {
+                                const auto& decoded = *replacement;
 
                                 _dia("webhook content-replace: received %dB of replacement data", decoded.size());
                                 {
@@ -1409,7 +1537,12 @@ bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t 
 void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected,
                       bool consume_source, FlowCtx::Tx const* tx) {
 
-    if(not to or not from or from->to_read().empty()) return;
+    if(not to or not from or from->to_read().empty()) {
+        // Even an early exit must close the observation transaction. In
+        // particular, a preceding destination may have consumed the source.
+        if(tx) flow_ctx_->discard(*tx);
+        return;
+    }
 
     if(redirected) {
         if(tx) flow_ctx_->discard(*tx);
@@ -1581,6 +1714,7 @@ void MitmProxy::write_stream_event(sx::stream_direction direction,
 void MitmProxy::on_left_bytes(baseHostCX* cx) {
 
     if(not cx or state().dead()) return;
+    if(cx->to_read().empty() || !webhook_session_start()) return;
 
     auto tx = flow_ctx_->begin(
         FlowCtx::Dir::I2R, cx->to_read(), cx->meter_read_bytes);
@@ -1667,6 +1801,7 @@ bool MitmProxy::handle_requirements(baseHostCX* cx) {
 void MitmProxy::on_right_bytes(baseHostCX* cx) {
 
     if(not cx or state().dead()) return;
+    if(cx->to_read().empty() || !webhook_session_start()) return;
 
     auto tx = flow_ctx_->begin(
         FlowCtx::Dir::R2I, cx->to_read(), cx->meter_read_bytes);

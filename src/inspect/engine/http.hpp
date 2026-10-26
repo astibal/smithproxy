@@ -142,25 +142,28 @@ namespace sx::engine::http {
         std::vector<std::string> l7_encoding;
         PayloadAnnotations payload_annotations;
         static std::uint64_t payload_fingerprint(std::string_view data) {
-            std::uint64_t value = 14695981039346656037ULL;
-            for(unsigned char byte : data) {
-                value ^= byte;
-                value *= 1099511628211ULL;
-            }
-            return value;
+            return PayloadAnalysis::calculate_fingerprint(data);
         }
 
         void observe_l7_payload(std::string_view data, std::uint64_t read_bytes,
                                 L7PayloadHints ranges,
                                 std::vector<std::string> encodings = {},
-                                PayloadAnnotations annotations = {}) {
+                                PayloadAnnotations annotations = {},
+                                PayloadAnalysis* analysis = nullptr) {
             l7_payload = std::move(ranges);
             l7_encoding = std::move(encodings);
             payload_annotations = std::move(annotations);
             l7_payload_observed_bytes = read_bytes;
             l7_payload_observed_size = data.size();
-            l7_payload_observed_fingerprint = payload_fingerprint(data);
-            l7_payload_observed = true;
+            const auto fingerprint = analysis
+                ? analysis->publication_fingerprint(data)
+                : std::optional<std::uint64_t>(payload_fingerprint(data));
+
+            // Protocol-only observations still update ranges and encoding, but
+            // cannot publish them as a verified webhook observation. Clear any
+            // previous identity rather than leaving stale metadata publishable.
+            l7_payload_observed_fingerprint = fingerprint.value_or(0);
+            l7_payload_observed = fingerprint.has_value();
         }
 
         [[nodiscard]] bool l7_payload_matches(std::string_view data,

@@ -23,6 +23,7 @@ percentage change.
 | PXM-014 | Stream event classification | The epoll adapter merged clean `EPOLLHUP` with `EPOLLERR`; the poll loop then unconditionally marked the owning proxy dead. It also did not subscribe to `EPOLLRDHUP`, so a directional peer close depended on incidental read readiness and could be mistaken for a fatal full close. | Subscribe read-monitored descriptors to `EPOLLRDHUP`, keep peer-shutdown events separate from socket errors, and route HUP/RDHUP through the normal read path so final bytes are drained before EOF is recorded. Only `EPOLLERR` remains unconditionally fatal. | `EpollLifecycle.PeerHalfCloseIsReadableButNotSocketError`, transfer lifecycle suite and privileged delayed-half-close E2E. |
 | PXM-015 | Permanent stream reconnect | A reconnected `baseHostCX` retained the previous stream's read-EOF flag, so the new connection could remain permanently unreadable. Each reconnect also overwrote the one descriptor deferred for destruction, leaking the prior retired descriptor. | Retire the previously shut-down descriptor before opening its replacement and reset directional EOF state for the new stream. | `TransferLifecycle.ReconnectResetsReadEofAndClosesRetiredDescriptor`. |
 | PXM-016 | Permanent connect failure | A failed left/right permanent connection abandoned its newly allocated context and transport. The same error path formatted the integer result as `%s`, which could dereference it as a pointer while logging the failure. | Keep the candidate context in a `unique_ptr` until a successful connection transfers ownership, and use the correct integer log format on both sides. | `ProxyLifecycle.FailedPermanentConnectReleasesBothSideContexts`. |
+| PXM-017 | SOCKS/implicit TLS CONNECT stalls | The delayed-accept path clears the upstream `opening` flag before the explicit handler can flush CONNECT success. | **FIXED** by origin/master `3de21bd`, merged into ProtocolViews in `d7aaef2`. CONNECT completion has its own readiness flag. | Post-merge implicit TLS, STARTTLS and HTTP CONNECT pass; setup metadata passes all 47 scenarios over both JSON and SXBN. Historical debugger evidence remains below. |
 | TST-001 | QUIC soak | The origin counted a completed short-lived certificate-probe handshake on a later polling tick. A peer close between accept and that tick made a valid handshake disappear from the counter. | Record the handshake immediately when OpenSSL publishes the accepted connection, retaining the later check only as a fallback. | Repeated `QuicTestbed.RepeatedVerifiedReconnectsReleaseEveryIdleSession` soak. |
 | TST-002 | QUIC interop | The OpenSSL client closed at stdin EOF immediately after a verified QUIC handshake, racing delivery of its first application-stream payload and making the external interop test deterministically fail. | Keep `s_client` alive until the origin confirms the echo, with a bounded poll and cleanup. | `external.quic_interop` with the system OpenSSL QUIC client. |
 | TST-003 | Privileged PCAP tests | Legacy PCAP unit tests reused fixed files in `/tmp` and passed their unchecked `fopen()` result to `fileno()`. Under root, Linux sticky-directory protection rejected truncating a user-owned prior artifact and the coverage suite segfaulted; concurrent runs could also overwrite each other. | Generate every throwaway PCAP/PCAPNG through an anonymous `tmpfile()` and assert successful creation before using its descriptor. | Root `PcapTest.*` and `NgTest.*` runs plus the privileged coverage profile. |
@@ -210,3 +211,43 @@ full native gates passed. One remote smoke attempt stopped at process startup
 because libconfig++ and libmicrohttpd runtime libraries were missing; after
 installing them, the complete unchanged P3 run passed. The successful run is
 recorded in `tests/docs/patch-run-history`; preceding failed reports are retained.
+
+ProtocolViews post-merge verification (2026-10-26): `d7aaef2` plus the working
+setup/rewrite changes passes the upstream implicit-TLS regression, STARTTLS
+matrix and HTTP CONNECT integration. The setup fixture also passes all 47
+scenarios over JSON and SXBN, including SNI/ALPN before content forwarding.
+Its SNI now matches the repository certificate SAN: the initial post-merge
+failure was a hostname mismatch, not a CONNECT stall. HTTP CONNECT requires
+system DNS for localtest.me and was rerun outside the loopback-only namespace.
+Logs, initial failures and reruns: `/tmp/master-merge-20261026/`.
+
+### Original ProtocolViews diagnosis and handoff (2026-10-25)
+
+- **Status at handoff:** OPEN; diagnosed on 2026-10-25, no fix applied then.
+  The fix from origin/master `3de21bd` was merged into this worktree on
+  2026-10-26; the original evidence below is retained as historical context.
+- **Worktree:** `smithproxy-need-more-test`, branch `wip/protocol-endpoint-views`,
+  HEAD `6d72e7d` plus working changes; Socle `1806c70`.
+- **Cause:** `socle/baseproxy.cpp:1004` clears the connected upstream's
+  `opening` flag from the delayed TLS accept path. The subsequent
+  `src/proxy/socks5/socksproxy.cpp:515` gate requires that flag to process
+  CONNECT completion, so the prepared success reply is never sent.
+- **Observed:** debugger stack confirms the flag change above, then
+  `EXPLICIT_WRITE side=r opening=0 pending=10 ready=0`. The client receives
+  no SOCKS success bytes; the origin TLS handshake times out. This happens
+  before the new setup webhook; an older binary also reproduces the failure.
+  This does not establish the regression's introducing commit or affect all SOCKS paths.
+- **Reproduce:** from that worktree, using its current uncommitted test fixture:
+
+  ```sh
+  unshare -Urn -- sh -c 'ip link set lo up && python3 tests/httpapi/need_more_integration.py --smithproxy build/smithproxy --source . --setup-only --setup-tls'
+  ```
+
+- **Evidence:** `/tmp/connection-start-tls-gdb.log` (stack and state),
+  `/tmp/connection-start-tls-trace.gdb`, `/tmp/connection-start-tls-baseline.log`.
+- **Fix/regression target:** explicit CONNECT readiness must not depend on
+  `opening` still being true. Preserve SO_ERROR/local-destination validation
+  and partial reply writes. Test a connected upstream whose opening flag was
+  already cleared, plus real SOCKS/TLS success, plain SOCKS, failed connect and
+  the shared HTTP CONNECT path. No change to connection-start is needed to
+  explain this failure.

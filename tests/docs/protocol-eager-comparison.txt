@@ -1,0 +1,82 @@
+EAGER TWO-CONTEXT COMPARISON
+Date: 2026-10-25
+Base: 6d72e7d + benchmark-only eager strategy; Socle 1806c70.
+Production routing, forking and parser code were NOT changed.
+
+QUESTION
+How much does parsing each payload in two independent endpoint contexts cost,
+compared with one parser and the current pre-split deep-fork preparation?
+
+METHOD
+Same CostByActiveStreamsAndPayload fixture and payloads as the prior benchmark.
+Added two_contexts_from_start to the existing rotated comparison, with seven
+warmed samples per row. All rows below were measured again in the same run,
+not combined with the older results.
+Release -O3 -DNDEBUG; AMD Ryzen 7 3700X; taskset CPU 14.
+No concurrent builds or other test jobs launched by this task during measurement.
+Normal host activity was not disabled.
+1000 payloads per batch for 1/32 streams; 128 for 256/1024 streams.
+DATA body sizes 64 and 16384 bytes; wire frames have another 9 header bytes.
+Both eager contexts are initialized independently with identical H2 traffic,
+including headers and explicitly enlarged windows. No initialized context is
+copied. The DATA workload then passes once through each context.
+Each unsplit ProtocolViews wrapper owns one engine; no fork/delta is invoked.
+seed() runs the parser and annotation path with external effects suppressed;
+the guard is inert for this fixture, which has no host callbacks or DNS content.
+Initialization and teardown are outside timing, consistently across paths.
+Reported numbers are medians of batch means, NOT request latency percentiles.
+
+RESULTS (microseconds per input payload, both passes included for eager-two)
+streams | DATA bytes | single us | deep-fork us | eager-two us | after-split us
+1 | 64 | 1.891 | 104.339 | 3.758 | 3.755
+1 | 16384 | 31.892 | 135.196 | 63.837 | 63.889
+32 | 64 | 1.910 | 198.664 | 3.807 | 3.809
+32 | 16384 | 31.920 | 231.523 | 63.852 | 63.931
+256 | 64 | 1.914 | 961.929 | 3.817 | 3.779
+256 | 16384 | 31.967 | 996.442 | 64.081 | 64.084
+1024 | 64 | 1.954 | 3679.361 | 3.905 | 3.913
+1024 | 16384 | 32.025 | 3710.351 | 64.005 | 64.022
+
+INTERPRETATION
+Eager-two costs approximately twice one parser, and matches the existing
+post-split two-parser path. Its DATA processing time barely changes with
+retained active stream count. Pre-split deep-copy cost grows sharply.
+For one stream the measured extra cost over one parser is 1.867 us for 64B
+and 31.945 us for 16KiB. Compared with deep-fork, eager-two is about 28x faster
+for 64B and 2.1x faster for 16KiB. With 1024 streams those ratios are about
+942x and 58x respectively.
+This supports testing an eager strategy before investing in a mutation journal.
+It does NOT establish that doubled parsing is negligible for every workload.
+
+CHECKS
+PASS 233 Release unit tests, benchmarks excluded.
+PASS all three ProtocolForkBenchmark tests.
+Each eager sample checks distinct context and HPACK decoder identities,
+body-byte totals, parser validity, receiver pending-frame emptiness, matching
+connection window and absence of a split.
+Existing storage and closed-history fork tests also passed unchanged.
+
+LIMITS
+Timed traffic is client-to-server DATA on an already initialized connection.
+HPACK setup occurs outside timing; repeated HEADERS/CONTINUATION decoding,
+Huffman-heavy fields, large trailers, gzip/DoH processing, connection churn,
+many idle connections and sustained full-proxy throughput are not measured.
+No webhook, sockets, TLS or scheduling overhead is included.
+Allocation counts and per-connection retained memory have not been measured.
+Whole-process peak RSS 187400 KiB includes all benchmark cases, NOT just eager
+contexts and NOT a per-connection memory estimate.
+Whole-process wall time 49.81 s, user 46.86 s, system 2.92 s, no swaps.
+Production behavior is still the WIP deep-fork strategy. No commit or push.
+
+REPRODUCTION
+cmake --build /tmp/protocol-views-validation-E80DfL/release --target sx_gtests_http1 -j2
+taskset -c 14 /tmp/protocol-views-validation-E80DfL/release/sx_gtests_http1 --gtest_filter='ProtocolForkBenchmark.*'
+
+ARTIFACTS
+/tmp/protocol-eager-build.log
+/tmp/protocol-eager-correctness.log
+/tmp/protocol-eager-correctness.xml
+/tmp/protocol-eager-benchmark.log
+/tmp/protocol-eager-benchmark.xml
+/tmp/protocol-eager-benchmark-time.txt
+/tmp/protocol-eager-timings.csv
