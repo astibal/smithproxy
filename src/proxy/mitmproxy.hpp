@@ -218,11 +218,17 @@ public:
     void proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected,
                bool consume_source = true, FlowCtx::Tx const* tx = nullptr);
 
+    // Queue local output to this side; call on the proxy's I/O thread only.
+    // The caller owns protocol framing and ordering relative to the current
+    // callback. Success means queued, not delivered. Input bytes are not consumed.
+    void inject(buffer& data, side_t side);
+
     // makes a synchronous API call letting webhook modify the content
     bool content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
                          std::string_view payload_layer,
-                         bool regular_webhook, bool sift);
-    bool handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t side);
+                         bool regular_webhook, bool sift, ::buffer& reverse_output);
+    bool handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t side,
+                                buffer& reverse_output);
 
     // this virtual method is called whenever there are new bytes in any LEFT host context!
     void on_left_bytes(baseHostCX* cx) override;

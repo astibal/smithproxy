@@ -124,6 +124,7 @@ def main():
     parser.add_argument('--control-only', action='store_true')
     parser.add_argument('--replace-only', action='store_true', help='Reproduce resize handling without need-more')
     parser.add_argument('--h2-views', action='store_true', help='Exercise lazy endpoint views through real forwarding')
+    parser.add_argument('--h2-inject', action='store_true', help='Exercise directional webhook output through real sockets')
     parser.add_argument('--setup-only', action='store_true', help='Verify synchronous connection setup decisions')
     parser.add_argument('--setup-tls', action='store_true', help='Also bind TLS origin port 443 (use isolated network namespace)')
     args = parser.parse_args()
@@ -252,6 +253,11 @@ def main():
 
             if args.h2_views:
                 from protocol_views_integration import run
+                run(connection, send, set_reply, server)
+                return
+
+            if args.h2_inject:
+                from protocol_injection_integration import run
                 run(connection, send, set_reply, server)
                 return
 

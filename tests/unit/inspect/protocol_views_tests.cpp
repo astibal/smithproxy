@@ -820,4 +820,90 @@ TEST(ProtocolViews, CanonicalHuffmanTreeIsSharedAndConcurrentDecodingIsIndepende
 
 INSTANTIATE_TEST_SUITE_P(BothEndpoints, ProtocolViewsDirection,
                         ::testing::Values(E::Client, E::Server));
+
+TEST_P(ProtocolViewsDirection, InjectionUpdatesOnlyRecipientDuringCallback) {
+    LedgerAdapter adapter;
+    ProtocolViews views(adapter, ProtocolViews::Mode::Rewrite);
+    const auto recipient = GetParam();
+    const auto other = recipient == E::Client ? E::Server : E::Client;
+    views.context(E::Client).state_data = LedgerState{};
+    const auto token = views.begin(recipient, bytes("request"), 7);
+
+    views.inject(recipient, bytes("reverse"));
+    views.inject(recipient, bytes("-tail"));
+    EXPECT_EQ(adapter.inputs, 1U);
+    EXPECT_EQ(adapter.outputs, 2U);
+    EXPECT_EQ(adapter.forks, 1U);
+
+    // Injection must not finish or replace the current callback token.
+    views.finish(token, bytes("replacement"));
+    const auto& origin = std::any_cast<LedgerState const&>(views.context(recipient).state_data);
+    const auto& destination = std::any_cast<LedgerState const&>(views.context(other).state_data);
+    EXPECT_EQ(recipient == E::Client ? origin.client_bytes : origin.server_bytes, "request");
+    EXPECT_EQ(recipient == E::Client ? origin.server_bytes : origin.client_bytes, "reverse-tail");
+    EXPECT_EQ(recipient == E::Client ? destination.client_bytes : destination.server_bytes, "replacement");
+    EXPECT_EQ(recipient == E::Client ? destination.server_bytes : destination.client_bytes, "");
+    EXPECT_EQ(adapter.outputs, 3U);
+    EXPECT_FALSE(views.context(recipient).protocol_only);
+    EXPECT_EQ(views.context(recipient).payload_analysis, nullptr);
+}
+
+TEST_P(ProtocolViewsDirection, InjectedSettingsAreAcknowledgedOnlyInRecipientView) {
+    ProtocolViews views(ProtocolViews::Mode::Rewrite);
+    initialize(views);
+    const auto recipient = GetParam();
+    const auto other = recipient == E::Client ? E::Server : E::Client;
+    const auto token = views.begin(recipient, bytes(frame(0, 0, 1, "data")), 4);
+    views.inject(recipient, bytes(setting(1, 0)));
+    views.abandon(token);
+
+    auto pending = [recipient](auto const& ctx) {
+        return recipient == E::Client ? ctx.right_settings_awaiting_ack
+                                      : ctx.left_settings_awaiting_ack;
+    };
+    EXPECT_EQ(pending(state(views, recipient)), 1U);
+    EXPECT_EQ(pending(state(views, other)), 0U);
+
+    // The synthetic SETTINGS ACK is consumed locally, not forwarded.
+    exchange(views, recipient, frame(4, 1, 0), "");
+    EXPECT_EQ(pending(state(views, recipient)), 0U);
+    EXPECT_EQ(pending(state(views, other)), 0U);
+    EXPECT_FALSE(state(views, recipient).connection_invalid);
+    EXPECT_FALSE(state(views, other).connection_invalid);
+}
+
+TEST(ProtocolViews, InjectionDoesNotRequireAnOutstandingCallback) {
+    LedgerAdapter adapter;
+    ProtocolViews views(adapter, ProtocolViews::Mode::Rewrite);
+    views.context(E::Client).state_data = LedgerState{};
+    pass(views, E::Client, "input");
+    views.inject(E::Server, bytes("output"));
+    EXPECT_EQ(adapter.inputs, 1U);
+    EXPECT_EQ(adapter.outputs, 2U);
+    EXPECT_EQ(std::any_cast<LedgerState const&>(views.context(E::Client).state_data).client_bytes,
+              "input");
+    EXPECT_EQ(std::any_cast<LedgerState const&>(views.context(E::Server).state_data).client_bytes,
+              "inputoutput");
+}
+
+TEST(ProtocolViews, InjectionRejectsUnpreparedOrUnreservedViews) {
+    ProtocolViews unknown(ProtocolViews::Mode::Rewrite);
+    EXPECT_THROW(unknown.inject(E::Client, bytes("output")), std::logic_error);
+    EXPECT_FALSE(unknown.split());
+
+    LedgerAdapter adapter;
+    ProtocolViews observe(adapter);
+    observe.context(E::Client).state_data = LedgerState{};
+    pass(observe, E::Client, "input");
+    EXPECT_THROW(observe.inject(E::Server, bytes("output")), std::logic_error);
+    EXPECT_FALSE(observe.split());
+    EXPECT_EQ(adapter.outputs, 0U);
+}
+
+TEST(ProtocolViews, EmptyInjectionIsANoopEvenBeforeSetup) {
+    ProtocolViews views;
+    EXPECT_NO_THROW(views.inject(E::Client, buffer{}));
+    EXPECT_FALSE(views.active());
+    EXPECT_FALSE(views.split());
+}
 } // namespace

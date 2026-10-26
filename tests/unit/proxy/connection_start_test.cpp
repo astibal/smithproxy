@@ -1,4 +1,5 @@
 #include <proxy/connection_start.hpp>
+#include <proxy/directional_content.hpp>
 #include <gtest/gtest.h>
 
 namespace {
@@ -73,3 +74,51 @@ TEST(ConnectionStart, RewriteIsExplicitAndAcceptOnly) {
     EXPECT_FALSE(sx::proxy::parse_setup_reply(503, R"({"control":{"rewrite":true}})").rewrite);
 }
 } // namespace
+
+TEST(DirectionalContent, DecodesBinaryAndEmptyOutputs) {
+    using sx::proxy::DirectionalContent;
+    const auto result = DirectionalContent::parse({
+        {"action", "replace"}, {"content", ""}, {"content-reverse", "AP9h"}});
+    EXPECT_TRUE(result.forward.empty());
+    EXPECT_EQ(result.reverse, std::string("\0\xff" "a", 3));
+    EXPECT_TRUE(DirectionalContent::parse({
+        {"action", "replace"}, {"content", ""}, {"content-reverse", ""}}).reverse.empty());
+}
+
+TEST(DirectionalContent, RejectsMalformedEnvelopeAndEitherPayload) {
+    using sx::proxy::DirectionalContent;
+    const nlohmann::json valid = {
+        {"action", "replace"}, {"content", "YQ=="}, {"content-reverse", "Yg=="}};
+    for(auto const* key : {"action", "content", "content-reverse"}) {
+        auto reply = valid;
+        reply.erase(key);
+        EXPECT_THROW(DirectionalContent::parse(reply), std::exception);
+    }
+    for(auto const* key : {"content", "content-reverse"}) {
+        for(auto const& bad : nlohmann::json::array({nullptr, 1, {}, "!AAA", "YQ", "YQ=", "YR==", "YQ==\n", "====", "AA=A"})) {
+            auto reply = valid;
+            reply[key] = bad;
+            EXPECT_THROW(DirectionalContent::parse(reply), std::exception) << reply;
+        }
+    }
+    for(auto const* action : {"accept", "unchanged", "need-more", "discard", "drop"}) {
+        auto reply = valid;
+        reply["action"] = action;
+        EXPECT_THROW(DirectionalContent::parse(reply), std::exception);
+    }
+}
+
+TEST(DirectionalContent, BoundsEncodedAndCombinedSizes) {
+    using sx::proxy::DirectionalContent;
+    auto encode = [](std::string const& bytes) {
+        return libbase64::encode<std::string, char, unsigned char, true>(
+            reinterpret_cast<unsigned char const*>(bytes.data()), bytes.size());
+    };
+    const auto maximum = encode(std::string(DirectionalContent::max_bytes, 'x'));
+    nlohmann::json reply = {{"action", "replace"}, {"content", maximum}, {"content-reverse", ""}};
+    EXPECT_EQ(DirectionalContent::parse(reply).forward.size(), DirectionalContent::max_bytes);
+    reply["content-reverse"] = "YQ==";
+    EXPECT_THROW(DirectionalContent::parse(reply), std::exception);
+    reply["content"] = maximum + "AAAA";
+    EXPECT_THROW(DirectionalContent::parse(reply), std::exception);
+}
