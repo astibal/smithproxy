@@ -1,0 +1,54 @@
+CONTENT-REVERSE FULL P3 REGRESSION -- 2026-10-26
+=============================================
+
+Verdict: PASS. All 43 sections passed; no FAIL or FLAKY_PASS.
+No source changes or retries were needed during this run.
+
+Source
+------
+Smithproxy fc-api: 63a2c679e427d66dbf0f7390b1b3e83bd41be254
+Socle: decc93fe2957f89f2cf508fe90118710ab224729 (unchanged)
+The source tree was clean at invocation. The runner subsequently appended
+the successful result to tests/docs/patch-run-history.
+
+Execution
+---------
+UTC: 2026-10-26 16:54:02 to 17:34:22 (40m20s).
+Fresh production and native builds; four local build jobs.
+Native gate: 45/45 CTest suites passed in 134.14 seconds.
+Dataplane: dedicated remote Linux target, three section workers.
+Smoke, RTT and TLS throughput ran exclusively before the parallel workload.
+
+Reproduction from the repository root:
+  tests/patch-runner/test-patch.sh full --remote root@TEST_HOST \
+      --parallel 3 --jobs 4 \
+      --dir /tmp/content-reverse-full-p3-20261026 --unique=63a2c67 --quiet
+
+Coverage
+--------
+The complete standard full profile passed: native, smoke, RTT, TLS throughput,
+TLS policy, routing, transfer, QUIC, TCP/UDP churn, capture, all three corpus
+categories, and every mandatory protocol fuzz section, including H1/H2
+regular, edge and insanity. Seed: smithproxy-baseline-v1.
+
+The native gate includes both JSON and SXBN content-reverse socket suites,
+alongside need-more, webhook control, setup and protocol-view regressions.
+These use a deterministic webhook fixture, not a running Spider. This run
+does not claim implementation of Spider's automatic H2 window translation.
+Optional sanitizer, line-coverage, extended and platform profiles were not run.
+
+Cleanup and evidence
+--------------------
+Runner cleanup checks passed. A separate final remote check found no network
+namespaces, running Smithproxy processes or remote schedulers.
+Test artifacts were retained; no production configuration was changed.
+
+Original aggregate report:
+  /tmp/content-reverse-full-p3-20261026_63a2c67/results/20261026T165402Z-63a2c679-full/
+  summary.txt, summary.json, sections.tsv, native/ctest.log, native/junit.xml
+
+Durable local report copy:
+  /home/astib/Documents/ChatGPT/Smithproxy/p3-runs/content-reverse-63a2c67-20261026/
+  results/, coordinator.log
+
+Detailed remote section artifacts remain under the original work root.
