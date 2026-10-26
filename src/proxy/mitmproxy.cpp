@@ -1537,6 +1537,16 @@ bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t 
 void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected,
                       bool consume_source, FlowCtx::Tx const* tx) {
 
+    auto stop_io = [this] {
+        // proxy() runs inside a traversal of these vectors. shutdown() would
+        // clear them, invalidate that traversal and cause a second Tx discard.
+        // Close descriptors now; normal proxy cleanup retires the contexts.
+        for(auto const* sockets : {&left_sockets, &right_sockets,
+                                   &left_delayed_accepts, &right_delayed_accepts}) {
+            for(auto* host : *sockets) host->shutdown();
+        }
+    };
+
     if(not to or not from or from->to_read().empty()) {
         // Even an early exit must close the observation transaction. In
         // particular, a preceding destination may have consumed the source.
@@ -1598,7 +1608,7 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
 
     if(state().dead()) {
         if(tx) flow_ctx_->discard(*tx);
-        shutdown();
+        stop_io();
         return;
     }
 
@@ -1614,7 +1624,7 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
             // after marking dead, session is not getting on_error anymore
             webhook_session_stop();
             if(tx) flow_ctx_->discard(*tx);
-            shutdown();
+            stop_io();
             return;
         }
     }
