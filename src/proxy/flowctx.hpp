@@ -32,6 +32,10 @@ public:
     void commit(Tx const& tx, buffer const& data);
     void discard(Tx const& tx);
 
+    // Locally generated output: no raw-input ingest or input-byte accounting.
+    void inject(Dir dir, buffer const& data);
+    bool can_inject() const { return views_.can_inject(); }
+
     // Existing metadata consumers see the current INPUT endpoint. Output
     // observation never switches this selector or publishes another webhook.
     sx::engine::EngineCtx& engine() { return views_.context(active_endpoint_); }

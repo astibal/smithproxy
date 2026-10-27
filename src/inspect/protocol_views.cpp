@@ -149,6 +149,20 @@ void ProtocolViews::abandon(std::uint64_t token) {
     finish(token, empty);
 }
 
+void ProtocolViews::inject(Endpoint recipient, buffer const& bytes) {
+    if (bytes.empty()) return;
+
+    // A shared observation view cannot represent data seen by only one peer.
+    // Never fork late from a state that already contains unmodified input.
+    if (mode_ != Mode::Rewrite || !active()) {
+        throw std::logic_error("Injection requires a prepared rewrite protocol view");
+    }
+
+    prepare_output();
+    const auto sender = peer(recipient);
+    observe(context(sender, Phase::Output), sender, bytes, 0, true);
+}
+
 void ProtocolViews::seed(Endpoint sender, buffer const& bytes, PayloadAnalysis* analysis) {
     if (sequence_ != 0 || split()) {
         throw std::logic_error("Cannot seed an active protocol conversation");

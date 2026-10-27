@@ -909,6 +909,17 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                             --source ${PROJECT_SOURCE_DIR} ${views_arguments})
                     set_tests_properties(integration.protocol_views_${webhook_format}
                             PROPERTIES LABELS "native;integration;http2" TIMEOUT 180)
+                    set(injection_arguments --h2-inject)
+                    if(webhook_format STREQUAL "binary")
+                        list(APPEND injection_arguments --binary)
+                    endif()
+                    add_test(NAME integration.protocol_injection_${webhook_format}
+                            COMMAND ${Python3_EXECUTABLE}
+                            ${PROJECT_SOURCE_DIR}/tests/httpapi/need_more_integration.py
+                            --smithproxy $<TARGET_FILE:smithproxy>
+                            --source ${PROJECT_SOURCE_DIR} ${injection_arguments})
+                    set_tests_properties(integration.protocol_injection_${webhook_format}
+                            PROPERTIES LABELS "native;integration;http2" TIMEOUT 180)
                 endforeach()
                 add_test(NAME integration.connection_start
                         COMMAND ${Python3_EXECUTABLE}

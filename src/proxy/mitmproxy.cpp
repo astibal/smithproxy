@@ -42,11 +42,13 @@
 #include <cerrno>
 #include <chrono>
 #include <thread>
+#include <limits>
 #include <openssl/rand.h>
 
 #include <proxy/mitmproxy.hpp>
 #include <proxy/content_webhook_metadata.hpp>
 #include <proxy/connection_start.hpp>
+#include <proxy/directional_content.hpp>
 #include <proxy/mitmhost.hpp>
 #include <proxy/streamhandler.hpp>
 #include <proxy/mitmproxy_utils.hpp>
@@ -1214,7 +1216,7 @@ static std::string b64_decode(std::string const& encoded) {
 
 bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
                                 std::string_view payload_layer,
-                                bool regular_webhook, bool sift) {
+                                bool regular_webhook, bool sift, ::buffer& reverse_output) {
 
     auto& log = log_content;
 
@@ -1222,6 +1224,10 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
     if(not cx or buffer.empty()) return false;
 
     bool was_modified = false;
+    const bool reverse_allowed = webhook_rewrite_allowed_ && flow_ctx_->can_inject() &&
+        left_sockets.size() + left_delayed_accepts.size() == 1 &&
+        right_sockets.size() + right_delayed_accepts.size() == 1 &&
+        cx->com()->l4_proto() == SOCK_STREAM;
 
     nlohmann::json j;
     auto cl = to_connection_label();
@@ -1239,7 +1245,8 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
         j["info"]["webhook_control"] = {
             {"version", 1}, {"mode", webhook_control_->strict() ? "strict" : "regular"},
             {"sequence", ++webhook_control_->content_sequence},
-            {"rewrite", webhook_rewrite_allowed_}
+            {"rewrite", webhook_rewrite_allowed_},
+            {"content-reverse", reverse_allowed}
         };
     }
 
@@ -1339,6 +1346,26 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
                     }
                     if(sift) {
                         if(apply_sift_reply(json_obj)) publish_sift_classifications();
+                    }
+                    if(json_obj.contains("content-reverse")) {
+                        try {
+                            if(!regular_webhook || sift || !reverse_allowed) {
+                                throw std::logic_error("Reverse content requires advertised rewrite views");
+                            }
+
+                            auto output = sx::proxy::DirectionalContent::parse(json_obj);
+                            // Stage only. The proxy publishes input metadata and
+                            // completes filtering before touching the reverse view.
+                            reverse_output.assign(output.reverse.data(), output.reverse.size());
+                            buffer.assign(output.forward.data(), output.forward.size());
+                            was_modified = true;
+                        }
+                        catch(std::exception const& error) {
+                            _err("Invalid directional webhook output: %s", error.what());
+                            reverse_output.clear();
+                            state().dead(true);
+                        }
+                        return;
                     }
                     if(json_obj.contains("action")) {
                         const auto& action = json_obj["action"];
@@ -1457,7 +1484,8 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
     return was_modified;
 }
 
-bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t side) {
+bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t side,
+                                     buffer& reverse_output) {
     const auto sift_is_enabled = sx::http::webhooks::sift_enabled();
     const auto webhook_enabled = sx::http::webhooks::is_enabled() and
                                  writer_opts()->webhook_enable;
@@ -1467,7 +1495,7 @@ bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t 
     auto const payload_layer = content_payload_layer(from);
 
     if(sift_is_enabled and content_webhook(
-            from, side, from->to_read(), payload_layer, false, true)) {
+            from, side, from->to_read(), payload_layer, false, true, reverse_output)) {
         if(!webhook_control_->strict()) return true;
     }
     if(!webhook_enabled) {
@@ -1517,7 +1545,7 @@ bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t 
                          to_string(iNOT).c_str(), attempt_no);
 
                 }
-                return content_webhook(from, side, from->to_read(), payload_layer, true, false);
+                return content_webhook(from, side, from->to_read(), payload_layer, true, false, reverse_output);
             }
         }
         _err("[%s]: content_webhook: previous webhook takes too long to complete, content NOT sent to webhook.",
@@ -1529,13 +1557,23 @@ bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t 
 
     }
     else {
-        return content_webhook(from, side, from->to_read(), payload_layer, true, false);
+        return content_webhook(from, side, from->to_read(), payload_layer, true, false, reverse_output);
     }
     return false;
 }
 
 void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected,
                       bool consume_source, FlowCtx::Tx const* tx) {
+
+    auto stop_io = [this] {
+        // proxy() runs inside a traversal of these vectors. shutdown() would
+        // clear them, invalidate that traversal and cause a second Tx discard.
+        // Close descriptors now; normal proxy cleanup retires the contexts.
+        for(auto const* sockets : {&left_sockets, &right_sockets,
+                                   &left_delayed_accepts, &right_delayed_accepts}) {
+            for(auto* host : *sockets) host->shutdown();
+        }
+    };
 
     if(not to or not from or from->to_read().empty()) {
         // Even an early exit must close the observation transaction. In
@@ -1587,10 +1625,11 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
         }
     }
 
+    buffer reverse_output;
     // 1. content webhook first (potentially modifies from->to_read() buffer
     if(writer_opts()->webhook_enable or sx::http::webhooks::sift_enabled() or webhook_control_->strict()) {
         auto orig_sz = from->to_read().size();
-        if(handle_content_webhook(from, to, side)) {
+        if(handle_content_webhook(from, to, side, reverse_output)) {
             auto sz = from->to_read().size();
             _dia("mitmproxy::proxy-%c: %dB replaced with %dB (webhook)", from_side(side), orig_sz, sz);
         }
@@ -1598,7 +1637,7 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
 
     if(state().dead()) {
         if(tx) flow_ctx_->discard(*tx);
-        shutdown();
+        stop_io();
         return;
     }
 
@@ -1614,7 +1653,7 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
             // after marking dead, session is not getting on_error anymore
             webhook_session_stop();
             if(tx) flow_ctx_->discard(*tx);
-            shutdown();
+            stop_io();
             return;
         }
     }
@@ -1631,25 +1670,31 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
         proxy_dump_packet(side, dump_buffer);
     }
 
-    if(replacement.has_value()) {
-        if(tx) flow_ctx_->commit(*tx, *replacement);
+    try {
+        auto& outgoing = replacement ? *replacement : from->to_read();
+        const auto size = outgoing.size();
 
-        write_traffic_log(side, from, &replacement.value());
+        // Reserve before publishing either output. Socket I/O remains deferred
+        // to the write phase; a failure below closes both legs.
+        if(!reverse_output.empty()) {
+            if(size > std::numeric_limits<std::size_t>::max() - to->writebuf()->size()) {
+                throw std::length_error("Forward output exceeds write buffer capacity");
+            }
+            to->writebuf()->capacity(to->writebuf()->size() + size);
+        }
 
-        auto orig_sz = from->to_read().size();
-        auto sz = replacement.value().size();
-        to->to_write(replacement.value());
-        _dia("mitmproxy::proxy-%c: %dB replaced with %dB (content rule)", from_side(side), orig_sz, sz);
+        if(tx) flow_ctx_->commit(*tx, outgoing);
+        write_traffic_log(side, from, replacement ? &*replacement : nullptr);
+        inject(reverse_output, side);
+        to->to_write(outgoing, replacement.has_value() || consume_source);
+        _dia("mitmproxy::proxy-%c: queued %dB", from_side(side), size);
     }
-    else {
-        if(tx) flow_ctx_->commit(*tx, from->to_read());
-
-        write_traffic_log(side, from);
-        auto sz = from->to_read().size();
-        to->to_write(from->to_read(), consume_source);
-
-        auto fastlane = sz > 0 and from->to_read().empty();
-        _dia("mitmproxy::proxy-%c: %dB copied %s", from_side(side), sz, fastlane ? "(fastlane)": "");
+    catch(std::exception const& error) {
+        _err("Cannot publish proxy output: %s", error.what());
+        state().dead(true);
+        from->to_read().clear();
+        stop_io();
+        return;
     }
 
     // All current bytes have now been queued (or deliberately discarded).
@@ -1660,6 +1705,49 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
     if(consume_source) from->to_read().clear();
 }
 
+
+void MitmProxy::inject(buffer& data, side_t side) {
+    if(data.empty()) return;
+
+    if(side != side_t::LEFT && side != side_t::RIGHT) {
+        throw std::invalid_argument("Invalid injection side");
+    }
+
+    // A side alone identifies a destination only on a one-to-one stream proxy.
+    // Do not silently choose the first peer of a multi-destination proxy.
+    const auto& sockets = side == side_t::LEFT ? left_sockets : right_sockets;
+    const auto& delayed = side == side_t::LEFT ? left_delayed_accepts : right_delayed_accepts;
+
+    if(state().dead() || sockets.size() + delayed.size() != 1) {
+        throw std::logic_error("Injection requires one live destination");
+    }
+
+    auto* target = side == side_t::LEFT ? first_left() : first_right();
+
+    if(!target || target->error() || target->socket() <= 0) {
+        throw std::logic_error("Injection destination is unavailable");
+    }
+
+    if(data.size() > std::numeric_limits<std::size_t>::max() - target->writebuf()->size()) {
+        throw std::length_error("Injection exceeds write buffer capacity");
+    }
+
+    try {
+        // Reserve before advancing protocol state. Neither this pass nor
+        // to_write() invokes inspectors, a content webhook or a socket write.
+        target->writebuf()->capacity(target->writebuf()->size() + data.size());
+        const auto direction = side == side_t::LEFT ? FlowCtx::Dir::R2I : FlowCtx::Dir::I2R;
+        flow_ctx_->inject(direction, data);
+        target->to_write(data, false);
+        target->com()->forced_write(true);
+    }
+    catch(...) {
+        // Protocol parsing may have advanced before queueing fails. Do not
+        // continue the connection with a context that differs from its output.
+        state().dead(true);
+        throw;
+    }
+}
 
 void MitmProxy::write_traffic_log(side_t side, baseHostCX* cx, buffer* custom_buffer) {
 

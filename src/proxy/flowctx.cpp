@@ -65,6 +65,12 @@ void FlowCtx::discard(Tx const& tx) {
     if (tx.protocol_token) views_.abandon(tx.protocol_token);
 }
 
+void FlowCtx::inject(Dir dir, buffer const& data) {
+    const auto recipient = dir == Dir::I2R ? Endpoint::Server : Endpoint::Client;
+    views_.inject(recipient, data);
+    stats(dir).out_bytes += data.size();
+}
+
 FlowCtx::Stats& FlowCtx::stats(Dir dir) {
     return dir == Dir::I2R ? i2r_ : r2i_;
 }

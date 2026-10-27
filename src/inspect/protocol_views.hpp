@@ -36,12 +36,17 @@ public:
     }
     bool split() const { return other_ != nullptr; }
     bool active() const { return adapter_ != nullptr; }
+    bool can_inject() const { return mode_ == Mode::Rewrite && active(); }
 
     // Exactly one input/finish pair may be outstanding. Tokens prevent an old
     // transaction from completing a newer callback accidentally.
     std::uint64_t begin(Endpoint sender, buffer const& bytes, std::uint64_t read_bytes);
     void finish(std::uint64_t token, buffer const& bytes);
     void abandon(std::uint64_t token);
+
+    // Observe bytes generated locally for one endpoint. This does not complete
+    // an outstanding input transaction or publish another input observation.
+    void inject(Endpoint recipient, buffer const& bytes);
 
     // Bootstrap retained pre-detection bytes, without external inspector effects.
     // Caller uses this only before the first begin(), never to replay a callback.
