@@ -645,6 +645,16 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
 
         add_executable(tls_testbed
                 tests/tls/tls_testbed.cpp)
+        add_executable(event_tls_tests socle/tests/event_tls_tests.cpp)
+        target_link_libraries(event_tls_tests socle_lib socle_common_lib pthread crypto ssl)
+
+        add_executable(event_history_tests socle/tests/event_history_tests.cpp)
+        target_link_libraries(event_history_tests socle_common_lib pthread crypto ssl)
+
+        add_executable(event_trail_tests socle/tests/event_trail_tests.cpp)
+        target_include_directories(event_trail_tests PRIVATE socle/common)
+        target_link_libraries(event_trail_tests pthread)
+
         add_executable(transfer_testbed
                 socle/tests/test_transfer.cpp)
         target_compile_definitions(tls_testbed PRIVATE
@@ -723,6 +733,9 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
             # separately so every native patch run reports it explicitly.
             add_test(NAME unit.logging_concurrency COMMAND sx_gtests
                     --gtest_filter=LogMux.RemoteTargetLifecycleIsSafeDuringConcurrentLogging)
+            add_test(NAME unit.event_tls COMMAND event_tls_tests)
+            add_test(NAME unit.event_history COMMAND event_history_tests)
+            add_test(NAME unit.event_trail COMMAND event_trail_tests)
             add_test(NAME unit.http1 COMMAND sx_gtests_http1 --gtest_filter=-HTTP1.benchmark)
             add_test(NAME unit.startstoptls COMMAND sx_gtests_startstoptls)
             add_test(NAME unit.httpconnect COMMAND sx_gtests_httpconnect)

@@ -114,6 +114,8 @@ public:
     using whitelist_verify_entry_t = expiring<whitelist_verify_entry> ;
     using whitelist_map_t = ptr_cache<std::string,whitelist_verify_entry_t>;
 
+    void enrich_event_context(logan_events::EventContext& context,
+                              const logan_events::EventBatch& batch) const override;
     time_t half_holdtimer = 0;
     static long& half_timeout() { ; return half_timeout_; };
     [[nodiscard]] std::time_t age() const noexcept { return std::time(nullptr) - created_at_; }

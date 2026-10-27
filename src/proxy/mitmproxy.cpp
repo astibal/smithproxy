@@ -2774,3 +2774,17 @@ void MitmUdpProxy::on_left_new(std::unique_ptr<baseHostCX> accepted_cx)
 baseHostCX* MitmUdpProxy::MitmUdpProxy::new_cx(int s) {
     return new MitmHostCX(com()->slave(),s);
 }
+
+void MitmProxy::enrich_event_context(logan_events::EventContext& context,
+                                   const logan_events::EventBatch& batch) const {
+    baseProxy::enrich_event_context(context, batch);
+    context.add("session", std::to_string(session_id_));
+    const bool tls_alert = std::any_of(batch.events.begin(), batch.events.end(),
+        [](const auto& observation) { return observation.event.message == "TLS fatal alert"; });
+    if (!tls_alert) return;
+    // The upstream TLS object holds server-certificate diagnostics. Resolve it
+    // here, while the proxy still owns its contexts, not in the SSL callback.
+    auto* right = first_right();
+    auto* tls = right ? dynamic_cast<SSLCom*>(right->com()) : nullptr;
+    if (tls && tls->get_SSL()) context.set_detail(tls->ssl_error_details());
+}
