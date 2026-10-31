@@ -47,6 +47,7 @@
 
 #include <proxy/mitmproxy.hpp>
 #include <proxy/content_webhook_metadata.hpp>
+#include <proxy/content_webhook_control.hpp>
 #include <proxy/connection_start.hpp>
 #include <proxy/directional_content.hpp>
 #include <proxy/mitmhost.hpp>
@@ -1246,7 +1247,8 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
             {"version", 1}, {"mode", webhook_control_->strict() ? "strict" : "regular"},
             {"sequence", ++webhook_control_->content_sequence},
             {"rewrite", webhook_rewrite_allowed_},
-            {"content-reverse", reverse_allowed}
+            {"content-reverse", reverse_allowed},
+            {"connection-close", cx->com()->l4_proto() == SOCK_STREAM}
         };
     }
 
@@ -1340,6 +1342,27 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
                     _err("MitmProxy::content_webhook: response body is invalid");
                 }
                 else {
+                    auto const action = json_obj.find("action");
+                    if(regular_webhook && !sift && action != json_obj.end() &&
+                       action->is_string() && *action == "close") {
+                        auto const reason = sx::proxy::connection_close_reason(json_obj);
+                        if(reason) {
+                            _dia("content webhook closed the current connection: %s",
+                                 reason->c_str());
+                        } else {
+                            _err("Invalid callback-local connection-close reply");
+                        }
+
+                        // A malformed close request fails closed as well. In
+                        // neither case may the triggering bytes or reverse
+                        // output escape after termination was requested.
+                        buffer.clear();
+                        reverse_output.clear();
+                        was_modified = true;
+                        state().dead(true);
+                        content_reply_received = true;
+                        return;
+                    }
                     if(regular_webhook) {
                         webhook_control_->apply(json_obj);
                         content_reply_received = true;

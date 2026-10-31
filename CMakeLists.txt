@@ -897,6 +897,19 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                         --source ${PROJECT_SOURCE_DIR} --binary)
                 set_tests_properties(integration.webhook_need_more integration.webhook_need_more_binary
                         PROPERTIES LABELS "native;integration" TIMEOUT 120)
+                add_test(NAME integration.webhook_h1_flow_kill
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/httpapi/need_more_integration.py
+                        --smithproxy $<TARGET_FILE:smithproxy>
+                        --source ${PROJECT_SOURCE_DIR} --h1-flow-kill)
+                add_test(NAME integration.webhook_h1_flow_kill_binary
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/httpapi/need_more_integration.py
+                        --smithproxy $<TARGET_FILE:smithproxy>
+                        --source ${PROJECT_SOURCE_DIR} --h1-flow-kill --binary)
+                set_tests_properties(integration.webhook_h1_flow_kill
+                        integration.webhook_h1_flow_kill_binary
+                        PROPERTIES LABELS "native;integration" TIMEOUT 120)
                 foreach(webhook_format json binary)
                     set(views_arguments --h2-views)
                     if(webhook_format STREQUAL "binary")

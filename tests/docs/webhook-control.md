@@ -40,8 +40,23 @@ the current `mode`, and a monotonically increasing `sequence` starting at 1.
 The counter belongs to the connection, shared by both directions. This lets
 Spider reject mid-connection activation and detect a missing translate callback;
 it does not add an activation handshake. SIFT callbacks do not carry this counter.
+
+Synchronous TCP content callbacks additionally advertise the literal
+`connection-close: true` capability. An endpoint may answer that callback with
+exactly:
+
+```json
+{"action":"close","control":{"mode":"strict"},"reason":"Connection killed."}
+```
+
+The reason is bounded diagnostic text and is never sent on the wire. Smithproxy
+discards both callback directions and closes only the current connection.
+Malformed close-shaped replies fail closed without forwarding callback bytes.
+There is no connection identifier or asynchronous close control plane.
+
 Tests: `unit.webhook_control`, `integration.webhook_control`,
-`integration.webhook_control_binary`.
+`integration.webhook_control_binary`, `integration.webhook_h1_flow_kill`, and
+`integration.webhook_h1_flow_kill_binary`.
 
 Validation (2026-10-25): full local build succeeded; all five selected CTest
 suites passed (31.15 s): the three above plus both existing need-more JSON/SXBN
