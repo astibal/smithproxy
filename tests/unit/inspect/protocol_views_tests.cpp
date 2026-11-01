@@ -906,4 +906,190 @@ TEST(ProtocolViews, EmptyInjectionIsANoopEvenBeforeSetup) {
     EXPECT_FALSE(views.active());
     EXPECT_FALSE(views.split());
 }
+
+namespace h1 = sx::engine::http::v1;
+
+h1::Http1Connection& h1_state(ProtocolViews& views, E endpoint) {
+    return std::any_cast<h1::Http1Connection&>(views.context(endpoint).state_data);
+}
+
+void initialize_h1(ProtocolViews& views) {
+    auto signature = std::make_shared<MyDuplexFlowMatch>();
+    signature->sig_engine = "http1";
+    views.context(E::Client).signature = signature;
+    duplexFlow history;
+    ASSERT_TRUE(views.prepare(E::Client, bytes(""), history, false));
+}
+
+TEST(ProtocolViews, H1HeldRequestDoesNotAdvanceServerMethodQueue) {
+    ProtocolViews views(ProtocolViews::Mode::Rewrite);
+    initialize_h1(views);
+    const std::string first = "GET /first HTTP/1.1\r\nHost: test\r\n\r\n";
+    const std::string held = "HEAD /held HTTP/1.1\r\nHost: test\r\n\r\n";
+    const std::string response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok";
+
+    exchange(views, E::Client, first + held, first);
+    EXPECT_EQ(h1_state(views, E::Client).pending_methods,
+              (std::deque<std::string>{"GET", "HEAD"}));
+    EXPECT_EQ(h1_state(views, E::Server).pending_methods,
+              (std::deque<std::string>{"GET"}));
+    ASSERT_TRUE(views.can_inject());
+
+    // The first response consumes GET on both sides. Only reverse publication
+    // then makes the held HEAD visible to the server's framing context.
+    pass(views, E::Server, response);
+    views.inject(E::Server, bytes(held));
+    EXPECT_EQ(h1_state(views, E::Client).pending_methods,
+              (std::deque<std::string>{"HEAD"}));
+    EXPECT_EQ(h1_state(views, E::Server).pending_methods,
+              (std::deque<std::string>{"HEAD"}));
+
+    const std::string head_response = "HTTP/1.1 200 OK\r\nContent-Length: 999\r\n\r\n";
+    pass(views, E::Server, head_response);
+    pass(views, E::Client, first);
+    pass(views, E::Server, response);
+    for (auto endpoint : {E::Client, E::Server}) {
+        EXPECT_TRUE(h1_state(views, endpoint).pending_methods.empty());
+        const auto& annotations = h1_state(views, endpoint).directions[1].annotations();
+        ASSERT_FALSE(annotations.empty());
+        EXPECT_EQ(annotations.back().kind, "http1.body");
+        EXPECT_EQ(annotations.back().end - annotations.back().start, 2);
+    }
+}
+
+TEST(ProtocolViews, H1HeldResponseAndInjectionPreserveIndependentBodyCursors) {
+    ProtocolViews views(ProtocolViews::Mode::Rewrite);
+    initialize_h1(views);
+    const std::string request = "GET / HTTP/1.1\r\nHost: test\r\n\r\n";
+    const std::string response = "HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nbody";
+    pass(views, E::Client, request);
+    exchange(views, E::Server, response, "");
+
+    EXPECT_TRUE(h1_state(views, E::Server).pending_methods.empty());
+    EXPECT_EQ(h1_state(views, E::Client).pending_methods.size(), 1U);
+    const auto input_metadata = views.context(E::Server).application_data;
+    views.inject(E::Client, bytes(response.substr(0, response.size() - 2)));
+    views.inject(E::Client, bytes("dy"));
+
+    EXPECT_EQ(views.context(E::Server).application_data, input_metadata);
+    EXPECT_NE(views.context(E::Client).application_data, input_metadata);
+    EXPECT_TRUE(h1_state(views, E::Client).pending_methods.empty());
+    pass(views, E::Client, request);
+    pass(views, E::Server, response);
+    EXPECT_TRUE(h1_state(views, E::Client).pending_methods.empty());
+    EXPECT_TRUE(h1_state(views, E::Server).pending_methods.empty());
+}
+
+TEST(ProtocolViews, H1FragmentedDetectionSeedsHistoryOnce) {
+    ProtocolViews views(ProtocolViews::Mode::Rewrite);
+    auto signature = std::make_shared<MyDuplexFlowMatch>();
+    signature->sig_engine = "http1";
+    views.context(E::Client).signature = signature;
+    duplexFlow history;
+    history.append('r', bytes("POST / HTTP/1.1\r\nHost: test\r\nContent-Length: 4\r\n"));
+    const auto current = bytes("\r\nbody");
+    history.append('r', current);
+
+    ASSERT_TRUE(views.prepare(E::Client, current, history, true));
+    const auto token = views.begin(E::Client, current, current.size());
+    views.finish(token, current);
+
+    for (auto endpoint : {E::Client, E::Server}) {
+        EXPECT_EQ(h1_state(views, endpoint).pending_methods,
+                  (std::deque<std::string>{"POST"}));
+        const auto& annotations = h1_state(views, endpoint).directions[0].annotations();
+        ASSERT_FALSE(annotations.empty());
+        EXPECT_EQ(annotations.back().kind, "http1.body");
+        EXPECT_EQ(annotations.back().end - annotations.back().start, 4);
+    }
+}
+
+TEST(ProtocolViews, H1ForkDetachesPendingChunkAndMetadata) {
+    ProtocolViews views(ProtocolViews::Mode::Rewrite);
+    initialize_h1(views);
+    const std::string head = "POST / HTTP/1.1\r\nHost: test\r\nTransfer-Encoding: chunked\r\n\r\n";
+    exchange(views, E::Client, head + "3\r\na", head);
+    exchange(views, E::Client, "bc\r\n0\r\nX-End: yes\r\n\r\n", "");
+    views.inject(E::Server, bytes("3\r\nabc\r\n0\r\nX-End: yes\r\n\r\n"));
+
+    const std::string next = "GET /next HTTP/1.1\r\nHost: test\r\n\r\n";
+    pass(views, E::Client, next);
+    for (auto endpoint : {E::Client, E::Server}) {
+        EXPECT_EQ(h1_state(views, endpoint).pending_methods,
+                  (std::deque<std::string>{"POST", "GET"}));
+        const auto& annotations = h1_state(views, endpoint).directions[0].annotations();
+        ASSERT_FALSE(annotations.empty());
+        EXPECT_EQ(annotations.front().kind, "http1.start_line");
+    }
+}
+
+TEST(ProtocolViews, H1ObserveModeCannotInjectOrChangeThePeerQueueTwice) {
+    ProtocolViews views;
+    initialize_h1(views);
+    pass(views, E::Client, "GET / HTTP/1.1\r\nHost: test\r\n\r\n");
+    EXPECT_FALSE(views.split());
+    EXPECT_FALSE(views.can_inject());
+    EXPECT_EQ(h1_state(views, E::Client).pending_methods.size(), 1U);
+    EXPECT_THROW(views.inject(E::Client, bytes("response")), std::logic_error);
+}
+
+TEST(ProtocolViews, H1ConnectCanTransitionToNegotiatedH2) {
+    for (auto endpoint : {E::Client, E::Server}) {
+        ProtocolViews views(ProtocolViews::Mode::Rewrite);
+        initialize_h1(views);
+        pass(views, E::Client, "CONNECT test:443 HTTP/1.1\r\nHost: test\r\n\r\n");
+        pass(views, E::Server, "HTTP/1.1 200 Connection Established\r\n\r\n");
+        views.context(endpoint).negotiated_alpn = "h2";
+        duplexFlow history;
+        history.append('r', bytes("CONNECT test:443 HTTP/1.1\r\nHost: test\r\n\r\n"));
+
+        // Outer tunnel bytes are not replayed through the inner H2 parser.
+        // Either endpoint may be the first to report negotiated ALPN.
+        std::string initial_wire = frame(4, 0, 0);
+        if (endpoint == E::Client) {
+            initial_wire = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n" + initial_wire;
+        }
+        const auto initial = bytes(initial_wire);
+        ASSERT_TRUE(views.prepare(endpoint, initial, history, false));
+        const auto token = views.begin(endpoint, initial, initial.size());
+        views.finish(token, initial);
+
+        EXPECT_TRUE(views.split());
+        for (auto peer : {E::Client, E::Server}) {
+            ASSERT_EQ(views.context(peer).state_data.type(), typeid(h2::Http2Connection));
+            EXPECT_FALSE(state(views, peer).connection_invalid);
+        }
+    }
+}
+
+TEST(ProtocolViews, H1UnknownNegotiatedProtocolStopsAdvertisingInjection) {
+    ProtocolViews views(ProtocolViews::Mode::Rewrite);
+    initialize_h1(views);
+    pass(views, E::Client, "CONNECT test:443 HTTP/1.1\r\nHost: test\r\n\r\n");
+    pass(views, E::Server, "HTTP/1.1 200 Connection Established\r\n\r\n");
+    views.context(E::Server).negotiated_alpn = "unknown-protocol";
+    duplexFlow history;
+
+    EXPECT_FALSE(views.prepare(E::Server, bytes("opaque"), history, false));
+    EXPECT_FALSE(views.can_inject());
+    EXPECT_THROW(views.inject(E::Client, bytes("opaque")), std::logic_error);
+}
+
+TEST(ProtocolViews, H1PreservesUnrelatedInspectorMetadataWhileTrackingFraming) {
+    ProtocolViews views(ProtocolViews::Mode::Rewrite);
+    initialize_h1(views);
+    auto metadata = std::make_shared<sx::engine::CustomApplicationData>("test-inspector");
+    views.context(E::Client).application_data = metadata;
+    const std::string request = "HEAD / HTTP/1.1\r\nHost: test\r\n\r\n";
+
+    exchange(views, E::Client, request, "");
+    EXPECT_EQ(views.context(E::Client).application_data, metadata);
+    EXPECT_EQ(h1_state(views, E::Client).pending_methods,
+              (std::deque<std::string>{"HEAD"}));
+    EXPECT_TRUE(h1_state(views, E::Server).pending_methods.empty());
+
+    views.inject(E::Server, bytes(request));
+    EXPECT_EQ(h1_state(views, E::Server).pending_methods,
+              (std::deque<std::string>{"HEAD"}));
+}
 } // namespace

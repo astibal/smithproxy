@@ -71,7 +71,23 @@ ProtocolAdapter const& ProtocolViews::adapter(EngineCtx const& ctx) {
 
 bool ProtocolViews::prepare(Endpoint sender, buffer const& current,
                             duplexFlow const& history, bool ingested) {
-    if (adapter_) return true;
+    if (adapter_ && adapter_->owns(context(sender))) {
+        return true;
+    }
+
+    // Negotiated ALPN can replace an outer H1 CONNECT conversation. Retire
+    // both old endpoint views together before preparing the inner protocol.
+    // There is no outstanding callback or output observation at this boundary.
+    if (adapter_) {
+        if (pending_) {
+            throw std::logic_error("Cannot change protocol during a callback");
+        }
+
+        EngineCtx next = context(sender);
+        other_.reset();
+        shared_ = std::move(next);
+        adapter_ = nullptr;
+    }
 
     auto preparation = ProtocolAdapter::Preparation::Unavailable;
     adapter_ = prepare_protocol_adapter(context(sender), sender == Endpoint::Client,

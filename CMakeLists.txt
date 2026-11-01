@@ -287,6 +287,7 @@ add_executable(smithproxy
         src/proxy/flowctx.cpp
         src/inspect/protocol_fork.cpp
         src/inspect/protocol_adapter.cpp
+        src/inspect/engine/http1_adapter.cpp
         src/inspect/engine/http2_adapter.cpp
         src/inspect/protocol_views.cpp
         src/proxy/mitmproxy.cpp
@@ -592,6 +593,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/inspect/protocol_fork_benchmark.cpp
                 src/inspect/protocol_fork.cpp
                 src/inspect/protocol_adapter.cpp
+                src/inspect/engine/http1_adapter.cpp
                 src/inspect/engine/http2_adapter.cpp
                 src/inspect/protocol_views.cpp
 
@@ -678,7 +680,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
         if (LIBCONFIGPP_FOUND)
             target_link_libraries(sx_gtests ${LIBCONFIGPP_LIBRARIES})
         endif()
-        target_link_libraries(sx_gtests_http1 gtest gtest_main socle_lib pthread crypto ssl)
+        target_link_libraries(sx_gtests_http1 gtest gtest_main socle_lib pthread crypto ssl
+            nlohmann_json::nlohmann_json)
         target_link_libraries(sx_gtests_startstoptls
                 gtest gtest_main
                 "$<LINK_GROUP:RESCAN,socle_lib,socle_common_lib>"

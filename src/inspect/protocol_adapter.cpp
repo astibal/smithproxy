@@ -1,11 +1,15 @@
 #include <inspect/protocol_adapter.hpp>
 #include <inspect/engine/http2_adapter.hpp>
+#include <inspect/engine/http1_adapter.hpp>
 
 namespace sx::engine {
 namespace {
 
 // Registration knows the available implementations, not their parsing rules.
-const ProtocolAdapter* const adapters[] = {&http::v2::protocol_adapter()};
+const ProtocolAdapter* const adapters[] = {
+    &http::v2::protocol_adapter(),
+    &http::v1::protocol_adapter(),
+};
 
 } // namespace
 

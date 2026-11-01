@@ -112,3 +112,27 @@ Spider's flow-control ledger, credit translation or automatic DATA resizing.
   being traversed; normal teardown retires their contexts.
 
 These are targeted native/integration regressions, not a full P3 run.
+
+## HTTP/1 endpoint views (2026-11-01)
+
+The registered H1 adapter reuses `Http1Connection` and `Http1Direction` for
+framing, chunked bodies and trailers. Rewrite mode copies that state before
+observing the first adapted input. Each endpoint has an independent pending
+request-method FIFO, so held requests do not affect the server's response
+framing before publication; this includes HEAD response body suppression.
+
+The existing `content-reverse` permission and wire format are unchanged. H1 now
+satisfies the prepared-adapter requirement after native signature or ALPN
+classification. Input keeps the existing request-identity inspector path;
+output observation advances framing without rescanning received history or
+invoking another webhook. Partial pre-detection history is seeded once.
+
+An ALPN transition away from H1 retires both outer endpoint views before the
+inner protocol is prepared. The H2 adapter remains responsible for H2 parsing.
+Unknown negotiated protocols do not retain H1 injection capability. This does
+not add CONNECT addon lifecycle hooks or idle publication.
+
+Validation uses the `ProtocolViews.H1*` native cases and Spider's real
+`h1_suspension_e2e.py` peer/both/kill scenarios. The latter require Spider's
+webhook to forward `replacement_reverse` from ordinary H1 commit results as
+well as H2 Translate results. Updating only the producer is insufficient.
