@@ -105,6 +105,7 @@ public:
     std::size_t process_in() override;
     virtual std::size_t process_socks_hello();
     virtual std::size_t process_socks_hello_tcp();
+    std::size_t process_socks_authentication();
     virtual std::size_t process_socks_udp_request();
 
     struct UDP {

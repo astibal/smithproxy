@@ -47,6 +47,7 @@
 #include <proxy/socks5/socksproxy.hpp>
 #include <proxy/mitmhost.hpp>
 #include <service/cfgapi/cfgapi.hpp>
+#include <service/auth/broker_client.hpp>
 
 #include <algorithm>
 #include <vector>
@@ -95,6 +96,9 @@ public:
         const auto completed = complete_frame_size(frame_);
         if(completed != 0 && frame_.size() >= completed) {
             if(stage_ == stage::greeting && !frame_.empty() && frame_[0] == 5) {
+                stage_ = sx::auth::proxy_auth_required() ? stage::authentication : stage::request;
+                frame_.clear();
+            } else if(stage_ == stage::authentication) {
                 stage_ = stage::request;
                 frame_.clear();
             } else {
@@ -105,11 +109,14 @@ public:
     }
 
 private:
-    enum class stage { greeting, request, done };
+    enum class stage { greeting, authentication, request, done };
 
     std::size_t complete_frame_size(
             std::vector<std::uint8_t> const& bytes) const noexcept {
         if(bytes.empty()) return 0;
+        if(stage_ == stage::authentication) {
+            return sx::socks5::authentication_size_if_complete(bytes.data(), bytes.size());
+        }
         if(stage_ == stage::greeting && bytes[0] != 4)
             return sx::socks5::initial_frame_size_if_complete(
                 bytes.data(), bytes.size());

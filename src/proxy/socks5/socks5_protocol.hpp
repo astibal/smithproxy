@@ -44,6 +44,21 @@ inline std::size_t greeting_size_if_complete(const std::uint8_t* data,
     return size >= required ? required : 0;
 }
 
+// RFC 1929 frames have two independent one-byte lengths. Both the socket
+// framer and the authentication state machine must retain the same boundary.
+inline std::size_t authentication_size_if_complete(
+        const std::uint8_t* data, std::size_t size) noexcept {
+    if(data == nullptr || size < 2) {
+        return 0;
+    }
+    const std::size_t username_size = data[1];
+    if(size < 3 + username_size) {
+        return 0;
+    }
+    const std::size_t required = 3 + username_size + data[2 + username_size];
+    return size >= required ? required : 0;
+}
+
 inline bool is_unambiguous_domain(const std::uint8_t* data,
                                   std::size_t size) noexcept {
     if(data == nullptr || size == 0) return false;
