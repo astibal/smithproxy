@@ -1,68 +1,43 @@
-# External PAM authentication (development)
+# External authentication client
 
-This directory is a standalone-buildable prototype on `new-AAA`. It keeps PAM
-and group lookup in a separate executable, ready for later repository extraction.
-There is no local password database, embedded verification backend or fallback
-inside the proxy. The old policy-profile authentication feature is unrelated.
+Smithproxy owns the generic authentication result, PAP exchange abstraction,
+Unix HTTP client and HTTP CONNECT/SOCKS5 protocol integration. The daemon and
+its PAM backend have moved to [Smithproxy Keyway](https://github.com/astibal/smithproxy-keyway).
+Smithproxy does not build or install the daemon, its backend or its test PAM
+module. The existing administrative CLI PAM dependency is unchanged.
 
-```text
-HTTP CONNECT / SOCKS5
-        |
-Smithproxy --comm-auth /run/smithproxy-auth/auth.sock
-        | HTTP/JSON over Unix socket
-smithproxy-auth-broker --config broker.cfg
-        | PAM authentication + account checks
-        | NSS primary/supplementary group membership
-        + accepted identity / rejected / unavailable
-```
+The `smithproxy_auth_client` target links curl and JSON. The diagnostic executable
+`smithproxy-auth-check` remains installed with Smithproxy.
 
 ## Build and test
 
-The normal Smithproxy build includes `smithproxy-auth-broker` and the diagnostic
-`smithproxy-auth-check`. The new proxy client links curl and JSON; PAM belongs to
-the broker. Smithproxy's existing administrative CLI PAM dependency is unchanged.
-
-The directory can also be built independently with CMake, a C++17 compiler,
-Linux-PAM (including `pam_start_confdir`), libconfig++, libmicrohttpd, libcurl,
-nlohmann-json and the repository's lmhttp headers:
+The normal Smithproxy build includes client unit tests and malformed-reply
+integration tests. For real proxy-to-Keyway integration, build Keyway separately
+with testing enabled and configure Smithproxy with:
 
 ```sh
-cmake -S src/service/auth -B build-auth -DBUILD_TESTING=ON
-cmake --build build-auth -j2
-ctest --test-dir build-auth --output-on-failure
+cmake -S . -B build \
+  -DSMITHPROXY_KEYWAY_EXECUTABLE=/path/to/keyway/build/smithproxy-keyway \
+  -DSMITHPROXY_KEYWAY_TEST_PAM_MODULE=/path/to/keyway/build/keyway_test_pam.so
+cmake --build build -j2
+ctest --test-dir build -R 'unit.pap|integration.auth_client|integration.proxy_auth' --output-on-failure
 ```
 
-For an extracted copy, set `LMHPP_INCLUDE_DIR` to the lmhttp include directory.
-Tests additionally need GoogleTest and Python 3. Integration tests open local
-Unix/TCP sockets and use a temporary PAM configuration and test-only module. They
-never change system accounts, group memberships, passwords or `/etc/pam.d`.
-The fixed password in the test module is a fixture, not a shipped backend; the
-module is not installed. Full builds also register `integration.proxy_auth`.
+These paths register optional tests; they do not add Keyway as a build or
+installation dependency. Without them the client still builds and tests alone.
+Test accounts and PAM configuration are confined to temporary directories.
 
 ## Configuration and startup
 
-Copy `broker.example.cfg` and select an existing Linux group. The required
-`pam.allowed_group` permits both primary and supplementary membership, resolved
-through NSS using the canonical identity returned by PAM. Only that matched
-group is returned, not a full identity/group directory.
-
-Provide a dedicated PAM service named by `pam.service`. Its `auth` stack must
-verify the password and its `account` stack must allow the account. Configure
-those stacks according to the host's PAM policy; the build does not install or
-modify a system PAM policy. Password changes, interactive challenges, sessions
-and credential establishment are outside this initial implementation. Empty
-passwords and accounts requiring a password change are rejected.
-
-Create the socket's parent directory with restricted access. Run the broker and
-proxy with the same effective UID, with the privileges required by the selected
-PAM stack. The socket is owner-only (umask 0077); this prototype does not grant
-access to a separate service UID. Configuration and any custom PAM directory
-must be writable only by their administrator.
+Configure Keyway separately, explicitly enable its PAM backend, and select a
+dedicated PAM service and allowed group. See the Keyway repository for its
+configuration and Unix socket ownership contract. No backend is enabled by
+installation and no system PAM policy is installed automatically.
 
 ```sh
-smithproxy-auth-broker --config /path/to/broker.cfg
-smithproxy --config-file /path/to/smithproxy.cfg --comm-auth /run/smithproxy-auth/auth.sock
-smithproxy-auth-check /run/smithproxy-auth/auth.sock USERNAME
+smithproxy-keyway --config /path/to/keyway.cfg
+smithproxy --config-file /path/to/smithproxy.cfg --comm-auth /run/smithproxy-keyway/keyway.sock
+smithproxy-auth-check /run/smithproxy-keyway/keyway.sock USERNAME
 ```
 
 The check utility reads one password line from standard input. Supply it through

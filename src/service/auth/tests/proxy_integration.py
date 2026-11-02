@@ -153,7 +153,7 @@ with tempfile.TemporaryDirectory(prefix='sx-auth-proxy-') as directory:
     path = root / 'auth.sock'
     (root / 'test-auth').write_text(f'auth required {MODULE}\naccount required {MODULE}\n')
     broker_config = root / 'broker.cfg'
-    broker_config.write_text(f'socket="{path}"; pam={{service="test-auth"; allowed_group="{GROUP}"; config_directory="{root}";}};')
+    broker_config.write_text(f'socket="{path}"; pam={{enabled=true; service="test-auth"; allowed_group="{GROUP}"; config_directory="{root}";}};')
     http_port, socks_port, cli_port = free_port(), free_port(), free_port()
     config = root / 'proxy.cfg'
     make_config(SOURCE / 'etc/smithproxy.cfg', config, SOURCE, root, http_port, cli_port)
