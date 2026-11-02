@@ -109,14 +109,17 @@ class WebhookHandler(http.server.BaseHTTPRequestHandler):
     requests = 0
     lock = threading.Lock()
     content: list[tuple[dict[str, object], bytes]] = []
+    actions: list[str] = []
 
     def do_POST(self) -> None:
         body_in = self.rfile.read(int(self.headers.get("Content-Length", "0")))
         info: dict[str, object] | None = None
         payload = b""
+        action = ""
 
         try:
             message = json.loads(body_in)
+            action = message.get("action", "")
             if message.get("action") == "connection-content":
                 info = message["details"]["info"]
                 payload = base64.b64decode(info.get("content", ""))
@@ -125,6 +128,7 @@ class WebhookHandler(http.server.BaseHTTPRequestHandler):
 
         with self.__class__.lock:
             self.__class__.requests += 1
+            self.__class__.actions.append(action)
             if info is not None:
                 self.__class__.content.append((info, payload))
 
@@ -623,6 +627,12 @@ def main() -> None:
                      half_close=True)
             run_case(args.smithproxy.resolve(), args.source.resolve(), Path(temp), True, port, True,
                      override_scope=True)
+        actions = WebhookHandler.actions
+        if "connection-start" not in actions or "access-request" not in actions:
+            raise AssertionError("missing setup or per-policy access callback")
+        if actions.index("connection-start") > actions.index("access-request"):
+            raise AssertionError("policy authorization ran before session setup")
+
         if WebhookHandler.requests == 0:
             raise AssertionError("enabled content webhook received no requests")
 

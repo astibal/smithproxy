@@ -43,6 +43,7 @@
 #include <openssl/rand.h>
 
 #include <staticcontent.hpp>
+#include <proxy/proxymaker.hpp>
 #include <privileged_socket.hpp>
 
 #include <inspect/sigfactory.hpp>
@@ -146,7 +147,8 @@ bool SmithProxy::create_tproxy_listeners() {
                 certs_path + SSLFactory::config_t::SR_KEYF,
                 true, 443, true, sx::quic::lifecycle_options {}, sx::quic::resource_limits {},
                 std::string {}, sx::multiflow::make_mitm_flow_proxy,
-                CfgFactory::get()->capture_local.enabled || CfgFactory::get()->capture_remote.enabled);
+                CfgFactory::get()->capture_local.enabled || CfgFactory::get()->capture_remote.enabled,
+                sx::proxymaker::make_quic_session_setup);
             if (!service->prepare()) {
                 _err("Failed to setup QUIC listener: %s", service->last_error().c_str());
                 return false;
@@ -448,7 +450,8 @@ bool SmithProxy::create_listeners() {
                         sx::quic::resource_limits {}, std::string {},
                         sx::multiflow::make_mitm_flow_proxy,
                         CfgFactory::get()->capture_local.enabled
-                            || CfgFactory::get()->capture_remote.enabled);
+                            || CfgFactory::get()->capture_remote.enabled,
+                        sx::proxymaker::make_quic_session_setup);
                     if (!service->prepare()) {
                         _fat("Failed to setup QUIC listener: %s", service->last_error().c_str());
                         return false;

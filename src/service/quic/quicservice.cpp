@@ -121,11 +121,13 @@ listener_service::listener_service(std::uint16_t port, std::string certificate,
                                    lifecycle_options lifecycle, resource_limits limits,
                                    std::string upstream_host,
                                    flow_proxy_factory proxy_factory,
-                                   bool capture_native)
+                                   bool capture_native,
+                                   proxymaker::SessionSetupFactory setup_factory)
     : port_(port), certificate_(std::move(certificate)),
       private_key_(std::move(private_key)), transparent_(transparent),
       upstream_port_(upstream_port), upstream_host_(std::move(upstream_host)),
       verify_upstream_(verify_upstream), lifecycle_(lifecycle), limits_(limits),
+      setup_factory_(std::move(setup_factory)),
       proxy_factory_(std::move(proxy_factory)), capture_native_(capture_native) {
     (void)log();
 }
@@ -457,6 +459,7 @@ void listener_service::attach_staged_upstream(session& value) {
 
     if (!value.client_endpoint.valid()) value.client_endpoint = found->second.client;
     value.target_endpoint = found->second.destination;
+    value.setup = found->second.setup;
     // OpenSSL may publish the accepted connection before a suspended
     // certificate callback has collected its asynchronous result. Keep the
     // generation binding until that result has been installed and staged;
@@ -464,8 +467,8 @@ void listener_service::attach_staged_upstream(session& value) {
     // very handshake which owns this session.
     dispatcher_bindings_.erase(key);
     value.upstream = transparent_
-        ? connect_upstream(value.target_endpoint, found->second.server_name)
-        : connect_upstream(found->second.server_name);
+        ? connect_upstream(value.target_endpoint, found->second.server_name, value.setup.get())
+        : connect_upstream(found->second.server_name, value.setup.get());
     staged_upstreams_.erase(found);
     if (!value.upstream) {
         ++upstream_failures_;
@@ -572,7 +575,11 @@ void listener_service::progress_handshake(
     // Tests may skip origin verification; production receives its upstream
     // connection from the certificate job above.
     if (!verify_upstream_ && value.downstream->handshake_complete() && !value.upstream) {
-        value.upstream = connect_upstream(value.downstream->server_name());
+        if (!value.setup && setup_factory_) {
+            auto const [host, port] = endpoint_parts(value.client_endpoint);
+            value.setup = setup_factory_(host, port);
+        }
+        value.upstream = connect_upstream(value.downstream->server_name(), value.setup.get());
         if (!value.upstream) {
             ++upstream_failures_;
             log().war("session %llu cannot create upstream connection",
@@ -636,6 +643,8 @@ void listener_service::progress_handshake(
                     spq1::stream_context {capture, flow});
             },
         };
+        if (value.setup) flow_context.parent_connection_id = value.setup->connection_id();
+
         value.proxy = proxy_factory_(
             value.downstream, value.upstream, proxy_limits,
             std::move(flow_context));
@@ -953,6 +962,7 @@ int listener_service::prepare_verified_certificate(SSL* downstream) {
                 certificate_jobs_.erase(found);
                 return 0;
             }
+            auto setup = found->second.setup;
             auto const client = found->second.client;
             auto const destination = found->second.destination;
             certificate_jobs_.erase(found);
@@ -967,7 +977,7 @@ int listener_service::prepare_verified_certificate(SSL* downstream) {
             // callback. Save only immutable routing data; accept_connections()
             // creates the forwarding connection in a normal listener-loop pass.
             staged_upstreams_.emplace(downstream, staged_upstream {
-                client, destination, server_name, generation });
+                std::move(setup), client, destination, server_name, generation });
             return 1;
         }
     }
@@ -1029,12 +1039,18 @@ int listener_service::prepare_verified_certificate(SSL* downstream) {
     log().deb("starting certificate job sni='%s' peer=%s target=%s",
               server_name.c_str(), endpoint_text(peer_endpoint).c_str(),
               endpoint_text(destination).c_str());
+    std::shared_ptr<proxymaker::SessionSetup> setup;
+    if (setup_factory_) {
+        auto const [host, port] = endpoint_parts(peer_endpoint);
+        setup = setup_factory_(host, port);
+    }
+
     try {
         certificate_jobs_.emplace(
             downstream,
-            certificate_job { std::async(std::launch::async,
-                [this, destination, server_name]() mutable {
-                    return verify_and_spoof(std::move(destination), std::move(server_name));
+            certificate_job { setup, std::async(std::launch::async,
+                [this, destination, server_name, setup]() mutable {
+                    return verify_and_spoof(std::move(destination), std::move(server_name), setup);
                 }), peer_endpoint, destination, server_name, generation });
     } catch (...) {
         log().err("cannot start certificate job sni='%s'", server_name.c_str());
@@ -1044,11 +1060,12 @@ int listener_service::prepare_verified_certificate(SSL* downstream) {
 }
 
 listener_service::verified_certificate listener_service::verify_and_spoof(
-    datagram_endpoint destination, std::string server_name) {
+    datagram_endpoint destination, std::string server_name,
+    std::shared_ptr<proxymaker::SessionSetup> setup) {
     verified_certificate verified;
     auto upstream = transparent_
-        ? connect_upstream(destination, server_name)
-        : connect_upstream(server_name);
+        ? connect_upstream(destination, server_name, setup.get())
+        : connect_upstream(server_name, setup.get());
     if (!upstream) {
         log().war("upstream connect failed sni='%s' target=%s", server_name.c_str(),
                   endpoint_text(destination).c_str());
@@ -1148,7 +1165,7 @@ bool listener_service::install_verified_certificate(
 }
 
 std::shared_ptr<openssl_connection> listener_service::connect_upstream(
-    std::string const& host) {
+    std::string const& host, proxymaker::SessionSetup* setup) {
     if (host.empty() || !client_context_) return nullptr;
     addrinfo hints {};
     hints.ai_family = AF_UNSPEC;
@@ -1164,8 +1181,14 @@ std::shared_ptr<openssl_connection> listener_service::connect_upstream(
     std::shared_ptr<openssl_connection> result;
     for (auto* current = addresses; current && !result; current = current->ai_next) {
         std::string error;
-        auto connection = connect_openssl_quic(client_context_.get(), current->ai_addr,
-                                                current->ai_addrlen, host, &error);
+        datagram_endpoint target;
+        std::memcpy(&target.address, current->ai_addr, current->ai_addrlen);
+        target.size = current->ai_addrlen;
+        auto const [target_host, target_port] = endpoint_parts(target);
+        auto connection = proxymaker::connect(setup, target_host, target_port, [&] {
+            return connect_openssl_quic(client_context_.get(), current->ai_addr,
+                                       current->ai_addrlen, host, &error);
+        });
         if (connection) result = std::shared_ptr<openssl_connection>(std::move(connection));
     }
     ::freeaddrinfo(addresses);
@@ -1173,12 +1196,16 @@ std::shared_ptr<openssl_connection> listener_service::connect_upstream(
 }
 
 std::shared_ptr<openssl_connection> listener_service::connect_upstream(
-    datagram_endpoint const& target, std::string const& server_name) {
+    datagram_endpoint const& target, std::string const& server_name,
+    proxymaker::SessionSetup* setup) {
     if (!target.valid() || server_name.empty() || !client_context_) return nullptr;
     std::string error;
-    auto connection = connect_openssl_quic(
-        client_context_.get(), reinterpret_cast<sockaddr const*>(&target.address),
-        target.size, server_name, &error);
+    auto const [host, port] = endpoint_parts(target);
+    auto connection = proxymaker::connect(setup, host, port, [&] {
+        return connect_openssl_quic(
+            client_context_.get(), reinterpret_cast<sockaddr const*>(&target.address),
+            target.size, server_name, &error);
+    });
     return connection
         ? std::shared_ptr<openssl_connection>(std::move(connection))
         : nullptr;

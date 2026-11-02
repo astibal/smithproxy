@@ -42,6 +42,12 @@
 
 #include <proxy/proxymaker.hpp>
 #include <proxy/proxymaker_utils.hpp>
+#include <proxy/connection_start.hpp>
+#include <proxy/connection_identity.hpp>
+#include <staticcontent.hpp>
+#include <service/http/webhooks.hpp>
+#include <proxy/filters/access_filter.hpp>
+
 
 #include <proxy/nbrhood.hpp>
 
@@ -353,10 +359,139 @@ namespace sx::proxymaker {
     }
 
 
-    bool connect(MasterProxy* owner, std::unique_ptr<MitmProxy> &&new_proxy) {
+    namespace {
+
+        // The certificate probe and forwarding socket belong to one session.
+        // They share this decision, but never share worker-affine QUIC objects.
+        class QuicSessionSetup final : public SessionSetup {
+        public:
+            QuicSessionSetup(std::string const& source_host, std::string const& source_port) {
+                static std::atomic_uint64_t sequence {0};
+                id_ = "quic-" + sx::proxy::connection_id(StaticContent::boot_random, ++sequence);
+                details_["info"] = {
+                    {"phase", "setup"}, {"scope", "transport"},
+                    {"transport", "udp"}, {"protocol", "quic"},
+                    {"source", {{"host", source_host}, {"port", source_port}}},
+                    {"webhook_control", {{"version", 1}, {"mode", "regular"},
+                                         {"sequence", 0}, {"rewrite", false}}}
+                };
+            }
+
+            std::string connection_id() const override { return id_; }
+
+            ~QuicSessionSetup() override {
+                if (!notified_) return;
+
+                // Also retire setup when certificate verification fails before
+                // the listener can publish a normal forwarding session.
+                details_["info"].erase("phase");
+                sx::http::webhooks::send_action("connection-stop", id_, details_, control_);
+                sx::http::webhooks::send_sift_action("connection-stop", id_, details_);
+            }
+
+            bool start(std::string const& host, std::string const& port) override {
+                if (started_) {
+                    // Do not reuse a script's verdict for a different DNS result.
+                    return allowed_ && (!notified_ || (host == host_ && port == port_));
+                }
+
+                started_ = true;
+                host_ = host;
+                port_ = port;
+                details_["info"]["destination"] = {{"host", host}, {"port", port}};
+
+                // Keep the display label compatible with existing session filters.
+                // The envelope id, not this label, identifies the physical session.
+                auto endpoint_label = [](std::string const& address, std::string const& service) {
+                    const auto bracketed = address.find(':') == std::string::npos
+                        ? address : "[" + address + "]";
+                    return "quic_" + bracketed + ":" + service;
+                };
+                const auto& source = details_["info"]["source"];
+                details_["info"]["session"] = endpoint_label(
+                    source["host"].get<std::string>(), source["port"].get<std::string>())
+                    + "+" + endpoint_label(host, port);
+
+                const bool enabled = sx::http::webhooks::is_enabled();
+                notified_ = enabled || sx::http::webhooks::sift_enabled();
+                if (!notified_) {
+                    allowed_ = true;
+                    return true;
+                }
+
+                bool valid_reply = false;
+                bool denied = false;
+                if (enabled) {
+                    sx::http::webhooks::send_action_wait("connection-start", id_, details_,
+                        [&](sx::http::expected_reply reply) {
+                            if (!reply) return;
+
+                            auto result = sx::proxy::parse_setup_reply(
+                                reply->response.first, reply->response.second);
+                            control_->apply(result.body);
+                            valid_reply = result.action != sx::proxy::setup_action::invalid;
+                            denied = result.action == sx::proxy::setup_action::drop;
+                            if (result.action == sx::proxy::setup_action::not_interested
+                                && control_->strict()) valid_reply = false;
+                        });
+                }
+
+                if (enabled && !valid_reply) {
+                    log::connect().war("QUIC connection-start: invalid setup reply (%s)",
+                                       control_->strict() ? "fail-closed" : "fail-open");
+                }
+
+                sx::http::webhooks::send_sift_action("connection-start", id_, details_);
+                allowed_ = !denied && (!enabled || valid_reply || !control_->strict());
+                return allowed_;
+            }
+
+        private:
+            std::string id_;
+            std::string host_;
+            std::string port_;
+            nlohmann::json details_;
+            std::shared_ptr<sx::http::webhooks::webhook_control_t> control_ =
+                std::make_shared<sx::http::webhooks::webhook_control_t>();
+            bool started_ = false;
+            bool notified_ = false;
+            bool allowed_ = false;
+        };
+    }
+
+    std::shared_ptr<SessionSetup> make_quic_session_setup(
+        std::string const& source_host, std::string const& source_port) {
+        return std::make_shared<QuicSessionSetup>(source_host, source_port);
+    }
+
+    bool connection_start(MitmProxy& proxy) {
+        if (not proxy.webhook_session_start()) return false;
+
+        // Access authorization is still selected by policy. Run it here,
+        // outside the configuration lock and before opening the upstream.
+        for (auto const& [name, filter] : proxy.filters_) {
+            if (auto* access = dynamic_cast<AccessFilter*>(filter.get())) {
+                access->authorize();
+                if (proxy.state().dead()) return false;
+            }
+        }
+
+        return true;
+    }
+
+    int connect(MitmProxy& proxy, MitmHostCX& target) {
+        if (not connection_start(proxy)) return -1;
+
+        return target.connect();
+    }
+
+    bool connect(MasterProxy* owner, std::unique_ptr<MitmProxy> new_proxy) {
         auto const& log = log::connect();
         if(new_proxy)
             _deb("proxymaker::connect[%s]: connecting", new_proxy->to_string(iINF).c_str());
+        if (not owner || not valid_proxy_endpoints(new_proxy.get())) return false;
+        if (not connection_start(*new_proxy)) return false;
+
         const bool connected = connect_owned_proxy(owner, std::move(new_proxy));
         if(!connected) _deb("proxymaker::connect: cannot connect proxy");
         return connected;

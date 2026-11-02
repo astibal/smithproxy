@@ -53,6 +53,10 @@ class Hook(http.server.BaseHTTPRequestHandler):
                     self.server.starts.append(event)
                     self.server.condition.notify_all()
                 status, result = self.server.start_reply(event)
+            if event.get('action') == 'connection-stop':
+                with self.server.condition:
+                    self.server.stops.append(event)
+                    self.server.condition.notify_all()
             if event.get('action') == 'info' and self.server.binary_enabled:
                 result = {'action': 'info-response',
                           'protocols': {'connection-content': ['sxbn-001']}}
@@ -137,6 +141,7 @@ def main():
         server.metadata = []
         server.actions = []
         server.starts = []
+        server.stops = []
         server.start_reply = lambda event: (200, {'action': 'accept', 'control': {'rewrite': True}})
         server.binary_enabled, server.binary_count = args.binary, 0
         server.verify_control, server.sequences = args.control_only, {}
@@ -225,6 +230,21 @@ def main():
                             assert receive(origin, 18) == b'WARMUP PLAINTEXT\r\n'
                         yield client, origin
 
+        @contextlib.contextmanager
+        def pending_connection():
+            # Expose the listener before CONNECT completes so setup tests can
+            # prove that no upstream socket exists while its verdict is pending.
+            with socket.socket() as listener:
+                listener.bind(('127.0.0.1', 0))
+                listener.listen()
+                listener.settimeout(.2)
+                with socket.create_connection(('127.0.0.1', port), timeout=5) as client:
+                    client.sendall(b'\x05\x01\x00')
+                    assert receive(client, 2) == b'\x05\x00'
+                    target = listener.getsockname()[1].to_bytes(2, 'big')
+                    client.sendall(b'\x05\x01\x00\x01\x7f\x00\x00\x01' + target)
+                    yield client, listener
+
         count = 0
         failures = []
         try:
@@ -248,7 +268,7 @@ def main():
 
             if args.setup_only:
                 from connection_start_integration import run
-                run(connection, send, set_reply, server, source, tls=args.setup_tls)
+                run(connection, send, set_reply, server, source, pending_connection, tls=args.setup_tls)
                 return
 
             if args.h2_views:

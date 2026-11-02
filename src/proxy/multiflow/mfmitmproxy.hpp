@@ -20,6 +20,7 @@ struct flow_proxy_context {
     /** Create an optional capture adapter for a downstream-visible flow ID. */
     std::function<std::unique_ptr<sx::traffic_log_adapter>(flow_id)>
         make_traffic_log_adapter;
+    std::string parent_connection_id = {}; ///< Physical transport webhook identity.
 };
 
 /**

@@ -220,6 +220,12 @@ private:
         right->opening(false);
 
         auto proxy = proxymaker::make(std::move(left), std::move(right));
+        if (proxy && !context_.parent_connection_id.empty()) {
+            const auto stream_id = downstream_->wire_flow_id(left_handle).value_or(left_handle.id);
+            proxy->webhook_stream = MitmProxy::WebhookStream {
+                context_.parent_connection_id, stream_id
+            };
+        }
         if (proxy && context_.make_traffic_log_adapter) {
             // The downstream ID is the stable identity visible to capture
             // consumers; the paired upstream flow may use a different ID.
@@ -242,6 +248,14 @@ private:
 
         if (!proxymaker::setup_snat(proxy, context_.source_host, context_.source_port)) {
             source_connection->reset(source, 0x102);
+            return;
+        }
+
+        // The parent QUIC session has already passed admission. Each logical
+        // stream still applies its own policy before inspecting stream data.
+        if (!proxymaker::connection_start(*proxy)) {
+            source_connection->reset(source, 0x10c);
+            destination_connection->reset(destination, 0x10c);
             return;
         }
 

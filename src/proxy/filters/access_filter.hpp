@@ -67,6 +67,7 @@ public:
     nlohmann::json to_json(int verbosity) const override;
 
     void init() override;
+    void authorize();
     void proxy(baseHostCX *from, baseHostCX *to, socle::side_t side, bool redirected) override;
     void update(socle::side_t side, buffer const& buf);
 

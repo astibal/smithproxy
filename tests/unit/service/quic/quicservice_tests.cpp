@@ -189,6 +189,88 @@ TEST_F(QuicListenerService, FailedPrepareDoesNotLeakDescriptorsAcrossRetries) {
     ::close(occupied);
 }
 
+namespace {
+
+class DeniedSessionSetup final : public sx::proxymaker::SessionSetup {
+public:
+    std::atomic_uint calls {0};
+    std::string host;
+    std::string port;
+
+    bool start(std::string const& target_host, std::string const& target_port) override {
+        host = target_host;
+        port = target_port;
+        ++calls;
+        return false;
+    }
+};
+
+} // namespace
+
+TEST_F(QuicListenerService, DeniedSetupPreventsProbeAndForwardingDatagrams) {
+    // Exercise both production certificate verification and the direct
+    // forwarding path used by isolated transport tests.
+    for (bool verify : {true, false}) {
+        SCOPED_TRACE(verify);
+        auto client_context = quic::make_openssl_quic_context(false);
+        ASSERT_NE(client_context, nullptr);
+        SSL_CTX_set_verify(client_context.get(), SSL_VERIFY_NONE, nullptr);
+
+        const int origin_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        ASSERT_GE(origin_fd, 0);
+        struct socket_guard {
+            int fd;
+            ~socket_guard() { close(fd); }
+        } origin_guard {origin_fd};
+
+        sockaddr_in origin {};
+        origin.sin_family = AF_INET;
+        origin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        ASSERT_EQ(bind(origin_fd, reinterpret_cast<sockaddr*>(&origin), sizeof(origin)), 0);
+        socklen_t size = sizeof(origin);
+        ASSERT_EQ(getsockname(origin_fd, reinterpret_cast<sockaddr*>(&origin), &size), 0);
+
+        auto setup = std::make_shared<DeniedSessionSetup>();
+        quic::listener_service proxy(
+            0, "etc/certs/default/srv-cert.pem", "etc/certs/default/srv-key.pem",
+            false, ntohs(origin.sin_port), verify, {}, {}, "127.0.0.1", {}, false,
+            [setup](auto const&, auto const&) { return setup; });
+        ASSERT_TRUE(proxy.prepare()) << proxy.last_error();
+        std::thread runner([&proxy] { proxy.run(); });
+        struct runner_guard {
+            quic::listener_service& proxy;
+            std::thread& runner;
+            ~runner_guard() {
+                proxy.stop();
+                runner.join();
+            }
+        } cleanup {proxy, runner};
+
+        sockaddr_in address {};
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        address.sin_port = htons(proxy.bound_port());
+        std::string error;
+        auto client = quic::connect_openssl_quic(
+            client_context.get(), reinterpret_cast<sockaddr*>(&address), sizeof(address),
+            "Smithproxy-Server-Certificate", &error);
+        ASSERT_NE(client, nullptr) << error;
+
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+        while (setup->calls.load() == 0 && std::chrono::steady_clock::now() < deadline) {
+            client->drain_events();
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+
+        ASSERT_EQ(setup->calls.load(), 1U);
+        EXPECT_EQ(setup->host, "127.0.0.1");
+        EXPECT_EQ(setup->port, std::to_string(ntohs(origin.sin_port)));
+        char byte;
+        EXPECT_EQ(recv(origin_fd, &byte, 1, MSG_DONTWAIT), -1);
+        EXPECT_EQ(errno, EAGAIN);
+    }
+}
+
 TEST_F(QuicListenerService, CleansUpHandshakeTimeout) {
     auto client_context = quic::make_openssl_quic_context(false);
     ASSERT_NE(client_context, nullptr);

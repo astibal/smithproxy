@@ -292,8 +292,18 @@ public:
     bool webhook_session_start();
     nlohmann::json connection_start_details() const;
 
+    // Logical streams retain their own inspection lifetime. Their parent ID
+    // identifies the shared transport without masquerading as another socket.
+    struct WebhookStream {
+        std::string parent_id;
+        std::uint64_t stream_id;
+    };
+    std::optional<WebhookStream> webhook_stream;
+    void add_webhook_stream_details(nlohmann::json& info) const;
+
     mutable bool wh_stop = false;
     void webhook_session_stop() const;
+    void shutdown() override;
 
     bool wh_sni = false;
 

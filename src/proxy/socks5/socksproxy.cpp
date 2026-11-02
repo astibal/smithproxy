@@ -455,7 +455,7 @@ void ExplicitProxy::explicit_handoff(ExplicitProxyCX* cx) {
     } else {
 
         // connect with applied properties
-        int real_socket = target_cx->connect();
+        int real_socket = sx::proxymaker::connect(*this, *target_cx);
         if(!target_cx->com()->descriptor_valid(real_socket)) {
             _err("SocksProxy::socks5_handoff: upstream connect returned invalid descriptor %d",
                  real_socket);
@@ -703,7 +703,7 @@ void SocksProxy::socks5_handoff_udp(socksServerCX* cx) {
     } else {
 
         // connect with applied properties
-        int real_socket = target_cx->connect();
+        int real_socket = sx::proxymaker::connect(*this, *target_cx);
         if(!target_cx->com()->descriptor_valid(real_socket)) {
             _err("SocksProxy::socks5_handoff_udp: upstream connect returned invalid descriptor %d",
                  real_socket);

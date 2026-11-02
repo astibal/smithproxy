@@ -290,7 +290,17 @@ void MitmProxy::toggle_tlog () {
 }
 
 
+void MitmProxy::shutdown() {
+    // MasterProxy can defer object destruction until a later busy poll cycle.
+    // Retire inspection state when transport shuts down, not when memory is freed.
+    webhook_session_stop();
+    baseProxy::shutdown();
+}
+
 MitmProxy::~MitmProxy() {
+    // Early setup may be followed by a failed connect or by logical-stream
+    // retirement without a socket error callback. Close that setup exactly once.
+    webhook_session_stop();
     
     if(writer_opts()->write_payload) {
         _deb("MitmProxy::destructor: syncing writer");
@@ -497,6 +507,14 @@ std::string MitmProxy::to_connection_ID() const {
     return sx::proxy::connection_id(StaticContent::boot_random, session_id_);
 }
 
+void MitmProxy::add_webhook_stream_details(nlohmann::json& info) const {
+    if (!webhook_stream) return;
+
+    info["scope"] = "stream";
+    info["parent_id"] = webhook_stream->parent_id;
+    info["stream_id"] = webhook_stream->stream_id;
+}
+
 nlohmann::json MitmProxy::connection_start_details() const {
     nlohmann::json info = {
         {"session", to_connection_label()}, {"phase", "setup"},
@@ -544,6 +562,7 @@ nlohmann::json MitmProxy::connection_start_details() const {
     if (!ja4.ClientHello.empty()) info["ja4_ch"] = ja4.ClientHello;
     if (!ja4.ServerHello.empty()) info["ja4_sh"] = ja4.ServerHello;
 
+    add_webhook_stream_details(info);
     return {{"info", std::move(info)}};
 }
 
@@ -670,6 +689,7 @@ void MitmProxy::webhook_session_stop() const {
                   { "ja4_sh", ja4.ServerHello },
     };
 
+    add_webhook_stream_details(j["info"]);
     if(tls.has_value())  j["info"]["tls"] = tls.value();
     if(l7.has_value())  j["info"]["l7"] = l7.value();
     if(auto classifications = sift_classifications(); !classifications.empty()) {
@@ -1240,6 +1260,7 @@ bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
         { "L7_encoding", nlohmann::json::array({""}) },
         { "content_annotations", nlohmann::json::array() }
     };
+    add_webhook_stream_details(j["info"]);
     if(regular_webhook) {
         // Advertise support before Spider may publish its first stateful rewrite.
         j["info"]["webhook_control"] = {

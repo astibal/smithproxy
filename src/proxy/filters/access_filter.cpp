@@ -4,16 +4,14 @@
 #include <service/http/webhooks.hpp>
 
 void AccessFilter::init() {
-
     state = state_t::INIT;
+}
 
-    // run update right when the filter is created (likely when connection is being opened)
-    if(not already_applied) {
-        buffer b;
-        _deb("AccessFilter[%c]: requesting webhook on init");
-        update(side_t::LEFT, b);
-    }
-
+void AccessFilter::authorize() {
+    // Setup and policy authorization share the pre-connect boundary. Keep
+    // construction free of network calls while policy holds its config lock.
+    buffer empty;
+    update(side_t::LEFT, empty);
     state = state_t::DATA;
 }
 

@@ -122,6 +122,9 @@ if os.environ.get('POLICY_TEST') == '1':
     text, count = re.subn(r'(policy\s*=\s*\()', r'\1\n' + policy_cases, text, count=1)
     if address_count != 1 or port_count != 1 or count != 1: raise RuntimeError('cannot inject policy suite objects/rules')
 if quic_test:
+    text = text.replace('settings = {', 'settings = {\n'
+                        '    webhook = { enabled = TRUE; tls_verify = FALSE; '
+                        'url = "http://127.0.0.1:59090/"; };', 1)
     if os.environ.get('QUIC_LAB') != '1':
         raise RuntimeError('QUIC_TEST requires QUIC_LAB=1')
     text, port_count = re.subn(
@@ -131,6 +134,8 @@ if quic_test:
     )
     profile = '''
     quic_runner = {
+        webhook_enable = TRUE;
+        webhook_lock_traffic = FALSE;
         write_payload = TRUE;
         write_format = "pcap_single";
         write_limit_client = 0;

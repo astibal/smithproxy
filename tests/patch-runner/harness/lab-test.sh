@@ -36,6 +36,7 @@ H3_ORIGIN_PID=
 QUIC_CLIENT_PID=
 QUIC_GRE_PID=
 QUIC_NATIVE_PID=
+QUIC_WEBHOOK_PID=
 SESSION_LIST_LOAD_PID=
 PPLAY_SUITE4_PID=
 PPLAY_SUITE6_PID=
@@ -90,6 +91,8 @@ cleanup() {
     [[ -z $QUIC_GRE_PID ]] || wait "$QUIC_GRE_PID" 2>/dev/null || true
     [[ -z $QUIC_NATIVE_PID ]] || kill -INT "$QUIC_NATIVE_PID" 2>/dev/null || true
     [[ -z $QUIC_NATIVE_PID ]] || wait "$QUIC_NATIVE_PID" 2>/dev/null || true
+    [[ -z $QUIC_WEBHOOK_PID ]] || kill "$QUIC_WEBHOOK_PID" 2>/dev/null || true
+    [[ -z $QUIC_WEBHOOK_PID ]] || wait "$QUIC_WEBHOOK_PID" 2>/dev/null || true
     [[ -z $H3_ORIGIN_PID ]] || kill "$H3_ORIGIN_PID" 2>/dev/null || true
     [[ -z $H3_ORIGIN_PID ]] || wait "$H3_ORIGIN_PID" 2>/dev/null || true
     [[ -z $SESSION_LIST_LOAD_PID ]] || kill "$SESSION_LIST_LOAD_PID" 2>/dev/null || true
@@ -290,6 +293,18 @@ if [[ ${SKIP_API_READY:-0} != 1 ]]; then
     python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["status"] == "ok"' "$ROOT/results/api.json"
     echo 'PASS API: authenticated HTTPS request from host namespace'
 fi
+if [[ $QUIC_TEST == 1 ]]; then
+    ip netns exec "$NS" python3 "$ROOT/runner/tests/quic-webhook-contract.py" serve \
+        "$ROOT/results/quic-webhooks.jsonl" > "$ROOT/results/quic-webhooks.log" 2>&1 &
+    QUIC_WEBHOOK_PID=$!
+    for attempt in $(seq 1 50); do
+        [[ ! -f "$ROOT/results/quic-webhooks.ready" ]] || break
+        kill -0 "$QUIC_WEBHOOK_PID"
+        sleep 0.1
+    done
+    [[ -f "$ROOT/results/quic-webhooks.ready" ]]
+fi
+
 if [[ $RUN_MODE == 1 ]]; then
     setsid socat "TCP4-LISTEN:$CLI_RELAY_PORT,bind=127.0.0.1,reuseaddr,fork" \
         "EXEC:ip netns exec $NS socat STDIO TCP4\:127.0.0.1\:50000" \
@@ -536,6 +551,19 @@ if [[ $QUIC_TEST == 1 ]]; then
     grep -q 'ALPN: downstream=h3 upstream=h3' "$QUIC_CLI"
     echo 'PASS4 QUIC/H3 traffic: verified certificate, SNI, ALPN and four multiplexed requests'
     echo 'PASS4 QUIC diagnostics: active session and streams visible in dedicated CLI'
+    # Let normal peer close and the bounded QUIC drain finish while webhook
+    # workers are still running; process shutdown does not flush their queue.
+    for attempt in $(seq 1 100); do
+        if python3 "$ROOT/runner/tests/quic-webhook-contract.py" verify \
+            "$ROOT/results/quic-webhooks.jsonl" > "$ROOT/results/quic-webhook-verdict.log" 2>&1; then
+            break
+        fi
+        sleep 0.1
+    done
+    cat "$ROOT/results/quic-webhook-verdict.log"
+    python3 "$ROOT/runner/tests/quic-webhook-contract.py" verify \
+        "$ROOT/results/quic-webhooks.jsonl"
+
 fi
 fi
 if [[ $SESSION_LIST_STRESS_TEST == 1 ]]; then
@@ -1158,6 +1186,8 @@ if [[ ${HTTP2_OBSERVABILITY_TEST:-0} == 1 ]]; then
     done
 fi
 if [[ $QUIC_TEST == 1 ]]; then
+    python3 "$ROOT/runner/tests/quic-webhook-contract.py" verify \
+        "$ROOT/results/quic-webhooks.jsonl"
     [[ -s "$ROOT/results/quic-downstream.keys" ]]
     grep -Eq '_(HANDSHAKE|TRAFFIC)_SECRET ' "$ROOT/results/quic-downstream.keys"
     python3 "$ROOT/runner/tests/verify-quic-observability.py" \

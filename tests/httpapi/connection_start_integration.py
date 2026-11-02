@@ -1,4 +1,5 @@
 """Setup decisions through the real SOCKS/TLS proxy, not a mock datapath."""
+import socket
 import ssl
 import threading
 import base64
@@ -17,14 +18,40 @@ def closed(sock):
         pass
 
 
-def run(connection, send, set_reply, server, source, tls=False):
+def run(connection, send, set_reply, server, source, pending_connection, tls=False):
     scenarios = 0
 
     def set_start(status=200, body=None):
         server.start_reply = lambda event: (status, {} if body is None else body)
 
-    # A held setup reply is a deterministic ordering probe. Neither the origin
-    # nor the content webhook may receive the waiting application bytes.
+    def no_upstream(listener):
+        try:
+            peer, _ = listener.accept()
+        except socket.timeout:
+            return
+        peer.close()
+        raise AssertionError('Setup opened the upstream before acceptance')
+
+    def rejected():
+        before = len(server.received)
+        with pending_connection() as (client, listener):
+            try:
+                response = client.recv(16)
+            except ConnectionResetError:
+                response = b''
+            assert not response.startswith(b'\x05\x00'), response
+            no_upstream(listener)
+        assert len(server.received) == before, 'Rejected setup invoked content'
+        identity = server.starts[-1]['id']
+        with server.condition:
+            assert server.condition.wait_for(
+                lambda: any(event['id'] == identity for event in server.stops), timeout=5
+            ), 'Rejected setup did not retire its script lifetime'
+            assert sum(event['id'] == identity for event in server.stops) == 1
+
+
+    # Hold the setup response before any origin socket exists. After acceptance,
+    # both client-first and server-first payloads retain the same setup identity.
     for server_first in (False, True):
         entered, release = threading.Event(), threading.Event()
 
@@ -34,20 +61,17 @@ def run(connection, send, set_reply, server, source, tls=False):
             return 200, {'action': 'accept'}
 
         server.start_reply = delayed
-        with connection(warmup=False) as (client, origin):
-            before_starts, before_content = len(server.starts), len(server.received)
-            sender, receiver = (origin, client) if server_first else (client, origin)
-            data = b'220 setup server greeting\r\n' if server_first else REQUEST
+        before_starts, before_content = len(server.starts), len(server.received)
+        with pending_connection() as (client, listener):
             try:
-                sender.sendall(data)
                 assert entered.wait(5), 'Missing connection-start'
-                silent(receiver)
-                assert len(server.received) == before_content, 'Content raced ahead of setup'
+                no_upstream(listener)
+                assert len(server.received) == before_content
                 event = server.starts[-1]
                 info = event['details']['info']
                 assert info['phase'] == 'setup'
                 assert info['source']['host'] == '127.0.0.1'
-                assert int(info['destination']['port']) == origin.getsockname()[1]
+                assert int(info['destination']['port']) == listener.getsockname()[1]
                 assert isinstance(info['policy'], int)
                 assert info['transport'] == 'tcp'
                 assert info['webhook_control']['sequence'] == 0
@@ -55,11 +79,17 @@ def run(connection, send, set_reply, server, source, tls=False):
             finally:
                 release.set()
 
-            assert receive(receiver, len(data)) == data
-            send(sender, b'next')
-            assert receive(receiver, 4) == b'next'
-            assert len(server.starts) == before_starts + 1, 'Duplicate setup'
-            assert server.received[-1][0] == event['id'], 'Setup/content identity mismatch'
+            assert receive(client, 10).startswith(b'\x05\x00')
+            listener.settimeout(5)
+            origin, _ = listener.accept()
+            with origin:
+                set_reply(lambda data: (200, {'action': 'unchanged'}))
+                sender, receiver = (origin, client) if server_first else (client, origin)
+                data = b'220 setup server greeting\r\n' if server_first else REQUEST
+                send(sender, data)
+                assert receive(receiver, len(data)) == data
+                assert len(server.starts) == before_starts + 1
+                assert server.received[-1][0] == event['id']
         scenarios += 1
 
     # An unavailable receiver remains fail-open before strict was negotiated.
@@ -83,16 +113,9 @@ def run(connection, send, set_reply, server, source, tls=False):
             assert receive(origin, len(REQUEST)) == REQUEST
         scenarios += 1
 
-    for server_first in (False, True):
-        set_start(body={'action': 'drop'})
-        with connection(warmup=False) as (client, origin):
-            before = len(server.received)
-            sender, receiver = (origin, client) if server_first else (client, origin)
-            sender.sendall(b'220 dropped\r\n' if server_first else REQUEST)
-            closed(receiver)
-            closed(sender)
-            assert len(server.received) == before, 'Drop still invoked content webhook'
-        scenarios += 1
+    set_start(body={'action': 'drop'})
+    rejected()
+    scenarios += 1
 
     set_start(body={'action': 'not-interested'})
     with connection(warmup=False) as (client, origin):
@@ -105,11 +128,7 @@ def run(connection, send, set_reply, server, source, tls=False):
     scenarios += 1
 
     set_start(body={'action': 'replace', 'control': {'mode': 'strict'}})
-    with connection(warmup=False) as (client, origin):
-        before = len(server.received)
-        client.sendall(REQUEST)
-        closed(origin)
-        assert len(server.received) == before, 'Invalid strict setup leaked content'
+    rejected()
     scenarios += 1
 
     # Control must be applied before the very first content callback.
@@ -122,11 +141,7 @@ def run(connection, send, set_reply, server, source, tls=False):
     scenarios += 1
 
     set_start(body={'action': 'not-interested', 'control': {'mode': 'strict'}})
-    with connection(warmup=False) as (client, origin):
-        before = len(server.received)
-        client.sendall(REQUEST)
-        closed(origin)
-        assert len(server.received) == before
+    rejected()
     scenarios += 1
 
     # Length changes and holding still need setup, never a retroactive opt-in.
@@ -218,7 +233,7 @@ def run(connection, send, set_reply, server, source, tls=False):
         closed(client)
     scenarios += 1
 
-    # TLS metadata must be available at setup, not merely at connection-stop.
+    # Setup now precedes both TLS handshakes; negotiated metadata is absent.
     # Certificate trust is intentionally disabled in this private lab fixture.
     if not tls:
         assert not server.errors, server.errors
@@ -237,14 +252,13 @@ def run(connection, send, set_reply, server, source, tls=False):
     client_tls.check_hostname = False
     client_tls.verify_mode = ssl.CERT_NONE
     client_tls.set_alpn_protocols(['http/1.1'])
+    before = len(server.starts)
     with connection(warmup=False, target_port=443, tls=(client_tls, server_tls)) as (client, origin):
-        before = len(server.starts)
         send(client, REQUEST)
         assert receive(origin, len(REQUEST)) == REQUEST
         assert len(server.starts) == before + 1
         metadata = server.starts[-1]['details']['info']['tls']
-        assert any(leg.get('sni') == TLS_HOSTNAME for leg in metadata.values()), metadata
-        assert metadata['server']['alpn'] == 'http/1.1', metadata
+        assert all(not leg.get('alpn') for leg in metadata.values()), metadata
     scenarios += 1
 
     assert not server.errors, server.errors
