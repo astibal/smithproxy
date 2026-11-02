@@ -151,7 +151,8 @@ namespace sx::http::webhooks {
     sx::auth::Result proxy_authentication(
         std::string const& protocol, std::string const& peer_host,
         std::string const& peer_port, sx::auth::PapCredentials const& credentials,
-        sx::auth::Result const& baseline);
+        sx::auth::Result const& baseline,
+        nlohmann::json const& protocol_context = nullptr);
 
     void ping();
     void ping_plus();

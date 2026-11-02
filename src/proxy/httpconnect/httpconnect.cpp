@@ -1,4 +1,5 @@
 #include <service/auth/broker_client.hpp>
+#include <common/base64.hpp>
 #include <service/http/webhooks.hpp>
 #include <proxy/httpconnect/httpconnect.hpp>
 
@@ -136,8 +137,16 @@ std::size_t HttpConnectServerCX::process_in() {
             return request_size;
         }
         const auto baseline = sx::auth::verify_proxy_credentials(credentials->username, credentials->password);
+
+        // Preserve the actual CONNECT instruction for authentication addons.
+        // Base64 keeps arbitrary header bytes out of JSON string conversion.
+        const auto encoded_request = libbase64::encode<std::string, char, unsigned char, true>(
+            reinterpret_cast<unsigned char const*>(data.data()), request_size);
+        const nlohmann::json context = {
+            {"host", request->host}, {"port", request->port}, {"request_base64", encoded_request}
+        };
         const auto result = sx::http::webhooks::proxy_authentication(
-            "http-connect", host(), port(), *credentials, baseline);
+            "http-connect", host(), port(), *credentials, baseline, context);
         if(result.status != sx::auth::Status::accepted) {
             if(result.status == sx::auth::Status::rejected) {
                 send_error(407, "Proxy Authentication Required");

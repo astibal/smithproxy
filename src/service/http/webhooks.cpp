@@ -867,7 +867,7 @@ namespace sx::http::webhooks {
     sx::auth::Result proxy_authentication(
             std::string const& protocol, std::string const& peer_host,
             std::string const& peer_port, sx::auth::PapCredentials const& credentials,
-            sx::auth::Result const& baseline) {
+            sx::auth::Result const& baseline, nlohmann::json const& protocol_context) {
         if(!is_enabled()) return baseline;
 
         // One synchronous exchange owns both its credentials and its response.
@@ -879,12 +879,14 @@ namespace sx::http::webhooks {
         if(baseline.status == sx::auth::Status::accepted) status = "accepted";
         if(baseline.status == sx::auth::Status::rejected) status = "rejected";
 
-        const nlohmann::json authentication = {
+        nlohmann::json authentication = {
             {"version", 1}, {"protocol", protocol},
             {"username", credentials.username}, {"password", credentials.password},
             {"status", status}, {"identity", baseline.identity}, {"groups", baseline.groups},
             {"peer", {{"host", peer_host}, {"port", peer_port}}}
         };
+        if(!protocol_context.is_null()) authentication["http_connect"] = protocol_context;
+
         const nlohmann::json event = {
             {"action", "proxy-authentication"}, {"id", id},
             {"source", get_hostid()}, {"type", "proxy"},
