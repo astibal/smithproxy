@@ -71,6 +71,7 @@ namespace sx::http {
 
         struct request_settings {
             bool enabled = false;
+            bool sensitive = false;
             std::string url;
             std::string dns_servers;
             bool verify_tls = true;
@@ -121,7 +122,8 @@ namespace sx::http {
             std::string info_detailed() const override {
                 std::stringstream ss;
                 ss << string_format("web request details: POST %s with %dB of data\n", settings.url.c_str(), payload.length());
-                ss << "Payload: \n" << hex_dump((unsigned char*)payload.data(), payload.length()) << "\n";
+                if(!settings.sensitive)
+                    ss << "Payload: \n" << hex_dump((unsigned char*)payload.data(), payload.length()) << "\n";
                 ss << "-- \n";
 
                 return ss.str();
@@ -233,7 +235,7 @@ namespace sx::http {
             Request request(Request::DEFAULT, settings.dns_servers);
 
             // make custom setup
-            request.set_timeout(config::timeout);
+            request.set_timeout(settings.sensitive ? 3 : config::timeout);
             log << make_ts() << ": init: timeout='" << config::timeout << "\n";
 
             request.set_stale_detection();
@@ -247,7 +249,7 @@ namespace sx::http {
                 request.set_interface(settings.bind_interface);
 
             // set debugging explicitly
-            if(Request::DEBUG) {
+            if(Request::DEBUG && !settings.sensitive) {
                 log << make_ts() << ": init: extended debug is enabled\n";
                 request.setup_curl_debug(log);
             }
@@ -263,13 +265,14 @@ namespace sx::http {
 
             if(not reply or reply.value().response.first >= 300) {
                 long code = reply.has_value() ? reply->response.first : -1;
-                std::string msg = reply.has_value() ? reply->response.second : "request failed";
+                std::string msg = "request failed";
+                if(reply.has_value() && !settings.sensitive) msg = reply->response.second;
 
                 Log::get()->events().insert(ERR, "error in request '%s' (attempts: %d): %d:%s", settings.url.c_str(), request.attempts, code, msg.c_str());
                 log << make_ts() << ": finished: result is error: (code="<< code << ", msg='" << msg << "'\n";
 
 
-                if(Request::DEBUG) {
+                if(Request::DEBUG && !settings.sensitive) {
                     Log::get()->events().insert(ERR, "error payload:\n >>>%s<<<", pay.c_str());
                     Log::get()->events().insert(ERR, "error trace:\n %s", log.str().c_str());
                 }

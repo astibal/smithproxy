@@ -37,6 +37,8 @@
     which carries forward this exception.
 */    
 
+#include <service/auth/broker_client.hpp>
+#include <service/http/webhooks.hpp>
 #include <service/cfgapi/cfgapi.hpp>
 #include <log/logger.hpp>
 #include <proxy/socks5/sockshostcx.hpp>
@@ -112,7 +114,8 @@ socksServerCX* claim_udp_association_locked(
 }
 }
 
-socksServerCX::socksServerCX(baseCom* c, unsigned int s) : ExplicitProxyCX(c,s) {
+socksServerCX::socksServerCX(baseCom* c, unsigned int s, bool require_authorization)
+    : ExplicitProxyCX(c,s), proxy_authorization_required_(require_authorization) {
     // SOCKS greeting and request framing is incremental. A zero process_in()
     // result means "retain until the next read", not "discard on the next
     // read cycle".
@@ -198,6 +201,8 @@ std::size_t socksServerCX::process_in() {
         case socks5_state::HELLO_SENT:
             _dia("process_in: state HELLO_SENT");
             return 0; // we sent response to client hello, don't process anything
+        case socks5_state::WAIT_AUTH:
+            return process_socks_authentication();
         case socks5_state::WAIT_REQUEST:
             _dia("process_in: state WAIT_REQUEST");
             return process_socks_request();
@@ -281,8 +286,10 @@ std::size_t socksServerCX::process_socks_hello_tcp() {
 
         unsigned char server_hello[2];
         server_hello[0] = 5; // version
-        server_hello[1] = sx::socks5::offers_no_authentication(
-            b->data() + 2, nmethods) ? 0 : 0xff;
+        const unsigned char method = proxy_authorization_required_ ? 2 : 0;
+        const auto* methods = b->data() + 2;
+        const bool offered = std::find(methods, methods + nmethods, method) != methods + nmethods;
+        server_hello[1] = offered ? method : 0xff;
 
         writebuf()->append(server_hello, 2);
         readbuf()->flush(greeting_size);
@@ -295,14 +302,19 @@ std::size_t socksServerCX::process_socks_hello_tcp() {
             return 0;
         }
 
-        state_ = socks5_state::WAIT_REQUEST;
+        state_ = method == 2 ? socks5_state::WAIT_AUTH : socks5_state::WAIT_REQUEST;
 
         // A client may pipeline its request with the greeting. Parse the
         // retained bytes now; no new socket-read edge is guaranteed.
-        if(!readbuf()->empty())
-            process_socks_request();
+        if(!readbuf()->empty()) {
+            process_in();
+        }
         return 0;
     } else if (version == 4) {
+        if(proxy_authorization_required_) {
+            error(true);
+            return 0;
+        }
         _dia("process_socks_hello_tcp: version %d", version);
         return process_socks_request();
     } else {
@@ -310,6 +322,44 @@ std::size_t socksServerCX::process_socks_hello_tcp() {
         error(true);
     }
 
+    return 0;
+}
+
+std::size_t socksServerCX::process_socks_authentication() {
+    const auto* input = readbuf();
+    const auto* bytes = input->data();
+    const auto frame_size = sx::socks5::authentication_size_if_complete(bytes, input->size());
+    if(frame_size == 0) {
+        return 0;
+    }
+    const std::size_t username_size = bytes[1];
+    const std::size_t password_size = bytes[2 + username_size];
+
+    bool accepted = false;
+    if(bytes[0] == 1 && username_size > 0 && password_size > 0) {
+        const std::string_view username(reinterpret_cast<const char*>(bytes + 2), username_size);
+        const std::string_view password(reinterpret_cast<const char*>(bytes + 3 + username_size), password_size);
+        const auto baseline = sx::auth::verify_proxy_credentials(username, password);
+        const auto result = sx::http::webhooks::proxy_authentication(
+            "socks5", host(), port(), {std::string(username), std::string(password)}, baseline);
+        accepted = static_cast<bool>(result);
+    }
+
+    const unsigned char reply[] = {1, static_cast<unsigned char>(accepted ? 0 : 1)};
+    writebuf()->append(reply, sizeof(reply));
+    readbuf()->flush(frame_size);
+    com()->set_write_monitor(socket());
+    if(!accepted) {
+        close_after_write(true);
+        state_ = socks5_state::HELLO_SENT;
+        return 0;
+    }
+
+    // Preserve a CONNECT/UDP_ASSOCIATE request pipelined after credentials.
+    state_ = socks5_state::WAIT_REQUEST;
+    if(!readbuf()->empty()) {
+        process_socks_request();
+    }
     return 0;
 }
 
@@ -1230,8 +1280,8 @@ std::string_view socksServerCX::upstream_policy_failure_response() const {
 void ExplicitProxyCX::pre_write() {
     _deb("socksServerCX::pre_write[%s]: writebuf=%d, readbuf=%d",c_type(),writebuf()->size(),readbuf()->size());
     if(state_ == socks5_state::HELLO_SENT) {
-        // HELLO_SENT is retained only for the terminal 0xff authentication
-        // response. Close after the response has actually left the buffer.
+        // HELLO_SENT is retained for terminal method/authentication
+        // failures. Close after the response has actually left the buffer.
         if(writebuf()->empty())
             error(true);
     }

@@ -81,6 +81,7 @@
 #include <service/gre_broker.hpp>
 #include <service/cli/cli_broker.hpp>
 #include <service/api/api_broker.hpp>
+#include <service/auth/broker_client.hpp>
 #include <service/webhook/webhook_broker.hpp>
 #include <staticcontent.hpp>
 #include <smithlog.hpp>
@@ -501,6 +502,7 @@ void print_help() {
     std::cerr << "    --comm-cli <path>            :  use an external CLI comm broker" << std::endl;
     std::cerr << "    --comm-api <path>            :  use an external API comm broker" << std::endl;
     std::cerr << "    --comm-webhook <path>        :  route webhook connections through a Unix socket" << std::endl;
+    std::cerr << "    --comm-auth <path>           :  set external authentication broker socket" << std::endl;
     std::cerr << "    --comm-sift <path>           :  route Sift connections through a Unix socket" << std::endl;
     std::cerr << std::endl;
     std::cerr << "  Notes:" << std::endl;
@@ -541,6 +543,7 @@ int main(int argc, char *argv[]) {
     constexpr int option_comm_webhook = 1004;
     constexpr int option_comm_sift = 1005;
     constexpr int option_no_pidfile = 1006;
+    constexpr int option_comm_auth = 1007;
     static struct option long_options[] =
             {
                     /* These options set a flag. */
@@ -560,6 +563,7 @@ int main(int argc, char *argv[]) {
                     {"comm-api", required_argument, nullptr, option_comm_api},
                     {"comm-webhook", required_argument, nullptr, option_comm_webhook},
                     {"comm-sift", required_argument, nullptr, option_comm_sift},
+                    {"comm-auth", required_argument, nullptr, option_comm_auth},
 
                     // multi-tenancy support: listening ports will be shifted by number 'i', while 't' controls logging, pidfile, etc.
                     // both, or none of them have to be set
@@ -666,6 +670,15 @@ int main(int argc, char *argv[]) {
                     return EXIT_FAILURE;
                 }
                 command_line_comm_webhook = optarg;
+                break;
+
+            case option_comm_auth:
+                try {
+                    sx::auth::configure_proxy_auth(optarg ? optarg : "");
+                } catch(const std::exception& error) {
+                    std::cerr << "--comm-auth: " << error.what() << std::endl;
+                    return EXIT_FAILURE;
+                }
                 break;
 
             case option_comm_sift:

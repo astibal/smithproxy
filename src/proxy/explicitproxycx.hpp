@@ -106,7 +106,7 @@ namespace sx::explicit_proxy {
 using explicit_state = enum class explicit_state_ {
     INIT = 1u, HELLO_SENT, WAIT_REQUEST, REQ_RECEIVED, WAIT_POLICY,
     POLICY_RECEIVED, REQRES_SENT, DNS_QUERY_SENT, DNS_RESP_RECV,
-    DNS_RESP_FAILED, HANDOFF, ZOMBIE
+    DNS_RESP_FAILED, HANDOFF, ZOMBIE, WAIT_AUTH
 };
 using explicit_request_error = enum class explicit_request_error_ {
     NONE = 0, UNSUPPORTED_VERSION, UNSUPPORTED_ATYPE, UNSUPPORTED_METHOD,

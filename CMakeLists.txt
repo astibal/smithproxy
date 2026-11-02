@@ -1129,6 +1129,8 @@ endif (LIBCONFIGPP_FOUND)
 
 target_link_libraries (smithproxy crypt)
 target_link_libraries (smithproxy nlohmann_json::nlohmann_json)
+add_subdirectory(src/service/auth)
+target_link_libraries(smithproxy smithproxy_auth_client)
 target_link_libraries (smithproxy curl)
 
 if((CMAKE_SYSTEM_PROCESSOR MATCHES "arm") OR (CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64"))

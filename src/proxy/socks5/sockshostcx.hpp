@@ -40,6 +40,7 @@
 #ifndef SOCKS5HOST_HPP
   #define SOCKS5HOST_HPP
 
+#include <atomic>
 #include <threadedacceptor.hpp>
 #include <proxy/mitmcom.hpp>
 #include <proxy/mitmhost.hpp>
@@ -99,12 +100,16 @@ private:
 
 class socksServerCX : public ExplicitProxyCX {
 public:
-    socksServerCX(baseCom* c, unsigned int s);
+    static inline std::atomic_bool proxy_authorization{false};
+
+    socksServerCX(baseCom* c, unsigned int s,
+                  bool require_authorization = proxy_authorization.load());
     ~socksServerCX() override;
 
     std::size_t process_in() override;
     virtual std::size_t process_socks_hello();
     virtual std::size_t process_socks_hello_tcp();
+    std::size_t process_socks_authentication();
     virtual std::size_t process_socks_udp_request();
 
     struct UDP {
@@ -176,6 +181,8 @@ private:
     bool udp_association_available();
     bool prepare_udp_handoff_datagram();
 
+    // Keep the negotiated method stable throughout a fragmented handshake.
+    const bool proxy_authorization_required_;
     uint8_t version {0};
     uint8_t req_cmd {0};
     socks5_atype req_atype {0};

@@ -57,6 +57,9 @@ namespace {
 
 class SocksFramingTCPCom final : public TCPCom {
 public:
+    explicit SocksFramingTCPCom(bool require_authorization)
+        : proxy_authorization_required_(require_authorization) {}
+
     baseCom* replicate() override { return new TCPCom(); }
 
     ssize_t read(int fd, void* destination, std::size_t capacity,
@@ -95,6 +98,9 @@ public:
         const auto completed = complete_frame_size(frame_);
         if(completed != 0 && frame_.size() >= completed) {
             if(stage_ == stage::greeting && !frame_.empty() && frame_[0] == 5) {
+                stage_ = proxy_authorization_required_ ? stage::authentication : stage::request;
+                frame_.clear();
+            } else if(stage_ == stage::authentication) {
                 stage_ = stage::request;
                 frame_.clear();
             } else {
@@ -105,11 +111,14 @@ public:
     }
 
 private:
-    enum class stage { greeting, request, done };
+    enum class stage { greeting, authentication, request, done };
 
     std::size_t complete_frame_size(
             std::vector<std::uint8_t> const& bytes) const noexcept {
         if(bytes.empty()) return 0;
+        if(stage_ == stage::authentication) {
+            return sx::socks5::authentication_size_if_complete(bytes.data(), bytes.size());
+        }
         if(stage_ == stage::greeting && bytes[0] != 4)
             return sx::socks5::initial_frame_size_if_complete(
                 bytes.data(), bytes.size());
@@ -132,6 +141,7 @@ private:
         return sx::socks5::request_size_if_complete(bytes.data(), bytes.size());
     }
 
+    const bool proxy_authorization_required_;
     stage stage_ = stage::greeting;
     std::vector<std::uint8_t> frame_;
 };
@@ -750,9 +760,11 @@ void ExplicitProxy::on_left_bytes(baseHostCX* cx) {
 
 
 baseHostCX* MitmSocksProxy::new_cx(int s) {
-    auto* transport = new SocksFramingTCPCom();
+    // Framing and negotiation must use the same configuration snapshot.
+    const bool require_authorization = socksServerCX::proxy_authorization.load();
+    auto* transport = new SocksFramingTCPCom(require_authorization);
     transport->master(com()->master());
-    return new socksServerCX(transport, s);
+    return new socksServerCX(transport, s, require_authorization);
 }
 
 void MitmSocksProxy::on_left_new(std::unique_ptr<baseHostCX> accepted_cx) {

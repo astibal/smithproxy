@@ -1,3 +1,6 @@
+#include <service/auth/broker_client.hpp>
+#include <common/base64.hpp>
+#include <service/http/webhooks.hpp>
 #include <proxy/httpconnect/httpconnect.hpp>
 
 #include <algorithm>
@@ -87,8 +90,9 @@ HttpConnectServerCX::HttpConnectServerCX(baseCom* c, unsigned int s)
 
 void HttpConnectServerCX::send_error(unsigned int status, std::string_view reason) {
     auto const response = string_format(
-            "HTTP/1.1 %u %.*s\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
-            status, static_cast<int>(reason.size()), reason.data());
+            "HTTP/1.1 %u %.*s\r\n%sConnection: close\r\nContent-Length: 0\r\n\r\n",
+            status, static_cast<int>(reason.size()), reason.data(),
+            status == 407 ? "Proxy-Authenticate: Basic realm=\"smithproxy\"\r\n" : "");
     writebuf()->append(response.data(), response.size());
     close_after_reply_ = true;
     state(explicit_state::REQRES_SENT);
@@ -122,6 +126,35 @@ std::size_t HttpConnectServerCX::process_in() {
     if(not request) {
         send_error(400, "Bad Request");
         return request_size;
+    }
+
+    // Authenticate before DNS, policy routing or opening the target. CONNECT
+    // headers are consumed here and never forwarded into the tunnel.
+    if(proxy_authorization.load()) {
+        const auto credentials = sx::auth::http_basic_credentials(data.substr(0, request_size));
+        if(!credentials) {
+            send_error(407, "Proxy Authentication Required");
+            return request_size;
+        }
+        const auto baseline = sx::auth::verify_proxy_credentials(credentials->username, credentials->password);
+
+        // Preserve the actual CONNECT instruction for authentication addons.
+        // Base64 keeps arbitrary header bytes out of JSON string conversion.
+        const auto encoded_request = libbase64::encode<std::string, char, unsigned char, true>(
+            reinterpret_cast<unsigned char const*>(data.data()), request_size);
+        const nlohmann::json context = {
+            {"host", request->host}, {"port", request->port}, {"request_base64", encoded_request}
+        };
+        const auto result = sx::http::webhooks::proxy_authentication(
+            "http-connect", host(), port(), *credentials, baseline, context);
+        if(result.status != sx::auth::Status::accepted) {
+            if(result.status == sx::auth::Status::rejected) {
+                send_error(407, "Proxy Authentication Required");
+            } else {
+                send_error(503, "Authentication Service Unavailable");
+            }
+            return request_size;
+        }
     }
 
     // setup_target() can replace this frontend before process_in() returns.
