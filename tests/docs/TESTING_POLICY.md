@@ -220,12 +220,17 @@ Legacy availability-first behavior is opt-in through
 `settings.policy_access_request_fail_open`; tests of those switches must also
 prove that explicit deny/reject decisions remain authoritative.
 
-## External authentication prototype
+## External proxy authentication
 
-The `new-AAA` prototype adds `unit.pap`, `integration.auth_broker` and
-`integration.proxy_auth` to CTest with the `native` and `auth` labels. The broker
-integration uses a temporary PAM service and test-only module; it never modifies
-system authentication. The proxy integration starts isolated local listeners
-and verifies CONNECT/SOCKS5 authentication before target access, including
-fragmentation, pipelining, rejection and broker failure. Standalone auth builds
-run the first two tests; the third needs the production Smithproxy executable.
+Proxy authentication registers `unit.pap` and `integration.auth_client` with
+CTest under the `native` and `auth` labels. Both also run in standalone auth
+client builds. `integration.proxy_auth` additionally requires the production
+Smithproxy executable and explicit paths to the separately built Keyway daemon
+and its test-only PAM module (`SMITHPROXY_KEYWAY_EXECUTABLE` and
+`SMITHPROXY_KEYWAY_TEST_PAM_MODULE`).
+
+The proxy integration uses a temporary PAM service without modifying system
+authentication. It starts isolated local listeners and verifies CONNECT/SOCKS5
+authentication before target access, including fragmentation, pipelining,
+rejection and broker failure. Keyway's own backend and management API tests
+remain in its separate repository.
