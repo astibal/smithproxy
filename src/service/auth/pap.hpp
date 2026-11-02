@@ -7,24 +7,9 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <vector>
+#include <service/auth/result.hpp>
 
 namespace sx::auth {
-
-enum class PapStatus {
-    accepted,
-    rejected,
-    error,
-};
-
-struct PapResult {
-    PapStatus status = PapStatus::error;
-    std::string identity;
-    std::string error;
-    std::vector<std::string> groups{};
-
-    explicit operator bool() const noexcept { return status == PapStatus::accepted; }
-};
 
 struct PapCredentials {
     std::string username;
@@ -33,7 +18,7 @@ struct PapCredentials {
 
 class PapBackend {
 public:
-    using completion_type = std::function<void(PapResult)>;
+    using completion_type = std::function<void(Result)>;
 
     virtual ~PapBackend() = default;
 
@@ -41,7 +26,7 @@ public:
     // that completion will be called later, exactly once. Implementations may
     // invoke completion before verify_pap() returns; PapExchange handles that
     // race. Credentials must not be retained beyond completion.
-    virtual std::optional<PapResult> verify_pap(
+    virtual std::optional<Result> verify_pap(
         PapCredentials credentials, completion_type completion) = 0;
 };
 

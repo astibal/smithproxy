@@ -22,8 +22,8 @@ std::size_t receive_reply(char* data, std::size_t size, std::size_t count, void*
     return count;
 }
 
-PapResult unavailable() {
-    return {PapStatus::error, {}, "authentication broker unavailable or invalid"};
+Result unavailable() {
+    return {Status::error, {}, "authentication broker unavailable or invalid"};
 }
 }
 
@@ -40,11 +40,11 @@ BrokerPapBackend::BrokerPapBackend(std::string socket_path, long timeout_ms)
     }
 }
 
-std::optional<PapResult> BrokerPapBackend::verify_pap(
+std::optional<Result> BrokerPapBackend::verify_pap(
         PapCredentials credentials, completion_type) {
     if(credentials.username.empty() || credentials.username.size() > 255 ||
        credentials.password.empty() || credentials.password.size() > 1024) {
-        return PapResult{PapStatus::rejected, {}, {}};
+        return Result{Status::rejected, {}, {}};
     }
 
     // The URL supplies HTTP framing only. curl must use this Unix socket and
@@ -54,7 +54,7 @@ std::optional<PapResult> BrokerPapBackend::verify_pap(
         body = nlohmann::json{{"version", 1}, {"username", credentials.username},
                               {"password", credentials.password}}.dump();
     } catch(...) {
-        return PapResult{PapStatus::rejected, {}, {}};
+        return Result{Status::rejected, {}, {}};
     }
     auto handle = std::unique_ptr<CURL, decltype(&curl_easy_cleanup)>(curl_easy_init(), curl_easy_cleanup);
     if(!handle) {
@@ -95,12 +95,12 @@ std::optional<PapResult> BrokerPapBackend::verify_pap(
         }
         const auto decision = value.at("status").get<std::string>();
         if(decision == "rejected") {
-            return PapResult{PapStatus::rejected, {}, {}};
+            return Result{Status::rejected, {}, {}};
         }
         if(decision != "accepted") {
             return unavailable();
         }
-        PapResult result{PapStatus::accepted, value.at("identity").get<std::string>(), {}};
+        Result result{Status::accepted, value.at("identity").get<std::string>(), {}};
         result.groups = value.at("groups").get<std::vector<std::string>>();
         if(result.identity.empty() || result.identity.size() > 512 || result.groups.size() > 64) {
             return unavailable();
@@ -124,7 +124,7 @@ bool proxy_auth_required() {
     return proxy_backend != nullptr;
 }
 
-PapResult verify_proxy_credentials(std::string_view username, std::string_view password) {
+Result verify_proxy_credentials(std::string_view username, std::string_view password) {
     if(!proxy_backend) {
         return unavailable();
     }

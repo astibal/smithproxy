@@ -41,6 +41,7 @@
 #ifndef SX_HTTP_WEBHOOKS
 #define SX_HTTP_WEBHOOKS
 
+#include <service/auth/pap.hpp>
 #include <string>
 #include <atomic>
 #include <memory>
@@ -144,6 +145,13 @@ namespace sx::http::webhooks {
 
     std::mutex& url_stats_lock();
     std::unordered_map<std::string, url_stats>& url_stats_map();
+
+    // A synchronous, callback-local veto after AAA. The observer cannot grant
+    // access denied by the broker, and owns neither sockets nor protocol replies.
+    sx::auth::Result proxy_authentication(
+        std::string const& protocol, std::string const& peer_host,
+        std::string const& peer_port, sx::auth::PapCredentials const& credentials,
+        sx::auth::Result const& baseline);
 
     void ping();
     void ping_plus();

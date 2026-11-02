@@ -9,7 +9,7 @@ namespace sx::auth {
 class LinuxPamBackend final : public PapBackend {
 public:
     LinuxPamBackend(std::string service, std::string allowed_group, std::string config_directory = {});
-    std::optional<PapResult> verify_pap(
+    std::optional<Result> verify_pap(
         PapCredentials credentials, completion_type completion) override;
 
 private:

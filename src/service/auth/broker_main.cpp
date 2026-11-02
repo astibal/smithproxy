@@ -105,10 +105,10 @@ public:
                 request.at("username").get<std::string>(), request.at("password").get<std::string>()};
             state.request_data.clear();
             auto result = backend_.verify_pap(std::move(credentials), {});
-            if(!result || result->status == sx::auth::PapStatus::error) {
+            if(!result || result->status == sx::auth::Status::error) {
                 response.response_code = 503;
                 output << R"({"version":1,"status":"error"})";
-            } else if(result->status == sx::auth::PapStatus::rejected) {
+            } else if(result->status == sx::auth::Status::rejected) {
                 output << R"({"version":1,"status":"rejected"})";
             } else {
                 output << nlohmann::json{{"version", 1}, {"status", "accepted"},

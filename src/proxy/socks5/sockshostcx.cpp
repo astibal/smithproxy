@@ -38,6 +38,7 @@
 */    
 
 #include <service/auth/broker_client.hpp>
+#include <service/http/webhooks.hpp>
 #include <service/cfgapi/cfgapi.hpp>
 #include <log/logger.hpp>
 #include <proxy/socks5/sockshostcx.hpp>
@@ -337,7 +338,10 @@ std::size_t socksServerCX::process_socks_authentication() {
     if(bytes[0] == 1 && username_size > 0 && password_size > 0) {
         const std::string_view username(reinterpret_cast<const char*>(bytes + 2), username_size);
         const std::string_view password(reinterpret_cast<const char*>(bytes + 3 + username_size), password_size);
-        accepted = static_cast<bool>(sx::auth::verify_proxy_credentials(username, password));
+        const auto baseline = sx::auth::verify_proxy_credentials(username, password);
+        const auto result = sx::http::webhooks::proxy_authentication(
+            "socks5", host(), port(), {std::string(username), std::string(password)}, baseline);
+        accepted = static_cast<bool>(result);
     }
 
     const unsigned char reply[] = {1, static_cast<unsigned char>(accepted ? 0 : 1)};

@@ -89,12 +89,12 @@ LinuxPamBackend::LinuxPamBackend(std::string service, std::string allowed_group,
     }
 }
 
-std::optional<PapResult> LinuxPamBackend::verify_pap(PapCredentials credentials, completion_type) {
+std::optional<Result> LinuxPamBackend::verify_pap(PapCredentials credentials, completion_type) {
     if(credentials.username.empty() || credentials.username.size() > 255 ||
        credentials.password.empty() || credentials.password.size() > 1024 ||
        credentials.username.find('\0') != std::string::npos ||
        credentials.password.find('\0') != std::string::npos) {
-        return PapResult{PapStatus::rejected, {}, {}};
+        return Result{Status::rejected, {}, {}};
     }
 
     pam_conv callbacks{conversation, &credentials};
@@ -107,7 +107,7 @@ std::optional<PapResult> LinuxPamBackend::verify_pap(PapCredentials credentials,
         if(handle) {
             pam_end(handle, result);
         }
-        return PapResult{PapStatus::error, {}, "PAM initialization failed"};
+        return Result{Status::error, {}, "PAM initialization failed"};
     }
     auto cleanup = std::unique_ptr<pam_handle_t, void(*)(pam_handle_t*)>(handle, [](pam_handle_t* value) {
         pam_end(value, PAM_SUCCESS);
@@ -118,20 +118,20 @@ std::optional<PapResult> LinuxPamBackend::verify_pap(PapCredentials credentials,
         result = pam_acct_mgmt(handle, PAM_SILENT);
     }
     if(result != PAM_SUCCESS) {
-        return PapResult{PapStatus::rejected, {}, {}};
+        return Result{Status::rejected, {}, {}};
     }
 
     // PAM may canonicalize the identity. Group policy must use that identity,
     // not the name supplied before the PAM stack ran.
     const void* canonical = nullptr;
     if(pam_get_item(handle, PAM_USER, &canonical) != PAM_SUCCESS || !canonical) {
-        return PapResult{PapStatus::error, {}, "PAM returned no identity"};
+        return Result{Status::error, {}, "PAM returned no identity"};
     }
     std::string identity(static_cast<const char*>(canonical));
     if(identity.empty() || identity.size() > 255 || !member_of(identity, allowed_group_)) {
-        return PapResult{PapStatus::rejected, {}, {}};
+        return Result{Status::rejected, {}, {}};
     }
-    PapResult accepted{PapStatus::accepted, std::move(identity), {}};
+    Result accepted{Status::accepted, std::move(identity), {}};
     accepted.groups.push_back(allowed_group_);
     return accepted;
 }

@@ -9,7 +9,7 @@ namespace sx::auth {
 class BrokerPapBackend final : public PapBackend {
 public:
     explicit BrokerPapBackend(std::string socket_path, long timeout_ms = 1500);
-    std::optional<PapResult> verify_pap(
+    std::optional<Result> verify_pap(
         PapCredentials credentials, completion_type completion) override;
 
 private:
@@ -21,7 +21,7 @@ private:
 // credentials database exists in the Smithproxy process.
 void configure_proxy_auth(std::string socket_path);
 bool proxy_auth_required();
-PapResult verify_proxy_credentials(std::string_view username, std::string_view password);
+Result verify_proxy_credentials(std::string_view username, std::string_view password);
 std::optional<PapCredentials> http_basic_credentials(std::string_view headers);
 
 } // namespace sx::auth

@@ -16,19 +16,19 @@ int main(int argc, char** argv) {
             password.push_back(byte);
         }
         sx::auth::BrokerPapBackend backend(argv[1]);
-        sx::auth::PapResult result;
+        sx::auth::Result result;
         sx::auth::PapExchange exchange({}, {});
-        exchange.verify(backend, argv[2], password, [&](sx::auth::PapResult value) {
+        exchange.verify(backend, argv[2], password, [&](sx::auth::Result value) {
             result = std::move(value);
         });
-        if(result.status == sx::auth::PapStatus::accepted) {
+        if(result.status == sx::auth::Status::accepted) {
             std::cout << "accepted " << result.identity << '\n';
             for(const auto& group : result.groups) {
                 std::cout << "group " << group << '\n';
             }
             return 0;
         }
-        std::cout << (result.status == sx::auth::PapStatus::rejected ? "rejected\n" : "unavailable\n");
+        std::cout << (result.status == sx::auth::Status::rejected ? "rejected\n" : "unavailable\n");
         return 1;
     } catch(const std::exception& error) {
         std::cerr << error.what() << '\n';

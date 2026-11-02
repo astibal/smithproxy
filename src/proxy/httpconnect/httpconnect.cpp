@@ -1,4 +1,5 @@
 #include <service/auth/broker_client.hpp>
+#include <service/http/webhooks.hpp>
 #include <proxy/httpconnect/httpconnect.hpp>
 
 #include <algorithm>
@@ -134,9 +135,11 @@ std::size_t HttpConnectServerCX::process_in() {
             send_error(407, "Proxy Authentication Required");
             return request_size;
         }
-        const auto result = sx::auth::verify_proxy_credentials(credentials->username, credentials->password);
-        if(result.status != sx::auth::PapStatus::accepted) {
-            if(result.status == sx::auth::PapStatus::rejected) {
+        const auto baseline = sx::auth::verify_proxy_credentials(credentials->username, credentials->password);
+        const auto result = sx::http::webhooks::proxy_authentication(
+            "http-connect", host(), port(), *credentials, baseline);
+        if(result.status != sx::auth::Status::accepted) {
+            if(result.status == sx::auth::Status::rejected) {
                 send_error(407, "Proxy Authentication Required");
             } else {
                 send_error(503, "Authentication Service Unavailable");

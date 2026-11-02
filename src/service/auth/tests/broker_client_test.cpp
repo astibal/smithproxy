@@ -26,7 +26,7 @@ TEST(AuthBroker, MissingSocketNeverAuthenticates) {
     BrokerPapBackend backend("/tmp/smithproxy-auth-nonexistent/test.sock", 100);
     auto result = backend.verify_pap({"user", "password"}, {});
     ASSERT_TRUE(result);
-    EXPECT_EQ(result->status, PapStatus::error);
+    EXPECT_EQ(result->status, Status::error);
     EXPECT_FALSE(static_cast<bool>(*result));
 }
 

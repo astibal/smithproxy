@@ -24,7 +24,7 @@ struct PapExchange::State {
         return active;
     }
 
-    void finish(std::uint64_t expected_generation, PapResult result) {
+    void finish(std::uint64_t expected_generation, Result result) {
         completion_type notify;
         {
             std::lock_guard lock(mutex);
@@ -86,7 +86,7 @@ bool PapExchange::verify(PapBackend& backend, std::string_view username,
     }
 
     std::weak_ptr<State> weak_state = state_;
-    auto finish = [weak_state, generation](PapResult result) {
+    auto finish = [weak_state, generation](Result result) {
         if(auto state = weak_state.lock()) {
             state->finish(generation, std::move(result));
         }
@@ -99,9 +99,9 @@ bool PapExchange::verify(PapBackend& backend, std::string_view username,
             finish(std::move(*immediate));
         }
     } catch(std::exception const& exception) {
-        finish(PapResult{PapStatus::error, {}, exception.what()});
+        finish(Result{Status::error, {}, exception.what()});
     } catch(...) {
-        finish(PapResult{PapStatus::error, {}, "PAP backend threw an unknown exception"});
+        finish(Result{Status::error, {}, "PAP backend threw an unknown exception"});
     }
     return true;
 }

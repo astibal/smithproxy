@@ -17,8 +17,8 @@ namespace {
 using sx::auth::PapBackend;
 using sx::auth::PapCredentials;
 using sx::auth::PapExchange;
-using sx::auth::PapResult;
-using sx::auth::PapStatus;
+using sx::auth::Result;
+using sx::auth::Status;
 
 struct FakeIo {
     void tap() { ++tap_calls; tapped = true; }
@@ -31,22 +31,22 @@ struct FakeIo {
 
 class ImmediateBackend final : public PapBackend {
 public:
-    std::optional<PapResult> verify_pap(PapCredentials credentials, completion_type) override {
+    std::optional<Result> verify_pap(PapCredentials credentials, completion_type) override {
         observed = std::move(credentials);
-        return PapResult{PapStatus::accepted, observed.username, {}};
+        return Result{Status::accepted, observed.username, {}};
     }
     PapCredentials observed;
 };
 
 class DeferredBackend final : public PapBackend {
 public:
-    std::optional<PapResult> verify_pap(PapCredentials credentials, completion_type completion) override {
+    std::optional<Result> verify_pap(PapCredentials credentials, completion_type completion) override {
         observed = std::move(credentials);
         completion_ = std::move(completion);
         return std::nullopt;
     }
 
-    void complete(PapResult result) { completion_(std::move(result)); }
+    void complete(Result result) { completion_(std::move(result)); }
 
     PapCredentials observed;
     completion_type completion_;
@@ -54,7 +54,7 @@ public:
 
 class ConcurrentDeferredBackend final : public PapBackend {
 public:
-    std::optional<PapResult> verify_pap(PapCredentials, completion_type completion) override {
+    std::optional<Result> verify_pap(PapCredentials, completion_type completion) override {
         std::lock_guard lock(mutex_);
         ++calls_;
         completions_.push_back(std::move(completion));
@@ -100,17 +100,17 @@ TEST(PapExchange, ImmediateBackendUsesSameTapUntapPath) {
     FakeIo io;
     ImmediateBackend backend;
     auto exchange = exchange_for(io);
-    std::vector<PapResult> results;
+    std::vector<Result> results;
 
     EXPECT_TRUE(exchange.verify(backend, "alice", "secret",
-                                [&](PapResult result) { results.push_back(std::move(result)); }));
+                                [&](Result result) { results.push_back(std::move(result)); }));
 
     EXPECT_EQ(io.tap_calls, 1);
     EXPECT_EQ(io.untap_calls, 1);
     EXPECT_FALSE(io.tapped);
     EXPECT_FALSE(exchange.pending());
     ASSERT_EQ(results.size(), 1U);
-    EXPECT_EQ(results[0].status, PapStatus::accepted);
+    EXPECT_EQ(results[0].status, Status::accepted);
     EXPECT_EQ(results[0].identity, "alice");
     EXPECT_EQ(backend.observed.password, "secret");
 }
@@ -119,21 +119,21 @@ TEST(PapExchange, DeferredBackendKeepsIoTappedUntilCompletion) {
     FakeIo io;
     DeferredBackend backend;
     auto exchange = exchange_for(io);
-    std::vector<PapResult> results;
+    std::vector<Result> results;
 
     ASSERT_TRUE(exchange.verify(backend, "alice", "secret",
-                                [&](PapResult result) { results.push_back(std::move(result)); }));
+                                [&](Result result) { results.push_back(std::move(result)); }));
     EXPECT_TRUE(exchange.pending());
     EXPECT_TRUE(io.tapped);
     EXPECT_EQ(io.untap_calls, 0);
 
-    backend.complete(PapResult{PapStatus::rejected, {}, {}});
+    backend.complete(Result{Status::rejected, {}, {}});
 
     EXPECT_FALSE(exchange.pending());
     EXPECT_FALSE(io.tapped);
     EXPECT_EQ(io.untap_calls, 1);
     ASSERT_EQ(results.size(), 1U);
-    EXPECT_EQ(results[0].status, PapStatus::rejected);
+    EXPECT_EQ(results[0].status, Status::rejected);
 }
 
 TEST(PapExchange, RejectsSecondRequestWhileOneIsPending) {
@@ -142,12 +142,12 @@ TEST(PapExchange, RejectsSecondRequestWhileOneIsPending) {
     ImmediateBackend second_backend;
     auto exchange = exchange_for(io);
 
-    ASSERT_TRUE(exchange.verify(backend, "alice", "one", [](PapResult) {}));
-    EXPECT_FALSE(exchange.verify(second_backend, "bob", "two", [](PapResult) {}));
+    ASSERT_TRUE(exchange.verify(backend, "alice", "one", [](Result) {}));
+    EXPECT_FALSE(exchange.verify(second_backend, "bob", "two", [](Result) {}));
     EXPECT_EQ(io.tap_calls, 1);
 
-    backend.complete(PapResult{PapStatus::accepted, "alice", {}});
-    EXPECT_TRUE(exchange.verify(second_backend, "bob", "two", [](PapResult) {}));
+    backend.complete(Result{Status::accepted, "alice", {}});
+    EXPECT_TRUE(exchange.verify(second_backend, "bob", "two", [](Result) {}));
     EXPECT_EQ(io.tap_calls, 2);
     EXPECT_EQ(io.untap_calls, 2);
 }
@@ -159,17 +159,17 @@ TEST(PapExchange, DuplicateAndStaleCallbacksCannotUntapAnotherRequest) {
     auto exchange = exchange_for(io);
     int completions = 0;
 
-    ASSERT_TRUE(exchange.verify(first, "alice", "one", [&](PapResult) { ++completions; }));
+    ASSERT_TRUE(exchange.verify(first, "alice", "one", [&](Result) { ++completions; }));
     auto stale_callback = first.completion_;
-    first.complete(PapResult{PapStatus::accepted, "alice", {}});
-    ASSERT_TRUE(exchange.verify(second, "bob", "two", [&](PapResult) { ++completions; }));
+    first.complete(Result{Status::accepted, "alice", {}});
+    ASSERT_TRUE(exchange.verify(second, "bob", "two", [&](Result) { ++completions; }));
 
-    stale_callback(PapResult{PapStatus::rejected, {}, {}});
+    stale_callback(Result{Status::rejected, {}, {}});
     EXPECT_TRUE(exchange.pending());
     EXPECT_TRUE(io.tapped);
     EXPECT_EQ(io.untap_calls, 1);
 
-    second.complete(PapResult{PapStatus::accepted, "bob", {}});
+    second.complete(Result{Status::accepted, "bob", {}});
     EXPECT_EQ(completions, 2);
     EXPECT_EQ(io.untap_calls, 2);
 }
@@ -180,32 +180,32 @@ TEST(PapExchange, CancelUntapsAndIgnoresLateCompletion) {
     auto exchange = exchange_for(io);
     int completions = 0;
 
-    ASSERT_TRUE(exchange.verify(backend, "alice", "secret", [&](PapResult) { ++completions; }));
+    ASSERT_TRUE(exchange.verify(backend, "alice", "secret", [&](Result) { ++completions; }));
     exchange.cancel();
     EXPECT_FALSE(io.tapped);
     EXPECT_FALSE(exchange.pending());
     EXPECT_EQ(io.untap_calls, 1);
 
-    backend.complete(PapResult{PapStatus::accepted, "alice", {}});
+    backend.complete(Result{Status::accepted, "alice", {}});
     EXPECT_EQ(completions, 0);
     EXPECT_EQ(io.untap_calls, 1);
 }
 
 TEST(PapExchange, BackendExceptionUntapsAndReportsError) {
     class ThrowingBackend final : public PapBackend {
-        std::optional<PapResult> verify_pap(PapCredentials, completion_type) override {
+        std::optional<Result> verify_pap(PapCredentials, completion_type) override {
             throw std::runtime_error("backend failed");
         }
     } backend;
 
     FakeIo io;
     auto exchange = exchange_for(io);
-    std::optional<PapResult> result;
+    std::optional<Result> result;
     ASSERT_TRUE(exchange.verify(backend, "alice", "secret",
-                                [&](PapResult value) { result = std::move(value); }));
+                                [&](Result value) { result = std::move(value); }));
 
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->status, PapStatus::error);
+    EXPECT_EQ(result->status, Status::error);
     EXPECT_EQ(result->error, "backend failed");
     EXPECT_FALSE(io.tapped);
     EXPECT_EQ(io.untap_calls, 1);
@@ -223,7 +223,7 @@ TEST(PapExchange, ParallelVerifyStartsExactlyOneRequest) {
     for(int index = 0; index < thread_count; ++index) {
         threads.emplace_back([&] {
             while(not go.load(std::memory_order_acquire)) std::this_thread::yield();
-            if(exchange.verify(backend, "alice", "secret", [](PapResult) {})) {
+            if(exchange.verify(backend, "alice", "secret", [](Result) {})) {
                 accepted_starts.fetch_add(1, std::memory_order_relaxed);
             }
         });
@@ -236,7 +236,7 @@ TEST(PapExchange, ParallelVerifyStartsExactlyOneRequest) {
     EXPECT_EQ(io.tap_calls.load(), 1);
     EXPECT_EQ(io.balance.load(), 1);
 
-    backend.completion(0)(PapResult{PapStatus::accepted, "alice", {}});
+    backend.completion(0)(Result{Status::accepted, "alice", {}});
     EXPECT_EQ(io.untap_calls.load(), 1);
     EXPECT_EQ(io.balance.load(), 0);
 }
@@ -250,11 +250,11 @@ TEST(PapExchange, ParallelCancelAndCompletionResumeExactlyOnce) {
         std::atomic_int completions{0};
 
         ASSERT_TRUE(exchange.verify(backend, "alice", "secret",
-                                    [&](PapResult) { completions.fetch_add(1); }));
+                                    [&](Result) { completions.fetch_add(1); }));
         auto callback = backend.completion(0);
         std::thread cancel_thread([&] { exchange.cancel(); });
         std::thread completion_thread([&] {
-            callback(PapResult{PapStatus::accepted, "alice", {}});
+            callback(Result{Status::accepted, "alice", {}});
         });
         cancel_thread.join();
         completion_thread.join();
@@ -277,13 +277,13 @@ TEST(PapExchange, StaleCallbacksCannotCompleteLaterGenerationsUnderLoad) {
 
     for(int iteration = 0; iteration < iterations; ++iteration) {
         ASSERT_TRUE(exchange.verify(backend, "user", "password",
-                                    [&](PapResult) { completions.fetch_add(1); }));
+                                    [&](Result) { completions.fetch_add(1); }));
         auto current = backend.completion(static_cast<std::size_t>(iteration));
         for(auto const& old : stale) {
-            old(PapResult{PapStatus::rejected, {}, {}});
+            old(Result{Status::rejected, {}, {}});
         }
         EXPECT_TRUE(exchange.pending());
-        current(PapResult{PapStatus::accepted, "user", {}});
+        current(Result{Status::accepted, "user", {}});
         stale.push_back(std::move(current));
     }
 
@@ -299,10 +299,10 @@ TEST(PapExchange, CompletionMayReenterAndStartNextRequest) {
     auto exchange = exchange_for(io);
     int completions = 0;
 
-    ASSERT_TRUE(exchange.verify(backend, "first", "one", [&](PapResult) {
+    ASSERT_TRUE(exchange.verify(backend, "first", "one", [&](Result) {
         ++completions;
         EXPECT_TRUE(exchange.verify(backend, "second", "two",
-                                    [&](PapResult) { ++completions; }));
+                                    [&](Result) { ++completions; }));
     }));
 
     EXPECT_EQ(completions, 2);
@@ -320,12 +320,12 @@ TEST(PapExchange, LateCompletionAfterDestructionIsIgnored) {
     {
         PapExchange exchange([&] { io.tap(); }, [&] { io.untap(); });
         ASSERT_TRUE(exchange.verify(backend, "alice", "secret",
-                                    [&](PapResult) { completions.fetch_add(1); }));
+                                    [&](Result) { completions.fetch_add(1); }));
         callback = backend.completion(0);
     }
 
     EXPECT_EQ(io.balance.load(), 0);
-    callback(PapResult{PapStatus::accepted, "alice", {}});
+    callback(Result{Status::accepted, "alice", {}});
     EXPECT_EQ(completions.load(), 0);
     EXPECT_EQ(io.tap_calls.load(), 1);
     EXPECT_EQ(io.untap_calls.load(), 1);
@@ -344,13 +344,13 @@ TEST(PapExchange, NextRequestWaitsForPreviousUntap) {
             release.wait();
         }
     });
-    ASSERT_TRUE(exchange.verify(backend, "first", "password", [](PapResult) {}));
+    ASSERT_TRUE(exchange.verify(backend, "first", "password", [](Result) {}));
     auto completion = std::async(std::launch::async, [&] {
-        backend.completion(0)(PapResult{PapStatus::accepted, "first", {}});
+        backend.completion(0)(Result{Status::accepted, "first", {}});
     });
     untap_started.get_future().wait();
     auto next = std::async(std::launch::async, [&] {
-        return exchange.verify(backend, "second", "password", [](PapResult) {});
+        return exchange.verify(backend, "second", "password", [](Result) {});
     });
     EXPECT_EQ(next.wait_for(std::chrono::milliseconds(30)), std::future_status::timeout);
     EXPECT_EQ(taps.load(), 1);
