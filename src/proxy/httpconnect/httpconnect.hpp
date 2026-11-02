@@ -6,10 +6,13 @@
 #include <proxy/httpconnect/httpconnectrequest.hpp>
 #include <service/core/sessionlist.hpp>
 
+#include <atomic>
 #include <string_view>
 
 class HttpConnectServerCX : public ExplicitProxyCX {
 public:
+    static inline std::atomic_bool proxy_authorization{false};
+
     HttpConnectServerCX(baseCom* c, unsigned int s);
 
     std::size_t process_in() override;

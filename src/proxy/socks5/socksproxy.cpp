@@ -47,7 +47,6 @@
 #include <proxy/socks5/socksproxy.hpp>
 #include <proxy/mitmhost.hpp>
 #include <service/cfgapi/cfgapi.hpp>
-#include <service/auth/broker_client.hpp>
 
 #include <algorithm>
 #include <vector>
@@ -58,6 +57,9 @@ namespace {
 
 class SocksFramingTCPCom final : public TCPCom {
 public:
+    explicit SocksFramingTCPCom(bool require_authorization)
+        : proxy_authorization_required_(require_authorization) {}
+
     baseCom* replicate() override { return new TCPCom(); }
 
     ssize_t read(int fd, void* destination, std::size_t capacity,
@@ -96,7 +98,7 @@ public:
         const auto completed = complete_frame_size(frame_);
         if(completed != 0 && frame_.size() >= completed) {
             if(stage_ == stage::greeting && !frame_.empty() && frame_[0] == 5) {
-                stage_ = sx::auth::proxy_auth_required() ? stage::authentication : stage::request;
+                stage_ = proxy_authorization_required_ ? stage::authentication : stage::request;
                 frame_.clear();
             } else if(stage_ == stage::authentication) {
                 stage_ = stage::request;
@@ -139,6 +141,7 @@ private:
         return sx::socks5::request_size_if_complete(bytes.data(), bytes.size());
     }
 
+    const bool proxy_authorization_required_;
     stage stage_ = stage::greeting;
     std::vector<std::uint8_t> frame_;
 };
@@ -757,9 +760,11 @@ void ExplicitProxy::on_left_bytes(baseHostCX* cx) {
 
 
 baseHostCX* MitmSocksProxy::new_cx(int s) {
-    auto* transport = new SocksFramingTCPCom();
+    // Framing and negotiation must use the same configuration snapshot.
+    const bool require_authorization = socksServerCX::proxy_authorization.load();
+    auto* transport = new SocksFramingTCPCom(require_authorization);
     transport->master(com()->master());
-    return new socksServerCX(transport, s);
+    return new socksServerCX(transport, s, require_authorization);
 }
 
 void MitmSocksProxy::on_left_new(std::unique_ptr<baseHostCX> accepted_cx) {

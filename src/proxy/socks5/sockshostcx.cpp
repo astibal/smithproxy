@@ -114,7 +114,8 @@ socksServerCX* claim_udp_association_locked(
 }
 }
 
-socksServerCX::socksServerCX(baseCom* c, unsigned int s) : ExplicitProxyCX(c,s) {
+socksServerCX::socksServerCX(baseCom* c, unsigned int s, bool require_authorization)
+    : ExplicitProxyCX(c,s), proxy_authorization_required_(require_authorization) {
     // SOCKS greeting and request framing is incremental. A zero process_in()
     // result means "retain until the next read", not "discard on the next
     // read cycle".
@@ -285,7 +286,7 @@ std::size_t socksServerCX::process_socks_hello_tcp() {
 
         unsigned char server_hello[2];
         server_hello[0] = 5; // version
-        const unsigned char method = sx::auth::proxy_auth_required() ? 2 : 0;
+        const unsigned char method = proxy_authorization_required_ ? 2 : 0;
         const auto* methods = b->data() + 2;
         const bool offered = std::find(methods, methods + nmethods, method) != methods + nmethods;
         server_hello[1] = offered ? method : 0xff;
@@ -310,7 +311,7 @@ std::size_t socksServerCX::process_socks_hello_tcp() {
         }
         return 0;
     } else if (version == 4) {
-        if(sx::auth::proxy_auth_required()) {
+        if(proxy_authorization_required_) {
             error(true);
             return 0;
         }

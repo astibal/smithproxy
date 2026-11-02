@@ -62,6 +62,7 @@
 #include <inspect/sigfactory.hpp>
 #include <inspect/sxsignature.hpp>
 
+#include <proxy/httpconnect/httpconnect.hpp>
 #include <proxy/mitmproxy.hpp>
 #include <proxy/mitmhost.hpp>
 #include <proxy/nbrhood.hpp>
@@ -1020,13 +1021,24 @@ bool CfgFactory::load_settings () {
                        listen_http_connect_port);
     load_if_exists(cfgapi.getRoot()["settings"], "http_connect_workers",num_workers_http_connect);
 
+    // Missing options preserve anonymous access, including after a reload.
+    // Publish each setting only after its complete value has been loaded.
+    bool socks_authorization = false;
+    bool http_connect_authorization = false;
     if(cfgapi.getRoot().exists("settings")) {
         if(cfgapi.getRoot()["settings"].exists("socks")) {
+            load_if_exists(cfgapi.getRoot()["settings"]["socks"], "proxy_authorization", socks_authorization);
             load_if_exists(cfgapi.getRoot()["settings"]["socks"], "async_dns", socksServerCX::global_async_dns);
             load_if_exists(cfgapi.getRoot()["settings"]["socks"], "ipver_mixing", socksServerCX::mixed_ip_versions);
             load_if_exists(cfgapi.getRoot()["settings"]["socks"], "prefer_ipv6", socksServerCX::prefer_ipv6);
         }
+        if(cfgapi.getRoot()["settings"].exists("http_connect")) {
+            load_if_exists(cfgapi.getRoot()["settings"]["http_connect"],
+                           "proxy_authorization", http_connect_authorization);
+        }
     }
+    socksServerCX::proxy_authorization.store(socks_authorization);
+    HttpConnectServerCX::proxy_authorization.store(http_connect_authorization);
 
     load_if_exists_atomic(cfgapi.getRoot()["settings"], "log_level", CfgFactory::get()->internal_init_level.level_ref());
 
@@ -5985,6 +5997,10 @@ int save_settings(Config& ex) {
     socks_objects.add("async_dns", Setting::TypeBoolean) = socksServerCX::global_async_dns;
     socks_objects.add("ipver_mixing", Setting::TypeBoolean) =  socksServerCX::mixed_ip_versions;
     socks_objects.add("prefer_ipv6", Setting::TypeBoolean) = socksServerCX::prefer_ipv6;
+    socks_objects.add("proxy_authorization", Setting::TypeBoolean) = socksServerCX::proxy_authorization.load();
+
+    Setting& http_connect_objects = objects.add("http_connect", Setting::TypeGroup);
+    http_connect_objects.add("proxy_authorization", Setting::TypeBoolean) = HttpConnectServerCX::proxy_authorization.load();
 
 
     objects.add("log_level", Setting::TypeInt) = static_cast<int>(CfgFactory::get()->internal_init_level.level_ref());

@@ -120,10 +120,6 @@ void configure_proxy_auth(std::string socket_path) {
     proxy_backend = std::make_unique<BrokerPapBackend>(std::move(socket_path));
 }
 
-bool proxy_auth_required() {
-    return proxy_backend != nullptr;
-}
-
 Result verify_proxy_credentials(std::string_view username, std::string_view password) {
     if(!proxy_backend) {
         return unavailable();

@@ -130,7 +130,7 @@ std::size_t HttpConnectServerCX::process_in() {
 
     // Authenticate before DNS, policy routing or opening the target. CONNECT
     // headers are consumed here and never forwarded into the tunnel.
-    if(sx::auth::proxy_auth_required()) {
+    if(proxy_authorization.load()) {
         const auto credentials = sx::auth::http_basic_credentials(data.substr(0, request_size));
         if(!credentials) {
             send_error(407, "Proxy Authentication Required");

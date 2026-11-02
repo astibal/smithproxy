@@ -429,6 +429,16 @@ void CfgValueHelp::init() {
         .value_filter(CfgValue::VALUE_BOOL);
 
 
+    add("settings.socks.proxy_authorization", "require proxy authentication for SOCKS")
+        .may_be_empty(false)
+        .value_filter(CfgValue::VALUE_BOOL);
+
+    add("settings.http_connect", "** configure HTTP CONNECT specific settings");
+    add("settings.http_connect.proxy_authorization", "require proxy authentication for HTTP CONNECT")
+        .may_be_empty(false)
+        .value_filter(CfgValue::VALUE_BOOL);
+
+
     add("settings.accept_api", "whether to accept HTTP API request")
             .help_quick("<bool>: set to 'true' to disable API server (default: true)")
             .may_be_empty(false)

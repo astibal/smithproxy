@@ -502,7 +502,7 @@ void print_help() {
     std::cerr << "    --comm-cli <path>            :  use an external CLI comm broker" << std::endl;
     std::cerr << "    --comm-api <path>            :  use an external API comm broker" << std::endl;
     std::cerr << "    --comm-webhook <path>        :  route webhook connections through a Unix socket" << std::endl;
-    std::cerr << "    --comm-auth <path>           :  require external auth broker for CONNECT and SOCKS5" << std::endl;
+    std::cerr << "    --comm-auth <path>           :  set external authentication broker socket" << std::endl;
     std::cerr << "    --comm-sift <path>           :  route Sift connections through a Unix socket" << std::endl;
     std::cerr << std::endl;
     std::cerr << "  Notes:" << std::endl;

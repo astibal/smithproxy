@@ -20,7 +20,6 @@ private:
 // Set once at startup, before proxy workers are created. No local backend or
 // credentials database exists in the Smithproxy process.
 void configure_proxy_auth(std::string socket_path);
-bool proxy_auth_required();
 Result verify_proxy_credentials(std::string_view username, std::string_view password);
 std::optional<PapCredentials> http_basic_credentials(std::string_view headers);
 

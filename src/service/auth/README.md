@@ -69,8 +69,21 @@ The check utility reads one password line from standard input. Supply it through
 a protected pipe; it does not provide a hidden terminal prompt. Passwords are
 never command-line arguments or logged by this code.
 
-`--comm-auth` enables mandatory authentication on HTTP CONNECT and SOCKS5. Without
-it, existing unauthenticated behavior remains unchanged. When enabled:
+`--comm-auth` configures only the broker socket. Authentication is explicitly
+opted into per protocol; both options default to false when omitted:
+
+```text
+settings = {
+    socks = { proxy_authorization = true; };
+    http_connect = { proxy_authorization = true; };
+};
+```
+
+These groups extend the existing settings, rather than replacing other options.
+The settings are saved with the configuration and can be reloaded. SOCKS keeps
+the negotiated choice for the lifetime of its handshake. A required protocol
+rejects access if the broker socket is missing or unavailable. Configuring a
+socket without enabling a protocol does not require authentication. When enabled:
 
 - CONNECT accepts Basic `Proxy-Authorization`; missing/invalid credentials get
   407 with a challenge, unavailable/invalid broker responses get 503. The
