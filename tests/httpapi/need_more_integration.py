@@ -53,6 +53,10 @@ class Hook(http.server.BaseHTTPRequestHandler):
                     self.server.starts.append(event)
                     self.server.condition.notify_all()
                 status, result = self.server.start_reply(event)
+            if event.get('action') == 'connection-info' and 'transport_lifecycle' in event.get('details', {}).get('info', {}):
+                with self.server.condition:
+                    self.server.lifecycle.append(event)
+                    self.server.condition.notify_all()
             if event.get('action') == 'connection-stop':
                 with self.server.condition:
                     self.server.stops.append(event)
@@ -142,6 +146,7 @@ def main():
         server.actions = []
         server.starts = []
         server.stops = []
+        server.lifecycle = []
         server.start_reply = lambda event: (200, {'action': 'accept', 'control': {'rewrite': True}})
         server.binary_enabled, server.binary_count = args.binary, 0
         server.verify_control, server.sequences = args.control_only, {}

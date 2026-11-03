@@ -24,6 +24,18 @@ def run(connection, send, set_reply, server, source, pending_connection, tls=Fal
     def set_start(status=200, body=None):
         server.start_reply = lambda event: (status, {} if body is None else body)
 
+    def check_readiness(identity):
+        def observations():
+            return [event['details']['info'] for event in server.lifecycle
+                    if event['id'] == identity]
+        with server.condition:
+            assert server.condition.wait_for(lambda: len(observations()) >= 4, timeout=5), observations()
+            observed = observations()
+            for side in ('L', 'R'):
+                events = [info['transport_lifecycle'] for info in observed if info['side'] == side]
+                assert sorted(item['event'] for item in events) == ['application-ready', 'tcp-connected'], events
+                assert events[0]['attempt'] == events[1]['attempt'], events
+
     def no_upstream(listener):
         try:
             peer, _ = listener.accept()
@@ -90,6 +102,7 @@ def run(connection, send, set_reply, server, source, pending_connection, tls=Fal
                 assert receive(receiver, len(data)) == data
                 assert len(server.starts) == before_starts + 1
                 assert server.received[-1][0] == event['id']
+                check_readiness(event['id'])
         scenarios += 1
 
     # An unavailable receiver remains fail-open before strict was negotiated.
@@ -259,6 +272,7 @@ def run(connection, send, set_reply, server, source, pending_connection, tls=Fal
         assert len(server.starts) == before + 1
         metadata = server.starts[-1]['details']['info']['tls']
         assert all(not leg.get('alpn') for leg in metadata.values()), metadata
+        check_readiness(server.starts[-1]['id'])
     scenarios += 1
 
     assert not server.errors, server.errors

@@ -44,12 +44,14 @@
 #include <atomic>
 #include <memory>
 #include <service/http/webhook_control.hpp>
+#include <proxy/connection_readiness.hpp>
 #include <ctime>
 #include <mutex>
 #include <set>
 #include <string>
 #include <string_view>
 #include <vector>
+#include <unordered_map>
 
 #include <basecom.hpp>
 #include <hostcx.hpp>
@@ -285,6 +287,20 @@ public:
         sx::traffic_log_adapter::flow_observation fields,
         std::string_view payload_layer);
 
+    bool handle_cx_read_once(unsigned char side, baseCom* com, baseHostCX* cx) override;
+    bool handle_cx_write_once(unsigned char side, baseCom* com, baseHostCX* cx) override;
+    bool handle_cx_events(unsigned char side, baseHostCX* cx) override;
+    void on_left_pc_error(baseHostCX* cx) override;
+    void on_right_pc_error(baseHostCX* cx) override;
+    void observe_readiness(unsigned char side, baseHostCX* cx);
+    void readiness_webhook(unsigned char side, baseHostCX* cx,
+                           const char* event, std::uint64_t attempt);
+
+private:
+    std::unordered_map<baseHostCX*, sx::proxy::ConnectionReadiness> readiness_;
+    std::uint64_t readiness_sequence_ = 0;
+
+public:
     bool wh_start = false;
     bool webhook_rewrite_allowed_ = false;
     // Synchronous setup gate, before application content is analyzed/forwarded.

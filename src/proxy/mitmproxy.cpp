@@ -294,6 +294,7 @@ void MitmProxy::shutdown() {
     // MasterProxy can defer object destruction until a later busy poll cycle.
     // Retire inspection state when transport shuts down, not when memory is freed.
     webhook_session_stop();
+    readiness_.clear();
     baseProxy::shutdown();
 }
 
@@ -778,7 +779,80 @@ void MitmProxy::add_filter(std::string const& name, FilterProxy* fp) {
 }
 
 
+void MitmProxy::readiness_webhook(unsigned char side, baseHostCX* cx,
+                                  const char* event, std::uint64_t attempt) {
+    const bool client = side == 'l' || side == 'x';
+    nlohmann::json info = {
+        {"session", to_connection_label()}, {"side", client ? "L" : "R"},
+        {"transport_lifecycle", {{"version", 1}, {"event", event},
+            {"attempt", attempt}, {"host", cx->host()}, {"port", cx->port()}}}
+    };
+    add_webhook_stream_details(info);
+    // These are native observations, not HTTP CONNECT or mitmproxy callbacks.
+    // Keep the existing connection-info response/control handling.
+    sx::http::webhooks::send_action("connection-info", to_connection_ID(),
+                                   {{"info", std::move(info)}}, webhook_control_);
+}
+
+void MitmProxy::observe_readiness(unsigned char side, baseHostCX* cx) {
+    if(!wh_start || wh_stop || !sx::http::webhooks::is_enabled()) return;
+    if(!cx || cx->socket() <= 0 || cx->error() || cx->com()->error()) return;
+
+    // Virtual streams and datagrams have different lifecycle contracts.
+    auto* tcp = dynamic_cast<TCPCom*>(cx->com());
+    if(!tcp) return;
+
+    auto& observed = readiness_[cx];
+    observed.observe_context(cx->socket(), cx->com(), readiness_sequence_);
+    if(!observed.connected && tcp->is_connected(cx->socket())) {
+        observed.connected = true;
+        readiness_webhook(side, cx, "tcp-connected", observed.attempt);
+    }
+    // com_status() also checks readiness of the higher layer, such as TLS.
+    // TCP can be connected while the TLS handshake is still in progress.
+    if(observed.connected && !observed.ready && cx->com()->com_status()) {
+        observed.ready = true;
+        readiness_webhook(side, cx, "application-ready", observed.attempt);
+    }
+}
+
+bool MitmProxy::handle_cx_read_once(unsigned char side, baseCom* com, baseHostCX* cx) {
+    observe_readiness(side, cx);
+    return baseProxy::handle_cx_read_once(side, com, cx);
+}
+
+bool MitmProxy::handle_cx_write_once(unsigned char side, baseCom* com, baseHostCX* cx) {
+    observe_readiness(side, cx);
+    return baseProxy::handle_cx_write_once(side, com, cx);
+}
+
+void MitmProxy::on_left_pc_error(baseHostCX* cx) {
+    // Permanent contexts can reconnect before the next per-context I/O call.
+    readiness_.erase(cx);
+    baseProxy::on_left_pc_error(cx);
+}
+
+void MitmProxy::on_right_pc_error(baseHostCX* cx) {
+    readiness_.erase(cx);
+    baseProxy::on_right_pc_error(cx);
+}
+
+bool MitmProxy::handle_cx_events(unsigned char side, baseHostCX* cx) {
+    // Sample again after transport I/O advanced a handshake. Retire the record
+    // before baseProxy can reconnect, including reuse of the same numeric fd.
+    observe_readiness(side, cx);
+    if(cx->error() || cx->opening_timeout() || cx->idle_timeout())
+        readiness_.erase(cx);
+    return baseProxy::handle_cx_events(side, cx);
+}
+
 int MitmProxy::handle_sockets_once(baseCom* xcom) {
+    // Exclusive stream handlers bypass baseProxy's ordinary per-context I/O.
+    if(stream_handler_) {
+        observe_readiness('l', first_left());
+        observe_readiness('r', first_right());
+    }
+
 
     // A policy stages the handler before the non-blocking upstream connect.
     // Activate it at the first worker cycle where the upstream is connected,
@@ -1821,6 +1895,8 @@ void MitmProxy::write_stream_event(sx::stream_direction direction,
 }
 
 void MitmProxy::on_left_bytes(baseHostCX* cx) {
+    observe_readiness('l', cx);
+
 
     if(not cx or state().dead()) return;
     if(cx->to_read().empty() || !webhook_session_start()) return;
@@ -1908,6 +1984,8 @@ bool MitmProxy::handle_requirements(baseHostCX* cx) {
 }
 
 void MitmProxy::on_right_bytes(baseHostCX* cx) {
+    observe_readiness('r', cx);
+
 
     if(not cx or state().dead()) return;
     if(cx->to_read().empty() || !webhook_session_start()) return;
