@@ -45,6 +45,21 @@ public:
     static void stop(const MitmProxy& proxy, const StopArgs& args);
     static void readiness(const MitmProxy& proxy, const ReadinessArgs& args);
     static bool content(MitmProxy& proxy, const ContentArgs& args);
+
+private:
+    // Internal arguments keep per-call state out of the proxy and out of
+    // asynchronous callbacks. Their definitions belong to the implementation.
+    struct StartReplyArgs;
+    struct ContentExchangeArgs;
+    struct ContentReplyArgs;
+    struct ContentActionArgs;
+
+    static bool start_reply(MitmProxy& proxy, const StartReplyArgs& args);
+    static nlohmann::json content_details(MitmProxy& proxy, const ContentExchangeArgs& args);
+    static void content_reply(MitmProxy& proxy, const ContentReplyArgs& args);
+    static void content_action(MitmProxy& proxy, const ContentActionArgs& args);
+    static void content_reverse(MitmProxy& proxy, const ContentActionArgs& args);
+
 };
 
 } // namespace sx::proxy

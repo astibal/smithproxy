@@ -25,7 +25,99 @@ std::string b64_decode(std::string const& encoded) {
     return libbase64::decode<std::string, char, unsigned char, false>(encoded);
 }
 
+// Metadata builders only describe the current payload; they never apply replies.
+void add_content_ranges(nlohmann::json& info, const ProxyHooks::ContentArgs& args,
+                        const MitmHostCX* left) {
+    // H1/H2 framing belongs to FlowCtx on the left context. Only HTTP/3
+    // carries the current payload observation on its individual stream.
+    auto const* current = MitmHostCX::from_baseHostCX(args.cx);
+    auto app = current
+        ? std::dynamic_pointer_cast<HttpApplication>(current->engine().application_data)
+        : nullptr;
+    if(!app || app->version != HttpApplication::HTTP_VER::HTTP3) {
+        app = left
+            ? std::dynamic_pointer_cast<HttpApplication>(left->engine().application_data)
+            : nullptr;
+    }
+
+    // An outer CONNECT request must not annotate bytes of the inner protocol.
+    if(!app || !app->l7_payload_matches(args.data->string_view(), args.cx->meter_read_bytes))
+        return;
+
+    auto metadata = sx::proxy::l7_payload_metadata(
+        app->l7_payload, app->l7_encoding, app->payload_annotations);
+    for(auto& [key, value] : metadata.items())
+        info[key] = std::move(value);
+}
+
+void add_content_http(nlohmann::json& info, const MitmHostCX* left) {
+    if(!left) return;
+    const auto app = std::dynamic_pointer_cast<HttpApplication>(
+        left->engine().application_data);
+    if(!app || !app->populated()) return;
+
+    auto const http2 = app->version == sx::engine::http::app_HttpRequest::HTTP_VER::HTTP2;
+    auto const http3 = app->version == sx::engine::http::app_HttpRequest::HTTP_VER::HTTP3;
+    auto const prefix = http3 ? "flow.http3." :
+                        http2 ? "flow.http2." : "flow.http1.";
+
+    info[http3 ? "flow.http3" : http2 ? "flow.http2" : "flow.http1"] = true;
+
+    auto put = [&](std::string const& field, std::string const& value) {
+        if(!value.empty()) info[prefix + field] = value;
+    };
+
+    auto path = app->http_data.uri;
+    if(!app->http_data.params.empty()) path += "?" + app->http_data.params;
+
+    auto scheme = app->http_data.proto;
+    if(scheme.size() >= 3 && scheme.compare(scheme.size() - 3, 3, "://") == 0) {
+        scheme.resize(scheme.size() - 3);
+    }
+
+    put("method", app->http_data.method);
+    put((http2 || http3) ? "authority" : "host", app->http_data.host);
+    put("path", path);
+    put("scheme", scheme);
+    put("url", app->request());
+    put("content_type", app->http_data.content_type);
+    put("accept", app->http_data.accept);
+    put("subprotocol", app->http_data.sub_proto);
+}
+
+void add_content_tls(nlohmann::json& info, const MitmHostCX* right) {
+    if(!right) return;
+    const auto* tls = dynamic_cast<SSLCom*>(right->com());
+    if(!tls || tls->get_sni().empty()) return;
+
+    info["flow.tls.sni"] = tls->get_sni();
+}
+
 } // namespace
+
+struct ProxyHooks::StartReplyArgs {
+    const sx::http::expected_reply& reply;
+    bool local_rewrite = false;
+};
+
+// One synchronous content exchange. Both receivers share the same buffers and
+// result flags, preserving the existing SIFT-before-webhook processing order.
+struct ProxyHooks::ContentExchangeArgs {
+    const ContentArgs& input;
+    bool reverse_allowed = false;
+    bool modified = false;
+    bool reply_received = false;
+};
+
+struct ProxyHooks::ContentReplyArgs {
+    ContentExchangeArgs& exchange;
+    const sx::http::expected_reply& reply;
+};
+
+struct ProxyHooks::ContentActionArgs {
+    ContentExchangeArgs& exchange;
+    const nlohmann::json& body;
+};
 
 nlohmann::json ProxyHooks::start_details(const MitmProxy& proxy, const StartDetailsArgs&) {
     nlohmann::json info = {
@@ -78,6 +170,32 @@ nlohmann::json ProxyHooks::start_details(const MitmProxy& proxy, const StartDeta
     return {{"info", std::move(info)}};
 }
 
+bool ProxyHooks::start_reply(MitmProxy& proxy, const StartReplyArgs& args) {
+    if(!args.reply) return false;
+
+    auto result = sx::proxy::parse_setup_reply(
+        args.reply->response.first, args.reply->response.second);
+    proxy.webhook_control_->apply(result.body);
+
+    switch(result.action) {
+        case setup_action::accept:
+            proxy.webhook_rewrite_allowed_ = result.rewrite;
+            proxy.flow_ctx_->allow_rewrite(args.local_rewrite || result.rewrite);
+            return true;
+        case setup_action::drop:
+            proxy.state().dead(true);
+            return true;
+        case setup_action::not_interested:
+            // Strict mode requires continued content delivery.
+            if(proxy.webhook_control_->strict()) return false;
+            proxy.webhook_content_wanted_ = false;
+            return true;
+        case setup_action::invalid:
+            return false;
+    }
+    return false;
+}
+
 bool ProxyHooks::start(MitmProxy& proxy, const StartArgs&) {
 
     // Local replacement rules are known before content arrives. They need the
@@ -100,27 +218,9 @@ bool ProxyHooks::start(MitmProxy& proxy, const StartArgs&) {
     if (enabled) {
         sx::http::webhooks::send_action_wait("connection-start", proxy.to_connection_ID(), details,
             [&](sx::http::expected_reply reply) {
-                if (!reply) return;
-
-                auto result = sx::proxy::parse_setup_reply(
-                    reply->response.first, reply->response.second);
-                proxy.webhook_control_->apply(result.body);
-
-                using action = sx::proxy::setup_action;
-                valid_reply = result.action != action::invalid;
-
-                if (result.action == action::accept) {
-                    proxy.webhook_rewrite_allowed_ = result.rewrite;
-                    proxy.flow_ctx_->allow_rewrite(local_rewrite || result.rewrite);
-                }
-
-                if (result.action == action::drop) {
-                    proxy.state().dead(true);
-                } else if (result.action == action::not_interested) {
-                    // Strict mode requires continued content delivery.
-                    if (proxy.webhook_control_->strict()) valid_reply = false;
-                    else proxy.webhook_content_wanted_ = false;
-                }
+                StartReplyArgs reply_args{reply};
+                reply_args.local_rewrite = local_rewrite;
+                valid_reply = start_reply(proxy, reply_args);
             });
 
         if (!valid_reply) {
@@ -213,243 +313,180 @@ void ProxyHooks::readiness(const MitmProxy& proxy, const ReadinessArgs& args) {
                                    {{"info", std::move(info)}}, proxy.webhook_control_);
 }
 
-bool ProxyHooks::content(MitmProxy& proxy, const ContentArgs& args) {
-    auto* cx = args.cx;
-    const auto side = args.side;
-    auto& buffer = *args.data;
-    const auto payload_layer = args.payload_layer;
-    const bool regular_webhook = args.regular_webhook;
-    const bool sift = args.sift;
-    auto& reverse_output = *args.reverse_output;
-
-    auto& log = proxy.log_content;
-
-    bool was_modified = false;
-    const bool reverse_allowed = proxy.webhook_rewrite_allowed_ && proxy.flow_ctx_->can_inject() &&
-        proxy.left_sockets.size() + proxy.left_delayed_accepts.size() == 1 &&
-        proxy.right_sockets.size() + proxy.right_delayed_accepts.size() == 1 &&
-        cx->com()->l4_proto() == SOCK_STREAM;
-
+nlohmann::json ProxyHooks::content_details(MitmProxy& proxy, const ContentExchangeArgs& args) {
     nlohmann::json j;
     auto cl = proxy.to_connection_label();
     j["info"] = {
         { "session", cl },
-        { "side", string_format("%c", from_side(side)) },
-        { "payload_layer", std::string(payload_layer) },
+        { "side", string_format("%c", from_side(args.input.side)) },
+        { "payload_layer", std::string(args.input.payload_layer) },
         { "L7_payload_start", nlohmann::json::array({-1}) },
         { "L7_payload_end", nlohmann::json::array({-1}) },
         { "L7_encoding", nlohmann::json::array({""}) },
         { "content_annotations", nlohmann::json::array() }
     };
     proxy.add_webhook_stream_details(j["info"]);
-    if(regular_webhook) {
+    if(args.input.regular_webhook) {
         // Advertise support before Spider may publish its first stateful rewrite.
         j["info"]["webhook_control"] = {
             {"version", 1}, {"mode", proxy.webhook_control_->strict() ? "strict" : "regular"},
             {"sequence", ++proxy.webhook_control_->content_sequence},
             {"rewrite", proxy.webhook_rewrite_allowed_},
-            {"content-reverse", reverse_allowed}
+            {"content-reverse", args.reverse_allowed}
         };
     }
 
-    auto publish_l7_ranges = [&j](auto const& ranges,
-                                  std::vector<std::string> const& known_encodings,
-                                  auto const& annotations) {
-        auto metadata = sx::proxy::l7_payload_metadata(ranges, known_encodings,
-                                                       annotations);
-        for(auto& [key, value] : metadata.items())
-            j["info"][key] = std::move(value);
-    };
+    add_content_ranges(j["info"], args.input, proxy.first_left());
+    add_content_tls(j["info"], proxy.first_right());
+    add_content_http(j["info"], proxy.first_left());
+    return j;
+}
 
-    auto publish_matching_observation = [&](MitmHostCX const* context) {
-        if(!context) return false;
-        auto const app = std::dynamic_pointer_cast<HttpApplication>(
-            context->engine().application_data);
-        if(!app || !app->l7_payload_matches(buffer.string_view(),
-                                             cx->meter_read_bytes)) return false;
-        publish_l7_ranges(app->l7_payload, app->l7_encoding,
-                          app->payload_annotations);
-        return true;
-    };
-    // TCP HTTP/1 and HTTP/2 framing is owned by the connection FlowCtx. The
-    // current side context may still contain an outer HTTP/1 CONNECT application;
-    // consulting it first can therefore attach HTTP/1 annotations to inner
-    // HTTP/2 bytes.  HTTP/3 is the exception: its transport adapter stores
-    // observations on the current QUIC stream context.
-    auto const* current = MitmHostCX::from_baseHostCX(cx);
-    auto const current_app = current
-        ? std::dynamic_pointer_cast<HttpApplication>(
-              current->engine().application_data)
-        : nullptr;
-    if(current_app && current_app->version == HttpApplication::HTTP_VER::HTTP3) {
-        publish_matching_observation(current);
-    } else {
-        publish_matching_observation(proxy.first_left());
+void ProxyHooks::content_reverse(MitmProxy& proxy, const ContentActionArgs& args) {
+    auto& exchange = args.exchange;
+    const auto& input = exchange.input;
+    auto& log = proxy.log_content;
+
+    try {
+        if(!input.regular_webhook || input.sift || !exchange.reverse_allowed) {
+            throw std::logic_error("Reverse content requires advertised rewrite views");
+        }
+
+        auto output = sx::proxy::DirectionalContent::parse(args.body);
+        // Stage only. The proxy publishes input metadata and completes filtering
+        // before touching the reverse view.
+        input.reverse_output->assign(output.reverse.data(), output.reverse.size());
+        input.data->assign(output.forward.data(), output.forward.size());
+        exchange.modified = true;
+    }
+    catch(std::exception const& error) {
+        _err("Invalid directional webhook output: %s", error.what());
+        input.reverse_output->clear();
+        proxy.state().dead(true);
+    }
+}
+
+void ProxyHooks::content_action(MitmProxy& proxy, const ContentActionArgs& args) {
+    auto& exchange = args.exchange;
+    const auto& input = exchange.input;
+    const auto& body = args.body;
+    auto& data = *input.data;
+    auto& log = proxy.log_content;
+
+    // Directional output takes precedence over ordinary actions.
+    if(body.contains("content-reverse")) {
+        content_reverse(proxy, args);
+        return;
+    }
+    if(!body.contains("action")) return;
+
+    const auto& action = body["action"];
+    if(action == "drop") {
+        proxy.state().dead(true);
+        return;
     }
 
-    if(auto* right = proxy.first_right(); right != nullptr) {
-        if(auto* tls = dynamic_cast<SSLCom*>(right->com()); tls != nullptr) {
-            if(auto const& sni = tls->get_sni(); !sni.empty()) {
-                j["info"]["flow.tls.sni"] = sni;
-            }
-        }
+    std::optional<std::string> replacement;
+    const auto content = body.find("content");
+    if(content != body.end() && content->is_string()) {
+        replacement = b64_decode(content->get_ref<const std::string&>());
     }
 
-    if(auto const* left = proxy.first_left(); left != nullptr) {
-        auto const app = std::dynamic_pointer_cast<sx::engine::http::app_HttpRequest>(
-            left->engine().application_data);
-
-        if(app && app->populated()) {
-            auto const http2 = app->version == sx::engine::http::app_HttpRequest::HTTP_VER::HTTP2;
-            auto const http3 = app->version == sx::engine::http::app_HttpRequest::HTTP_VER::HTTP3;
-            auto const prefix = http3 ? "flow.http3." :
-                                http2 ? "flow.http2." : "flow.http1.";
-
-            j["info"][http3 ? "flow.http3" : http2 ? "flow.http2" : "flow.http1"] = true;
-
-            auto put = [&](std::string const& field, std::string const& value) {
-                if(!value.empty()) j["info"][prefix + field] = value;
-            };
-
-            auto path = app->http_data.uri;
-            if(!app->http_data.params.empty()) path += "?" + app->http_data.params;
-
-            auto scheme = app->http_data.proto;
-            if(scheme.size() >= 3 && scheme.compare(scheme.size() - 3, 3, "://") == 0) {
-                scheme.resize(scheme.size() - 3);
-            }
-
-            put("method", app->http_data.method);
-            put((http2 || http3) ? "authority" : "host", app->http_data.host);
-            put("path", path);
-            put("scheme", scheme);
-            put("url", app->request());
-            put("content_type", app->http_data.content_type);
-            put("accept", app->http_data.accept);
-            put("subprotocol", app->http_data.sub_proto);
-        }
+    // Same-size replace is an intentional low-level escape hatch, not a claim
+    // of protocol safety. Compare decoded bytes, not the base64 envelope size.
+    const bool same_size_replace = action == "replace" && replacement &&
+        replacement->size() == data.size();
+    const bool changes_stream = action == "replace" || action == "discard" ||
+        action == "need-more" || body.contains("content");
+    if(changes_stream && (input.sift || (!proxy.webhook_rewrite_allowed_ && !same_size_replace))) {
+        _err("content mutation requires setup rewrite permission or a same-size replace");
+        proxy.state().dead(true);
+        return;
     }
 
-    bool content_reply_received = false;
-    auto response_hook = [&, sift](sx::http::expected_reply r){
-        if(r.has_value()) {
-            auto reply = r.value();
-            _dia("webhook content-replace: response %d", reply.response.first);
+    if(input.regular_webhook && action == "not-interested" && !proxy.webhook_control_->strict()) {
+        proxy.webhook_content_wanted_ = false;
+        _dia("webhook content: peer declined future content for this connection");
+        return;
+    }
+    if(action == "discard" || (input.regular_webhook && action == "need-more")) {
+        // need-more consumes this chunk too, but keeps future callbacks enabled.
+        // The receiver may return the accumulated bytes in a later replacement.
+        data.size(0);
+        exchange.modified = true;
+        if(action == "need-more")
+            _dia("webhook content: chunk consumed; awaiting more content");
+        return;
+    }
+    if(!replacement) {
+        _dia("webhook content-replace: no replacement body received");
+        return;
+    }
 
-            if(reply.response.first >= 200 and reply.response.first < 300) {
-                auto json_obj = nlohmann::json::parse(reply.response.second, nullptr, false);
-                if(!json_obj.is_object()) {
-                    _err("MitmProxy::content_webhook: response body is invalid");
-                }
-                else {
-                    if(regular_webhook) {
-                        proxy.webhook_control_->apply(json_obj);
-                        content_reply_received = true;
-                    }
-                    if(sift) {
-                        if(proxy.apply_sift_reply(json_obj)) proxy.publish_sift_classifications();
-                    }
-                    if(json_obj.contains("content-reverse")) {
-                        try {
-                            if(!regular_webhook || sift || !reverse_allowed) {
-                                throw std::logic_error("Reverse content requires advertised rewrite views");
-                            }
+    const auto& decoded = *replacement;
+    _dia("webhook content-replace: received %dB of replacement data", decoded.size());
+    {
+        auto& log = proxy.log_content_dump;
+        _deb("webhook content-replace: replacement: %s\r\n",
+             hex_dump((unsigned char*)decoded.data(), decoded.size(), 4, 0, true).c_str());
+    }
+    data.assign(decoded.data(), decoded.size());
+    exchange.modified = true;
+}
 
-                            auto output = sx::proxy::DirectionalContent::parse(json_obj);
-                            // Stage only. The proxy publishes input metadata and
-                            // completes filtering before touching the reverse view.
-                            reverse_output.assign(output.reverse.data(), output.reverse.size());
-                            buffer.assign(output.forward.data(), output.forward.size());
-                            was_modified = true;
-                        }
-                        catch(std::exception const& error) {
-                            _err("Invalid directional webhook output: %s", error.what());
-                            reverse_output.clear();
-                            proxy.state().dead(true);
-                        }
-                        return;
-                    }
-                    if(json_obj.contains("action")) {
-                        const auto& action = json_obj["action"];
-                        const bool changes_stream = action == "replace" || action == "discard" ||
-                            action == "need-more" || json_obj.contains("content");
+void ProxyHooks::content_reply(MitmProxy& proxy, const ContentReplyArgs& args) {
+    if(!args.reply) return;
 
-                        if (action == "drop") {
-                            proxy.state().dead(true);
-                            return;
-                        }
+    auto& exchange = args.exchange;
+    const auto& input = exchange.input;
+    const auto& response = args.reply->response;
+    auto& log = proxy.log_content;
+    _dia("webhook content-replace: response %d", response.first);
 
-                        std::optional<std::string> replacement;
-                        const auto content = json_obj.find("content");
-
-                        if (content != json_obj.end() && content->is_string()) {
-                            replacement = b64_decode(content->get_ref<const std::string&>());
-                        }
-
-                        // Same-size replace is an intentional low-level escape
-                        // hatch, not a claim of protocol safety. Keep the input
-                        // context as-is: the script owns any resulting mismatch.
-                        // Compare decoded bytes, not the base64 envelope size.
-                        const bool same_size_replace = action == "replace" && replacement &&
-                            replacement->size() == buffer.size();
-
-                        if (changes_stream && (sift || (!proxy.webhook_rewrite_allowed_ && !same_size_replace))) {
-                            _err("content mutation requires setup rewrite permission or a same-size replace");
-                            proxy.state().dead(true);
-                            return;
-                        }
-
-                        if(regular_webhook && json_obj["action"] == "not-interested" &&
-                           !proxy.webhook_control_->strict()) {
-                            proxy.webhook_content_wanted_ = false;
-                            _dia("webhook content: peer declined future content for this connection");
-                        }
-                        else if(json_obj["action"] == "discard") {
-                            // data sent to webhook shall be discarded
-                            buffer.size(0);
-                            was_modified = true;
-                        }
-                        else if(regular_webhook && json_obj["action"] == "need-more") {
-                            // The webhook owns these bytes now: consume this chunk
-                            // without forwarding it or retaining another copy here.
-                            // Keep future content callbacks enabled. The webhook may
-                            // return the accumulated content with a later replacement.
-                            buffer.size(0);
-                            was_modified = true;
-                            _dia("webhook content: chunk consumed; awaiting more content");
-                        }
-                        else {
-                            // catch-all code to decode response if present
-                            if(replacement) {
-                                const auto& decoded = *replacement;
-
-                                _dia("webhook content-replace: received %dB of replacement data", decoded.size());
-                                {
-                                    auto& log = proxy.log_content_dump;
-                                    _deb("webhook content-replace: replacement: %s\r\n",
-                                         hex_dump((unsigned char*)decoded.data(), decoded.size(), 4, 0, true).c_str());
-                                }
-
-                                buffer.assign(decoded.data(), decoded.size());
-                                was_modified = true;
-                            }
-                            else {
-                                _dia("webhook content-replace: no replacement body received");
-                            }
-                        }
-                    }
-                }
-            }
-            else if(sift) {
-                auto json_obj = nlohmann::json::parse(
-                    reply.response.second, nullptr, false);
-                if(!json_obj.is_discarded() && proxy.apply_sift_reply(json_obj))
-                    proxy.publish_sift_classifications();
-            }
+    if(response.first < 200 || response.first >= 300) {
+        // SIFT can return classification information even with an HTTP error.
+        if(input.sift) {
+            auto body = nlohmann::json::parse(response.second, nullptr, false);
+            if(!body.is_discarded() && proxy.apply_sift_reply(body))
+                proxy.publish_sift_classifications();
         }
+        return;
+    }
+
+    auto body = nlohmann::json::parse(response.second, nullptr, false);
+    if(!body.is_object()) {
+        _err("MitmProxy::content_webhook: response body is invalid");
+        return;
+    }
+
+    // Apply control and classification before any content action, as before.
+    if(input.regular_webhook) {
+        proxy.webhook_control_->apply(body);
+        exchange.reply_received = true;
+    }
+    if(input.sift && proxy.apply_sift_reply(body))
+        proxy.publish_sift_classifications();
+
+    ContentActionArgs action_args{exchange, body};
+    content_action(proxy, action_args);
+}
+
+bool ProxyHooks::content(MitmProxy& proxy, const ContentArgs& args) {
+    ContentExchangeArgs exchange{args};
+    exchange.reverse_allowed = proxy.webhook_rewrite_allowed_ && proxy.flow_ctx_->can_inject() &&
+        proxy.left_sockets.size() + proxy.left_delayed_accepts.size() == 1 &&
+        proxy.right_sockets.size() + proxy.right_delayed_accepts.size() == 1 &&
+        args.cx->com()->l4_proto() == SOCK_STREAM;
+
+    auto j = content_details(proxy, exchange);
+    auto& buffer = *args.data;
+    auto response_hook = [&](sx::http::expected_reply reply) {
+        ContentReplyArgs reply_args{exchange, reply};
+        content_reply(proxy, reply_args);
     };
-    if(sift) {
-        const bool right_side = side == side_t::RIGHT;
+
+    if(args.sift) {
+        const bool right_side = args.side == side_t::RIGHT;
         auto& sent_bytes = right_side
             ? proxy.sift_ctl_.payload_right_bytes
             : proxy.sift_ctl_.payload_left_bytes;
@@ -464,7 +501,7 @@ bool ProxyHooks::content(MitmProxy& proxy, const ContentArgs& args) {
                 response_hook);
         }
     }
-    if(regular_webhook) {
+    if(args.regular_webhook) {
         const auto binary_sent = sx::http::webhooks::send_content_wait(
             proxy.to_connection_ID(), j,
             std::string_view(reinterpret_cast<const char*>(buffer.data()), buffer.size()), response_hook);
@@ -477,13 +514,13 @@ bool ProxyHooks::content(MitmProxy& proxy, const ContentArgs& args) {
 
     // No response (including a skipped request), HTTP failure or invalid JSON:
     // strict connections must not forward the unprocessed content.
-    if(regular_webhook && !content_reply_received && proxy.webhook_control_->strict()) {
+    if(args.regular_webhook && !exchange.reply_received && proxy.webhook_control_->strict()) {
         buffer.size(0);
         proxy.state().dead(true);
         return true;
     }
 
-    return was_modified;
+    return exchange.modified;
 }
 
 } // namespace sx::proxy
