@@ -351,6 +351,18 @@ bool half_close_peer_drained(Host* cx) {
            !peer->com()->write_event_pending();
 }
 
+// TCP directions finish independently; other transports keep their existing
+// response-drain lifecycle until they opt into half-close support.
+template<class Host>
+bool half_close_finished(Host* cx) {
+    if(!cx || !cx->read_eof() || !half_close_peer_drained(cx)) return false;
+
+    auto* peer = cx->peer();
+    return !cx->com()->supports_half_close() ||
+           !peer->com()->supports_half_close() ||
+           (cx->write_eof() && peer->write_eof());
+}
+
 } // namespace sx::mitmproxy
 
 #endif // MITMPROXY_UTILS_HPP
