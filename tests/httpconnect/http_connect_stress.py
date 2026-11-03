@@ -89,7 +89,14 @@ def pipeline_probe(listener_port):
             raise RuntimeError(f"pipelined CONNECT failed: {response!r}")
         client.settimeout(1)
         try:
-            payload = integration.recv_until(client, b"PONG\r\n")
+            # TCP may coalesce the CONNECT response and tunnel bytes. Keep
+            # the bytes already consumed by the header reader.
+            payload = response.split(b"\r\n\r\n", 1)[1]
+            while b"PONG\r\n" not in payload:
+                chunk = client.recv(4096)
+                if not chunk:
+                    raise RuntimeError(f"pipelined tunnel closed: {payload!r}")
+                payload += chunk
             if payload != b"PONG\r\n":
                 raise RuntimeError(f"pipelined response mismatch: {payload!r}")
             result = "preserved"

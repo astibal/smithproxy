@@ -433,15 +433,21 @@ TEST(PolicyTest, DirectMatchRequiresCompleteNonNullEndpointSets) {
     EXPECT_FALSE(rule.match(lefts, rights));
 
     lefts = {&left};
-    baseHostCX missing_transport(new TCPCom(), "192.0.2.11", "12345");
-    missing_transport.com(nullptr);
+    // The public setter now rejects a null COM. Deliberately corrupt only
+    // this fixture to retain the policy's defensive missing-transport check.
+    class MissingTransportCX : public baseHostCX {
+    public:
+        MissingTransportCX() : baseHostCX(new TCPCom(), "192.0.2.11", "12345") {
+            saved_ = std::move(com_);
+        }
+        ~MissingTransportCX() override { com_ = std::move(saved_); }
+    private:
+        std::unique_ptr<baseCom> saved_;
+    } missing_transport;
     lefts.push_back(&missing_transport);
     // A wildcard protocol used to skip the only com() validation and let
     // this incomplete endpoint participate in an allow-rule match.
     EXPECT_FALSE(rule.match(lefts, rights));
-    // baseHostCX historically assumes a transport during destruction; restore
-    // a disposable one after exercising the deliberately partial state.
-    missing_transport.com(new TCPCom());
 }
 
 TEST(PolicyTest, EveryEndpointMustMatchAddressAndPortOnTheSameFlowSet) {

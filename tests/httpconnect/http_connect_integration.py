@@ -49,7 +49,7 @@ class EchoOrigin:
     def __init__(self, family=socket.AF_INET, address=None):
         self.family = family
         self.address = address or ("::1" if family == socket.AF_INET6 else "127.0.0.1")
-        self.port = free_port(family, self.address)
+        self.port = 0
         self.ready = threading.Event()
         self.finished = threading.Event()
         self.error = None
@@ -60,12 +60,17 @@ class EchoOrigin:
         self.thread.start()
         if not self.ready.wait(5):
             raise RuntimeError("origin did not start")
+        if self.error:
+            raise self.error
 
     def run(self):
         try:
             with socket.socket(self.family) as listener:
                 listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                listener.bind((self.address, self.port))
+                # Reserve and publish the port in one operation. Probing a
+                # free port before binding races concurrent test origins.
+                listener.bind((self.address, 0))
+                self.port = listener.getsockname()[1]
                 listener.listen(1)
                 listener.settimeout(15)
                 self.ready.set()
@@ -76,6 +81,7 @@ class EchoOrigin:
                     connection.sendall(b"PONG\r\n")
         except Exception as exc:
             self.error = exc
+            self.ready.set()
         finally:
             self.finished.set()
 
