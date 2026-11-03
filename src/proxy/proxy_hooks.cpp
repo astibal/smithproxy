@@ -2,9 +2,13 @@
 #include <proxy/mitmproxy.hpp>
 #include <proxy/content_webhook_metadata.hpp>
 #include <proxy/connection_start.hpp>
+#include <proxy/httpconnect/httpconnectrequest.hpp>
+#include <proxy/httpconnect/httpconnectreply.hpp>
 #include <proxy/directional_content.hpp>
 #include <service/http/webhooks.hpp>
 #include <socle/common/base64.hpp>
+
+#include <netdb.h>
 
 using namespace socle;
 
@@ -23,6 +27,11 @@ std::string b64_decode(std::string const& encoded) {
     // at least one base64 block, so handle this valid zero-byte value directly.
     if(encoded.empty()) return {};
     return libbase64::decode<std::string, char, unsigned char, false>(encoded);
+}
+
+std::string b64_encode_text(std::string_view bytes) {
+    return libbase64::encode<std::string, char, unsigned char, true>(
+        reinterpret_cast<unsigned char const*>(bytes.data()), bytes.size());
 }
 
 // Metadata builders only describe the current payload; they never apply replies.
@@ -94,6 +103,13 @@ void add_content_tls(nlohmann::json& info, const MitmHostCX* right) {
 }
 
 } // namespace
+
+struct ProxyHooks::HttpConnectReplyArgs {
+    const HttpConnectArgs& input;
+    const sx::http::expected_reply& reply;
+    const nlohmann::json& envelope;
+    HttpConnectDecision& decision;
+};
 
 struct ProxyHooks::StartReplyArgs {
     const sx::http::expected_reply& reply;
@@ -168,6 +184,174 @@ nlohmann::json ProxyHooks::start_details(const MitmProxy& proxy, const StartDeta
 
     proxy.add_webhook_stream_details(info);
     return {{"info", std::move(info)}};
+}
+
+nlohmann::json ProxyHooks::http_connect_details(const MitmProxy& proxy, const HttpConnectArgs& args) {
+
+    auto endpoint = [](baseHostCX* cx, bool peer) -> nlohmann::json {
+        if(!cx || cx->socket() < 0)
+            return nullptr;
+
+        sockaddr_storage address{};
+        socklen_t size = sizeof(address);
+        const auto status = peer
+            ? ::getpeername(cx->socket(), reinterpret_cast<sockaddr*>(&address), &size)
+            : ::getsockname(cx->socket(), reinterpret_cast<sockaddr*>(&address), &size);
+
+        if(status != 0)
+            return nullptr;
+
+        char host[NI_MAXHOST]{};
+        char port[NI_MAXSERV]{};
+        if(::getnameinfo(reinterpret_cast<sockaddr*>(&address), size, host, sizeof(host),
+                         port, sizeof(port), NI_NUMERICHOST | NI_NUMERICSERV) != 0)
+            return nullptr;
+
+        return nlohmann::json::array({host, std::stoi(port)});
+    };
+
+    const auto id = proxy.to_connection_ID();
+    const nlohmann::json envelope = {
+        {"version", 1},
+        {"delivery", "http-connect"},
+        {"connection_id", id},
+        {"exchange_id", 1},
+        {"event", args.event},
+        {"mode", "regular"}
+    };
+
+    nlohmann::json observation = {
+        {"envelope", envelope},
+        {"target", {args.host, args.port}},
+        {"authenticated", args.authenticated},
+        {"response_base64", args.response.empty()
+            ? nlohmann::json(nullptr)
+            : nlohmann::json(b64_encode_text(args.response))}
+    };
+
+    if(args.event == "request") {
+        observation["request_base64"] = b64_encode_text(args.request);
+        observation["client_peername"] = endpoint(args.client, true);
+        observation["client_sockname"] = endpoint(args.client, false);
+    }
+
+    if(args.event == "connected") {
+        observation["peername"] = endpoint(args.server, true);
+        observation["sockname"] = endpoint(args.server, false);
+    }
+
+    nlohmann::json details = {{"http_connect", observation}};
+    if(args.client) {
+        details["info"]["session"] = "tcp_[" + args.client->host() + "]:" + args.client->port() +
+            "+tcp_[" + std::string(args.host) + "]:" + std::to_string(args.port);
+    }
+
+    return details;
+}
+
+void ProxyHooks::http_connect_reply(MitmProxy& proxy, const HttpConnectReplyArgs& args) {
+
+    // Bound and decode the complete callback reply before inspecting its decision.
+    const auto& reply = args.reply;
+    if(!reply || reply->response.first != 200)
+        return;
+
+    const auto& bytes = reply->response.second;
+    if(bytes.size() > 360 * 1024)
+        return;
+
+    auto body = nlohmann::json::parse(bytes, nullptr, false);
+    if(body.is_discarded() || !body.is_object())
+        return;
+
+    try {
+        // A valid decision must belong to this exact connection and event.
+        if(body.at("action") != "http-connect" || body.at("id") != proxy.to_connection_ID() ||
+           body.at("envelope") != args.envelope)
+            return;
+
+        const auto& result = body.at("decision");
+        const auto action = result.at("action").get<std::string>();
+        HttpConnectDecision candidate;
+
+        if(args.input.event == "request" && action == "kill") {
+            candidate.action = HttpConnectDecision::Action::kill;
+        } else if(args.input.event == "request" && action == "continue") {
+            // Reuse the native authority parser for any addon-selected target.
+            const auto& target = result.at("target");
+            if(!target.is_array() || target.size() != 2 || !target[1].is_number_integer() ||
+               target[1] < 1 || target[1] > 65535)
+                return;
+
+            const auto host = target[0].get<std::string>();
+            const auto port = target[1].get<int>();
+            if(host.size() > 255 || port < 1 || port > 65535)
+                return;
+
+            const auto authority = host.find(':') == std::string::npos ? host : "[" + host + "]";
+            const auto parsed = HttpConnectRequest::parse(
+                "CONNECT " + authority + ":" + std::to_string(port) + " HTTP/1.1");
+            if(!parsed)
+                return;
+
+            candidate.action = HttpConnectDecision::Action::proceed;
+            candidate.host = parsed->host;
+            candidate.port = parsed->port;
+        } else if((args.input.event == "request" && action == "local-response") ||
+                  (args.input.event != "request" && action == "send-response")) {
+            // Validate both encoding and HTTP framing before replacing any bytes.
+            const auto encoded = result.at("response_base64").get<std::string>();
+            if(encoded.empty() || encoded.size() > 349528)
+                return;
+
+            candidate.response = libbase64::decode<std::string, char, unsigned char, true>(encoded);
+            if(b64_encode_text(candidate.response) != encoded ||
+               !valid_connect_reply(candidate.response))
+                return;
+
+            candidate.action = args.input.event == "request"
+                ? HttpConnectDecision::Action::local_response
+                : HttpConnectDecision::Action::send_response;
+        } else {
+            return;
+        }
+
+        // Publish only after every field in the candidate has passed validation.
+        args.decision = std::move(candidate);
+    } catch(const std::exception&) {
+        // A malformed decision is never partially applied.
+    }
+}
+
+ProxyHooks::HttpConnectDecision ProxyHooks::http_connect(
+        MitmProxy& proxy, const HttpConnectArgs& args) {
+
+    HttpConnectDecision decision;
+    if(!sx::http::webhooks::is_enabled())
+        return decision;
+
+    try {
+        const auto details = http_connect_details(proxy, args);
+        const auto& envelope = details.at("http_connect").at("envelope");
+
+        sx::http::webhooks::send_action_wait("http-connect", proxy.to_connection_ID(), details,
+            [&](sx::http::expected_reply reply) {
+                HttpConnectReplyArgs reply_args{args, reply, envelope, decision};
+
+                http_connect_reply(proxy, reply_args);
+            });
+    } catch(const nlohmann::json::exception&) {
+        // A client-supplied hostname may not be valid UTF-8. An unencodable
+        // observation follows the same policy as an unavailable callback.
+    }
+
+    // Invalid/unavailable callbacks retain the native decision unless a prior
+    // hook has already negotiated strict control over this connection.
+    if(decision.action == HttpConnectDecision::Action::kill ||
+       (decision.action == HttpConnectDecision::Action::unavailable && proxy.webhook_control_->strict())) {
+        proxy.state().dead(true);
+    }
+    return decision;
 }
 
 bool ProxyHooks::start_reply(MitmProxy& proxy, const StartReplyArgs& args) {

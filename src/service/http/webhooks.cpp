@@ -237,8 +237,20 @@ namespace sx::http::webhooks {
             webhook_request_started(payload.size(), action, true, content);
             webhook_request_accepted(true);
             auto trace = std::make_shared<webhook_request_trace>();
-            sx::http::AsyncRequest::emit_wait(
-                payload, webhook_tracked_hook(std::move(hook), std::move(trace)));
+            auto tracked = webhook_tracked_hook(std::move(hook), std::move(trace));
+
+            if(action == "http-connect") {
+                // Rejected CONNECT requests still expose Authorization to the
+                // addon. Keep both request and reply out of transport diagnostics.
+                auto settings = sx::http::AsyncRequest::settings_snapshot();
+                settings.sensitive = true;
+
+                std::stringstream private_log;
+                sx::http::AsyncRequest::emit_url_wait_log(settings, payload, private_log, tracked);
+                return;
+            }
+
+            sx::http::AsyncRequest::emit_wait(payload, tracked);
         }
 
         void sift_request_started(std::size_t bytes, bool content) {

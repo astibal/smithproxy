@@ -106,3 +106,17 @@ TEST(HttpConnectRequest, RejectsAmbiguousHostIdentity) {
     EXPECT_TRUE(HttpConnectRequest::parse(
         "CONNECT [2001:db8::7]:443 HTTP/1.1"));
 }
+
+#include <proxy/httpconnect/httpconnectreply.hpp>
+
+TEST(HttpConnectReply, CompleteBoundedResponse) {
+    EXPECT_TRUE(sx::proxy::valid_connect_reply("HTTP/1.1 200 Connection Established\r\n\r\n"));
+    EXPECT_TRUE(sx::proxy::valid_connect_reply("HTTP/1.1 418 Tea\r\nContent-Length: 3\r\n\r\ntea"));
+    EXPECT_FALSE(sx::proxy::valid_connect_reply("HTTP/1.1 200 OK\r\n\r\nextra"));
+    EXPECT_FALSE(sx::proxy::valid_connect_reply("HTTP/1.1 100 Continue\r\n\r\n"));
+    EXPECT_FALSE(sx::proxy::valid_connect_reply("HTTP/1.1 502 Bad\r\nContent-Length: 2\r\n\r\nx"));
+    EXPECT_FALSE(sx::proxy::valid_connect_reply("HTTP/1.1 502 Bad\r\nContent-Length: 0\r\nContent-Length: 0\r\n\r\n"));
+    EXPECT_FALSE(sx::proxy::valid_connect_reply("HTTP/1.1 502 Bad\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n"));
+    EXPECT_FALSE(sx::proxy::valid_connect_reply("HTTP/1.1 502 Bad\r\nBad Name: value\r\n\r\n"));
+    EXPECT_FALSE(sx::proxy::valid_connect_reply("HTTP/1.1 502 Bad\nInjected\r\n\r\n"));
+}

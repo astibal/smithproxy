@@ -40,6 +40,27 @@ public:
         buffer* reverse_output = nullptr;
     };
 
+    struct HttpConnectArgs {
+        std::string_view event;
+        std::string_view request;
+        std::string_view host;
+        unsigned short port = 0;
+        std::string_view response;
+        bool authenticated = false;
+        baseHostCX* client = nullptr;
+        baseHostCX* server = nullptr;
+    };
+
+    struct HttpConnectDecision {
+        enum class Action { unavailable, proceed, local_response, send_response, kill };
+        Action action = Action::unavailable;
+        std::string host;
+        unsigned short port = 0;
+        std::string response;
+    };
+
+    static HttpConnectDecision http_connect(MitmProxy& proxy, const HttpConnectArgs& args);
+
     static nlohmann::json start_details(const MitmProxy& proxy, const StartDetailsArgs& args);
     static bool start(MitmProxy& proxy, const StartArgs& args);
     static void stop(const MitmProxy& proxy, const StopArgs& args);
@@ -49,10 +70,14 @@ public:
 private:
     // Internal arguments keep per-call state out of the proxy and out of
     // asynchronous callbacks. Their definitions belong to the implementation.
+    struct HttpConnectReplyArgs;
     struct StartReplyArgs;
     struct ContentExchangeArgs;
     struct ContentReplyArgs;
     struct ContentActionArgs;
+
+    static nlohmann::json http_connect_details(const MitmProxy& proxy, const HttpConnectArgs& args);
+    static void http_connect_reply(MitmProxy& proxy, const HttpConnectReplyArgs& args);
 
     static bool start_reply(MitmProxy& proxy, const StartReplyArgs& args);
     static nlohmann::json content_details(MitmProxy& proxy, const ContentExchangeArgs& args);
