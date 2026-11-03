@@ -290,6 +290,7 @@ add_executable(smithproxy
         src/inspect/engine/http2_adapter.cpp
         src/inspect/protocol_views.cpp
         src/proxy/mitmproxy.cpp
+        src/proxy/proxy_hooks.cpp
         src/proxy/mitmcom.hpp
         src/proxy/mitmcom.cpp
         src/proxy/ssh/sshprotocol.cpp

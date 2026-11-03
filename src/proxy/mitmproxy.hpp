@@ -45,6 +45,7 @@
 #include <memory>
 #include <service/http/webhook_control.hpp>
 #include <proxy/connection_readiness.hpp>
+#include <proxy/proxy_hooks.hpp>
 #include <ctime>
 #include <mutex>
 #include <set>
@@ -301,6 +302,8 @@ private:
     std::uint64_t readiness_sequence_ = 0;
 
 public:
+    friend class sx::proxy::ProxyHooks;
+
     bool wh_start = false;
     bool webhook_rewrite_allowed_ = false;
     // Synchronous setup gate, before application content is analyzed/forwarded.
