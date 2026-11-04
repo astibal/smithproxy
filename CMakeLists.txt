@@ -280,7 +280,9 @@ add_executable(smithproxy
 
         src/main.cpp
         src/smithlog.cpp
+        src/utils/crypto.cpp
         src/service/cfgapi/cfgapi.cpp
+        src/service/cfgapi/cfg_revision.cpp
         src/staticcontent.cpp
 
         src/proxy/mitmhost.cpp
@@ -518,6 +520,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/utils/str_test.cpp
                 tests/unit/utils/fs_test.cpp
                 tests/unit/utils/atomic_json_tests.cpp
+                src/utils/crypto.cpp
+                tests/unit/utils/crypto_tests.cpp
                 tests/unit/base/staticcontent_tests.cpp
                 tests/unit/ext/nltemplate/nltemplate_tests.cpp
                 tests/unit/inspect/dns_tests.cpp
@@ -588,6 +592,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/service/core/live_listener_lifecycle_tests.cpp
                 src/service/cfgapi/cfgvalue.cpp
                 tests/unit/service/cfgapi/cfgvalue_tests.cpp
+                src/service/cfgapi/cfg_revision.cpp
+                tests/unit/service/cfgapi/cfg_revision_tests.cpp
                 tests/unit/base/smithlog_tests.cpp
                 tests/unit/service/core/authpam_tests.cpp
                 tests/unit/service/daemon_tests.cpp
