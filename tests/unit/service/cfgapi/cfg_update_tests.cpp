@@ -62,6 +62,19 @@ TEST(UpdateBoard, TracksRunningAndSavedRevisions) {
     EXPECT_FALSE(board.unsaved());
 }
 
+TEST(UpdateBoard, ReturnsOneConsistentRevisionView) {
+    UpdateBoard board;
+    auto const initial = board.init_revision("setting = 1;", "startup");
+    auto const changed = board.upgrade("cli", "setting = 2;", "set setting");
+
+    auto const view = board.revision_view();
+
+    ASSERT_EQ(view.entries.size(), 2U);
+    EXPECT_EQ(view.current_id, changed.id);
+    EXPECT_EQ(view.saved_id, initial.id);
+    EXPECT_EQ(view.entries.back().id, view.current_id);
+}
+
 TEST(UpdateBoard, RevisionHistoryCanOnlyBeInitializedOnce) {
     UpdateBoard board;
     board.init_revision("setting = 1;", "startup");

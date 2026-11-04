@@ -33,6 +33,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <mutex>
 #include <sstream>
 #include <string_view>
@@ -272,6 +273,77 @@ std::string render_section(std::string_view name, int index = -1) {
     return render(copy);
 }
 
+std::string revision_time(std::int64_t timestamp_us) {
+    const auto seconds = static_cast<std::time_t>(timestamp_us / 1'000'000);
+    const auto micros = timestamp_us % 1'000'000;
+    std::tm time {};
+    if(!gmtime_r(&seconds, &time)) return "invalid-time";
+
+    std::ostringstream output;
+    output << std::put_time(&time, "%Y-%m-%dT%H:%M:%S")
+           << '.' << std::setfill('0') << std::setw(6) << micros << 'Z';
+    return output.str();
+}
+
+bool has_prefix(std::string_view value, std::string_view prefix) {
+    return value.size() >= prefix.size() &&
+           std::equal(prefix.begin(), prefix.end(), value.begin());
+}
+
+std::vector<libcli2::CompletionItem> revision_ids(const libcli2::Context&, std::string_view prefix) {
+    std::vector<libcli2::CompletionItem> result;
+    for(auto const& revision: CfgFactory::board()->revision_view().entries) {
+        if(has_prefix(revision.id, prefix))
+            result.push_back({revision.id, revision.description});
+    }
+    return result;
+}
+
+std::optional<sx::cfg::CfgRevision> find_revision(std::string_view id, bool& ambiguous) {
+    ambiguous = false;
+    std::optional<sx::cfg::CfgRevision> result;
+    for(auto const& revision: CfgFactory::board()->revision_view().entries) {
+        if(revision.id == id) return revision;
+        if(has_prefix(revision.id, id)) {
+            if(result) {
+                ambiguous = true;
+                return std::nullopt;
+            }
+            result = revision;
+        }
+    }
+    return result;
+}
+
+std::string render_revisions(const libcli2::Decorator& decor) {
+    auto const view = CfgFactory::board()->revision_view();
+    std::ostringstream output;
+    if(view.entries.empty()) return "No configuration revisions recorded.";
+
+    for(auto it = view.entries.rbegin(); it != view.entries.rend(); ++it) {
+        const bool current = it->id == view.current_id;
+        const bool saved = it->id == view.saved_id;
+        output << (current ? decor.success("C") : " ")
+               << (saved ? decor.key("S") : " ") << "  "
+               << revision_time(it->timestamp_us) << "  "
+               << it->id << "  " << it->source << "  " << it->description << '\n';
+    }
+    output << "C = current, S = saved\n";
+    return output.str();
+}
+
+std::string render_revision(const sx::cfg::CfgRevision& revision) {
+    std::ostringstream output;
+    output << "ID:          " << revision.id << '\n'
+           << "Parent:      " << (revision.parent_id.empty() ? "<none>" : revision.parent_id) << '\n'
+           << "Content SHA: " << revision.content_hash << '\n'
+           << "Created:     " << revision_time(revision.timestamp_us) << '\n'
+           << "Source:      " << revision.source << '\n'
+           << "Description: " << revision.description << "\n\n"
+           << revision.snapshot;
+    return output.str();
+}
+
 void section_command(libcli2::Cli& cli, std::string_view name, std::string_view help) {
     cli.command(std::string("show config ") + std::string(name))
         .reset_definition()
@@ -310,6 +382,28 @@ void register_smithproxy_cli2_commands(libcli2::Cli& cli, std::string subscriber
         .help("Show complete Smithproxy configuration")
         .handler([](libcli2::Context& context, const libcli2::Invocation&) {
             context.print(render_full_config());
+            return 0;
+        });
+
+    cli.command("show config revision")
+        .reset_definition()
+        .help("List configuration revisions or show one complete snapshot")
+        .argument({"id", "Optional revision ID or unique prefix", false, false, revision_ids})
+        .handler([](libcli2::Context& context, const libcli2::Invocation& invocation) {
+            if(invocation.arguments.empty()) {
+                context.print(render_revisions(context.decor()));
+                return 0;
+            }
+
+            bool ambiguous = false;
+            auto revision = find_revision(invocation.arguments.front(), ambiguous);
+            if(!revision) {
+                context.print(libcli2::Style::error,
+                              ambiguous ? "revision ID prefix is ambiguous"
+                                        : "configuration revision not found");
+                return -1;
+            }
+            context.print(render_revision(*revision));
             return 0;
         });
 
