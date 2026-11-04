@@ -1,6 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <proxy/cx_map.hpp>
+
+class baseHostCX;
 
 namespace sx::proxy {
 
@@ -27,5 +30,7 @@ struct ConnectionReadiness {
         }
     }
 };
+
+using ConnectionReadinessMap = CxMap<baseHostCX*, ConnectionReadiness>;
 
 } // namespace sx::proxy

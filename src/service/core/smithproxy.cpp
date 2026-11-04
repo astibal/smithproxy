@@ -841,15 +841,17 @@ void SmithProxy::run() {
         if (!cfg_daemonize)
             std::cerr << "all master threads terminated" << std::endl;
 
-        state_save();
-        std::cerr << "state saved." << std::endl;
+        if (state_save())
+            std::cerr << "state saved." << std::endl;
+        else
+            std::cerr << "state save failed; see error log." << std::endl;
     }
     else {
         bail_it();
     }
 }
 
-void SmithProxy::state_save() const {
+bool SmithProxy::state_save() const {
 
     std::string state_dir;
     std::string tenant_name = "default";
@@ -863,15 +865,20 @@ void SmithProxy::state_save() const {
 
     auto nbr_file = string_format("%s/nbr-%s.json", state_dir.c_str(), tenant_name.c_str());
 
-    state_save_neighbors(nbr_file);
+    return state_save_neighbors(nbr_file);
 }
 
-void SmithProxy::state_save_neighbors(std::string const& fnm) const {
-    auto js = NbrHood::instance().ser_json_out();
-    auto of = std::ofstream(fnm, std::ios::out);
-    if(of.is_open()) {
-        of << js.dump(4);
-        of.close();
+bool SmithProxy::state_save_neighbors(std::string const& fnm) const {
+    try {
+        auto snapshot = NbrHood::instance().snapshot();
+        // The live cache is already unlocked. Only the detached record values
+        // are serialized, validated and atomically published from here on.
+        NbrHood::save_snapshot(snapshot, fnm);
+        return true;
+    }
+    catch (std::exception const& e) {
+        _err("state_save_neighbors: %s: %s", fnm.c_str(), e.what());
+        return false;
     }
 }
 
