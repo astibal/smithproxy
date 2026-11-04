@@ -52,7 +52,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-#include <unordered_map>
 
 #include <basecom.hpp>
 #include <hostcx.hpp>
@@ -298,7 +297,7 @@ public:
                            const char* event, std::uint64_t attempt);
 
 private:
-    std::unordered_map<baseHostCX*, sx::proxy::ConnectionReadiness> readiness_;
+    sx::proxy::ConnectionReadinessMap readiness_;
     std::uint64_t readiness_sequence_ = 0;
 
 public:

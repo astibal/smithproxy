@@ -639,7 +639,7 @@ void MitmProxy::observe_readiness(unsigned char side, baseHostCX* cx) {
     auto* tcp = dynamic_cast<TCPCom*>(cx->com());
     if(!tcp) return;
 
-    auto& observed = readiness_[cx];
+    auto& observed = readiness_.get_or_create(cx);
     observed.observe_context(cx->socket(), cx->com(), readiness_sequence_);
     if(!observed.connected && tcp->is_connected(cx->socket())) {
         observed.connected = true;

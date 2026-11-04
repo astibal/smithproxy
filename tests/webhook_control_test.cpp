@@ -3,7 +3,36 @@
 #include <cassert>
 #include <memory>
 
+static void test_context_map_lookup() {
+
+    sx::proxy::CxMap<int*, int> contexts;
+    int left = 0;
+    int right = 0;
+
+    // Looking up an untracked CX must not create a lifecycle record.
+    assert(contexts.find(&left) == nullptr);
+    assert(contexts.begin() == contexts.end());
+
+    contexts.get_or_create(&left) = 1;
+    contexts.get_or_create(&right) = 2;
+    assert(*contexts.find(&left) == 1);
+    assert(*contexts.find(&right) == 2);
+
+    const auto& observed = contexts;
+    int total = 0;
+    for(const auto& [cx, value] : observed) {
+        total += value;
+    }
+    assert(total == 3);
+
+    contexts.erase(&left);
+    assert(contexts.find(&left) == nullptr);
+    assert(*contexts.find(&right) == 2);
+}
+
 int main() {
+    test_context_map_lookup();
+
     // STARTTLS must preserve TCP identity while permitting a new readiness
     // event; a replacement socket must get a distinct attempt identity.
     std::uint64_t sequence = 0;
