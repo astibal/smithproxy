@@ -457,6 +457,44 @@ target_link_libraries(smithproxy-webhook-broker pthread)
 # Keep release packages unchanged, but allow an explicitly requested optimized
 # native test build for benchmarks. Measuring parser cost in Debug is misleading.
 option(SMITHPROXY_OPTIMIZED_TESTS "Build native tests outside Debug" OFF)
+if(BUILD_TESTING)
+        find_program(PATCH_RUNNER_PYTHON NAMES python3 REQUIRED)
+        add_subdirectory(tests/patch-runner/cpu-monitor)
+        add_test(NAME unit.patch_runner_profile_plan
+                COMMAND ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-profile-plan.sh)
+        set_tests_properties(unit.patch_runner_profile_plan
+                PROPERTIES LABELS "native;unit" TIMEOUT 15)
+        add_test(NAME unit.patch_runner_test_inventory
+                COMMAND ${PATCH_RUNNER_PYTHON}
+                ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-test-inventory.py)
+        set_tests_properties(unit.patch_runner_test_inventory
+                PROPERTIES LABELS "native;unit" TIMEOUT 15)
+        add_test(NAME unit.patch_runner_publish_report
+                COMMAND ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-publish-report.sh)
+        set_tests_properties(unit.patch_runner_publish_report
+                PROPERTIES LABELS "native;unit" TIMEOUT 15)
+        add_test(NAME unit.patch_runner_port_leases
+                COMMAND ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-port-leases.sh)
+        set_tests_properties(unit.patch_runner_port_leases
+                PROPERTIES LABELS "native;unit" TIMEOUT 15)
+        add_test(NAME unit.patch_runner_privilege_preflight
+                COMMAND ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-privilege-preflight.sh)
+        set_tests_properties(unit.patch_runner_privilege_preflight
+                PROPERTIES LABELS "native;unit" TIMEOUT 15)
+        add_test(NAME unit.patch_runner_proxy_nightmare_acquisition
+                COMMAND ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-prepare-proxy-nightmare.sh)
+        set_tests_properties(unit.patch_runner_proxy_nightmare_acquisition
+                PROPERTIES LABELS "native;unit" TIMEOUT 60)
+        add_test(NAME unit.patch_runner_proxy_nightmare_xfail
+                COMMAND ${PATCH_RUNNER_PYTHON}
+                ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-proxy-nightmare-expected-failures.py)
+        set_tests_properties(unit.patch_runner_proxy_nightmare_xfail
+                PROPERTIES LABELS "native;unit" TIMEOUT 15)
+        add_test(NAME unit.patch_runner_remote_artifacts
+                COMMAND ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-remote-scheduler-artifacts.sh)
+        set_tests_properties(unit.patch_runner_remote_artifacts
+                PROPERTIES LABELS "native;unit" TIMEOUT 15)
+endif()
 IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
     find_package(GTest)
     if(GTEST_FOUND)
@@ -628,7 +666,9 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
         )
 
         add_executable(webhook_control_test tests/webhook_control_test.cpp)
-        target_include_directories(webhook_control_test PRIVATE ${PROJECT_SOURCE_DIR}/src)
+        target_include_directories(webhook_control_test PRIVATE
+                ${PROJECT_SOURCE_DIR}/src
+                ${PROJECT_SOURCE_DIR}/third_party/nlohmann/include)
         target_compile_options(webhook_control_test PRIVATE -UNDEBUG)
         add_test(NAME unit.webhook_control COMMAND webhook_control_test)
 
@@ -690,7 +730,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
         if (LIBCONFIGPP_FOUND)
             target_link_libraries(sx_gtests ${LIBCONFIGPP_LIBRARIES})
         endif()
-        target_link_libraries(sx_gtests_http1 gtest gtest_main socle_lib pthread crypto ssl)
+        target_link_libraries(sx_gtests_http1 gtest gtest_main socle_lib
+                nlohmann_json::nlohmann_json pthread crypto ssl)
         target_link_libraries(sx_gtests_startstoptls
                 gtest gtest_main
                 "$<LINK_GROUP:RESCAN,socle_lib,socle_common_lib>"
@@ -971,6 +1012,29 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/tests/sslca/private_key_permissions.py
                         --source ${PROJECT_SOURCE_DIR})
+                add_test(NAME unit.patch_runner_cpu_faults
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-cpu-monitor-faults.py)
+                set_tests_properties(unit.patch_runner_cpu_faults
+                        PROPERTIES LABELS "native;unit" TIMEOUT 45 RUN_SERIAL TRUE)
+                add_test(NAME unit.patch_runner_cpu_accounting
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-cpu-monitor-accounting.py)
+                set_tests_properties(unit.patch_runner_cpu_accounting
+                        PROPERTIES LABELS "native;unit" TIMEOUT 30)
+                add_test(NAME extended.patch_runner_cpu_diagnostics
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-cpu-monitor-diagnostics.py)
+                set_tests_properties(extended.patch_runner_cpu_diagnostics
+                        PROPERTIES LABELS "native;extended" TIMEOUT 600 RUN_SERIAL TRUE)
+                add_test(NAME unit.patch_runner_cpu_monitor
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-cpu-monitor.py)
+                set_tests_properties(unit.patch_runner_cpu_monitor
+                        PROPERTIES LABELS "native;unit" TIMEOUT 45 RUN_SERIAL TRUE)
+                set_tests_properties(unit.patch_runner_cpu_monitor unit.patch_runner_cpu_faults
+                        extended.patch_runner_cpu_diagnostics PROPERTIES
+                        ENVIRONMENT "CPU_MONITOR_BINARY=$<TARGET_FILE:smithproxy-cpu-monitor>")
                 add_test(NAME unit.patch_runner_native_parallel
                         COMMAND ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-native-parallel.sh)
                 add_test(NAME integration.wireshark_spq1

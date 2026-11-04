@@ -41,16 +41,28 @@ run_section() {
     fi
 
     set +e
-    env PATCH_TEST_ROOT_OVERRIDE="$BUNDLE" \
-        PATCH_TEST_COMMIT_OVERRIDE="$PATCH_RUN_COMMIT" \
-        PATCH_TEST_BRANCH_OVERRIDE="$PATCH_RUN_BRANCH" \
-        PATCH_TEST_DIRTY_OVERRIDE="$PATCH_RUN_DIRTY" \
-        CURL_HTTP3_PREFIX="$BUNDLE/curl-http3" \
-        QUIC_PYTHON_PREFIX="$BUNDLE/quic-python" \
-        "$BUNDLE/tests/patch-runner/test-patch.sh" sanity \
-        --skip-build --build-dir "$BUNDLE/build" --shared-binary "$BUNDLE/build/smithproxy" \
-        --quiet --worker --local --suite "$section" --dir "$WORK_ROOT/sections/$job" \
-        "${PATCH_RUN_ENV_ARGS[@]}" "${fuzz_env[@]}" > "$OUTPUT_DIR/$job.log" 2>&1
+    if [[ $section == lifecycle ]]; then
+        mkdir -p "$WORK_ROOT/sections/$job"
+        unshare --user --map-root-user --keep-caps --mount --propagation private --net \
+            "$BUNDLE/tests/patch-runner/run-proxy-nightmare-lifecycle.sh" \
+            "$WORK_ROOT/sections/$job/results" \
+            python3 "$BUNDLE/tests/patch-runner/test-proxy-nightmare-lifecycle.py" \
+            --source "$BUNDLE" --smithproxy "$BUNDLE/build/smithproxy" \
+            --monitor "$BUNDLE/build/smithproxy-cpu-monitor" \
+            --proxy-nightmare "$BUNDLE/proxy-nightmare" \
+            > "$OUTPUT_DIR/$job.log" 2>&1
+    else
+        env PATCH_TEST_ROOT_OVERRIDE="$BUNDLE" \
+            PATCH_TEST_COMMIT_OVERRIDE="$PATCH_RUN_COMMIT" \
+            PATCH_TEST_BRANCH_OVERRIDE="$PATCH_RUN_BRANCH" \
+            PATCH_TEST_DIRTY_OVERRIDE="$PATCH_RUN_DIRTY" \
+            CURL_HTTP3_PREFIX="$BUNDLE/curl-http3" \
+            QUIC_PYTHON_PREFIX="$BUNDLE/quic-python" \
+            "$BUNDLE/tests/patch-runner/test-patch.sh" sanity \
+            --skip-build --build-dir "$BUNDLE/build" --shared-binary "$BUNDLE/build/smithproxy" \
+            --quiet --worker --local --suite "$section" --dir "$WORK_ROOT/sections/$job" \
+            "${PATCH_RUN_ENV_ARGS[@]}" "${fuzz_env[@]}" > "$OUTPUT_DIR/$job.log" 2>&1
+    fi
     child_rc=$?
     set -e
     printf '%s\n' "$child_rc" > "$OUTPUT_DIR/$job.rc"
@@ -89,9 +101,13 @@ for line in "${JOBS[@]}"; do
     }
 done
 
-# One archive per batch keeps result retrieval to one SCP connection.  Labs
-# themselves remain on the execution target for detailed investigation.
+# One archive per batch keeps result retrieval to one SCP connection. Copy the
+# report metadata needed by the coordinator, but leave per-case lab artifacts
+# on the execution target. Corpus and fuzz runs can create thousands of tiny
+# files there, which needlessly consume coordinator inodes when every section
+# passed.
 relative_output=${OUTPUT_DIR#"$WORK_ROOT"/}
 mapfile -t RESULT_DIRS < <(find "$WORK_ROOT/sections" -mindepth 2 -maxdepth 2 -type d -name results -printf '%P\n' | sed 's#^#sections/#' | sort)
-tar -C "$WORK_ROOT" -cf "$OUTPUT_DIR.tar" "$relative_output" "${RESULT_DIRS[@]}"
+tar --exclude='*/lab-results' --exclude='*/lab-results/*' \
+    -C "$WORK_ROOT" -cf "$OUTPUT_DIR.tar" "$relative_output" "${RESULT_DIRS[@]}"
 chmod 0644 "$OUTPUT_DIR.tar"

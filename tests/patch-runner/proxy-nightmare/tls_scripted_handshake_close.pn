@@ -1,0 +1,26 @@
+preamble
+name "Smithproxy cryptographic TLS 1.3 MITM handshake"
+description "Both OpenSSL sessions complete through Smithproxy TLS interception"
+owner "smithproxy"
+timeout 20s
+begin using tls
+server at "netns:sxr-origin"
+client at "netns:sxr-client"
+server listen "198.18.20.2:443"
+client connect "198.18.20.2:443"
+client handshake
+client close-notify
+client write-eot
+server receive-eot
+server close
+client close
+end
+outcome pass
+when client.tls.handshake == complete
+and server.tls.handshake == complete
+and server.tls.close-notify == received
+and server.rx.eot == received
+describe "Smithproxy completed both cryptographic TLS 1.3 sessions and clean close."
+outcome fail "A cryptographic TLS phase failed or clean close was not propagated."
+outcome timeout "The intercepted TLS handshake stalled."
+end

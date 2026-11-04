@@ -1,0 +1,23 @@
+preamble
+name "Smithproxy TLS ClientHello followed by FIN"
+description "TLS listener forwards a complete ClientHello before propagating the client half-close"
+owner "smithproxy"
+timeout 20s
+begin using tls
+server at "netns:sxr-origin"
+client at "netns:sxr-client"
+server listen "198.18.20.2:443"
+client connect "198.18.20.2:443"
+client hello
+client write-eot
+server receive-eot
+server close
+client close
+end
+outcome pass
+when server.tls.client-hello == received
+and server.rx.eot == received
+describe "Smithproxy forwarded ClientHello and the following TCP FIN."
+outcome fail "Smithproxy lost the ClientHello or failed to propagate FIN."
+outcome timeout "TLS ClientHello/FIN propagation stalled."
+end
