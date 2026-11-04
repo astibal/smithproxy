@@ -14,12 +14,21 @@ struct CxMap {
         entries_.reserve(2);
     }
 
-    T& get_or_create(Key cx) {
+    T* find(Key cx) {
 
         for(auto& [context, value] : entries_) {
             if(context == cx) {
-                return value;
+                return &value;
             }
+        }
+
+        return nullptr;
+    }
+
+    T& get_or_create(Key cx) {
+
+        if(auto* value = find(cx)) {
+            return *value;
         }
 
         entries_.emplace_back(cx, T{});
@@ -40,6 +49,11 @@ struct CxMap {
 
         entries_.clear();
     }
+
+    auto begin() { return entries_.begin(); }
+    auto end() { return entries_.end(); }
+    auto begin() const { return entries_.begin(); }
+    auto end() const { return entries_.end(); }
 
 private:
     // References are only valid until an insertion, erase or clear.
