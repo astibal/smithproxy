@@ -799,7 +799,8 @@ ProxyHooks::ClientHelloDecision ProxyHooks::client_hello(MitmProxy& proxy,
         {"upstream", {
             {"sni", args.upstream_sni},
             {"alpn_base64", args.alpn_blocked || args.upstream_alpn.empty()
-                ? std::string{} : b64_encode_text(args.upstream_alpn)}
+                ? std::string{} : b64_encode_text(args.upstream_alpn)},
+            {"openssl_cipher_list", nullptr}
         }},
         {"upstream_alpn_blocked", args.alpn_blocked}
     };
@@ -851,9 +852,22 @@ ProxyHooks::ClientHelloDecision ProxyHooks::client_hello(MitmProxy& proxy,
                    (args.alpn_blocked && !candidate.upstream_alpn.empty())) {
                     return;
                 }
+
+                // The adapter supplies OpenSSL syntax, not addon cipher names.
+                // Absence/null preserves native defaults for older receivers.
+                if(upstream.contains("openssl_cipher_list") && !upstream["openssl_cipher_list"].is_null()) {
+                    const auto& value = upstream["openssl_cipher_list"];
+                    if(!value.is_string()) return;
+
+                    const auto ciphers = value.get<std::string>();
+                    if(ciphers.size() > 65535 || ciphers.find('\0') != std::string::npos) return;
+                    candidate.upstream_cipher_list = ciphers;
+                }
+
                 const auto current_alpn = args.alpn_blocked ? std::string_view{} : args.upstream_alpn;
                 candidate.update_upstream = candidate.upstream_sni != args.upstream_sni ||
-                                            candidate.upstream_alpn != current_alpn;
+                                            candidate.upstream_alpn != current_alpn ||
+                                            candidate.upstream_cipher_list.has_value();
             }
 
             decision = std::move(candidate);

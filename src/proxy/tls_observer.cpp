@@ -59,7 +59,8 @@ socle::ProtocolHookResult TlsObserver::client_hello(baseCom& com) noexcept {
         }
 
         if(!decision.ignore_connection && decision.update_upstream &&
-           !tls->configure_upstream_hello(decision.upstream_sni, decision.upstream_alpn)) {
+           !tls->configure_upstream_hello(decision.upstream_sni, decision.upstream_alpn,
+                                          decision.upstream_cipher_list)) {
             return socle::ProtocolHookResult::Terminate;
         }
     }

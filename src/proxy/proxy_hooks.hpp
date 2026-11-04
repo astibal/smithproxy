@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string_view>
+#include <optional>
 #include <nlohmann/json.hpp>
 #include <vars.hpp>
 #include <service/auth/pap.hpp>
@@ -92,6 +93,7 @@ public:
         bool update_upstream = false;
         std::string upstream_sni;
         std::string upstream_alpn;
+        std::optional<std::string> upstream_cipher_list;
     };
 
     static ClientHelloDecision client_hello(MitmProxy& proxy, const ClientHelloArgs& args);
