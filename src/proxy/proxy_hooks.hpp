@@ -4,6 +4,7 @@
 #include <string_view>
 #include <nlohmann/json.hpp>
 #include <vars.hpp>
+#include <service/auth/pap.hpp>
 
 class MitmProxy;
 class baseHostCX;
@@ -39,6 +40,18 @@ public:
         bool sift = false;
         buffer* reverse_output = nullptr;
     };
+
+    // Authentication runs on the frontend before target setup. Inputs are
+    // borrowed only for this synchronous veto; AAA remains authoritative.
+    struct AuthenticationArgs {
+        std::string protocol;
+        sx::auth::PapCredentials credentials;
+        sx::auth::Result baseline;
+        nlohmann::json protocol_context = nullptr;
+    };
+
+    static sx::auth::Result authentication(const baseHostCX& client,
+                                          const AuthenticationArgs& args);
 
     struct HttpConnectArgs {
         std::string_view event;

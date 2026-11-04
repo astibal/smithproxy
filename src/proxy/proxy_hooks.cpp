@@ -483,6 +483,82 @@ void ProxyHooks::stop(const MitmProxy& proxy, const StopArgs&) {
     proxy.wh_stop = true;
 }
 
+sx::auth::Result ProxyHooks::authentication(const baseHostCX& client,
+                                           const AuthenticationArgs& args) {
+
+    if(!sx::http::webhooks::is_enabled()) {
+        return args.baseline;
+    }
+
+    // One synchronous exchange owns both its credentials and its response.
+    // No callback captures a frontend that target setup may later replace.
+    static std::atomic_uint64_t sequence{0};
+    const auto id = "auth-" + std::to_string(getpid()) + "-" +
+                    std::to_string(++sequence);
+    std::string status = "unavailable";
+    if(args.baseline.status == sx::auth::Status::accepted) status = "accepted";
+    if(args.baseline.status == sx::auth::Status::rejected) status = "rejected";
+
+    nlohmann::json authentication = {
+        {"version", 1},
+        {"protocol", args.protocol},
+        {"username", args.credentials.username},
+        {"password", args.credentials.password},
+        {"status", status},
+        {"identity", args.baseline.identity},
+        {"groups", args.baseline.groups},
+        {"peer", {{"host", client.host()}, {"port", client.port()}}}
+    };
+    if(!args.protocol_context.is_null()) {
+        authentication["http_connect"] = args.protocol_context;
+    }
+
+    const nlohmann::json event = {
+        {"action", "proxy-authentication"}, {"id", id},
+        {"source", sx::http::webhooks::get_hostid()}, {"type", "proxy"},
+        {"details", {{"authentication", authentication}}}
+    };
+
+    sx::auth::Result observed;
+    observed.error = "Authentication webhook unavailable";
+    std::string payload;
+    try {
+        payload = event.dump();
+    } catch (const nlohmann::json::exception&) {
+        // SOCKS credentials are arbitrary bytes; invalid UTF-8 must not
+        // escape the frontend or accidentally turn into permission.
+        if(args.baseline.status != sx::auth::Status::accepted) return args.baseline;
+        return observed;
+    }
+
+    auto settings = sx::http::AsyncRequest::settings_snapshot();
+    settings.sensitive = true;
+    std::stringstream trace;
+    sx::http::AsyncRequest::emit_url_wait_log(settings, payload, trace,
+        [&](sx::http::expected_reply const& reply) {
+            if(!reply || reply->response.first != 200) return;
+
+            const auto body = nlohmann::json::parse(reply->response.second, nullptr, false);
+            if(!body.is_object() || body.value("action", "") != "proxy-authentication" ||
+               body.value("id", "") != id || !body.contains("version") ||
+               !body["version"].is_number_integer() || body["version"] != 1 ||
+               !body.contains("decision") || !body["decision"].is_string()) return;
+
+            const auto decision = body["decision"].get<std::string>();
+            if(decision == "accept") {
+                observed = args.baseline;
+            } else if(decision == "reject") {
+                observed = {};
+                observed.status = sx::auth::Status::rejected;
+            }
+        });
+
+    // Even a valid acceptance cannot override rejected/unavailable AAA.
+    if(args.baseline.status != sx::auth::Status::accepted) return args.baseline;
+    return observed;
+}
+
+
 void ProxyHooks::readiness(const MitmProxy& proxy, const ReadinessArgs& args) {
     const bool client = args.side == 'l' || args.side == 'x';
     nlohmann::json info = {

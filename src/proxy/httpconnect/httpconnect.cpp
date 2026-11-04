@@ -143,8 +143,13 @@ HttpConnectServerCX::Authentication HttpConnectServerCX::authenticate_request(
         {"request_base64", encoded_request}
     };
 
-    const auto result = sx::http::webhooks::proxy_authentication(
-        "http-connect", host(), port(), *credentials, baseline, context);
+    sx::proxy::ProxyHooks::AuthenticationArgs args;
+    args.protocol = "http-connect";
+    args.credentials = *credentials;
+    args.baseline = baseline;
+    args.protocol_context = context;
+
+    const auto result = sx::proxy::ProxyHooks::authentication(*this, args);
 
     authentication.accepted = result.status == sx::auth::Status::accepted;
     if(!authentication.accepted) {
