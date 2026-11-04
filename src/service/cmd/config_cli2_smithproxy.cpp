@@ -110,6 +110,17 @@ bool reload_section(const std::string& section) {
     return true;
 }
 
+bool record_change(const std::string& source, std::string description, std::string& error) {
+    auto snapshot = CfgFactory::get()->snapshot();
+    if (!snapshot) {
+        error = "configuration changed, but its revision snapshot could not be created";
+        return false;
+    }
+
+    CfgFactory::board()->upgrade(source, std::move(*snapshot), std::move(description));
+    return true;
+}
+
 std::string setting_text(const libconfig::Setting& parent, const char* name, std::string_view fallback) {
     if (!parent.exists(name)) return std::string(fallback);
     try {
@@ -184,6 +195,7 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
     };
     access.set = [subscriber_id](std::string_view path, std::string_view property,
                                        const std::vector<std::string>& values, std::string& error) {
+        std::scoped_lock writer(CfgFactory::write_lock());
         std::unique_lock<std::recursive_mutex> lock(CfgFactory::lock());
         const std::string section(path);
         std::string name(property);
@@ -238,8 +250,9 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
                 return false;
             }
         }
-        CfgFactory::board()->upgrade(subscriber_id);
-        return true;
+        return record_change(subscriber_id,
+                             "set " + section + "." + name,
+                             error);
     };
     access.set_confirmation = [](std::string_view path, std::string_view property,
                                  const std::vector<std::string>& values) {
@@ -271,6 +284,7 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
         return set(path, property, CfgValueCleaner::toggle(current, toggles), error);
     };
     access.add = [subscriber_id](std::string_view path, const std::vector<std::string>& input, std::string& error) {
+        std::scoped_lock writer(CfgFactory::write_lock());
         auto arguments = input;
         const std::string section = unmask(std::string(path));
         const auto kind = collection_kind(section);
@@ -281,8 +295,9 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
             if (!prepared) { error = note; return false; }
             auto [added, message] = CfgFactory::get()->cfg_add_entry(section, arguments.front());
             if (!added) { error = message; return false; }
-            CfgFactory::board()->upgrade(subscriber_id);
-            return true;
+            return record_change(subscriber_id,
+                                 "add " + section + "." + arguments.front(),
+                                 error);
         }
 
         std::scoped_lock<std::recursive_mutex> lock(CfgFactory::lock());
@@ -294,10 +309,12 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
         if (!reload_section(reload)) { error = "entry added, but live reload failed"; return false; }
         CfgFactory::get()->cleanup_db_policy();
         if (CfgFactory::get()->load_db_policy() < 0) { error = "entry added, but policy reload failed"; return false; }
-        CfgFactory::board()->upgrade(subscriber_id);
-        return true;
+        return record_change(subscriber_id,
+                             "add entry to " + section,
+                             error);
     };
     access.remove = [subscriber_id](std::string_view path, const std::vector<std::string>& entries, std::string& error) {
+        std::scoped_lock writer(CfgFactory::write_lock());
         const std::string section = unmask(std::string(path));
         std::scoped_lock<std::recursive_mutex> lock(CfgFactory::lock());
         const auto kind = collection_kind(section);
@@ -328,11 +345,14 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
                 return false;
             }
         }
-        CfgFactory::board()->upgrade(subscriber_id);
-        return true;
+        return record_change(subscriber_id,
+                             "remove " + std::to_string(entries.size()) +
+                                 (entries.size() == 1 ? " entry from " : " entries from ") + section,
+                             error);
     };
     access.move = [subscriber_id](std::string_view path, std::string_view source, std::string_view operation,
                                    std::string_view target, std::string& error) {
+        std::scoped_lock writer(CfgFactory::write_lock());
         const std::string section = unmask(std::string(path));
         if (section != "policy") { error = "move is currently supported only for policy"; return false; }
         int from = -1;
@@ -349,8 +369,11 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
                                    ? CfgFactory::op_move::OP_MOVE_AFTER : CfgFactory::op_move::OP_MOVE_BEFORE;
         if (!CfgFactory::get()->move_policy(from, to, direction)) { error = "cannot move policy"; return false; }
         reload_section(section);
-        CfgFactory::board()->upgrade(subscriber_id);
-        return true;
+        return record_change(subscriber_id,
+                             "move policy " + std::string(source) + " " +
+                                 std::string(operation) +
+                                 (target.empty() ? std::string{} : " " + std::string(target)),
+                             error);
     };
     return access;
 }

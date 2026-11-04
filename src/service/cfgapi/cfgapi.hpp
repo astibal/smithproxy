@@ -106,6 +106,10 @@ class CfgFactory : public CfgFactoryBase {
 
     libconfig::Config cfgapi;
     std::recursive_mutex lock_;
+    // Serializes complete configuration changes. Unlike lock_, this remains
+    // held while a writer temporarily releases the config mutex for runtime
+    // operations such as listener drain.
+    std::mutex write_lock_;
 
     static inline std::shared_ptr<CfgFactory> self;
     static inline std::shared_ptr<UpdateBoard> update_board;
@@ -140,6 +144,7 @@ public:
 
 
     static std::recursive_mutex& lock() { return get()->lock_; }
+    static std::mutex& write_lock() { return get()->write_lock_; }
     static libconfig::Setting& cfg_root() { return get()->cfgapi.getRoot(); }
     static libconfig::Config&  cfg_obj() { return get()->cfgapi; }
 
