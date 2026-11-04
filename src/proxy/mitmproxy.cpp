@@ -526,6 +526,9 @@ void MitmProxy::prepare_session_stop() {
     try {
         // Every retirement path must finish server callbacks before Spider releases
         // the session. This only orders observations; transport teardown stays put.
+        if(observe_tls(true) == ObserverStatus::Terminate) {
+            state().dead(true);
+        }
         finish_server_hooks();
 
         auto snapshot = std::make_unique<sx::proxy::ProxyHooks::Epitaph>(
@@ -721,6 +724,87 @@ void MitmProxy::readiness_webhook(unsigned char side, baseHostCX* cx,
     sx::proxy::ProxyHooks::readiness(*this, args);
 }
 
+MitmProxy::ObserverStatus MitmProxy::observe_tls(bool retiring) {
+
+    if(!wh_start || (wh_stop && !retiring) || !webhook_tls_lifecycle_ ||
+       !sx::http::webhooks::is_enabled()) {
+        return ObserverStatus::Continue;
+    }
+
+    // The upstream may finish while processing the client's hello. Inspect
+    // both legs before delivering payload or retiring either transport.
+    const auto upstream = observe_tls_side(first_right(), false);
+    const auto client = observe_tls_side(first_left(), true);
+
+    // Observe both legs even when one hook requests termination.
+    if(upstream == ObserverStatus::Terminate || client == ObserverStatus::Terminate) {
+        return ObserverStatus::Terminate;
+    }
+
+    return ObserverStatus::Continue;
+}
+
+MitmProxy::ObserverStatus MitmProxy::observe_tls_side(baseHostCX* cx, bool client) {
+
+    auto* tls = cx ? dynamic_cast<SSLCom*>(cx->com()) : nullptr;
+    if(!tls) {
+        return ObserverStatus::Continue;
+    }
+
+    auto& observed = tls_.get_or_create(cx);
+    if(observed.communication != tls ||
+       (cx->socket() > 0 && observed.descriptor != cx->socket())) {
+        observed = {};
+        observed.communication = tls;
+        observed.descriptor = cx->socket();
+        observed.attempt = ++tls_sequence_;
+    }
+
+    if(observed.finished) {
+        tls->clear_tls_proto_history();
+        return ObserverStatus::Continue;
+    }
+
+    const auto& history = tls->tls_proto_history();
+    const auto current = tls->tls_proto_state();
+    const bool established = history.contains(TlsProtoState::established) ||
+                             current == TlsProtoState::established;
+    if(history.overflowed && !observed.history_gap) {
+        _war("TLS observation history overflowed; handshake failure cannot be inferred safely");
+    }
+    observed.history_gap = observed.history_gap || history.overflowed;
+
+    // A later I/O failure must never turn an accepted handshake into tls_failed.
+    // With a history gap, only positive evidence of success remains reliable.
+    const bool pending_handshake = current == TlsProtoState::prepared ||
+        current == TlsProtoState::handshaking || current == TlsProtoState::handshake_want_read ||
+        current == TlsProtoState::handshake_want_write || current == TlsProtoState::checking_peer;
+    const bool interrupted = pending_handshake &&
+        (cx->error() || tls->error() || cx->opening_timeout() || cx->idle_timeout());
+    const bool failed = !observed.history_gap &&
+        (history.contains(TlsProtoState::failed) || current == TlsProtoState::failed || interrupted);
+    tls->clear_tls_proto_history();
+
+    if(!established && !failed) {
+        return ObserverStatus::Continue;
+    }
+
+    observed.finished = true;
+
+    sx::proxy::ProxyHooks::TlsArgs args;
+    args.cx = cx;
+    args.client = client;
+    args.established = established;
+    args.attempt = observed.attempt;
+    args.error = established ? "" : "TLS handshake failed";
+
+    if(!sx::proxy::ProxyHooks::tls(*this, args)) {
+        return ObserverStatus::Terminate;
+    }
+
+    return ObserverStatus::Continue;
+}
+
 void MitmProxy::observe_readiness(unsigned char side, baseHostCX* cx) {
     if(!wh_start || wh_stop || !sx::http::webhooks::is_enabled()) return;
     if(!cx || cx->socket() <= 0 || cx->error() || cx->com()->error()) return;
@@ -748,11 +832,21 @@ void MitmProxy::observe_readiness(unsigned char side, baseHostCX* cx) {
 
 bool MitmProxy::handle_cx_read_once(unsigned char side, baseCom* com, baseHostCX* cx) {
     observe_readiness(side, cx);
+
+    if(observe_tls() == ObserverStatus::Terminate) {
+        state().dead(true);
+    }
+
     return baseProxy::handle_cx_read_once(side, com, cx);
 }
 
 bool MitmProxy::handle_cx_write_once(unsigned char side, baseCom* com, baseHostCX* cx) {
     observe_readiness(side, cx);
+
+    if(observe_tls() == ObserverStatus::Terminate) {
+        state().dead(true);
+    }
+
     return baseProxy::handle_cx_write_once(side, com, cx);
 }
 
@@ -771,6 +865,11 @@ bool MitmProxy::handle_cx_events(unsigned char side, baseHostCX* cx) {
     // Sample again after transport I/O advanced a handshake. Retire the record
     // before baseProxy can reconnect, including reuse of the same numeric fd.
     observe_readiness(side, cx);
+
+    if(observe_tls() == ObserverStatus::Terminate) {
+        state().dead(true);
+    }
+
     if(cx->error() || cx->opening_timeout() || cx->idle_timeout())
         readiness_.erase(cx);
     return baseProxy::handle_cx_events(side, cx);
@@ -781,6 +880,10 @@ int MitmProxy::handle_sockets_once(baseCom* xcom) {
     if(stream_handler_) {
         observe_readiness('l', first_left());
         observe_readiness('r', first_right());
+
+        if(observe_tls() == ObserverStatus::Terminate) {
+            state().dead(true);
+        }
     }
 
 
@@ -1559,6 +1662,13 @@ void MitmProxy::write_stream_event(sx::stream_direction direction,
 }
 
 void MitmProxy::on_left_bytes(baseHostCX* cx) {
+
+    // A single read may complete TLS and return application data together.
+    if(observe_tls() == ObserverStatus::Terminate) {
+        state().dead(true);
+        return;
+    }
+
     observe_readiness('l', cx);
 
 
@@ -1648,6 +1758,13 @@ bool MitmProxy::handle_requirements(baseHostCX* cx) {
 }
 
 void MitmProxy::on_right_bytes(baseHostCX* cx) {
+
+    // A single read may complete TLS and return application data together.
+    if(observe_tls() == ObserverStatus::Terminate) {
+        state().dead(true);
+        return;
+    }
+
     observe_readiness('r', cx);
 
 

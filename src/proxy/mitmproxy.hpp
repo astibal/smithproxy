@@ -304,6 +304,26 @@ public:
 
 private:
     void finish_server_hooks();
+    enum class ObserverStatus {
+        Continue,
+        Terminate
+    };
+
+    // Report hook decisions; the caller owns proxy termination.
+    ObserverStatus observe_tls(bool retiring = false);
+    ObserverStatus observe_tls_side(baseHostCX* cx, bool client);
+
+    struct TlsLifecycle {
+        const baseCom* communication = nullptr;
+        int descriptor = 0;
+        std::uint64_t attempt = 0;
+        bool finished = false;
+        bool history_gap = false;
+    };
+    using TlsLifecycleMap = sx::proxy::CxMap<baseHostCX*, TlsLifecycle>;
+
+    TlsLifecycleMap tls_;
+    std::uint64_t tls_sequence_ = 0;
 
     struct ServerLifecycle {
         std::uint64_t attempt = 0;
@@ -324,6 +344,7 @@ public:
     bool wh_start = false;
     bool webhook_rewrite_allowed_ = false;
     bool webhook_server_lifecycle_ = false;
+    bool webhook_tls_lifecycle_ = false;
     // Synchronous setup gate, before application content is analyzed/forwarded.
     // False means the connection must not proceed.
     bool webhook_session_start();

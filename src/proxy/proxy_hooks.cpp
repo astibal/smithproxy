@@ -41,6 +41,18 @@ nlohmann::json socket_endpoint(baseHostCX* cx, bool peer) {
     return nlohmann::json::array({host, std::stoi(port)});
 }
 
+std::string certificate_pem(X509* certificate) {
+
+    auto output = std::unique_ptr<BIO, decltype(&BIO_free)>(BIO_new(BIO_s_mem()), BIO_free);
+    if(!output || !PEM_write_bio_X509(output.get(), certificate)) {
+        return {};
+    }
+
+    char* bytes = nullptr;
+    const auto length = BIO_get_mem_data(output.get(), &bytes);
+    return length > 0 ? std::string(bytes, static_cast<std::size_t>(length)) : std::string{};
+}
+
 std::string b64_encode(buffer &buffer) {
     return libbase64::encode<std::string, char, unsigned char, true>(buffer.data(), buffer.size());
 }
@@ -371,6 +383,10 @@ bool ProxyHooks::start_reply(MitmProxy& proxy, const StartReplyArgs& args) {
                 const auto version = control->find("server_lifecycle");
                 proxy.webhook_server_lifecycle_ = version != control->end() &&
                     version->is_number_integer() && *version == 1;
+
+                const auto tls = control->find("tls_lifecycle");
+                proxy.webhook_tls_lifecycle_ = tls != control->end() &&
+                    tls->is_number_integer() && *tls == 1;
             }
 
             proxy.webhook_rewrite_allowed_ = result.rewrite;
@@ -623,6 +639,88 @@ bool ProxyHooks::server(MitmProxy& proxy, const ServerArgs& args) {
 
             // Only a valid explicit veto can stop the pending attempt. Target
             // mutation requires the separate native routing/policy contract.
+            if(body.contains("proceed") && body["proceed"].is_boolean()) {
+                proceed = body["proceed"].get<bool>();
+            }
+        });
+
+    return proceed;
+}
+
+nlohmann::json ProxyHooks::tls_details(const TlsArgs& args) {
+
+    auto* tls = dynamic_cast<SSLCom*>(args.cx->com());
+    auto* ssl = tls->get_SSL();
+    nlohmann::json details = {
+        {"sni", tls->get_sni().empty() ? nlohmann::json(nullptr) : nlohmann::json(tls->get_sni())},
+        {"alpn_base64", nullptr},
+        {"cipher", nullptr},
+        {"tls_version", nullptr},
+        {"certificates", nlohmann::json::array()},
+        {"error", args.error}
+    };
+
+    // Negotiated values describe the accepted handshake, even if a later read
+    // has already failed. Nothing here changes OpenSSL or transport state.
+    if(args.established && ssl) {
+        const auto alpn = tls->negotiated_alpn();
+        // An accepted handshake without ALPN has an empty selection, not an
+        // unknown value. Preserve that distinction in the public descriptor.
+        details["alpn_base64"] = b64_encode_text(alpn);
+        details["cipher"] = SSL_get_cipher_name(ssl);
+        details["tls_version"] = SSL_get_version(ssl);
+    }
+
+    // OpenSSL includes the leaf in the client-side chain but not necessarily
+    // in the server-side chain. Publish it once, followed by its issuers.
+    if(ssl) {
+        auto leaf = std::unique_ptr<X509, decltype(&X509_free)>(
+            SSL_get_peer_certificate(ssl), X509_free);
+        if(leaf) {
+            details["certificates"].push_back(certificate_pem(leaf.get()));
+        }
+
+        const auto* chain = SSL_get_peer_cert_chain(ssl);
+        for(int index = 0; chain && index < sk_X509_num(chain); ++index) {
+            auto* certificate = sk_X509_value(chain, index);
+            if(!leaf || X509_cmp(leaf.get(), certificate) != 0) {
+                details["certificates"].push_back(certificate_pem(certificate));
+            }
+        }
+    }
+
+    return details;
+}
+
+bool ProxyHooks::tls(MitmProxy& proxy, const TlsArgs& args) {
+
+    const nlohmann::json envelope = {
+        {"version", 1},
+        {"connection_id", proxy.to_connection_ID()},
+        {"attempt", args.attempt},
+        {"side", args.client ? "client" : "server"},
+        {"event", args.established ? "established" : "failed"}
+    };
+    auto observation = tls_details(args);
+    observation["envelope"] = envelope;
+
+    // Preserve callback order before application events. As with server hooks,
+    // observer unavailability is fail-open unless strict control was negotiated.
+    bool proceed = !proxy.webhook_control_->strict();
+    sx::http::webhooks::send_action_wait(
+        "tls-lifecycle", proxy.to_connection_ID(), {{"tls", observation}},
+        [&](const sx::http::expected_reply& reply) {
+            if(!reply || reply->response.first != 200) {
+                return;
+            }
+
+            const auto body = nlohmann::json::parse(reply->response.second, nullptr, false);
+            if(!body.is_object() || body.value("action", "") != "tls-lifecycle" ||
+               body.value("id", "") != proxy.to_connection_ID() ||
+               !body.contains("envelope") || body["envelope"] != envelope) {
+                return;
+            }
+
             if(body.contains("proceed") && body["proceed"].is_boolean()) {
                 proceed = body["proceed"].get<bool>();
             }

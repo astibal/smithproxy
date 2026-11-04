@@ -69,6 +69,16 @@ public:
 
     static bool server(MitmProxy& proxy, const ServerArgs& args);
 
+    struct TlsArgs {
+        baseHostCX* cx = nullptr;
+        bool client = false;
+        bool established = false;
+        std::uint64_t attempt = 0;
+        std::string_view error;
+    };
+
+    static bool tls(MitmProxy& proxy, const TlsArgs& args);
+
     struct HttpConnectArgs {
         std::string_view event;
         std::string_view request;
@@ -106,6 +116,7 @@ private:
     struct ContentReplyArgs;
     struct ContentActionArgs;
 
+    static nlohmann::json tls_details(const TlsArgs& args);
     static nlohmann::json http_connect_details(const MitmProxy& proxy, const HttpConnectArgs& args);
     static void http_connect_reply(MitmProxy& proxy, const HttpConnectReplyArgs& args);
 
