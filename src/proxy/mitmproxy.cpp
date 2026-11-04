@@ -294,20 +294,12 @@ void MitmProxy::toggle_tlog () {
 void MitmProxy::shutdown() {
     // MasterProxy can defer object destruction until a later busy poll cycle.
     // Retire inspection state when transport shuts down, not when memory is freed.
-    finish_server_hooks();
-    webhook_session_stop();
+    prepare_session_stop();
     readiness_.clear();
     baseProxy::shutdown();
 }
 
 MitmProxy::~MitmProxy() {
-    // Destruction can follow a synchronous connect failure without shutdown.
-    finish_server_hooks();
-
-    // Early setup may be followed by a failed connect or by logical-stream
-    // retirement without a socket error callback. Close that setup exactly once.
-    webhook_session_stop();
-    
     if(writer_opts()->write_payload) {
         _deb("MitmProxy::destructor: syncing writer");
 
@@ -328,28 +320,6 @@ MitmProxy::~MitmProxy() {
         if(tlog()) tlog()->write_left("Connection stop\n");
     }
 
-
-    if(not filters_.empty() and sx::http::webhooks::is_enabled()) {
-        auto event = nlohmann::json();
-        bool got_something = false;
-
-        for (auto &[name, filter]: filters_) {
-            if(filter->update_states()) {
-                event[name] = filter->to_json(iINF);
-                got_something = true;
-            }
-            else {
-                _dia("filter %s did not profile any useful data for webhook", name.c_str());
-            }
-        }
-
-        if(got_something) {
-            sx::http::webhooks::send_action("connection-info", to_connection_ID(), event, webhook_control_);
-            _dia("webhook sent");
-        } else {
-            _dia("nothing to sent to webhook");
-        }
-    }
 
     current_sessions()--;
 }
@@ -547,11 +517,52 @@ std::optional<std::string> MitmProxy::get_application() const {
     return std::nullopt;
 }
 
-void MitmProxy::webhook_session_stop() const {
+void MitmProxy::prepare_session_stop() {
     if(!wh_start || wh_stop || (!sx::http::webhooks::is_enabled() &&
                                !sx::http::webhooks::sift_enabled())) return;
 
-    sx::proxy::ProxyHooks::stop(*this, sx::proxy::ProxyHooks::StopArgs{});
+    // A failed snapshot must not prevent transport teardown or run again.
+    wh_stop = true;
+    try {
+        // Every retirement path must finish server callbacks before Spider releases
+        // the session. This only orders observations; transport teardown stays put.
+        finish_server_hooks();
+
+        auto snapshot = std::make_unique<sx::proxy::ProxyHooks::Epitaph>(
+            sx::proxy::ProxyHooks::prepare_stop(*this, sx::proxy::ProxyHooks::StopArgs{}));
+
+        // Filters must be sampled while their session context is still alive.
+        for(auto& [name, filter] : filters_) {
+            if(filter->update_states()) {
+                snapshot->filter_info[name] = filter->to_json(iINF);
+            }
+        }
+
+        epitaph_ = std::move(snapshot);
+    }
+    catch(...) {
+        try { _err("MitmProxy::prepare_session_stop: failed to prepare session epitaph"); }
+        catch(...) {}
+    }
+}
+
+
+void MitmProxy::finalize() noexcept {
+
+    // Consume once. The asynchronous request owns its own payload before this
+    // snapshot is released; callbacks must never retain the proxy or its CXs.
+    auto snapshot = std::move(epitaph_);
+    if(!snapshot) return;
+
+    try {
+        sx::proxy::ProxyHooks::stop(*snapshot, sx::proxy::ProxyHooks::StopArgs{});
+    }
+    catch(...) {
+        // Finalization is best effort. Even diagnostic allocation may fail;
+        // neither failure may escape into the owner's resource cleanup.
+        try { _err("MitmProxy::finalize: failed to enqueue session stop"); }
+        catch(...) {}
+    }
 }
 
 
@@ -1399,7 +1410,7 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
             _deb("MitmProxy::proxy: filter %s: proxy marked dead", filter_name.c_str());
 
             // after marking dead, session is not getting on_error anymore
-            webhook_session_stop();
+            prepare_session_stop();
             if(tx) flow_ctx_->discard(*tx);
             stop_io();
             return;
@@ -1968,7 +1979,7 @@ void MitmProxy::on_error(baseHostCX* cx, char side, const char* side_label) {
             }
         }
 
-        webhook_session_stop();
+        prepare_session_stop();
     }
 }
 
@@ -2016,7 +2027,7 @@ bool MitmProxy::run_timers() {
             }
         }
 
-        webhook_session_stop();
+        prepare_session_stop();
     }
 
     return ret;

@@ -584,6 +584,16 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 socle/common/tests/biostring_tests.cpp
                 socle/common/tests/cast_tests.cpp
                 )
+        add_executable(sx_gtests_webhook_lifetime
+                tests/unit/service/http/webhook_lifetime_tests.cpp
+                src/service/http/request.cpp)
+        target_compile_options(sx_gtests_webhook_lifetime PRIVATE
+                -include ${PROJECT_SOURCE_DIR}/tests/unit/service/http/webhook_runtime_stub.hpp)
+        target_link_libraries(sx_gtests_webhook_lifetime PRIVATE
+                gtest gtest_main "$<LINK_GROUP:RESCAN,socle_lib,socle_common_lib>"
+                pthread curl crypto ssl)
+        add_test(NAME unit.webhook_lifetime COMMAND sx_gtests_webhook_lifetime)
+
         add_executable(sx_gtests_http1
                 tests/unit/proxy/connection_start_test.cpp
                 tests/unit/inspect/http1_tests.cpp

@@ -433,7 +433,7 @@ bool ProxyHooks::start(MitmProxy& proxy, const StartArgs&) {
     return !proxy.state().dead();
 }
 
-void ProxyHooks::stop(const MitmProxy& proxy, const StopArgs&) {
+ProxyHooks::Epitaph ProxyHooks::prepare_stop(const MitmProxy& proxy, const StopArgs&) {
 
     nlohmann::json j;
     auto cl = proxy.to_connection_label();
@@ -487,11 +487,24 @@ void ProxyHooks::stop(const MitmProxy& proxy, const StopArgs&) {
         j["info"]["classification"]["lored"] = std::move(classifications);
     }
 
-    if(sx::http::webhooks::is_enabled())
-        sx::http::webhooks::send_action("connection-stop", proxy.to_connection_ID(), j, proxy.webhook_control_);
-    sx::http::webhooks::send_sift_action("connection-stop", proxy.to_connection_ID(), j);
+    return {proxy.to_connection_ID(), std::move(j), nullptr};
+}
 
-    proxy.wh_stop = true;
+void ProxyHooks::stop(const Epitaph& epitaph, const StopArgs&) {
+
+    // Terminal notifications cannot change the retired session's control state.
+    // Each enqueue copies the serialized payload into its own request task.
+    if(sx::http::webhooks::is_enabled()) {
+        if(!epitaph.filter_info.is_null()) {
+            sx::http::webhooks::send_action(
+                "connection-info", epitaph.connection_id, epitaph.filter_info);
+        }
+        sx::http::webhooks::send_action(
+            "connection-stop", epitaph.connection_id, epitaph.details);
+    }
+
+    sx::http::webhooks::send_sift_action(
+        "connection-stop", epitaph.connection_id, epitaph.details);
 }
 
 sx::auth::Result ProxyHooks::authentication(const baseHostCX& client,

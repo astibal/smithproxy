@@ -287,15 +287,10 @@ void HttpConnectServerCX::pre_write() {
     ExplicitProxyCX::pre_write();
 }
 
-HttpConnectProxy::~HttpConnectProxy() {
-
-    connect_cleanup();
-}
-
 void HttpConnectProxy::shutdown() {
 
     // Object destruction can be deferred. Release the prelude with transport
-    // shutdown, while the destructor remains a fallback for early failures.
+    // shutdown, before deferred destruction.
     connect_cleanup();
     ExplicitProxy::shutdown();
 }

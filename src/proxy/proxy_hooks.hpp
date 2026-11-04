@@ -20,6 +20,12 @@ public:
     // Hooks without additional inputs still use the same explicit call shape.
     struct StartDetailsArgs {};
     struct StartArgs {};
+    // Owned snapshots only: no proxy/CX references survive transport teardown.
+    struct Epitaph {
+        std::string connection_id;
+        nlohmann::json details;
+        nlohmann::json filter_info;
+    };
     struct StopArgs {};
 
     struct ReadinessArgs {
@@ -86,7 +92,8 @@ public:
 
     static nlohmann::json start_details(const MitmProxy& proxy, const StartDetailsArgs& args);
     static bool start(MitmProxy& proxy, const StartArgs& args);
-    static void stop(const MitmProxy& proxy, const StopArgs& args);
+    static Epitaph prepare_stop(const MitmProxy& proxy, const StopArgs& args);
+    static void stop(const Epitaph& epitaph, const StopArgs& args);
     static void readiness(const MitmProxy& proxy, const ReadinessArgs& args);
     static bool content(MitmProxy& proxy, const ContentArgs& args);
 

@@ -495,13 +495,18 @@ namespace sx::proxymaker {
         auto const& log = log::connect();
         if(new_proxy)
             _deb("proxymaker::connect[%s]: connecting", new_proxy->to_string(iINF).c_str());
-        if (not owner || not valid_proxy_endpoints(new_proxy.get())) return false;
-        if (not connection_start(*new_proxy)) return false;
+        if(!new_proxy) return false;
 
-        if(not new_proxy->hook_server_connect(new_proxy->first_right())) return false;
+        const bool admitted = owner && valid_proxy_endpoints(new_proxy.get()) &&
+            connection_start(*new_proxy) &&
+            new_proxy->hook_server_connect(new_proxy->first_right());
+        const bool connected = admitted && connect_owned_proxy(owner, new_proxy);
 
-        const bool connected = connect_owned_proxy(owner, std::move(new_proxy));
-        if(!connected) _deb("proxymaker::connect: cannot connect proxy");
+        if(!connected) {
+            _deb("proxymaker::connect: cannot connect proxy");
+            new_proxy->shutdown();
+            new_proxy->finalize();
+        }
         return connected;
     }
 

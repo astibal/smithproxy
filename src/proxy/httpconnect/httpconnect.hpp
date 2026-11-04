@@ -45,7 +45,7 @@ private:
 class HttpConnectProxy : public ExplicitProxy {
 public:
     using ExplicitProxy::ExplicitProxy;
-    ~HttpConnectProxy() override;
+    ~HttpConnectProxy() override = default;
     void shutdown() override;
 
     sx::proxy::ProxyHooks::HttpConnectDecision connect_request(

@@ -831,6 +831,7 @@ void listener_service::start_draining(session& value,
               static_cast<unsigned long long>(value.forwarded_bytes));
     value.state = session_state::draining;
     value.draining_since = now;
+    if(value.proxy) value.proxy->shutdown();
     value.proxy.reset();
     if (value.downstream) value.downstream->close(protocol_error);
     if (value.upstream) value.upstream->close(protocol_error);
@@ -839,6 +840,7 @@ void listener_service::start_draining(session& value,
 void listener_service::cleanup_sessions() {
     completed_sessions_ += sessions_.size();
     for (auto& linked : sessions_) {
+        if(linked.proxy) linked.proxy->shutdown();
         if (linked.downstream) linked.downstream->close();
         if (linked.upstream) linked.upstream->close();
     }

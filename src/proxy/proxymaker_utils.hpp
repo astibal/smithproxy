@@ -32,7 +32,7 @@ inline std::optional<unsigned short> parse_source_port(std::string_view text) {
 }
 
 template<class Owner, class Proxy>
-bool connect_owned_proxy(Owner* owner, std::unique_ptr<Proxy> proxy) {
+bool connect_owned_proxy(Owner* owner, std::unique_ptr<Proxy>& proxy) {
     if(owner == nullptr || !proxy) return false;
     auto* left = proxy->first_left();
     auto* right = proxy->first_right();
