@@ -592,7 +592,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 -include ${PROJECT_SOURCE_DIR}/tests/unit/service/http/webhook_runtime_stub.hpp)
         target_link_libraries(sx_gtests_webhook_lifetime PRIVATE
                 gtest gtest_main "$<LINK_GROUP:RESCAN,socle_lib,socle_common_lib>"
-                pthread curl crypto ssl)
+                nlohmann_json::nlohmann_json pthread curl crypto ssl)
         add_test(NAME unit.webhook_lifetime COMMAND sx_gtests_webhook_lifetime)
 
         add_executable(sx_gtests_http1
@@ -639,7 +639,9 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
         )
 
         add_executable(webhook_control_test tests/webhook_control_test.cpp)
-        target_include_directories(webhook_control_test PRIVATE ${PROJECT_SOURCE_DIR}/src)
+        target_include_directories(webhook_control_test PRIVATE
+                ${PROJECT_SOURCE_DIR}/src
+                ${PROJECT_SOURCE_DIR}/third_party/nlohmann/include)
         target_compile_options(webhook_control_test PRIVATE -UNDEBUG)
         add_test(NAME unit.webhook_control COMMAND webhook_control_test)
 
@@ -701,7 +703,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
         if (LIBCONFIGPP_FOUND)
             target_link_libraries(sx_gtests ${LIBCONFIGPP_LIBRARIES})
         endif()
-        target_link_libraries(sx_gtests_http1 gtest gtest_main socle_lib pthread crypto ssl)
+        target_link_libraries(sx_gtests_http1 gtest gtest_main socle_lib
+                nlohmann_json::nlohmann_json pthread crypto ssl)
         target_link_libraries(sx_gtests_startstoptls
                 gtest gtest_main
                 "$<LINK_GROUP:RESCAN,socle_lib,socle_common_lib>"
