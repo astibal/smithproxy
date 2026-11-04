@@ -59,9 +59,7 @@ bool ct_is_requested() {
 std::string prompt(const libcli2::Context& context) {
     const auto d = context.decor();
     auto board = CfgFactory::board();
-    board->ack_current(cli_id());
-    board->ack_saved(cli_id());
-    const bool unsaved = board->at(cli_id()).seen_current != board->at(cli_id()).seen_saved;
+    const bool unsaved = board->unsaved();
     // Keep the wire-safe ASCII name when colors are disabled. An active palette
     // implies a modern terminal, so the colored prompt can use U+2300 as the
     // terminal-sized counterpart of the Smithproxy mark.
@@ -96,10 +94,9 @@ void load_defaults() {
 
 int regular(libcli2::Context& context) {
     auto board = CfgFactory::board();
-    if (board->differs(cli_id())) {
-        board->ack_current(cli_id());
-        board->ack_saved(cli_id());
-        if (board->updater() != cli_id()) {
+    auto const update = board->poll_updates(cli_id());
+    if (update.changed()) {
+        if (update.updater != cli_id()) {
             context.mode = "0";
             static_cast<ConfigCli2Session*>(context.user_data)->reset();
         }
