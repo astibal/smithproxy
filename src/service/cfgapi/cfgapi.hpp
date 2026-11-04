@@ -44,6 +44,7 @@
 #include <map>
 #include <mutex>
 #include <chrono>
+#include <optional>
  
 #include <libconfig.h++>
 #include <ext/libcidr/cidr.hpp>
@@ -432,6 +433,7 @@ public:
     bool move_policy(int what, int where, op_move op);
 
     [[nodiscard]] bool save_config() const;
+    [[nodiscard]] std::optional<std::string> snapshot() const;
 
 
     size_t cleanup_db_address ();

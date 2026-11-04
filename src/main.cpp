@@ -55,6 +55,7 @@
 #include <unistd.h>
 
 #include <ostream>
+#include <stdexcept>
 
 #include <getopt.h>
 
@@ -784,6 +785,19 @@ int main(int argc, char *argv[]) {
         _fat("Failed to apply tenant specific configuration!");
         std::cerr << "Failed to apply tenant specific configuration!"  << std::endl;
 
+        CfgFactory::get()->cleanup();
+        return EXIT_FAILURE;
+    }
+
+    try {
+        auto startup_snapshot = CfgFactory::get()->snapshot();
+        if(!startup_snapshot) {
+            throw std::runtime_error("cannot serialize the initial running configuration");
+        }
+        CfgFactory::board()->init_revision(std::move(*startup_snapshot), "startup");
+    }
+    catch(std::exception const& error) {
+        _fat("Failed to initialize configuration history: %s", error.what());
         CfgFactory::get()->cleanup();
         return EXIT_FAILURE;
     }

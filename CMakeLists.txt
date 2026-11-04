@@ -593,6 +593,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/service/core/live_listener_lifecycle_tests.cpp
                 src/service/cfgapi/cfgvalue.cpp
                 tests/unit/service/cfgapi/cfgvalue_tests.cpp
+                tests/unit/service/cfgapi/cfg_serialization_tests.cpp
                 src/service/cfgapi/cfg_update.cpp
                 tests/unit/service/cfgapi/cfg_update_tests.cpp
                 src/service/cfgapi/cfg_revision.cpp

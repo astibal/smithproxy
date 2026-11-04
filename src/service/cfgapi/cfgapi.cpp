@@ -6276,6 +6276,11 @@ bool CfgFactory::save_config() const {
     }
 }
 
+std::optional<std::string> CfgFactory::snapshot() const {
+    std::scoped_lock<std::recursive_mutex> lock(CfgFactory::lock());
+    return cfgapi_detail::serialize_config(CfgFactory::cfg_obj());
+}
+
 
 AddressInfo const& DNS_Setup::default_ns() {
     static const auto ai = create_default_ns(AF_INET, "1.1.1.1", 53);
