@@ -72,6 +72,7 @@ namespace sx::webserver {
 
         if(not section_name.empty() and not varname.empty()) {
             json ret;
+            auto locks = std::scoped_lock(CfgFactory::write_lock(), CfgFactory::lock());
 
             std::vector<std::string> args;
             args.emplace_back(varname);
@@ -82,10 +83,10 @@ namespace sx::webserver {
             }
             else {
                 // parameters satisfy requirements
-                auto lc_ = std::scoped_lock(CfgFactory::lock());
                 auto add_status = CfgFactory::get()->cfg_add_entry(section_name, args[0]);
-                if(add_status.first) {
-                    CfgFactory::board()->upgrade("API");
+                if(add_status.first and not CfgFactory::get()->record_revision(
+                    "API", "add " + section_name + "." + args[0])) {
+                    return {{"error", "entry added, but its revision snapshot could not be created"}};
                 }
                 return jsonize::cfg_status_response(add_status);
             }

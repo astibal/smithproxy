@@ -111,13 +111,10 @@ bool reload_section(const std::string& section) {
 }
 
 bool record_change(const std::string& source, std::string description, std::string& error) {
-    auto snapshot = CfgFactory::get()->snapshot();
-    if (!snapshot) {
+    if (!CfgFactory::get()->record_revision(source, std::move(description))) {
         error = "configuration changed, but its revision snapshot could not be created";
         return false;
     }
-
-    CfgFactory::board()->upgrade(source, std::move(*snapshot), std::move(description));
     return true;
 }
 
@@ -195,8 +192,9 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
     };
     access.set = [subscriber_id](std::string_view path, std::string_view property,
                                        const std::vector<std::string>& values, std::string& error) {
-        std::scoped_lock writer(CfgFactory::write_lock());
-        std::unique_lock<std::recursive_mutex> lock(CfgFactory::lock());
+        std::unique_lock writer(CfgFactory::write_lock(), std::defer_lock);
+        std::unique_lock lock(CfgFactory::lock(), std::defer_lock);
+        std::lock(writer, lock);
         const std::string section(path);
         std::string name(property);
         auto metadata = CfgValueHelp::get().find(section + "." + name);
@@ -284,7 +282,7 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
         return set(path, property, CfgValueCleaner::toggle(current, toggles), error);
     };
     access.add = [subscriber_id](std::string_view path, const std::vector<std::string>& input, std::string& error) {
-        std::scoped_lock writer(CfgFactory::write_lock());
+        std::scoped_lock locks(CfgFactory::write_lock(), CfgFactory::lock());
         auto arguments = input;
         const std::string section = unmask(std::string(path));
         const auto kind = collection_kind(section);
@@ -300,7 +298,6 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
                                  error);
         }
 
-        std::scoped_lock<std::recursive_mutex> lock(CfgFactory::lock());
         if (!CfgFactory::cfg_obj().exists(section)) { error = "unknown configuration section"; return false; }
         auto& list = CfgFactory::cfg_root().lookup(section);
         if (!add_ordered_entry(list, section, arguments, error)) return false;
@@ -314,9 +311,8 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
                              error);
     };
     access.remove = [subscriber_id](std::string_view path, const std::vector<std::string>& entries, std::string& error) {
-        std::scoped_lock writer(CfgFactory::write_lock());
+        std::scoped_lock locks(CfgFactory::write_lock(), CfgFactory::lock());
         const std::string section = unmask(std::string(path));
-        std::scoped_lock<std::recursive_mutex> lock(CfgFactory::lock());
         const auto kind = collection_kind(section);
         if (!CfgFactory::cfg_obj().exists(section)) { error = "unknown configuration section"; return false; }
         auto& setting = CfgFactory::cfg_root().lookup(section);
@@ -352,7 +348,7 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
     };
     access.move = [subscriber_id](std::string_view path, std::string_view source, std::string_view operation,
                                    std::string_view target, std::string& error) {
-        std::scoped_lock writer(CfgFactory::write_lock());
+        std::scoped_lock locks(CfgFactory::write_lock(), CfgFactory::lock());
         const std::string section = unmask(std::string(path));
         if (section != "policy") { error = "move is currently supported only for policy"; return false; }
         int from = -1;

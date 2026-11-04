@@ -439,6 +439,9 @@ public:
 
     [[nodiscard]] bool save_config() const;
     [[nodiscard]] std::optional<std::string> snapshot() const;
+    // The caller holds write_lock() from before the configuration mutation.
+    [[nodiscard]] bool record_revision(std::string const& source,
+                                       std::string description) const;
 
 
     size_t cleanup_db_address ();

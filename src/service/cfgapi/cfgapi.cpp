@@ -6281,6 +6281,14 @@ std::optional<std::string> CfgFactory::snapshot() const {
     return cfgapi_detail::serialize_config(CfgFactory::cfg_obj());
 }
 
+bool CfgFactory::record_revision(std::string const& source, std::string description) const {
+    auto revision_snapshot = snapshot();
+    if(!revision_snapshot) return false;
+
+    CfgFactory::board()->upgrade(source, std::move(*revision_snapshot), std::move(description));
+    return true;
+}
+
 
 AddressInfo const& DNS_Setup::default_ns() {
     static const auto ai = create_default_ns(AF_INET, "1.1.1.1", 53);

@@ -69,7 +69,7 @@ namespace sx::webserver {
         auto cfg_name = jsonize::load_json_params<std::string>(req, "name").value_or("");
         auto changeset = jsonize::load_json_params<json>(req, "changeset");
 
-        auto lc_ = std::scoped_lock(CfgFactory::lock());
+        auto locks = std::scoped_lock(CfgFactory::write_lock(), CfgFactory::lock());
 
 
         if(section_name.empty() or cfg_name.empty() or not changeset.has_value()) {
@@ -131,10 +131,15 @@ namespace sx::webserver {
                     return { { "error", cur_write_msg.str() } };
                 }
 
-                rollback.commit();
-                CfgFactory::get()->board()->upgrade("API");
                 if (not CfgFactory::get()->apply_config_change(section_name)) {
                     cur_write_msg << "ER(config not applied);";
+                }
+                rollback.commit();
+                if(not CfgFactory::get()->record_revision(
+                    "API", "set " + fullpath + " (" +
+                               std::to_string(changeset->size()) +
+                               (changeset->size() == 1 ? " field)" : " fields)"))) {
+                    return {{"error", "configuration changed, but its revision snapshot could not be created"}};
                 }
 
                 return { { "success", cur_write_msg.str() } };
