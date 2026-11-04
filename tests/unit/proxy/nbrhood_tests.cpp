@@ -60,3 +60,66 @@ TEST(NeighborPersistence, HoodSkipsInvalidEntriesAndUsesArrayResults) {
     ASSERT_TRUE(hood.to_json().is_array());
     EXPECT_EQ(hood.to_json().size(), 1U);
 }
+
+TEST(NeighborPersistence, SnapshotDeepCopiesAllHistoryAndSurvivesCacheRemoval) {
+    NbrHood hood(4);
+    hood.apply("snapshot.test", [](Neighbor& n) {
+        n.last_seen = 123;
+        n.tags_update("=+original");
+        // Snapshot must not truncate history, even if its size exceeds the
+        // normal configured retention limit.
+        for (size_t i = 0; i < Neighbor::max_timetable_sz + 5; ++i) {
+            Neighbor::stats_entry_t stat;
+            stat.days_epoch = static_cast<time_t>(i);
+            stat.counter = UINT64_MAX;
+            stat.bytes_up = i;
+            stat.bytes_down = 2 * i;
+            stat.labels.insert("original-label");
+            n.timetable.push_back(std::move(stat));
+        }
+        return true;
+    });
+    auto expected = hood.ser_json_out();
+    auto snapshot = hood.snapshot();
+    ASSERT_EQ(snapshot.size(), 1U);
+    EXPECT_EQ(snapshot[0].ser_json_out(), expected[0]);
+    EXPECT_EQ(snapshot[0].tags_ts(), hood.cache().get("snapshot.test").value()->tags_ts());
+
+    hood.apply("snapshot.test", [](Neighbor& n) {
+        n.tags_update("=+changed");
+        n.last_seen = 999;
+        n.timetable[0].counter = 0;
+        n.timetable[0].labels.clear();
+        return true;
+    });
+    hood.cache().clear();
+    EXPECT_EQ(snapshot[0].ser_json_out(), expected[0]);
+}
+
+TEST(NeighborPersistence, SavesDetachedSnapshotAndEmptyArray) {
+    char pattern[] = "/tmp/smithproxy-nbr-snapshot-XXXXXX";
+    auto* directory = ::mkdtemp(pattern);
+    ASSERT_NE(directory, nullptr);
+    auto filename = (std::filesystem::path(directory) / "neighbors.json").string();
+    NbrHood hood(4);
+    hood.apply("before.test", [](Neighbor& n) { n.update(); return true; });
+    auto expected = hood.ser_json_out();
+    auto snapshot = hood.snapshot();
+    hood.cache().clear();
+    // Keep the original non-recursive mutex locked: saving the detached
+    // snapshot must never attempt to reacquire it.
+    {
+        auto guard = std::scoped_lock(hood.cache().lock());
+        NbrHood::save_snapshot(snapshot, filename);
+    }
+    {
+        std::ifstream input(filename);
+        EXPECT_EQ(nlohmann::json::parse(input), expected);
+    }
+    NbrHood::save_snapshot({}, filename);
+    {
+        std::ifstream input(filename);
+        EXPECT_EQ(nlohmann::json::parse(input), nlohmann::json::array());
+    }
+    std::filesystem::remove_all(directory);
+}

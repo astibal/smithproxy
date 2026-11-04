@@ -47,6 +47,7 @@
 #include <socle/common/stringops.hpp>
 
 #include <utils/lru.hpp>
+#include <utils/atomic_json.hpp>
 #include <service/http/webhooks.hpp>
 
 struct Neighbor {
@@ -297,11 +298,37 @@ public:
 
     using nbr_t = std::shared_ptr<Neighbor>;
     using nbr_cache_t = LRUCache<std::string, nbr_t>;
+    using snapshot_t = std::vector<Neighbor>;
 
     explicit NbrHood(size_t max_size): nbrs_(max_size) {}
 
     nbr_cache_t& cache() { return nbrs_; }
     nbr_cache_t const& cache() const { return nbrs_; }
+
+    // Copy record values only: the export needs neither the live hash index
+    // nor its LRU list. Neighbor's value members give us an independent copy
+    // of all history, labels and tags.
+    [[nodiscard]] snapshot_t snapshot() const {
+        auto guard = std::scoped_lock(cache().lock());
+        snapshot_t result;
+        result.reserve(cache().get_map_ul().size());
+        for (auto const& item: cache().get_map_ul())
+            result.emplace_back(*item.second.first);
+        return result;
+    }
+
+    static void save_snapshot(snapshot_t const& records, std::string const& filename) {
+        sx::atomic_json::replace(filename, [&records](FILE* file) {
+            sx::atomic_json::write(file, "[");
+            bool first = true;
+            for (auto const& record: records) {
+                sx::atomic_json::write(file, first ? "\n" : ",\n");
+                first = false;
+                sx::atomic_json::write(file, record.ser_json_out().dump(4));
+            }
+            sx::atomic_json::write(file, "\n]\n");
+        });
+    }
 
     void update(std::string const& hostname) {
         bool is_new = false;

@@ -479,6 +479,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
 
                 tests/unit/utils/str_test.cpp
                 tests/unit/utils/fs_test.cpp
+                tests/unit/utils/atomic_json_tests.cpp
                 tests/unit/base/staticcontent_tests.cpp
                 tests/unit/ext/nltemplate/nltemplate_tests.cpp
                 tests/unit/inspect/dns_tests.cpp
@@ -664,6 +665,16 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
         )
         target_compile_definitions(sx_gtests_webhook_broker PRIVATE
                 SMITHPROXY_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+
+        # Keep syscall fault injection isolated from the application and other
+        # tests. These wrappers exercise failures before and after publication.
+        add_executable(sx_gtests_atomic_json
+                tests/unit/utils/atomic_json_tests.cpp
+                tests/unit/utils/atomic_json_fault_tests.cpp)
+        target_link_libraries(sx_gtests_atomic_json PRIVATE
+                gtest gtest_main nlohmann_json::nlohmann_json pthread)
+        target_link_options(sx_gtests_atomic_json PRIVATE
+                -Wl,--wrap=fsync -Wl,--wrap=fclose -Wl,--wrap=rename)
 
         add_executable(tls_testbed
                 tests/tls/tls_testbed.cpp)
