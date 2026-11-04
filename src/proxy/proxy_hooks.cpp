@@ -18,6 +18,55 @@ using HttpApplication = sx::engine::http::app_HttpRequest;
 
 namespace {
 
+bool valid_upstream_sni(std::string_view name) {
+
+    if(name.empty()) return true;
+    if(name.size() > 253 || inet::is_ipv4_address(std::string(name)) ||
+       inet::is_ipv6_address(std::string(name))) {
+        return false;
+    }
+
+    std::size_t label = 0;
+    char previous = '.';
+    for(char ch : name) {
+        if(ch == '.') {
+            if(label == 0 || previous == '-') return false;
+            label = 0;
+        } else {
+            const bool letter = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z');
+            const bool digit = ch >= '0' && ch <= '9';
+            if((!letter && !digit && ch != '-') || (label == 0 && ch == '-')) return false;
+            if(++label > 63) return false;
+        }
+        previous = ch;
+    }
+
+    return previous != '-';
+}
+
+bool alpn_subset(std::string_view proposed, std::string_view offered) {
+
+    if(proposed.size() > 65535) return false;
+    while(!proposed.empty()) {
+        const auto length = static_cast<unsigned char>(proposed.front());
+        if(length == 0 || proposed.size() <= length) return false;
+        const auto protocol = proposed.substr(1, length);
+        proposed.remove_prefix(length + 1);
+
+        bool found = false;
+        auto remaining = offered;
+        while(!remaining.empty()) {
+            const auto size = static_cast<unsigned char>(remaining.front());
+            if(size == 0 || remaining.size() <= size) return false;
+            found = found || remaining.substr(1, size) == protocol;
+            remaining.remove_prefix(size + 1);
+        }
+        if(!found) return false;
+    }
+
+    return true;
+}
+
 nlohmann::json socket_endpoint(baseHostCX* cx, bool peer) {
 
     if(!cx || cx->socket() < 0)
@@ -387,6 +436,11 @@ bool ProxyHooks::start_reply(MitmProxy& proxy, const StartReplyArgs& args) {
                 const auto tls = control->find("tls_lifecycle");
                 proxy.webhook_tls_lifecycle_ = tls != control->end() &&
                     tls->is_number_integer() && *tls == 1;
+
+                const auto hello = control->find("tls_clienthello");
+                proxy.webhook_tls_clienthello_ = hello != control->end() &&
+                    hello->is_number_integer() && *hello == 1;
+                proxy.tls_observer_enabled(proxy.webhook_tls_clienthello_);
             }
 
             proxy.webhook_rewrite_allowed_ = result.rewrite;
@@ -727,6 +781,85 @@ bool ProxyHooks::tls(MitmProxy& proxy, const TlsArgs& args) {
         });
 
     return proceed;
+}
+
+ProxyHooks::ClientHelloDecision ProxyHooks::client_hello(MitmProxy& proxy,
+                                                         const ClientHelloArgs& args) {
+
+    const nlohmann::json envelope = {
+        {"version", 1},
+        {"connection_id", proxy.to_connection_ID()},
+        {"attempt", args.attempt},
+        {"side", "client"},
+        {"event", "client-hello"}
+    };
+    const nlohmann::json observation = {
+        {"envelope", envelope},
+        {"client_hello_base64", b64_encode_text(args.body)},
+        {"upstream", {
+            {"sni", args.upstream_sni},
+            {"alpn_base64", args.alpn_blocked || args.upstream_alpn.empty()
+                ? std::string{} : b64_encode_text(args.upstream_alpn)}
+        }},
+        {"upstream_alpn_blocked", args.alpn_blocked}
+    };
+
+    // A malformed or unavailable reply must never partially enable bypass.
+    ClientHelloDecision decision;
+    decision.proceed = !proxy.webhook_control_->strict();
+
+    sx::http::webhooks::send_action_wait(
+        "tls-lifecycle", proxy.to_connection_ID(), {{"tls", observation}},
+        [&](const sx::http::expected_reply& reply) {
+            if(!reply || reply->response.first != 200) {
+                return;
+            }
+
+            const auto body = nlohmann::json::parse(reply->response.second, nullptr, false);
+            if(!body.is_object() || body.value("action", "") != "tls-lifecycle" ||
+               body.value("id", "") != proxy.to_connection_ID() ||
+               !body.contains("envelope") || body["envelope"] != envelope ||
+               !body.contains("proceed") || !body["proceed"].is_boolean() ||
+               !body.contains("ignore_connection") || !body["ignore_connection"].is_boolean()) {
+                return;
+            }
+
+            ClientHelloDecision candidate;
+            candidate.proceed = body["proceed"].get<bool>();
+            candidate.ignore_connection = candidate.proceed && body["ignore_connection"].get<bool>();
+
+            // Older receivers omit upstream settings. Validate a complete new
+            // offer before publishing any part of the callback decision.
+            if(body.contains("upstream") && candidate.proceed && !candidate.ignore_connection) {
+                const auto& upstream = body["upstream"];
+                if(!upstream.is_object() || !upstream.contains("sni") || !upstream["sni"].is_string() ||
+                   !upstream.contains("alpn_base64") || !upstream["alpn_base64"].is_string()) {
+                    return;
+                }
+
+                candidate.upstream_sni = upstream["sni"].get<std::string>();
+                const auto encoded = upstream["alpn_base64"].get<std::string>();
+                if(encoded.size() > 87380 ||
+                   (candidate.upstream_sni != args.upstream_sni && !valid_upstream_sni(candidate.upstream_sni))) {
+                    return;
+                }
+
+                candidate.upstream_alpn = b64_decode(encoded);
+                const auto canonical = candidate.upstream_alpn.empty()
+                    ? std::string{} : b64_encode_text(candidate.upstream_alpn);
+                if(canonical != encoded || !alpn_subset(candidate.upstream_alpn, args.upstream_alpn) ||
+                   (args.alpn_blocked && !candidate.upstream_alpn.empty())) {
+                    return;
+                }
+                const auto current_alpn = args.alpn_blocked ? std::string_view{} : args.upstream_alpn;
+                candidate.update_upstream = candidate.upstream_sni != args.upstream_sni ||
+                                            candidate.upstream_alpn != current_alpn;
+            }
+
+            decision = std::move(candidate);
+        });
+
+    return decision;
 }
 
 void ProxyHooks::readiness(const MitmProxy& proxy, const ReadinessArgs& args) {

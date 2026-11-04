@@ -79,6 +79,23 @@ public:
 
     static bool tls(MitmProxy& proxy, const TlsArgs& args);
 
+    struct ClientHelloArgs {
+        std::uint64_t attempt = 0;
+        std::string_view body;
+        std::string_view upstream_sni;
+        std::string_view upstream_alpn;
+        bool alpn_blocked = false;
+    };
+    struct ClientHelloDecision {
+        bool proceed = true;
+        bool ignore_connection = false;
+        bool update_upstream = false;
+        std::string upstream_sni;
+        std::string upstream_alpn;
+    };
+
+    static ClientHelloDecision client_hello(MitmProxy& proxy, const ClientHelloArgs& args);
+
     struct HttpConnectArgs {
         std::string_view event;
         std::string_view request;

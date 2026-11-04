@@ -291,6 +291,7 @@ add_executable(smithproxy
         src/inspect/protocol_views.cpp
         src/proxy/mitmproxy.cpp
         src/proxy/proxy_hooks.cpp
+        src/proxy/tls_observer.cpp
         src/proxy/mitmcom.hpp
         src/proxy/mitmcom.cpp
         src/proxy/ssh/sshprotocol.cpp

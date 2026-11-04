@@ -115,8 +115,22 @@ MitmProxy::MitmProxy(baseCom* c):
 }
 
 void MitmProxy::attach_flow(MitmHostCX& host, char leg) {
+    host.com()->protocol_hooks_enabled(tls_observer_enabled_);
     host.flow_context(flow_ctx_);
     flow_ctx_->attach(host, leg);
+}
+
+void MitmProxy::tls_observer_enabled(bool enabled) {
+
+    if(tls_observer_enabled_ == enabled) return;
+    tls_observer_enabled_ = enabled;
+
+    // Include delayed contexts: their first handshake may happen on release.
+    for(auto* contexts : {&ls(), &rs(), &lda(), &rda(), &lbs(), &rbs(), &lpc(), &rpc()}) {
+        for(auto* cx : *contexts) {
+            cx->com()->protocol_hooks_enabled(enabled);
+        }
+    }
 }
 
 std::atomic_uint64_t& MitmProxy::sift_payload_limit_per_direction() {
@@ -292,6 +306,8 @@ void MitmProxy::toggle_tlog () {
 
 
 void MitmProxy::shutdown() {
+    tls_observer_enabled(false);
+
     // MasterProxy can defer object destruction until a later busy poll cycle.
     // Retire inspection state when transport shuts down, not when memory is freed.
     prepare_session_stop();
@@ -300,6 +316,9 @@ void MitmProxy::shutdown() {
 }
 
 MitmProxy::~MitmProxy() {
+    // Base destruction must not dispatch back into the retired derived object.
+    tls_observer_enabled(false);
+
     if(writer_opts()->write_payload) {
         _deb("MitmProxy::destructor: syncing writer");
 
@@ -744,6 +763,20 @@ MitmProxy::ObserverStatus MitmProxy::observe_tls(bool retiring) {
     return ObserverStatus::Continue;
 }
 
+MitmProxy::TlsLifecycle& MitmProxy::tls_lifecycle(baseHostCX& cx) {
+
+    auto& observed = tls_.get_or_create(&cx);
+    if(observed.communication != cx.com() ||
+       (cx.socket() > 0 && observed.descriptor != cx.socket())) {
+        observed = {};
+        observed.communication = cx.com();
+        observed.descriptor = cx.socket();
+        observed.attempt = ++tls_sequence_;
+    }
+
+    return observed;
+}
+
 MitmProxy::ObserverStatus MitmProxy::observe_tls_side(baseHostCX* cx, bool client) {
 
     auto* tls = cx ? dynamic_cast<SSLCom*>(cx->com()) : nullptr;
@@ -751,14 +784,7 @@ MitmProxy::ObserverStatus MitmProxy::observe_tls_side(baseHostCX* cx, bool clien
         return ObserverStatus::Continue;
     }
 
-    auto& observed = tls_.get_or_create(cx);
-    if(observed.communication != tls ||
-       (cx->socket() > 0 && observed.descriptor != cx->socket())) {
-        observed = {};
-        observed.communication = tls;
-        observed.descriptor = cx->socket();
-        observed.attempt = ++tls_sequence_;
-    }
+    auto& observed = tls_lifecycle(*cx);
 
     if(observed.finished) {
         tls->clear_tls_proto_history();

@@ -46,6 +46,10 @@ bool StartStopTls::start(MitmHostCX& client) {
     new_client_com->init(&client);
     new_peer_com->init(peer);
 
+    // Replacement transports inherit this session's explicit observation opt-in.
+    new_client_com->protocol_hooks_enabled(owner_.tls_observer_enabled());
+    new_peer_com->protocol_hooks_enabled(owner_.tls_observer_enabled());
+
     client.peer(peer);
     peer->peer(&client);
 
