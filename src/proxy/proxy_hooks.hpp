@@ -53,6 +53,16 @@ public:
     static sx::auth::Result authentication(const baseHostCX& client,
                                           const AuthenticationArgs& args);
 
+    struct ServerArgs {
+        baseHostCX* cx = nullptr;
+        std::string_view event;
+        std::uint64_t attempt = 0;
+        std::string_view error;
+        bool session_ending = false;
+    };
+
+    static bool server(MitmProxy& proxy, const ServerArgs& args);
+
     struct HttpConnectArgs {
         std::string_view event;
         std::string_view request;

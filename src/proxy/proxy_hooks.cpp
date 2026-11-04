@@ -18,6 +18,29 @@ using HttpApplication = sx::engine::http::app_HttpRequest;
 
 namespace {
 
+nlohmann::json socket_endpoint(baseHostCX* cx, bool peer) {
+
+    if(!cx || cx->socket() < 0)
+        return nullptr;
+
+    sockaddr_storage address{};
+    socklen_t size = sizeof(address);
+    const auto status = peer
+        ? ::getpeername(cx->socket(), reinterpret_cast<sockaddr*>(&address), &size)
+        : ::getsockname(cx->socket(), reinterpret_cast<sockaddr*>(&address), &size);
+
+    if(status != 0)
+        return nullptr;
+
+    char host[NI_MAXHOST]{};
+    char port[NI_MAXSERV]{};
+    if(::getnameinfo(reinterpret_cast<sockaddr*>(&address), size, host, sizeof(host),
+                     port, sizeof(port), NI_NUMERICHOST | NI_NUMERICSERV) != 0)
+        return nullptr;
+
+    return nlohmann::json::array({host, std::stoi(port)});
+}
+
 std::string b64_encode(buffer &buffer) {
     return libbase64::encode<std::string, char, unsigned char, true>(buffer.data(), buffer.size());
 }
@@ -188,28 +211,6 @@ nlohmann::json ProxyHooks::start_details(const MitmProxy& proxy, const StartDeta
 
 nlohmann::json ProxyHooks::http_connect_details(const MitmProxy& proxy, const HttpConnectArgs& args) {
 
-    auto endpoint = [](baseHostCX* cx, bool peer) -> nlohmann::json {
-        if(!cx || cx->socket() < 0)
-            return nullptr;
-
-        sockaddr_storage address{};
-        socklen_t size = sizeof(address);
-        const auto status = peer
-            ? ::getpeername(cx->socket(), reinterpret_cast<sockaddr*>(&address), &size)
-            : ::getsockname(cx->socket(), reinterpret_cast<sockaddr*>(&address), &size);
-
-        if(status != 0)
-            return nullptr;
-
-        char host[NI_MAXHOST]{};
-        char port[NI_MAXSERV]{};
-        if(::getnameinfo(reinterpret_cast<sockaddr*>(&address), size, host, sizeof(host),
-                         port, sizeof(port), NI_NUMERICHOST | NI_NUMERICSERV) != 0)
-            return nullptr;
-
-        return nlohmann::json::array({host, std::stoi(port)});
-    };
-
     const auto id = proxy.to_connection_ID();
     const nlohmann::json envelope = {
         {"version", 1},
@@ -231,13 +232,13 @@ nlohmann::json ProxyHooks::http_connect_details(const MitmProxy& proxy, const Ht
 
     if(args.event == "request") {
         observation["request_base64"] = b64_encode_text(args.request);
-        observation["client_peername"] = endpoint(args.client, true);
-        observation["client_sockname"] = endpoint(args.client, false);
+        observation["client_peername"] = socket_endpoint(args.client, true);
+        observation["client_sockname"] = socket_endpoint(args.client, false);
     }
 
     if(args.event == "connected") {
-        observation["peername"] = endpoint(args.server, true);
-        observation["sockname"] = endpoint(args.server, false);
+        observation["peername"] = socket_endpoint(args.server, true);
+        observation["sockname"] = socket_endpoint(args.server, false);
     }
 
     nlohmann::json details = {{"http_connect", observation}};
@@ -362,10 +363,20 @@ bool ProxyHooks::start_reply(MitmProxy& proxy, const StartReplyArgs& args) {
     proxy.webhook_control_->apply(result.body);
 
     switch(result.action) {
-        case setup_action::accept:
+        case setup_action::accept: {
+            // Older receivers may use strict content control without knowing
+            // this newer synchronous lifecycle contract. Require version 1.
+            const auto control = result.body.find("control");
+            if(control != result.body.end()) {
+                const auto version = control->find("server_lifecycle");
+                proxy.webhook_server_lifecycle_ = version != control->end() &&
+                    version->is_number_integer() && *version == 1;
+            }
+
             proxy.webhook_rewrite_allowed_ = result.rewrite;
             proxy.flow_ctx_->allow_rewrite(args.local_rewrite || result.rewrite);
             return true;
+        }
         case setup_action::drop:
             proxy.state().dead(true);
             return true;
@@ -558,6 +569,54 @@ sx::auth::Result ProxyHooks::authentication(const baseHostCX& client,
     return observed;
 }
 
+
+bool ProxyHooks::server(MitmProxy& proxy, const ServerArgs& args) {
+
+    const nlohmann::json envelope = {
+        {"version", 1},
+        {"connection_id", proxy.to_connection_ID()},
+        {"attempt", args.attempt},
+        {"event", args.event}
+    };
+    const nlohmann::json observation = {
+        {"envelope", envelope},
+        {"target", {args.cx->host(), std::stoi(args.cx->port())}},
+        {"peername", socket_endpoint(args.cx, true)},
+        {"sockname", socket_endpoint(args.cx, false)},
+        {"client_peername", socket_endpoint(proxy.first_left(), true)},
+        {"client_sockname", socket_endpoint(proxy.first_left(), false)},
+        {"client_closed", !proxy.first_left() || proxy.first_left()->socket() <= 0},
+        {"session_ending", args.session_ending},
+        {"error", args.error}
+    };
+
+    // Transport observations are synchronous so content and CONNECT replies
+    // cannot overtake them. An unavailable observer does not authorize traffic.
+    // Native policy remains in charge; ordinary observer failure is fail-open.
+    bool proceed = !proxy.webhook_control_->strict();
+    sx::http::webhooks::send_action_wait(
+        "server-lifecycle", proxy.to_connection_ID(), {{"server", observation}},
+        [&](const sx::http::expected_reply& reply) {
+            if(!reply || reply->response.first != 200) {
+                return;
+            }
+
+            const auto body = nlohmann::json::parse(reply->response.second, nullptr, false);
+            if(!body.is_object() || body.value("action", "") != "server-lifecycle" ||
+               body.value("id", "") != proxy.to_connection_ID() ||
+               !body.contains("envelope") || body["envelope"] != envelope) {
+                return;
+            }
+
+            // Only a valid explicit veto can stop the pending attempt. Target
+            // mutation requires the separate native routing/policy contract.
+            if(body.contains("proceed") && body["proceed"].is_boolean()) {
+                proceed = body["proceed"].get<bool>();
+            }
+        });
+
+    return proceed;
+}
 
 void ProxyHooks::readiness(const MitmProxy& proxy, const ReadinessArgs& args) {
     const bool client = args.side == 'l' || args.side == 'x';

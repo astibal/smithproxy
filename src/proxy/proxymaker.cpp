@@ -482,7 +482,13 @@ namespace sx::proxymaker {
     int connect(MitmProxy& proxy, MitmHostCX& target) {
         if (not connection_start(proxy)) return -1;
 
-        return target.connect();
+        if(not proxy.hook_server_connect(&target)) return -1;
+
+        const int descriptor = target.connect();
+        if(!target.com()->descriptor_valid(descriptor)) {
+            proxy.hook_server_end(&target, "Upstream connect failed");
+        }
+        return descriptor;
     }
 
     bool connect(MasterProxy* owner, std::unique_ptr<MitmProxy> new_proxy) {
@@ -491,6 +497,8 @@ namespace sx::proxymaker {
             _deb("proxymaker::connect[%s]: connecting", new_proxy->to_string(iINF).c_str());
         if (not owner || not valid_proxy_endpoints(new_proxy.get())) return false;
         if (not connection_start(*new_proxy)) return false;
+
+        if(not new_proxy->hook_server_connect(new_proxy->first_right())) return false;
 
         const bool connected = connect_owned_proxy(owner, std::move(new_proxy));
         if(!connected) _deb("proxymaker::connect: cannot connect proxy");

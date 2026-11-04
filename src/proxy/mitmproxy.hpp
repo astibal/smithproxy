@@ -292,11 +292,29 @@ public:
     bool handle_cx_events(unsigned char side, baseHostCX* cx) override;
     void on_left_pc_error(baseHostCX* cx) override;
     void on_right_pc_error(baseHostCX* cx) override;
+    // Ordered observations for actual TCP attempts, independently of TLS.
+    bool hook_server_connect(baseHostCX* cx);
+    void hook_server_connected(baseHostCX* cx);
+    void hook_server_end(baseHostCX* cx, std::string_view error = {},
+                         bool session_ending = false);
+
     void observe_readiness(unsigned char side, baseHostCX* cx);
     void readiness_webhook(unsigned char side, baseHostCX* cx,
                            const char* event, std::uint64_t attempt);
 
 private:
+    void finish_server_hooks();
+
+    struct ServerLifecycle {
+        std::uint64_t attempt = 0;
+        bool connected = false;
+        bool finished = false;
+    };
+    using ServerLifecycleMap = sx::proxy::CxMap<baseHostCX*, ServerLifecycle>;
+
+    ServerLifecycleMap servers_;
+    std::uint64_t server_sequence_ = 0;
+
     sx::proxy::ConnectionReadinessMap readiness_;
     std::uint64_t readiness_sequence_ = 0;
 
@@ -305,6 +323,7 @@ public:
 
     bool wh_start = false;
     bool webhook_rewrite_allowed_ = false;
+    bool webhook_server_lifecycle_ = false;
     // Synchronous setup gate, before application content is analyzed/forwarded.
     // False means the connection must not proceed.
     bool webhook_session_start();

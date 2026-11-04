@@ -294,12 +294,16 @@ void MitmProxy::toggle_tlog () {
 void MitmProxy::shutdown() {
     // MasterProxy can defer object destruction until a later busy poll cycle.
     // Retire inspection state when transport shuts down, not when memory is freed.
+    finish_server_hooks();
     webhook_session_stop();
     readiness_.clear();
     baseProxy::shutdown();
 }
 
 MitmProxy::~MitmProxy() {
+    // Destruction can follow a synchronous connect failure without shutdown.
+    finish_server_hooks();
+
     // Early setup may be followed by a failed connect or by logical-stream
     // retirement without a socket error callback. Close that setup exactly once.
     webhook_session_stop();
@@ -620,6 +624,81 @@ void MitmProxy::add_filter(std::string const& name, FilterProxy* fp) {
 }
 
 
+void MitmProxy::finish_server_hooks() {
+
+    // Announce session retirement while endpoint metadata is still available.
+    // The existing baseProxy path remains solely responsible for closing CXs.
+    for(const auto& [cx, server] : servers_) {
+        hook_server_end(cx, {}, true);
+    }
+
+    servers_.clear();
+}
+
+bool MitmProxy::hook_server_connect(baseHostCX* cx) {
+
+    if(!wh_start || !webhook_server_lifecycle_ ||
+       !sx::http::webhooks::is_enabled() || !cx || !dynamic_cast<TCPCom*>(cx->com())) {
+        return true;
+    }
+
+    auto& server = servers_.get_or_create(cx);
+    server = {};
+    server.attempt = ++server_sequence_;
+
+    sx::proxy::ProxyHooks::ServerArgs args;
+    args.cx = cx;
+    args.event = "connect";
+    args.attempt = server.attempt;
+
+    if(!sx::proxy::ProxyHooks::server(*this, args)) {
+        hook_server_end(cx, "Connection rejected by addon");
+        return false;
+    }
+
+    return true;
+}
+
+void MitmProxy::hook_server_connected(baseHostCX* cx) {
+
+    auto* server = servers_.find(cx);
+    if(!server || server->connected || server->finished) {
+        return;
+    }
+
+    server->connected = true;
+
+    sx::proxy::ProxyHooks::ServerArgs args;
+    args.cx = cx;
+    args.event = "connected";
+    args.attempt = server->attempt;
+
+    if(!sx::proxy::ProxyHooks::server(*this, args)) {
+        state().dead(true);
+    }
+}
+
+void MitmProxy::hook_server_end(baseHostCX* cx, std::string_view error,
+                                bool session_ending) {
+
+    auto* server = servers_.find(cx);
+    if(!server || server->finished) {
+        return;
+    }
+
+    server->finished = true;
+
+    sx::proxy::ProxyHooks::ServerArgs args;
+    args.cx = cx;
+    args.event = server->connected ? "disconnected" : "error";
+    args.attempt = server->attempt;
+    args.session_ending = session_ending;
+    args.error = !server->connected && error.empty()
+        ? "Upstream connection closed before TCP completion" : error;
+
+    sx::proxy::ProxyHooks::server(*this, args);
+}
+
 void MitmProxy::readiness_webhook(unsigned char side, baseHostCX* cx,
                                   const char* event, std::uint64_t attempt) {
     sx::proxy::ProxyHooks::ReadinessArgs args;
@@ -643,6 +722,9 @@ void MitmProxy::observe_readiness(unsigned char side, baseHostCX* cx) {
     observed.observe_context(cx->socket(), cx->com(), readiness_sequence_);
     if(!observed.connected && tcp->is_connected(cx->socket())) {
         observed.connected = true;
+        if(side == 'r' || side == 'y') {
+            hook_server_connected(cx);
+        }
         readiness_webhook(side, cx, "tcp-connected", observed.attempt);
     }
     // com_status() also checks readiness of the higher layer, such as TLS.
