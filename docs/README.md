@@ -9,6 +9,8 @@ For help visit:
 
 Feature documentation:
 
+  * [Proxy hooks, transport state and retirement](proxy-hooks.md)
+
   * [SSH MITM configuration and diagnostics](ssh-mitm.md)
   * [Privilege separation](privilege-separation.md)
 
