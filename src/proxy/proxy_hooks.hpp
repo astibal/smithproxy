@@ -88,6 +88,13 @@ public:
         bool alpn_blocked = false;
     };
 
+    struct TlsClientStartArgs {
+        std::uint64_t attempt = 0;
+        std::string_view sni;
+    };
+
+    static bool tls_start_client(MitmProxy& proxy, const TlsClientStartArgs& args);
+
     struct ClientHelloArgs {
         std::uint64_t attempt = 0;
         std::string_view body;
@@ -108,6 +115,8 @@ public:
     static TlsOfferDecision tls_start_server(MitmProxy& proxy, const TlsStartArgs& args);
 
 private:
+    static bool tls_exchange(MitmProxy& proxy, const nlohmann::json& observation);
+
     static TlsOfferDecision tls_offer(MitmProxy& proxy, const ClientHelloArgs& args,
                                          const nlohmann::json& observation);
 

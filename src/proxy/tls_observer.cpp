@@ -22,13 +22,31 @@ socle::ProtocolHookResult TlsObserver::start(baseCom& com) noexcept {
         auto* cx = com.owner_cx();
         auto* proxy = cx ? dynamic_cast<MitmProxy*>(cx->parent_proxy()) : nullptr;
         auto* tls = dynamic_cast<SSLCom*>(&com);
-        if(!proxy || !tls || cx->com() != &com || !proxy->tls_observer_enabled() ||
-           !proxy->webhook_tls_start_server_ || tls->tls_proto_role() != socle::TlsProtoRole::client) {
+        if(!proxy || !tls || cx->com() != &com || !proxy->tls_observer_enabled()) {
             return socle::ProtocolHookResult::Continue;
         }
 
-        // OpenSSL's client role is the addon API's upstream/server leg.
         strict = proxy->webhook_control_->strict();
+
+        // OpenSSL's server role faces the client. This hook observes or vetoes;
+        // certificate selection and handshake scheduling stay native.
+        if(tls->tls_proto_role() == socle::TlsProtoRole::server) {
+            if(!proxy->webhook_tls_start_client_) {
+                return socle::ProtocolHookResult::Continue;
+            }
+
+            ProxyHooks::TlsClientStartArgs args;
+            args.attempt = proxy->tls_lifecycle(*cx).attempt;
+            args.sni = tls->get_sni();
+
+            const bool proceed = ProxyHooks::tls_start_client(*proxy, args);
+            return proceed ? socle::ProtocolHookResult::Continue : socle::ProtocolHookResult::Terminate;
+        }
+
+        // OpenSSL's client role is the addon API's upstream/server leg.
+        if(!proxy->webhook_tls_start_server_) {
+            return socle::ProtocolHookResult::Continue;
+        }
 
         // Catch up a completed TCP connection before reporting TLS start.
         // A pending connection keeps its native handshake scheduling.

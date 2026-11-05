@@ -445,7 +445,12 @@ bool ProxyHooks::start_reply(MitmProxy& proxy, const StartReplyArgs& args) {
                 proxy.webhook_tls_start_server_ = start != control->end() &&
                     start->is_number_integer() && *start == 1;
 
-                proxy.tls_observer_enabled(proxy.webhook_tls_clienthello_ || proxy.webhook_tls_start_server_);
+                const auto client_start = control->find("tls_start_client");
+                proxy.webhook_tls_start_client_ = client_start != control->end() &&
+                    client_start->is_number_integer() && *client_start == 1;
+
+                proxy.tls_observer_enabled(proxy.webhook_tls_clienthello_ ||
+                    proxy.webhook_tls_start_server_ || proxy.webhook_tls_start_client_);
             }
 
             proxy.webhook_rewrite_allowed_ = result.rewrite;
@@ -762,6 +767,24 @@ bool ProxyHooks::tls(MitmProxy& proxy, const TlsArgs& args) {
     };
     auto observation = tls_details(args);
     observation["envelope"] = envelope;
+
+    return tls_exchange(proxy, observation);
+}
+
+bool ProxyHooks::tls_start_client(MitmProxy& proxy, const TlsClientStartArgs& args) {
+
+    const nlohmann::json observation = {
+        {"envelope", {{"version", 1}, {"connection_id", proxy.to_connection_ID()},
+            {"attempt", args.attempt}, {"side", "client"}, {"event", "start"}}},
+        {"sni", args.sni}
+    };
+
+    return tls_exchange(proxy, observation);
+}
+
+bool ProxyHooks::tls_exchange(MitmProxy& proxy, const nlohmann::json& observation) {
+
+    const auto& envelope = observation.at("envelope");
 
     // Preserve callback order before application events. As with server hooks,
     // observer unavailability is fail-open unless strict control was negotiated.
