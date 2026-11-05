@@ -284,6 +284,7 @@ add_executable(smithproxy
         src/service/cfgapi/cfgapi.cpp
         src/service/cfgapi/cfg_lease.cpp
         src/service/cfgapi/cfg_write_gate.cpp
+        src/service/cfgapi/cfg_tx.cpp
         src/service/cfgapi/cfg_update.cpp
         src/service/cfgapi/cfg_revision.cpp
         src/staticcontent.cpp
@@ -600,6 +601,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/service/cfgapi/cfg_lease_tests.cpp
                 src/service/cfgapi/cfg_write_gate.cpp
                 tests/unit/service/cfgapi/cfg_write_gate_tests.cpp
+                src/service/cfgapi/cfg_tx.cpp
+                tests/unit/service/cfgapi/cfg_tx_tests.cpp
                 src/service/cfgapi/cfg_update.cpp
                 tests/unit/service/cfgapi/cfg_update_tests.cpp
                 src/service/cfgapi/cfg_revision.cpp
