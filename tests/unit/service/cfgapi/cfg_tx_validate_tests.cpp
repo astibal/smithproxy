@@ -172,15 +172,15 @@ TEST(CfgTransaction, CommitsPreparedCandidateAndReleasesLease) {
     auto base = board.init_revision(base_config, "startup");
     sx::cfg::CfgWriteGate gate({}, [] { return "lease-token"; });
     std::recursive_mutex config_mutex;
-    std::string installed_snapshot;
+    std::string applied_snapshot;
     auto transaction = tx::Transaction::create(
         board,
         gate,
         config_mutex,
         "gui-session-1",
         base.id,
-        [&installed_snapshot](std::string const& snapshot) -> tx::Result<void> {
-            installed_snapshot = snapshot;
+        [&applied_snapshot](std::string const& snapshot) -> tx::Result<void> {
+            applied_snapshot = snapshot;
             return {};
         });
     ASSERT_TRUE(transaction);
@@ -194,7 +194,7 @@ TEST(CfgTransaction, CommitsPreparedCandidateAndReleasesLease) {
     EXPECT_EQ(board.revision_current(), committed->revision);
     EXPECT_TRUE(board.unsaved());
     EXPECT_FALSE(gate.active());
-    EXPECT_NE(installed_snapshot.find("enabled = false"), std::string::npos);
+    EXPECT_NE(applied_snapshot.find("enabled = false"), std::string::npos);
     auto revision = board.revision(committed->revision);
     ASSERT_TRUE(revision);
     EXPECT_EQ(revision->parent_id, base.id);
@@ -202,20 +202,20 @@ TEST(CfgTransaction, CommitsPreparedCandidateAndReleasesLease) {
     EXPECT_EQ(revision->description, "disable test setting");
 }
 
-TEST(CfgTransaction, RejectsChangedCandidateBeforeInstall) {
+TEST(CfgTransaction, RejectsChangedCandidateBeforeApply) {
     UpdateBoard board;
     auto base = board.init_revision(base_config, "startup");
     sx::cfg::CfgWriteGate gate({}, [] { return "lease-token"; });
     std::recursive_mutex config_mutex;
-    bool installed = false;
+    bool applied = false;
     auto transaction = tx::Transaction::create(
         board,
         gate,
         config_mutex,
         "gui",
         base.id,
-        [&installed](std::string const&) -> tx::Result<void> {
-            installed = true;
+        [&applied](std::string const&) -> tx::Result<void> {
+            applied = true;
             return {};
         });
     ASSERT_TRUE(transaction);
@@ -227,12 +227,12 @@ TEST(CfgTransaction, RejectsChangedCandidateBeforeInstall) {
 
     ASSERT_FALSE(committed);
     EXPECT_EQ(committed.error().code, "candidate_changed");
-    EXPECT_FALSE(installed);
+    EXPECT_FALSE(applied);
     EXPECT_EQ(board.revision_current(), base.id);
     EXPECT_TRUE(gate.active());
 }
 
-TEST(CfgTransaction, KeepsLeaseWhenInstallerFails) {
+TEST(CfgTransaction, KeepsLeaseWhenApplyFails) {
     UpdateBoard board;
     auto base = board.init_revision(base_config, "startup");
     sx::cfg::CfgWriteGate gate({}, [] { return "lease-token"; });
@@ -295,15 +295,15 @@ TEST(CfgTransaction, RejectsCommitAfterLeaseExpires) {
         [&now] { return now; },
         [] { return "lease-token"; });
     std::recursive_mutex config_mutex;
-    bool installed = false;
+    bool applied = false;
     auto transaction = tx::Transaction::create(
         board,
         gate,
         config_mutex,
         "gui",
         base.id,
-        [&installed](std::string const&) -> tx::Result<void> {
-            installed = true;
+        [&applied](std::string const&) -> tx::Result<void> {
+            applied = true;
             return {};
         });
     ASSERT_TRUE(transaction);
@@ -315,6 +315,6 @@ TEST(CfgTransaction, RejectsCommitAfterLeaseExpires) {
 
     ASSERT_FALSE(committed);
     EXPECT_EQ(committed.error().code, "lease_expired");
-    EXPECT_FALSE(installed);
+    EXPECT_FALSE(applied);
     EXPECT_EQ(board.revision_current(), base.id);
 }

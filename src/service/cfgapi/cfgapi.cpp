@@ -6281,6 +6281,124 @@ std::optional<std::string> CfgFactory::snapshot() const {
     return cfgapi_detail::serialize_config(CfgFactory::cfg_obj());
 }
 
+bool CfgFactory::replace_config(std::string const& snapshot) {
+    using namespace libconfig;
+
+    // Parse before touching the running object. Candidate validation already
+    // does this, but direct snapshot application remains safe on its own.
+    try {
+        Config verification;
+        verification.readString(snapshot);
+    }
+    catch(ParseException const& error) {
+        _err("cannot apply configuration snapshot at line %d: %s",
+             error.getLine(), error.getError());
+        return false;
+    }
+
+    std::scoped_lock<std::recursive_mutex> lock(CfgFactory::lock());
+    try {
+        cfgapi.clear();
+        cfgapi.readString(snapshot);
+        return true;
+    }
+    catch(ConfigException const& error) {
+        // Re-parsing verified text should be unreachable. Report it loudly;
+        // apply_snapshot() will restore its previous running snapshot.
+        _err("cannot replace running configuration: %s", error.what());
+        return false;
+    }
+}
+
+bool CfgFactory::apply_config(bool reload) {
+    using namespace libconfig;
+
+    std::scoped_lock<std::recursive_mutex> lock(lock_);
+    try {
+        if(reload) cleanup();
+        const bool had_load_errors = LOAD_ERRORS.load();
+
+        LOAD_ERRORS = false;
+        load_internal();
+        load_db_address();
+        load_db_port();
+        load_db_proto();
+        load_db_prof_detection();
+        load_db_prof_content();
+        load_db_prof_tls();
+        load_db_prof_ssh();
+        load_db_prof_alg_dns();
+        load_db_prof_script();
+        load_db_prof_auth();
+        load_db_routing();
+        load_db_features();
+
+        // Policy is list-backed and must be rebuilt even during initial load.
+        cleanup_db_policy();
+        load_db_policy();
+
+        auto& signatures = SigFactory::get().signature_tree();
+        signatures.reset();
+        signatures.group_add(true);
+        signatures.group_add(true);
+        load_signatures(cfgapi, "starttls_signatures", signatures, 0);
+        load_signatures(cfgapi, "detection_signatures", signatures);
+
+        load_settings();
+        load_captures();
+        load_debug();
+
+        if(had_load_errors && !LOAD_ERRORS) {
+            Log::get()->events().insert(NOT, "Configuration errors have been resolved.");
+        }
+        return true;
+    }
+    catch(SettingNotFoundException const& error) {
+        _fat("Setting not found: %s", error.getPath());
+        return false;
+    }
+}
+
+sx::cfg::tx::Result<void> CfgFactory::apply_snapshot(std::string const& candidate) {
+    auto previous = snapshot();
+    if(!previous) {
+        return sx::cfg::tx::Issue {
+            sx::cfg::tx::Issue::no_operation,
+            "snapshot_failed",
+            {},
+            "Running configuration could not be captured before commit",
+        };
+    }
+
+    bool applied = false;
+    try {
+        applied = replace_config(candidate) && apply_config(true) && !LOAD_ERRORS;
+    }
+    catch(std::exception const& error) {
+        _err("transaction configuration apply failed: %s", error.what());
+    }
+
+    if(applied) return {};
+
+    _err("transaction configuration apply failed; restoring previous running snapshot");
+    try {
+        const bool restored = replace_config(*previous) && apply_config(true) && !LOAD_ERRORS;
+        if(!restored) {
+            _fat("previous running configuration snapshot could not be restored completely");
+        }
+    }
+    catch(std::exception const& error) {
+        _fat("exception while restoring running configuration snapshot: %s", error.what());
+    }
+
+    return sx::cfg::tx::Issue {
+        sx::cfg::tx::Issue::no_operation,
+        "runtime_apply_failed",
+        {},
+        "Candidate could not be applied to the running configuration",
+    };
+}
+
 bool CfgFactory::record_revision(std::string const& source, std::string description) const {
     auto revision_snapshot = snapshot();
     if(!revision_snapshot) return false;

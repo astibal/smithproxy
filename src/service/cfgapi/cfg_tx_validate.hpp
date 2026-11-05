@@ -36,7 +36,7 @@ struct Committed {
 class Transaction {
 public:
     using CreateResult = Result<Transaction>;
-    using Install = std::function<Result<void>(std::string const& snapshot)>;
+    using ApplySnapshot = std::function<Result<void>(std::string const& snapshot)>;
 
     Transaction(Transaction&& other) noexcept;
     Transaction& operator=(Transaction&&) = delete;
@@ -51,21 +51,21 @@ public:
         CfgWriteGate& gate,
         std::recursive_mutex& config_mutex,
         std::string owner,
-        Install install = {});
+        ApplySnapshot apply_snapshot = {});
     static CreateResult create(
         UpdateBoard& board,
         CfgWriteGate& gate,
         std::recursive_mutex& config_mutex,
         std::string owner,
         std::string base_revision,
-        Install install = {});
+        ApplySnapshot apply_snapshot = {});
 
     // Apply and validate operations against the isolated base snapshot. A
     // successful result is ready for the later commit stage.
     Result<Prepared> prepare(Op operation);
     Result<Prepared> prepare(std::vector<Op> operations);
 
-    // Install one prepared candidate into running configuration. Persistence
+    // Apply one prepared candidate to running configuration. Persistence
     // remains an explicit, separate save-config operation.
     Result<Committed> commit(Prepared prepared, std::string description = {});
 
@@ -77,13 +77,13 @@ private:
         CfgWriteGate& gate,
         std::recursive_mutex& config_mutex,
         CfgLease::Grant lease,
-        Install install);
+        ApplySnapshot apply_snapshot);
 
     UpdateBoard& board_;
     CfgWriteGate& gate_;
     std::recursive_mutex& config_mutex_;
     CfgLease::Grant lease_;
-    Install install_;
+    ApplySnapshot apply_snapshot_;
     bool owns_lease_ {true};
 };
 

@@ -158,6 +158,7 @@ public:
     ObjAPI API;
 
 private:
+    bool apply_config_hooks(bool reload);
     bool listener_enabled(LiveListener listener) const;
     bool create_listener_group(LiveListener listener);
     void launch_listener_group(LiveListener listener);

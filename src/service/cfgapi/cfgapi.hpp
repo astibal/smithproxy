@@ -147,14 +147,29 @@ public:
     static std::recursive_mutex& lock() { return get()->lock_; }
     static std::shared_ptr<sx::cfg::CfgWriteGate> write_gate() { return write_gate_; }
     static sx::cfg::tx::Transaction::CreateResult make_transaction(std::string owner) {
+        auto factory = get();
         return sx::cfg::tx::Transaction::create(
-            *board(), *write_gate(), lock(), std::move(owner));
+            *board(),
+            *write_gate(),
+            lock(),
+            std::move(owner),
+            [factory](std::string const& snapshot) {
+                return factory->apply_snapshot(snapshot);
+            });
     }
     static sx::cfg::tx::Transaction::CreateResult make_transaction(
         std::string owner,
         std::string base_revision) {
+        auto factory = get();
         return sx::cfg::tx::Transaction::create(
-            *board(), *write_gate(), lock(), std::move(owner), std::move(base_revision));
+            *board(),
+            *write_gate(),
+            lock(),
+            std::move(owner),
+            std::move(base_revision),
+            [factory](std::string const& snapshot) {
+                return factory->apply_snapshot(snapshot);
+            });
     }
     static libconfig::Setting& cfg_root() { return get()->cfgapi.getRoot(); }
     static libconfig::Config&  cfg_obj() { return get()->cfgapi; }
@@ -450,6 +465,10 @@ public:
 
     [[nodiscard]] bool save_config() const;
     [[nodiscard]] std::optional<std::string> snapshot() const;
+    [[nodiscard]] bool replace_config(std::string const& snapshot);
+    [[nodiscard]] bool apply_config(bool reload);
+    [[nodiscard]] sx::cfg::tx::Result<void> apply_snapshot(
+        std::string const& snapshot);
     // The caller holds a write-gate guard from before the mutation.
     [[nodiscard]] bool record_revision(std::string const& source,
                                        std::string description) const;

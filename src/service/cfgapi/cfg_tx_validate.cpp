@@ -26,19 +26,19 @@ Transaction::Transaction(
     CfgWriteGate& gate,
     std::recursive_mutex& config_mutex,
     CfgLease::Grant lease,
-    Install install)
+    ApplySnapshot apply_snapshot)
     : board_(board),
       gate_(gate),
       config_mutex_(config_mutex),
       lease_(std::move(lease)),
-      install_(std::move(install)) {}
+      apply_snapshot_(std::move(apply_snapshot)) {}
 
 Transaction::Transaction(Transaction&& other) noexcept
     : board_(other.board_),
       gate_(other.gate_),
       config_mutex_(other.config_mutex_),
       lease_(std::move(other.lease_)),
-      install_(std::move(other.install_)),
+      apply_snapshot_(std::move(other.apply_snapshot_)),
       owns_lease_(other.owns_lease_) {
     other.owns_lease_ = false;
 }
@@ -52,14 +52,14 @@ Transaction::CreateResult Transaction::create(
     CfgWriteGate& gate,
     std::recursive_mutex& config_mutex,
     std::string owner,
-    Install install) {
+    ApplySnapshot apply_snapshot) {
     return create(
         board,
         gate,
         config_mutex,
         std::move(owner),
         board.revision_current(),
-        std::move(install));
+        std::move(apply_snapshot));
 }
 
 Transaction::CreateResult Transaction::create(
@@ -68,7 +68,7 @@ Transaction::CreateResult Transaction::create(
     std::recursive_mutex& config_mutex,
     std::string owner,
     std::string base_revision,
-    Install install) {
+    ApplySnapshot apply_snapshot) {
     if(base_revision.empty()) {
         return transaction_issue("missing_base_revision", "Base revision must not be empty");
     }
@@ -91,7 +91,8 @@ Transaction::CreateResult Transaction::create(
             "lease_busy", "Another configuration transaction holds the commit lease");
     }
 
-    return Transaction(board, gate, config_mutex, std::move(*grant), std::move(install));
+    return Transaction(
+        board, gate, config_mutex, std::move(*grant), std::move(apply_snapshot));
 }
 
 Result<Prepared> Transaction::prepare(Op operation) {
@@ -151,9 +152,9 @@ Result<Committed> Transaction::commit(Prepared prepared, std::string description
         return transaction_issue(
             "foreign_candidate", "Prepared candidate belongs to another transaction");
     }
-    if(!install_) {
+    if(!apply_snapshot_) {
         return transaction_issue(
-            "installer_unavailable", "Running configuration installer is not configured");
+            "apply_unavailable", "Running configuration apply function is not configured");
     }
 
     auto hash = sx::crypto::sha256(prepared.snapshot);
@@ -170,8 +171,8 @@ Result<Committed> Transaction::commit(Prepared prepared, std::string description
             "lease_expired", "Commit lease or base revision is no longer valid");
     }
 
-    auto installed = install_(prepared.snapshot);
-    if(!installed) return installed.error();
+    auto applied = apply_snapshot_(prepared.snapshot);
+    if(!applied) return applied.error();
 
     if(description.empty()) {
         description = "commit " + std::to_string(prepared.operation_count) +
