@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -18,9 +20,15 @@ namespace sx::cfg::tx {
 // Server-side candidate prepared for commit. The candidate snapshot remains
 // trusted server data and never needs to make a round trip through a client.
 struct Prepared {
+    std::string transaction_token;
     std::string snapshot;
     std::string content_hash;
     std::size_t operation_count {0};
+};
+
+struct Committed {
+    std::string revision;
+    std::string content_hash;
 };
 
 // A transaction owns its commit lease for its entire lifetime. Creating one
@@ -28,6 +36,7 @@ struct Prepared {
 class Transaction {
 public:
     using CreateResult = Result<Transaction>;
+    using Install = std::function<Result<void>(std::string const& snapshot)>;
 
     Transaction(Transaction&& other) noexcept;
     Transaction& operator=(Transaction&&) = delete;
@@ -37,26 +46,44 @@ public:
 
     // Start on the current revision, or require a specific base revision for
     // callers which decoded it from an API request.
-    static CreateResult create(UpdateBoard& board, CfgWriteGate& gate, std::string owner);
     static CreateResult create(
         UpdateBoard& board,
         CfgWriteGate& gate,
+        std::recursive_mutex& config_mutex,
         std::string owner,
-        std::string base_revision);
+        Install install = {});
+    static CreateResult create(
+        UpdateBoard& board,
+        CfgWriteGate& gate,
+        std::recursive_mutex& config_mutex,
+        std::string owner,
+        std::string base_revision,
+        Install install = {});
 
     // Apply and validate operations against the isolated base snapshot. A
     // successful result is ready for the later commit stage.
     Result<Prepared> prepare(Op operation);
     Result<Prepared> prepare(std::vector<Op> operations);
 
+    // Install one prepared candidate into running configuration. Persistence
+    // remains an explicit, separate save-config operation.
+    Result<Committed> commit(Prepared prepared, std::string description = {});
+
     [[nodiscard]] CfgLease::Grant const& lease() const noexcept;
 
 private:
-    Transaction(UpdateBoard& board, CfgWriteGate& gate, CfgLease::Grant lease);
+    Transaction(
+        UpdateBoard& board,
+        CfgWriteGate& gate,
+        std::recursive_mutex& config_mutex,
+        CfgLease::Grant lease,
+        Install install);
 
     UpdateBoard& board_;
     CfgWriteGate& gate_;
+    std::recursive_mutex& config_mutex_;
     CfgLease::Grant lease_;
+    Install install_;
     bool owns_lease_ {true};
 };
 

@@ -21,13 +21,24 @@ Issue transaction_issue(std::string code, std::string detail) {
 
 }  // namespace
 
-Transaction::Transaction(UpdateBoard& board, CfgWriteGate& gate, CfgLease::Grant lease)
-    : board_(board), gate_(gate), lease_(std::move(lease)) {}
+Transaction::Transaction(
+    UpdateBoard& board,
+    CfgWriteGate& gate,
+    std::recursive_mutex& config_mutex,
+    CfgLease::Grant lease,
+    Install install)
+    : board_(board),
+      gate_(gate),
+      config_mutex_(config_mutex),
+      lease_(std::move(lease)),
+      install_(std::move(install)) {}
 
 Transaction::Transaction(Transaction&& other) noexcept
     : board_(other.board_),
       gate_(other.gate_),
+      config_mutex_(other.config_mutex_),
       lease_(std::move(other.lease_)),
+      install_(std::move(other.install_)),
       owns_lease_(other.owns_lease_) {
     other.owns_lease_ = false;
 }
@@ -39,15 +50,25 @@ Transaction::~Transaction() {
 Transaction::CreateResult Transaction::create(
     UpdateBoard& board,
     CfgWriteGate& gate,
-    std::string owner) {
-    return create(board, gate, std::move(owner), board.revision_current());
+    std::recursive_mutex& config_mutex,
+    std::string owner,
+    Install install) {
+    return create(
+        board,
+        gate,
+        config_mutex,
+        std::move(owner),
+        board.revision_current(),
+        std::move(install));
 }
 
 Transaction::CreateResult Transaction::create(
     UpdateBoard& board,
     CfgWriteGate& gate,
+    std::recursive_mutex& config_mutex,
     std::string owner,
-    std::string base_revision) {
+    std::string base_revision,
+    Install install) {
     if(base_revision.empty()) {
         return transaction_issue("missing_base_revision", "Base revision must not be empty");
     }
@@ -70,7 +91,7 @@ Transaction::CreateResult Transaction::create(
             "lease_busy", "Another configuration transaction holds the commit lease");
     }
 
-    return Transaction(board, gate, std::move(*grant));
+    return Transaction(board, gate, config_mutex, std::move(*grant), std::move(install));
 }
 
 Result<Prepared> Transaction::prepare(Op operation) {
@@ -118,10 +139,55 @@ Result<Prepared> Transaction::prepare(std::vector<Op> operations) {
     }
 
     return Prepared {
+        lease_.token,
         std::move(*snapshot),
         "sha256:" + std::move(*hash),
         operations.size(),
     };
+}
+
+Result<Committed> Transaction::commit(Prepared prepared, std::string description) {
+    if(prepared.transaction_token != lease_.token) {
+        return transaction_issue(
+            "foreign_candidate", "Prepared candidate belongs to another transaction");
+    }
+    if(!install_) {
+        return transaction_issue(
+            "installer_unavailable", "Running configuration installer is not configured");
+    }
+
+    auto hash = sx::crypto::sha256(prepared.snapshot);
+    if(!hash || prepared.content_hash != "sha256:" + *hash) {
+        return transaction_issue(
+            "candidate_changed", "Prepared candidate content no longer matches its hash");
+    }
+
+    // enter() validates the token and base revision while taking the same
+    // writer/config locks used by ordinary configuration mutations.
+    auto guard = gate_.enter(config_mutex_, lease_.token, lease_.base_revision);
+    if(!guard || board_.revision_current() != lease_.base_revision) {
+        return transaction_issue(
+            "lease_expired", "Commit lease or base revision is no longer valid");
+    }
+
+    auto installed = install_(prepared.snapshot);
+    if(!installed) return installed.error();
+
+    if(description.empty()) {
+        description = "commit " + std::to_string(prepared.operation_count) +
+                      " configuration operation(s)";
+    }
+    auto revision = board_.upgrade(
+        lease_.owner, std::move(prepared.snapshot), std::move(description));
+    const auto content_hash = std::move(prepared.content_hash);
+
+    // Release the config/write locks before waking writers waiting on the
+    // lease. The successful transaction no longer owns it afterwards.
+    guard.reset();
+    (void)gate_.release(lease_.token);
+    owns_lease_ = false;
+
+    return Committed {std::move(revision.id), content_hash};
 }
 
 CfgLease::Grant const& Transaction::lease() const noexcept {

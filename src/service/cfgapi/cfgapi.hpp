@@ -147,13 +147,14 @@ public:
     static std::recursive_mutex& lock() { return get()->lock_; }
     static std::shared_ptr<sx::cfg::CfgWriteGate> write_gate() { return write_gate_; }
     static sx::cfg::tx::Transaction::CreateResult make_transaction(std::string owner) {
-        return sx::cfg::tx::Transaction::create(*board(), *write_gate(), std::move(owner));
+        return sx::cfg::tx::Transaction::create(
+            *board(), *write_gate(), lock(), std::move(owner));
     }
     static sx::cfg::tx::Transaction::CreateResult make_transaction(
         std::string owner,
         std::string base_revision) {
         return sx::cfg::tx::Transaction::create(
-            *board(), *write_gate(), std::move(owner), std::move(base_revision));
+            *board(), *write_gate(), lock(), std::move(owner), std::move(base_revision));
     }
     static libconfig::Setting& cfg_root() { return get()->cfgapi.getRoot(); }
     static libconfig::Config&  cfg_obj() { return get()->cfgapi; }
