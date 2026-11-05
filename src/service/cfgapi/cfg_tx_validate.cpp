@@ -102,6 +102,11 @@ Result<Prepared> Transaction::prepare(Op operation) {
 }
 
 Result<Prepared> Transaction::prepare(std::vector<Op> operations) {
+    return prepare(std::move(operations), {});
+}
+
+Result<Prepared> Transaction::prepare(std::vector<Op> operations,
+                                      AddInitializerFactory add_initializer) {
     if(operations.empty()) {
         return transaction_issue("empty_transaction", "Transaction requires at least one operation");
     }
@@ -116,7 +121,17 @@ Result<Prepared> Transaction::prepare(std::vector<Op> operations) {
     if(!candidate) return candidate.error();
 
     for(std::size_t index = 0; index < operations.size(); ++index) {
-        auto applied = candidate->apply(operations[index], index);
+        Result<void> applied;
+        if(auto const* add = std::get_if<Add>(&operations[index]); add && add_initializer) {
+            // Local schema adapters may decorate Add with canonical defaults.
+            // All other operations still use the transport-neutral path.
+            auto initializer = add_initializer(*add);
+            applied = initializer
+                ? candidate->apply(*add, index, initializer)
+                : candidate->apply(operations[index], index);
+        } else {
+            applied = candidate->apply(operations[index], index);
+        }
         if(!applied) return applied.error();
     }
 

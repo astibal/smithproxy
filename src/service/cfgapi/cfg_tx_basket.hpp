@@ -19,6 +19,7 @@ class TxBasket {
 public:
     using Clock = CfgLease::Clock;
     using ClockFn = std::function<Clock::time_point()>;
+    using PrepareFn = std::function<Result<Prepared>(Transaction&, std::vector<Op>)>;
 
     struct Opened {
         std::string token;
@@ -32,7 +33,7 @@ public:
         std::chrono::milliseconds expires_in;
     };
 
-    explicit TxBasket(ClockFn clock = {});
+    explicit TxBasket(ClockFn clock = {}, PrepareFn prepare = {});
 
     // Take ownership of a newly leased transaction and return the opaque
     // token which connects subsequent HTTP requests to this basket entry.
@@ -65,6 +66,7 @@ private:
     static Issue basket_issue(std::string code, std::string detail);
 
     ClockFn clock_;
+    PrepareFn prepare_;
     std::mutex mutex_;
     std::unordered_map<std::string, Entry> entries_;
 };

@@ -37,6 +37,8 @@ class Transaction {
 public:
     using CreateResult = Result<Transaction>;
     using ApplySnapshot = std::function<Result<void>(std::string const& snapshot)>;
+    using AddInitializerFactory =
+        std::function<Candidate::AddInitializer(Add const& operation)>;
 
     Transaction(Transaction&& other) noexcept;
     Transaction& operator=(Transaction&&) = delete;
@@ -64,6 +66,8 @@ public:
     // successful result is ready for the later commit stage.
     Result<Prepared> prepare(Op operation);
     Result<Prepared> prepare(std::vector<Op> operations);
+    Result<Prepared> prepare(std::vector<Op> operations,
+                             AddInitializerFactory add_initializer);
     Result<Prepared> prepare(Add operation, Candidate::AddInitializer initializer);
 
     // Apply one prepared candidate to running configuration. Persistence

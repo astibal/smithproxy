@@ -292,6 +292,38 @@ TEST(CfgTransaction, LocalAddInitializerBuildsDefaultsInsideCandidate) {
     EXPECT_NE(revision->snapshot.find("192.0.2.0/24"), std::string::npos);
 }
 
+TEST(CfgTransaction, AddInitializerFactorySupportsChainedOperations) {
+    UpdateBoard board;
+    auto base = board.init_revision(base_config, "startup");
+    sx::cfg::CfgWriteGate gate({}, [] { return "lease-token"; });
+    std::recursive_mutex config_mutex;
+    auto transaction = tx::Transaction::create(
+        board, gate, config_mutex, "gui-session", base.id);
+    ASSERT_TRUE(transaction);
+
+    std::vector<tx::Op> operations {
+        tx::Add {"address_objects", "office"},
+        tx::Set {"address_objects.office.value", std::string {"192.0.2.0/24"}},
+    };
+    auto prepared = transaction->prepare(
+        std::move(operations),
+        [](tx::Add const& add) -> tx::Candidate::AddInitializer {
+            if(add.path != "address_objects") return {};
+            return [](libconfig::Setting& collection, std::string const& name) {
+                auto& entry = collection.add(name, libconfig::Setting::TypeGroup);
+                entry.add("type", libconfig::Setting::TypeString) = "cidr";
+                entry.add("value", libconfig::Setting::TypeString) = "0.0.0.0/32";
+                return true;
+            };
+        });
+
+    ASSERT_TRUE(prepared);
+    EXPECT_EQ(prepared->operation_count, 2U);
+    EXPECT_NE(prepared->snapshot.find("type = \"cidr\""), std::string::npos);
+    EXPECT_NE(prepared->snapshot.find("192.0.2.0/24"), std::string::npos);
+    EXPECT_EQ(prepared->snapshot.find("0.0.0.0/32"), std::string::npos);
+}
+
 TEST(CfgTransaction, FailedLocalAddInitializerKeepsBaseRevision) {
     UpdateBoard board;
     auto base = board.init_revision(base_config, "startup");

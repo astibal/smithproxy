@@ -15,6 +15,7 @@ constexpr auto base_config = R"cfg(
 settings = {
     enabled = true;
 };
+address_objects = {};
 )cfg";
 
 class CfgTxBasketTest : public testing::Test {
@@ -131,4 +132,33 @@ TEST_F(CfgTxBasketTest, CommitRequiresPrepare) {
     EXPECT_EQ(committed.error().code, "not_prepared");
     EXPECT_EQ(basket.size(), 1U);
     EXPECT_TRUE(gate.active());
+}
+
+TEST_F(CfgTxBasketTest, UsesConfiguredCandidatePreparation) {
+    bool called = false;
+    tx::TxBasket configured_basket {
+        [this] { return now; },
+        [&called](tx::Transaction& active, std::vector<tx::Op> operations) {
+            called = true;
+            return active.prepare(
+                std::move(operations),
+                [](tx::Add const&) -> tx::Candidate::AddInitializer {
+                    return [](libconfig::Setting& collection, std::string const& name) {
+                        auto& entry = collection.add(name, libconfig::Setting::TypeGroup);
+                        entry.add("type", libconfig::Setting::TypeString) = "cidr";
+                        return true;
+                    };
+                });
+        },
+    };
+    auto opened = configured_basket.begin(transaction());
+    ASSERT_TRUE(opened);
+
+    auto prepared = configured_basket.prepare(
+        opened->token,
+        {tx::Add {"address_objects", "office"}});
+
+    EXPECT_TRUE(called);
+    ASSERT_TRUE(prepared);
+    EXPECT_EQ(prepared->operation_count, 1U);
 }

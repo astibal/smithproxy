@@ -155,7 +155,13 @@ namespace tx = sx::cfg::tx;
 tx::TxBasket& tx_basket() {
     // One process-wide basket matches the one process-wide commit lease.
     // Its internal mutex also makes requests from different HTTP workers safe.
-    static tx::TxBasket basket;
+    static tx::TxBasket basket {
+        {},
+        [](tx::Transaction& transaction, std::vector<tx::Op> operations) {
+            return CfgFactory::get()->prepare_operations(
+                transaction, std::move(operations));
+        },
+    };
     return basket;
 }
 

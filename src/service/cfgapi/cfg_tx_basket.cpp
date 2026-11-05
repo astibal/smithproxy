@@ -5,8 +5,12 @@
 
 namespace sx::cfg::tx {
 
-TxBasket::TxBasket(ClockFn clock)
-    : clock_(clock ? std::move(clock) : [] { return Clock::now(); }) {}
+TxBasket::TxBasket(ClockFn clock, PrepareFn prepare)
+    : clock_(clock ? std::move(clock) : [] { return Clock::now(); }),
+      prepare_(prepare ? std::move(prepare)
+                       : [](Transaction& transaction, std::vector<Op> operations) {
+                             return transaction.prepare(std::move(operations));
+                         }) {}
 
 Result<TxBasket::Opened> TxBasket::begin(Transaction::CreateResult transaction) {
     if(!transaction) return transaction.error();
@@ -47,7 +51,7 @@ Result<TxBasket::PreparedInfo> TxBasket::prepare(std::string const& token,
     // A failed re-prepare must not leave an older candidate available for a
     // later commit under the same token.
     entry->second.prepared.reset();
-    auto prepared = entry->second.transaction.prepare(std::move(operations));
+    auto prepared = prepare_(entry->second.transaction, std::move(operations));
     if(!prepared) return prepared.error();
 
     PreparedInfo info {

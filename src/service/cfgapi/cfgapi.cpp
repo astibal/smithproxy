@@ -5189,6 +5189,24 @@ bool CfgFactory::build_new_entry(Setting& collection,
     return false;
 }
 
+bool CfgFactory::supports_new_entry(std::string const& section) const {
+    static const std::set<std::string, std::less<>> sections {
+        "proto_objects",
+        "port_objects",
+        "address_objects",
+        "detection_profiles",
+        "content_profiles",
+        "tls_ca",
+        "tls_profiles",
+        "ssh_profiles",
+        "alg_dns_profiles",
+        "auth_profiles",
+        "policy",
+        "routing",
+    };
+    return sections.find(section) != sections.end();
+}
+
 bool CfgFactory::_apply_new_entry(std::string const& section, std::string const& entry_name) {
     Setting& collection = cfg_root().lookup(section.c_str());
     const bool added = CfgFactory::get()->build_new_entry(collection, section, entry_name);
@@ -5236,6 +5254,22 @@ sx::cfg::tx::Result<sx::cfg::tx::Committed> CfgFactory::commit_new_entry(
             return build_new_entry(collection, section, name);
         },
         std::move(description));
+}
+
+sx::cfg::tx::Result<sx::cfg::tx::Prepared> CfgFactory::prepare_operations(
+    sx::cfg::tx::Transaction& transaction,
+    std::vector<sx::cfg::tx::Op> operations) {
+    // Root Smithproxy collections get their canonical defaults from the same
+    // builders used by CLI. Generic nested Add operations remain empty and can
+    // be populated by later operations in the same candidate.
+    return transaction.prepare(
+        std::move(operations),
+        [this](sx::cfg::tx::Add const& add) -> sx::cfg::tx::Candidate::AddInitializer {
+            if(!supports_new_entry(add.path)) return {};
+            return [this, section = add.path](Setting& collection, std::string const& name) {
+                return build_new_entry(collection, section, name);
+            };
+        });
 }
 
 std::pair<bool, std::string> CfgFactory::cfg_add_prepare_params(std::string const& section, std::vector<std::string>& args) {
