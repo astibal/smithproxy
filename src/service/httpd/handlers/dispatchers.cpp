@@ -10,6 +10,7 @@
 #include <service/httpd/cfg/add.hpp>
 #include <service/httpd/cfg/set.hpp>
 #include <service/httpd/cfg/get.hpp>
+#include <service/httpd/cfg/transaction.hpp>
 
 #include <service/httpd/wh/whcontrol.hpp>
 
@@ -191,6 +192,21 @@ namespace sx::webserver::dispatchers {
     }
 
     void controller_add_uni(lmh::WebServer &server) {
+        const std::array transaction_handlers {
+            std::pair {"/api/config/transaction/begin", &cfg_transaction_begin},
+            std::pair {"/api/config/transaction/prepare", &cfg_transaction_prepare},
+            std::pair {"/api/config/transaction/commit", &cfg_transaction_commit},
+            std::pair {"/api/config/transaction/abort", &cfg_transaction_abort},
+        };
+        for(auto const& [path, callback] : transaction_handlers) {
+            auto* handler = new Http_Responder(
+                "POST",
+                path,
+                authorized::token_protected<Http_JsonResponseParams>(callback));
+            handler->Content_Type = "application/json";
+            server.addController(std::shared_ptr<lmh::Controller>(handler));
+        }
+
         auto* cfg_uni_add = new Http_Responder(
                 "POST",
                 "/api/config/uni/add",

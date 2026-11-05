@@ -286,6 +286,8 @@ add_executable(smithproxy
         src/service/cfgapi/cfg_write_gate.cpp
         src/service/cfgapi/cfg_tx.cpp
         src/service/cfgapi/cfg_tx_validate.cpp
+        src/service/cfgapi/cfg_tx_basket.cpp
+        src/service/httpd/cfg/transaction.cpp
         src/service/cfgapi/cfg_update.cpp
         src/service/cfgapi/cfg_revision.cpp
         src/staticcontent.cpp
@@ -606,6 +608,10 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/service/cfgapi/cfg_tx_tests.cpp
                 src/service/cfgapi/cfg_tx_validate.cpp
                 tests/unit/service/cfgapi/cfg_tx_validate_tests.cpp
+                src/service/cfgapi/cfg_tx_basket.cpp
+                tests/unit/service/cfgapi/cfg_tx_basket_tests.cpp
+                src/service/httpd/cfg/transaction.cpp
+                tests/unit/service/httpd/cfg_transaction_tests.cpp
                 src/service/cfgapi/cfg_update.cpp
                 tests/unit/service/cfgapi/cfg_update_tests.cpp
                 src/service/cfgapi/cfg_revision.cpp
@@ -773,6 +779,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
         target_link_libraries(tls_testbed gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(transfer_testbed gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries (sx_gtests nlohmann_json::nlohmann_json)
+        target_compile_definitions(sx_gtests PRIVATE SX_CFG_TRANSACTION_CODEC_ONLY)
 
         # Focused QUIC integration target. It intentionally avoids the legacy
         # unrelated application tests while keeping the complete MultiFlow,
