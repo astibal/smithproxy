@@ -84,7 +84,7 @@ exclude_labels=()
 ((INCLUDE_BENCHMARKS)) || exclude_labels+=(benchmark)
 ((INCLUDE_EXTENDED)) || exclude_labels+=(extended)
 ((INCLUDE_PLATFORM)) || exclude_labels+=(platform)
-ctest_args=(--test-dir "$BUILD_DIR" --output-on-failure -j"$CTEST_JOBS"
+ctest_args=(--test-dir "$BUILD_DIR" --output-on-failure --no-tests=error -j"$CTEST_JOBS"
     --output-junit "$REPORT_DIR/junit.xml")
 if ((${#exclude_labels[@]})); then
     label_regex=$(IFS='|'; echo "${exclude_labels[*]}")

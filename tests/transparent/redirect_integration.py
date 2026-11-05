@@ -152,6 +152,10 @@ def free_port() -> int:
         return probe.getsockname()[1]
 
 
+class PortBindRace(RuntimeError):
+    """A selected ephemeral port was claimed before Smithproxy could bind it."""
+
+
 def replace_setting(text: str, name: str, value: str) -> str:
     result, count = re.subn(
         rf"(?m)^(\s*{re.escape(name)}\s*=\s*).*$", rf"\g<1>{value}", text, count=1)
@@ -282,7 +286,7 @@ class EchoOrigin:
             raise self.error
 
 
-def run_case(binary: Path, source: Path, runtime: Path, tls: bool,
+def _run_case(binary: Path, source: Path, runtime: Path, tls: bool,
              webhook_port: int, reject_certificate: bool = False,
              listener_tls: bool | None = None, half_close: bool = False,
              http2: bool = False, early_h2_settings: bool = False,
@@ -347,7 +351,7 @@ def run_case(binary: Path, source: Path, runtime: Path, tls: bool,
     config = runtime / f"redirect-{case_name}.cfg"
     runtime_log = runtime / f"redirect-{case_name}.log"
     capture_dir = runtime / f"capture-{case_name}"
-    capture_dir.mkdir()
+    capture_dir.mkdir(exist_ok=True)
     shutil.copyfile(source / "etc/smithproxy.cfg", config)
     text = config.read_text()
     for name, value in (
@@ -435,6 +439,8 @@ def run_case(binary: Path, source: Path, runtime: Path, tls: bool,
         while time.monotonic() < deadline:
             if process.poll() is not None:
                 output, _ = process.communicate()
+                if "error binding redir-tcp on port/path" in output:
+                    raise PortBindRace(output)
                 raise AssertionError(f"smithproxy exited early:\n{output}")
             try:
                 client = socket.create_connection(("127.0.0.1", redirect_port), timeout=.2)
@@ -561,25 +567,37 @@ def run_case(binary: Path, source: Path, runtime: Path, tls: bool,
                 elif b"modified reply" not in response or b"redirect reply" in response:
                     raise AssertionError(f"content replacement mismatch: {bytes(response)!r}")
     finally:
-        failed = sys.exc_info()[0] is not None
+        failure = sys.exc_info()[1]
+        failed = failure is not None
         process.terminate()
         try:
             process.wait(timeout=10)
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=5)
-        if failed and process.stdout:
+        if failed and process.stdout and not process.stdout.closed:
             print(process.stdout.read()[-12000:], file=sys.stderr)
         if failed and runtime_log.exists():
             print(runtime_log.read_text(errors="replace")[-30000:], file=sys.stderr)
         origin.close()
-        if process.returncode not in (0, -15):
-            output = process.stdout.read() if process.stdout else ""
+        if process.returncode not in (0, -15) and not isinstance(failure, PortBindRace):
+            output = (process.stdout.read()
+                      if process.stdout and not process.stdout.closed else "")
             raise AssertionError(f"smithproxy shutdown failed ({process.returncode}):\n{output[-4000:]}")
     captures = [path for path in capture_dir.iterdir()
                 if path.is_file() and path.stat().st_size > 0]
     if not captures:
         raise AssertionError("enabled per-session capture produced no data")
+
+
+def run_case(*args: object, **kwargs: object) -> None:
+    for attempt in range(3):
+        try:
+            _run_case(*args, **kwargs)
+            return
+        except PortBindRace:
+            if attempt == 2:
+                raise
 
 
 def main() -> None:

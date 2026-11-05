@@ -1,0 +1,28 @@
+preamble
+name "Smithproxy upload after client receive shutdown"
+description "Client closes its receive half while a marked upload continues to the origin"
+owner "smithproxy"
+timeout 20s
+begin using tcp
+server at "netns:sxr-origin"
+client at "netns:sxr-client"
+server listen "198.18.20.2:18082"
+client connect "198.18.20.2:18082"
+client half-close-read
+server drain 4MiB stamp-every 4KiB
+client transmit 4MiB stamp-every 4KiB chunk 257B
+client await-tx
+client half-close-write
+server await-rx
+server receive-eot
+server close
+client close
+end
+outcome pass
+when server.rx.bytes == 4MiB
+and server.rx.integrity == valid
+and server.rx.eot == received
+describe "Smithproxy delivered the complete upload after downstream SHUT_RD."
+outcome fail "Smithproxy incorrectly killed the upload after client SHUT_RD."
+outcome timeout "Smithproxy blocked the upload or failed to propagate FIN."
+end

@@ -1,0 +1,4 @@
+# ProxyNightmare source used by the lifecycle profile. Keep this immutable:
+# updates are explicit reviewable changes to both repository and commit.
+PROXY_NIGHTMARE_REPOSITORY=https://github.com/astibal/proxynightmare.git
+PROXY_NIGHTMARE_COMMIT=7a3cd117a55cbf71303a78e2b4fa05d18b74ed00

@@ -1,0 +1,27 @@
+preamble
+name "Smithproxy TLS idle after close_notify"
+description "A half-closed TLS session must sleep without a permanent EPOLLOUT retry"
+owner "smithproxy"
+timeout 20s
+begin using tls
+server at "netns:sxr-origin"
+client at "netns:sxr-client"
+server listen "198.18.20.2:443"
+client connect "198.18.20.2:443"
+client handshake
+client close-notify
+client write-eot
+server receive-eot
+server sleep 2s
+server close
+client close
+end
+outcome pass
+when client.tls.handshake == complete
+and server.tls.handshake == complete
+and server.tls.close-notify == received
+and server.rx.eot == received
+describe "The half-closed TLS session remained idle and closed cleanly."
+outcome fail "TLS close propagation failed."
+outcome timeout "TLS close or the idle hold stalled."
+end
