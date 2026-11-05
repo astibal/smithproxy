@@ -288,6 +288,7 @@ add_executable(smithproxy
         src/service/cfgapi/cfg_tx_validate.cpp
         src/service/cfgapi/cfg_tx_basket.cpp
         src/service/httpd/cfg/transaction.cpp
+        src/service/httpd/cfg/state.cpp
         src/service/cfgapi/cfg_update.cpp
         src/service/cfgapi/cfg_revision.cpp
         src/staticcontent.cpp

@@ -10,6 +10,7 @@
 #include <service/httpd/cfg/add.hpp>
 #include <service/httpd/cfg/set.hpp>
 #include <service/httpd/cfg/get.hpp>
+#include <service/httpd/cfg/state.hpp>
 #include <service/httpd/cfg/transaction.hpp>
 
 #include <service/httpd/wh/whcontrol.hpp>
@@ -192,6 +193,13 @@ namespace sx::webserver::dispatchers {
     }
 
     void controller_add_uni(lmh::WebServer &server) {
+        auto* cfg_state_handler = new Http_Responder(
+            "GET",
+            "/api/config/state",
+            authorized::token_protected<json>(&cfg_state));
+        cfg_state_handler->Content_Type = "application/json";
+        server.addController(std::shared_ptr<lmh::Controller>(cfg_state_handler));
+
         const std::array transaction_handlers {
             std::pair {"/api/config/transaction/begin", &cfg_transaction_begin},
             std::pair {"/api/config/transaction/prepare", &cfg_transaction_prepare},

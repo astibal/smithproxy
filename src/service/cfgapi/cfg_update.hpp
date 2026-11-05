@@ -34,6 +34,12 @@ public:
         std::vector<sx::cfg::CfgRevision> entries;
     };
 
+    struct RevisionState {
+        std::string current_id;
+        std::string saved_id;
+        bool unsaved {false};
+    };
+
     explicit UpdateBoard(std::size_t history_capacity = sx::cfg::CfgRevHistory::default_capacity);
 
     void subscribe(std::string const& subscriber);
@@ -83,6 +89,7 @@ public:
         std::string const& id) const;
     [[nodiscard]] std::vector<sx::cfg::CfgRevision> revisions() const;
     [[nodiscard]] RevisionView revision_view() const;
+    [[nodiscard]] RevisionState revision_state() const;
 
 private:
     using SubscriberMap = std::unordered_map<std::string, UpdateInfo>;

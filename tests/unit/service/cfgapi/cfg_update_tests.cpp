@@ -75,6 +75,22 @@ TEST(UpdateBoard, ReturnsOneConsistentRevisionView) {
     EXPECT_EQ(view.entries.back().id, view.current_id);
 }
 
+TEST(UpdateBoard, ReturnsRevisionStateWithoutCopyingHistory) {
+    UpdateBoard board;
+    auto initial = board.init_revision("settings = {};", "startup");
+
+    auto saved = board.revision_state();
+    EXPECT_EQ(saved.current_id, initial.id);
+    EXPECT_EQ(saved.saved_id, initial.id);
+    EXPECT_FALSE(saved.unsaved);
+
+    auto changed = board.upgrade("cli", "settings = { enabled = true; };", "enable");
+    auto running = board.revision_state();
+    EXPECT_EQ(running.current_id, changed.id);
+    EXPECT_EQ(running.saved_id, initial.id);
+    EXPECT_TRUE(running.unsaved);
+}
+
 TEST(UpdateBoard, FindsRevisionSnapshotById) {
     UpdateBoard board;
     auto revision = board.init_revision("setting = 1;", "startup");

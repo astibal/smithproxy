@@ -164,6 +164,15 @@ UpdateBoard::RevisionView UpdateBoard::revision_view() const {
     return {current_revision_, saved_revision_, history_.entries()};
 }
 
+UpdateBoard::RevisionState UpdateBoard::revision_state() const {
+    std::scoped_lock lock(board_mutex_);
+    return {
+        current_revision_,
+        saved_revision_,
+        current_version_ != saved_version_,
+    };
+}
+
 UpdateBoard::UpdateInfo& UpdateBoard::subscriber_locked(std::string const& subscriber) {
     auto [position, inserted] = subscribers_.try_emplace(
         subscriber,
