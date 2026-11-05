@@ -29,10 +29,88 @@ std::optional<bool> config_bool(std::string value) {
     return std::nullopt;
 }
 
+std::optional<tx::Value> transaction_array_value(
+    libconfig::Setting const& setting,
+    std::vector<std::string> const& arguments,
+    std::string& error) {
+    std::vector<std::string> values;
+    for(auto const& argument : arguments) {
+        auto items = string_split(argument, ',');
+        values.insert(values.end(), items.begin(), items.end());
+    }
+
+    // Validate the complete replacement before converting any element. This
+    // preserves the existing all-or-nothing behavior of CLI array writes.
+    for(auto& value : values) {
+        auto checked = CfgValueHelp::get().value_check(setting.getPath(), value);
+        if(!checked.first) {
+            error = checked.second.empty() ? "invalid array value" : checked.second;
+            return std::nullopt;
+        }
+        value = std::move(*checked.first);
+    }
+
+    auto element_type = libconfig::Setting::TypeString;
+    if(setting.getLength() > 0) {
+        element_type = setting[0].getType();
+    } else if(sx::cfg::integer_array_path(setting.getPath())) {
+        // libconfig forgets the element type of an empty array. These schema
+        // paths are the two arrays which are defined as numeric.
+        element_type = libconfig::Setting::TypeInt;
+    }
+
+    switch(element_type) {
+        case libconfig::Setting::TypeInt:
+        case libconfig::Setting::TypeInt64: {
+            std::vector<std::int64_t> converted;
+            converted.reserve(values.size());
+            for(auto const& value : values) {
+                auto parsed = sx::cfg::parse_number<std::int64_t>(value);
+                if(!parsed) { error = "array value is not an integer"; return std::nullopt; }
+                converted.push_back(*parsed);
+            }
+            return converted;
+        }
+        case libconfig::Setting::TypeBoolean: {
+            std::vector<bool> converted;
+            converted.reserve(values.size());
+            for(auto const& value : values) {
+                auto parsed = config_bool(value);
+                if(!parsed) { error = "array value is not boolean"; return std::nullopt; }
+                converted.push_back(*parsed);
+            }
+            return converted;
+        }
+        case libconfig::Setting::TypeFloat: {
+            std::vector<double> converted;
+            converted.reserve(values.size());
+            for(auto const& value : values) {
+                auto parsed = sx::cfg::parse_number<double>(value);
+                if(!parsed) { error = "array value is not numeric"; return std::nullopt; }
+                converted.push_back(*parsed);
+            }
+            return converted;
+        }
+        case libconfig::Setting::TypeString:
+            return values;
+        case libconfig::Setting::TypeNone:
+        case libconfig::Setting::TypeGroup:
+        case libconfig::Setting::TypeArray:
+        case libconfig::Setting::TypeList:
+            error = "unsupported configuration array element type";
+            return std::nullopt;
+    }
+
+    error = "unsupported configuration array element type";
+    return std::nullopt;
+}
+
 std::optional<tx::Value> transaction_value(
     libconfig::Setting const& setting,
     std::vector<std::string> const& values,
     std::string& error) {
+    if(setting.isArray()) return transaction_array_value(setting, values, error);
+
     std::string value = values.empty() ? std::string {} : values.front();
     auto checked = CfgValueHelp::get().value_check(setting.getPath(), value);
     if(!checked.first) {
@@ -56,10 +134,11 @@ std::optional<tx::Value> transaction_value(
             return value;
         case libconfig::Setting::TypeNone:
         case libconfig::Setting::TypeGroup:
-        case libconfig::Setting::TypeArray:
         case libconfig::Setting::TypeList:
-            error = "transactional set currently supports scalar values only";
+            error = "transactional set supports scalar and array values only";
             return std::nullopt;
+        case libconfig::Setting::TypeArray:
+            break;
     }
 
     error = "value does not match the configuration type";
@@ -299,7 +378,8 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
         auto& setting = CfgFactory::cfg_obj().lookup(section);
         if (!setting.exists(name.c_str())) { error = "unknown property: " + name; return false; }
         auto& property_setting = setting[name.c_str()];
-        if(live_apply == CfgValue::live_apply_t::none && property_setting.isScalar()) {
+        if(live_apply == CfgValue::live_apply_t::none &&
+           (property_setting.isScalar() || property_setting.isArray())) {
             return transaction_set(subscriber_id, property_setting, values, error);
         }
         std::string previous_value;
