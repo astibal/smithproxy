@@ -486,9 +486,11 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
                              error);
     };
     access.remove = [subscriber_id](std::string_view path, const std::vector<std::string>& entries, std::string& error) {
-        auto guard = CfgFactory::write_gate()->enter(CfgFactory::lock());
-        if(!guard) {
-            error = "configuration is locked by an active commit lease";
+        // Acquire the lease before inspecting dependencies. The running
+        // revision and its usage database then remain stable until commit.
+        auto transaction = CfgFactory::make_transaction(subscriber_id);
+        if(!transaction) {
+            error = transaction.error().detail;
             return false;
         }
         const std::string section = unmask(std::string(path));
@@ -503,33 +505,31 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
               })
             : UsageLookup{};
         if (!plan_remove(setting, kind, entries, usage, plan, error)) return false;
-        // Planning validates every entry and dependency before the first mutation.
-        try {
-            for (const int index : plan.indexes_descending) setting.remove(index);
-            for (const auto& name : plan.names) setting.remove(name.c_str());
-        } catch (const libconfig::SettingException& exception) {
-            error = exception.what();
+
+        // Candidate removal repeats structural validation in isolation. The
+        // plan above additionally supplies Smithproxy-specific usage checks.
+        std::vector<std::string> transaction_entries;
+        transaction_entries.reserve(plan.indexes_descending.size() + plan.names.size());
+        for (const int index : plan.indexes_descending) {
+            transaction_entries.push_back(std::to_string(index));
+        }
+        transaction_entries.insert(transaction_entries.end(), plan.names.begin(), plan.names.end());
+
+        auto committed = transaction->commit(
+            tx::Remove {section, std::move(transaction_entries)},
+            "remove " + std::to_string(entries.size()) +
+                (entries.size() == 1 ? " entry from " : " entries from ") + section);
+        if(!committed) {
+            error = committed.error().detail;
             return false;
         }
-        const std::string reload = root_section(section);
-        if (!reload_section(reload)) { error = "entry removed, but live reload failed"; return false; }
-        if (reload != "policy") {
-            CfgFactory::get()->cleanup_db_policy();
-            if (CfgFactory::get()->load_db_policy() < 0) {
-                error = "entry removed, but policy reload failed";
-                return false;
-            }
-        }
-        return record_change(subscriber_id,
-                             "remove " + std::to_string(entries.size()) +
-                                 (entries.size() == 1 ? " entry from " : " entries from ") + section,
-                             error);
+        return true;
     };
     access.move = [subscriber_id](std::string_view path, std::string_view source, std::string_view operation,
                                    std::string_view target, std::string& error) {
-        auto guard = CfgFactory::write_gate()->enter(CfgFactory::lock());
-        if(!guard) {
-            error = "configuration is locked by an active commit lease";
+        auto transaction = CfgFactory::make_transaction(subscriber_id);
+        if(!transaction) {
+            error = transaction.error().detail;
             return false;
         }
         const std::string section = unmask(std::string(path));
@@ -544,15 +544,24 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
         else if (operation == "bottom") to = count - 1;
         else if (!list_index(target, to)) { error = "invalid target index"; return false; }
         if (to < 0 || to >= count) { error = "target index is out of range"; return false; }
-        const auto direction = operation == "after" || operation == "down" || operation == "bottom"
-                                   ? CfgFactory::op_move::OP_MOVE_AFTER : CfgFactory::op_move::OP_MOVE_BEFORE;
-        if (!CfgFactory::get()->move_policy(from, to, direction)) { error = "cannot move policy"; return false; }
-        reload_section(section);
-        return record_change(subscriber_id,
-                             "move policy " + std::string(source) + " " +
-                                 std::string(operation) +
-                                 (target.empty() ? std::string{} : " " + std::string(target)),
-                             error);
+        const auto position = operation == "after" || operation == "down" || operation == "bottom"
+                                ? tx::Position::after : tx::Position::before;
+        const std::string description =
+            "move policy " + std::string(source) + " " + std::string(operation) +
+            (target.empty() ? std::string{} : " " + std::string(target));
+        auto committed = transaction->commit(
+            tx::Move {
+                section,
+                static_cast<std::size_t>(from),
+                position,
+                static_cast<std::size_t>(to),
+            },
+            description);
+        if(!committed) {
+            error = committed.error().detail;
+            return false;
+        }
+        return true;
     };
     return access;
 }

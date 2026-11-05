@@ -17,6 +17,11 @@ settings = {
     enabled = true;
 };
 address_objects = {};
+policy = (
+    { name = "first"; },
+    { name = "second"; },
+    { name = "third"; }
+);
 )cfg";
 
 tx::Request request(std::string revision) {
@@ -224,6 +229,36 @@ TEST(CfgTransaction, ConvenienceCommitPreparesOneOperation) {
     ASSERT_TRUE(revision);
     EXPECT_EQ(revision->description, "set settings.enabled");
     EXPECT_NE(revision->snapshot.find("enabled = false"), std::string::npos);
+}
+
+TEST(CfgTransaction, ConvenienceCommitRemovesAndMovesListEntries) {
+    UpdateBoard board;
+    auto base = board.init_revision(base_config, "startup");
+    sx::cfg::CfgWriteGate gate({}, [] { return "lease-token"; });
+    std::recursive_mutex config_mutex;
+    const auto apply = [](std::string const&) -> tx::Result<void> { return {}; };
+
+    auto remove = tx::Transaction::create(
+        board, gate, config_mutex, "cli-session-1", base.id, apply);
+    ASSERT_TRUE(remove);
+    auto removed = remove->commit(tx::Remove {"policy", {"1"}}, "remove policy entry");
+    ASSERT_TRUE(removed);
+
+    auto move = tx::Transaction::create(
+        board, gate, config_mutex, "cli-session-1", removed->revision, apply);
+    ASSERT_TRUE(move);
+    auto moved = move->commit(
+        tx::Move {"policy", 1, tx::Position::before, 0}, "move policy [1] top");
+    ASSERT_TRUE(moved);
+
+    auto revision = board.revision(moved->revision);
+    ASSERT_TRUE(revision);
+    const auto third = revision->snapshot.find("third");
+    const auto first = revision->snapshot.find("first");
+    EXPECT_NE(third, std::string::npos);
+    EXPECT_NE(first, std::string::npos);
+    EXPECT_LT(third, first);
+    EXPECT_EQ(revision->snapshot.find("second"), std::string::npos);
 }
 
 TEST(CfgTransaction, RejectsChangedCandidateBeforeApply) {
