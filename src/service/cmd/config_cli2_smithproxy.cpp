@@ -453,26 +453,36 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
         return set(path, property, CfgValueCleaner::toggle(current, toggles), error);
     };
     access.add = [subscriber_id](std::string_view path, const std::vector<std::string>& input, std::string& error) {
-        auto guard = CfgFactory::write_gate()->enter(CfgFactory::lock());
-        if(!guard) {
-            error = "configuration is locked by an active commit lease";
-            return false;
-        }
         auto arguments = input;
         const std::string section = unmask(std::string(path));
         const auto kind = collection_kind(section);
         if (kind == ConfigCollectionKind::none) { error = "add is not supported for this section"; return false; }
 
         if (kind == ConfigCollectionKind::named_objects || section == "policy") {
+            auto transaction = CfgFactory::make_transaction(subscriber_id);
+            if(!transaction) {
+                error = transaction.error().detail;
+                return false;
+            }
             auto [prepared, note] = CfgFactory::cfg_add_prepare_params(section, arguments);
             if (!prepared) { error = note; return false; }
-            auto [added, message] = CfgFactory::get()->cfg_add_entry(section, arguments.front());
-            if (!added) { error = message; return false; }
-            return record_change(subscriber_id,
-                                 "add " + section + "." + arguments.front(),
-                                 error);
+            auto committed = CfgFactory::get()->commit_new_entry(
+                *transaction,
+                section,
+                arguments.front(),
+                "add " + section + "." + arguments.front());
+            if(!committed) {
+                error = committed.error().detail;
+                return false;
+            }
+            return true;
         }
 
+        auto guard = CfgFactory::write_gate()->enter(CfgFactory::lock());
+        if(!guard) {
+            error = "configuration is locked by an active commit lease";
+            return false;
+        }
         if (!CfgFactory::cfg_obj().exists(section)) { error = "unknown configuration section"; return false; }
         auto& list = CfgFactory::cfg_root().lookup(section);
         if (!add_ordered_entry(list, section, arguments, error)) return false;

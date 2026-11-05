@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -134,6 +135,8 @@ public:
     using ApplyResult = Result<void>;
     using LoadResult = Result<Candidate>;
     using SnapshotResult = Result<std::string>;
+    using AddInitializer =
+        std::function<bool(libconfig::Setting& collection, std::string const& name)>;
 
     Candidate(Candidate&&) noexcept = default;
     Candidate& operator=(Candidate&&) noexcept = default;
@@ -145,6 +148,13 @@ public:
     // Apply one operation to this candidate only. The index is carried into
     // Issue so a caller can identify the failing item in an operation chain.
     ApplyResult apply(Op const& operation, std::size_t operation_index);
+
+    // Trusted local schema adapters may initialize a newly added entry with
+    // their canonical defaults. Remote transaction requests use apply(Op)
+    // and therefore cannot inject an arbitrary initializer.
+    ApplyResult apply(Add const& operation,
+                      std::size_t operation_index,
+                      AddInitializer const& initializer);
 
     // Serialize and parse the result once more. Success means the complete
     // candidate can be persisted and reconstructed by libconfig.

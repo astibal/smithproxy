@@ -261,6 +261,66 @@ TEST(CfgTransaction, ConvenienceCommitRemovesAndMovesListEntries) {
     EXPECT_EQ(revision->snapshot.find("second"), std::string::npos);
 }
 
+TEST(CfgTransaction, LocalAddInitializerBuildsDefaultsInsideCandidate) {
+    UpdateBoard board;
+    auto base = board.init_revision(base_config, "startup");
+    sx::cfg::CfgWriteGate gate({}, [] { return "lease-token"; });
+    std::recursive_mutex config_mutex;
+    auto transaction = tx::Transaction::create(
+        board,
+        gate,
+        config_mutex,
+        "cli-session-1",
+        base.id,
+        [](std::string const&) -> tx::Result<void> { return {}; });
+    ASSERT_TRUE(transaction);
+
+    auto committed = transaction->commit(
+        tx::Add {"address_objects", "office"},
+        [](libconfig::Setting& collection, std::string const& name) {
+            auto& entry = collection.add(name, libconfig::Setting::TypeGroup);
+            entry.add("type", libconfig::Setting::TypeString) = "cidr";
+            entry.add("value", libconfig::Setting::TypeString) = "192.0.2.0/24";
+            return true;
+        },
+        "add address_objects.office");
+
+    ASSERT_TRUE(committed);
+    auto revision = board.revision(committed->revision);
+    ASSERT_TRUE(revision);
+    EXPECT_NE(revision->snapshot.find("office"), std::string::npos);
+    EXPECT_NE(revision->snapshot.find("192.0.2.0/24"), std::string::npos);
+}
+
+TEST(CfgTransaction, FailedLocalAddInitializerKeepsBaseRevision) {
+    UpdateBoard board;
+    auto base = board.init_revision(base_config, "startup");
+    sx::cfg::CfgWriteGate gate({}, [] { return "lease-token"; });
+    std::recursive_mutex config_mutex;
+    bool applied = false;
+    auto transaction = tx::Transaction::create(
+        board,
+        gate,
+        config_mutex,
+        "cli-session-1",
+        base.id,
+        [&applied](std::string const&) -> tx::Result<void> {
+            applied = true;
+            return {};
+        });
+    ASSERT_TRUE(transaction);
+
+    auto committed = transaction->commit(
+        tx::Add {"address_objects", "office"},
+        [](libconfig::Setting&, std::string const&) { return false; });
+
+    ASSERT_FALSE(committed);
+    EXPECT_EQ(committed.error().code, "initialization_failed");
+    EXPECT_EQ(board.revision_current(), base.id);
+    EXPECT_FALSE(applied);
+    EXPECT_TRUE(gate.active());
+}
+
 TEST(CfgTransaction, RejectsChangedCandidateBeforeApply) {
     UpdateBoard board;
     auto base = board.init_revision(base_config, "startup");

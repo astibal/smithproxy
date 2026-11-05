@@ -120,7 +120,27 @@ Result<Prepared> Transaction::prepare(std::vector<Op> operations) {
         if(!applied) return applied.error();
     }
 
-    auto snapshot = candidate->snapshot();
+    return finish_prepare(std::move(*candidate), operations.size());
+}
+
+Result<Prepared> Transaction::prepare(Add operation, Candidate::AddInitializer initializer) {
+    auto revision = board_.revision(lease_.base_revision);
+    if(!revision) {
+        return transaction_issue(
+            "revision_unavailable", "Base revision snapshot is no longer available");
+    }
+
+    auto candidate = Candidate::load(revision->snapshot);
+    if(!candidate) return candidate.error();
+
+    auto applied = candidate->apply(operation, 0, initializer);
+    if(!applied) return applied.error();
+    return finish_prepare(std::move(*candidate), 1);
+}
+
+Result<Prepared> Transaction::finish_prepare(Candidate candidate,
+                                             std::size_t operation_count) {
+    auto snapshot = candidate.snapshot();
     if(!snapshot) return snapshot.error();
 
     auto hash = sx::crypto::sha256(*snapshot);
@@ -143,12 +163,20 @@ Result<Prepared> Transaction::prepare(std::vector<Op> operations) {
         lease_.token,
         std::move(*snapshot),
         "sha256:" + std::move(*hash),
-        operations.size(),
+        operation_count,
     };
 }
 
 Result<Committed> Transaction::commit(Op operation, std::string description) {
     auto prepared = prepare(std::move(operation));
+    if(!prepared) return prepared.error();
+    return commit(std::move(*prepared), std::move(description));
+}
+
+Result<Committed> Transaction::commit(Add operation,
+                                      Candidate::AddInitializer initializer,
+                                      std::string description) {
+    auto prepared = prepare(std::move(operation), std::move(initializer));
     if(!prepared) return prepared.error();
     return commit(std::move(*prepared), std::move(description));
 }

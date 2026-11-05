@@ -320,7 +320,8 @@ Candidate::ApplyResult apply_set(libconfig::Config& config,
 
 Candidate::ApplyResult apply_add(libconfig::Config& config,
                                  Add const& operation,
-                                 std::size_t index) {
+                                 std::size_t index,
+                                 Candidate::AddInitializer const* initializer = nullptr) {
     if(operation.path.empty()) {
         return unexpected(issue(index, "empty_path", {}, "Add path must not be empty"));
     }
@@ -350,11 +351,27 @@ Candidate::ApplyResult apply_add(libconfig::Config& config,
                 return unexpected(issue(
                     index, "duplicate_entry", operation.path, "Entry already exists: " + operation.name));
             }
-            parent->add(operation.name, libconfig::Setting::TypeGroup);
+            if(initializer) {
+                if(!(*initializer)(*parent, operation.name)) {
+                    return unexpected(issue(
+                        index, "initialization_failed", operation.path,
+                        "Configuration factory could not initialize the new entry"));
+                }
+            } else {
+                parent->add(operation.name, libconfig::Setting::TypeGroup);
+            }
             return {};
         }
         if(parent->getType() == libconfig::Setting::TypeList) {
-            parent->add(libconfig::Setting::TypeGroup);
+            if(initializer) {
+                if(!(*initializer)(*parent, operation.name)) {
+                    return unexpected(issue(
+                        index, "initialization_failed", operation.path,
+                        "Configuration factory could not initialize the new entry"));
+                }
+            } else {
+                parent->add(libconfig::Setting::TypeGroup);
+            }
             return {};
         }
     } catch(libconfig::SettingException const& exception) {
@@ -512,6 +529,17 @@ Candidate::ApplyResult Candidate::apply(Op const& operation,
             }
         },
         operation);
+}
+
+Candidate::ApplyResult Candidate::apply(Add const& operation,
+                                        std::size_t operation_index,
+                                        AddInitializer const& initializer) {
+    if(!initializer) {
+        return unexpected(issue(
+            operation_index, "missing_initializer", operation.path,
+            "Local add operation requires a configuration initializer"));
+    }
+    return apply_add(*config_, operation, operation_index, &initializer);
 }
 
 Candidate::SnapshotResult Candidate::snapshot() {

@@ -64,12 +64,16 @@ public:
     // successful result is ready for the later commit stage.
     Result<Prepared> prepare(Op operation);
     Result<Prepared> prepare(std::vector<Op> operations);
+    Result<Prepared> prepare(Add operation, Candidate::AddInitializer initializer);
 
     // Apply one prepared candidate to running configuration. Persistence
     // remains an explicit, separate save-config operation.
     // The Op overload is the one-command convenience path: it prepares and
     // validates the operation before forwarding the result to the same commit.
     Result<Committed> commit(Op operation, std::string description = {});
+    Result<Committed> commit(Add operation,
+                             Candidate::AddInitializer initializer,
+                             std::string description = {});
     Result<Committed> commit(Prepared prepared, std::string description = {});
 
     [[nodiscard]] CfgLease::Grant const& lease() const noexcept;
@@ -81,6 +85,8 @@ private:
         std::recursive_mutex& config_mutex,
         CfgLease::Grant lease,
         ApplySnapshot apply_snapshot);
+
+    Result<Prepared> finish_prepare(Candidate candidate, std::size_t operation_count);
 
     UpdateBoard& board_;
     CfgWriteGate& gate_;

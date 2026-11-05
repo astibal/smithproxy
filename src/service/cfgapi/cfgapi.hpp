@@ -171,6 +171,11 @@ public:
                 return factory->apply_snapshot(snapshot);
             });
     }
+    sx::cfg::tx::Result<sx::cfg::tx::Committed> commit_new_entry(
+        sx::cfg::tx::Transaction& transaction,
+        std::string const& section,
+        std::string const& entry_name,
+        std::string description);
     static libconfig::Setting& cfg_root() { return get()->cfgapi.getRoot(); }
     static libconfig::Config&  cfg_obj() { return get()->cfgapi; }
 
@@ -349,6 +354,9 @@ public:
 
     static std::pair<bool, std::string> cfg_add_prepare_params(std::string const& section, std::vector<std::string>& args);
     std::pair<bool, std::string> cfg_add_entry(std::string const& section_name, std::string const& entry_name);
+    bool build_new_entry(libconfig::Setting& collection,
+                         std::string const& section,
+                         std::string const& entry_name) const;
     static bool _apply_new_entry(std::string const& section, std::string const& entry_name);
 
     bool write_value(libconfig::Setting& setting, std::optional<std::string> string_value, libconfig::Setting::Type add_as_type = libconfig::Setting::TypeNone);

@@ -5147,90 +5147,71 @@ size_t CfgFactory::section_list_size(std::string const& section) const {
     return 0;
 }
 
-bool CfgFactory::_apply_new_entry(std::string const& section, std::string const& entry_name) {
-
-    bool added = false;
-
-    Setting &s = cfg_root().lookup(section.c_str());
+bool CfgFactory::build_new_entry(Setting& collection,
+                                 std::string const& section,
+                                 std::string const& entry_name) const {
     if(section == "proto_objects") {
-        if (CfgFactory::get()->new_proto_object(s, entry_name)) {
-            added = true;
-            CfgFactory::get()->load_db_proto();
-        }
+        return new_proto_object(collection, entry_name);
     }
     else if(section == "port_objects") {
-        if (CfgFactory::get()->new_port_object(s, entry_name)) {
-            added = true;
-            CfgFactory::get()->load_db_port();
-        }
+        return new_port_object(collection, entry_name);
     }
     else if(section == "address_objects") {
-        if (CfgFactory::get()->new_address_object(s, entry_name)) {
-            added = true;
-            CfgFactory::get()->load_db_address();
-        }
+        return new_address_object(collection, entry_name);
     }
     else if(section == "detection_profiles") {
-        if (CfgFactory::get()->new_detection_profile(s, entry_name)) {
-            added = true;
-            CfgFactory::get()->load_db_prof_detection();
-        }
+        return new_detection_profile(collection, entry_name);
     }
     else if(section == "content_profiles") {
-        if (CfgFactory::get()->new_content_profile(s, entry_name)) {
-            added = true;
-            CfgFactory::get()->load_db_prof_content();
-        }
+        return new_content_profile(collection, entry_name);
     }
     else if(section == "tls_ca") {
-        if (CfgFactory::get()->new_tls_ca(s, entry_name)) {
-            added = true;
-            // missing load_db_tls_ca
-        }
+        return new_tls_ca(collection, entry_name);
     }
     else if(section == "tls_profiles") {
-        if (CfgFactory::get()->new_tls_profile(s, entry_name)) {
-            added = true;
-            CfgFactory::get()->load_db_prof_tls();
-        }
+        return new_tls_profile(collection, entry_name);
     }
     else if(section == "ssh_profiles") {
-        if (CfgFactory::get()->new_ssh_profile(s, entry_name)) {
-            added = true;
-            CfgFactory::get()->load_db_prof_ssh();
-        }
+        return new_ssh_profile(collection, entry_name);
     }
     else if(section == "alg_dns_profiles") {
-        if (CfgFactory::get()->new_alg_dns_profile(s, entry_name)) {
-            added = true;
-            CfgFactory::get()->load_db_prof_alg_dns();
-        }
+        return new_alg_dns_profile(collection, entry_name);
     }
     else if(section == "auth_profiles") {
-        if (CfgFactory::get()->new_auth_profile(s, entry_name)) {
-            added = true;
-            CfgFactory::get()->load_db_prof_auth();
-        }
+        return new_auth_profile(collection, entry_name);
     }
     else if(section == "policy") {
-        // policy is unnamed list, ignore argument and add index
-        if (CfgFactory::get()->new_policy(s, string_format("[%d]", CfgFactory::get()->db_policy_list.size()))) {
-            added = true;
-
-            // policy is a list - it must be cleared before loaded again
-            CfgFactory::get()->cleanup_db_policy();
-            CfgFactory::get()->load_db_policy();
-        }
+        return new_policy(collection, entry_name);
     }
     else if(section == "routing") {
-        if (CfgFactory::get()->new_routing(s, entry_name)) {
-            added = true;
-            // policy is a list - it must be cleared before loaded again
-            CfgFactory::get()->load_db_routing();
-        }
+        return new_routing(collection, entry_name);
+    }
+    return false;
+}
+
+bool CfgFactory::_apply_new_entry(std::string const& section, std::string const& entry_name) {
+    Setting& collection = cfg_root().lookup(section.c_str());
+    const bool added = CfgFactory::get()->build_new_entry(collection, section, entry_name);
+    if(!added) return false;
+
+    // Legacy direct writers still need their narrow reload. Transactional
+    // writers rebuild the complete runtime when their candidate is applied.
+    if(section == "proto_objects") CfgFactory::get()->load_db_proto();
+    else if(section == "port_objects") CfgFactory::get()->load_db_port();
+    else if(section == "address_objects") CfgFactory::get()->load_db_address();
+    else if(section == "detection_profiles") CfgFactory::get()->load_db_prof_detection();
+    else if(section == "content_profiles") CfgFactory::get()->load_db_prof_content();
+    else if(section == "tls_profiles") CfgFactory::get()->load_db_prof_tls();
+    else if(section == "ssh_profiles") CfgFactory::get()->load_db_prof_ssh();
+    else if(section == "alg_dns_profiles") CfgFactory::get()->load_db_prof_alg_dns();
+    else if(section == "auth_profiles") CfgFactory::get()->load_db_prof_auth();
+    else if(section == "routing") CfgFactory::get()->load_db_routing();
+    else if(section == "policy") {
+        CfgFactory::get()->cleanup_db_policy();
+        CfgFactory::get()->load_db_policy();
     }
 
-    if(added && cfgapi_detail::policy_dependency_section(section)) {
+    if(cfgapi_detail::policy_dependency_section(section)) {
         // A rule which referenced this previously missing object was loaded
         // as a fail-closed degraded rule. Rebuild it now so live policy
         // reflects the dependency which the CLI has just created.
@@ -5239,6 +5220,22 @@ bool CfgFactory::_apply_new_entry(std::string const& section, std::string const&
     }
 
     return added;
+}
+
+sx::cfg::tx::Result<sx::cfg::tx::Committed> CfgFactory::commit_new_entry(
+    sx::cfg::tx::Transaction& transaction,
+    std::string const& section,
+    std::string const& entry_name,
+    std::string description) {
+    // The initializer runs only against the isolated candidate. It reuses the
+    // same canonical defaults as legacy CLI/API creation without touching the
+    // running configuration before commit.
+    return transaction.commit(
+        sx::cfg::tx::Add {section, entry_name},
+        [this, section](Setting& collection, std::string const& name) {
+            return build_new_entry(collection, section, name);
+        },
+        std::move(description));
 }
 
 std::pair<bool, std::string> CfgFactory::cfg_add_prepare_params(std::string const& section, std::vector<std::string>& args) {
