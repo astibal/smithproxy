@@ -202,6 +202,30 @@ TEST(CfgTransaction, CommitsPreparedCandidateAndReleasesLease) {
     EXPECT_EQ(revision->description, "disable test setting");
 }
 
+TEST(CfgTransaction, ConvenienceCommitPreparesOneOperation) {
+    UpdateBoard board;
+    auto base = board.init_revision(base_config, "startup");
+    sx::cfg::CfgWriteGate gate({}, [] { return "lease-token"; });
+    std::recursive_mutex config_mutex;
+    auto transaction = tx::Transaction::create(
+        board,
+        gate,
+        config_mutex,
+        "cli-session-1",
+        base.id,
+        [](std::string const&) -> tx::Result<void> { return {}; });
+    ASSERT_TRUE(transaction);
+
+    auto committed = transaction->commit(
+        tx::Set {"settings.enabled", false}, "set settings.enabled");
+
+    ASSERT_TRUE(committed);
+    auto revision = board.revision(committed->revision);
+    ASSERT_TRUE(revision);
+    EXPECT_EQ(revision->description, "set settings.enabled");
+    EXPECT_NE(revision->snapshot.find("enabled = false"), std::string::npos);
+}
+
 TEST(CfgTransaction, RejectsChangedCandidateBeforeApply) {
     UpdateBoard board;
     auto base = board.init_revision(base_config, "startup");

@@ -147,6 +147,12 @@ Result<Prepared> Transaction::prepare(std::vector<Op> operations) {
     };
 }
 
+Result<Committed> Transaction::commit(Op operation, std::string description) {
+    auto prepared = prepare(std::move(operation));
+    if(!prepared) return prepared.error();
+    return commit(std::move(*prepared), std::move(description));
+}
+
 Result<Committed> Transaction::commit(Prepared prepared, std::string description) {
     if(prepared.transaction_token != lease_.token) {
         return transaction_issue(

@@ -2,6 +2,7 @@
 #include "config_cli2_schema.hpp"
 
 #include <service/cfgapi/cfgapi.hpp>
+#include <service/cfgapi/cfg_numeric.hpp>
 #include <service/cfgapi/cfgvalue.hpp>
 #include <service/core/smithproxy.hpp>
 #include <inspect/sigfactory.hpp>
@@ -15,6 +16,88 @@
 using namespace smithproxy::config_cli;
 
 namespace {
+
+namespace tx = sx::cfg::tx;
+
+std::optional<bool> config_bool(std::string value) {
+    if(value.empty()) return true;
+    value = string_tolower(value);
+    if(value == "true" || value == "1" || value == "yes" || value == "y" || value == "t")
+        return true;
+    if(value == "false" || value == "0" || value == "no" || value == "n" || value == "f")
+        return false;
+    return std::nullopt;
+}
+
+std::optional<tx::Value> transaction_value(
+    libconfig::Setting const& setting,
+    std::vector<std::string> const& values,
+    std::string& error) {
+    std::string value = values.empty() ? std::string {} : values.front();
+    auto checked = CfgValueHelp::get().value_check(setting.getPath(), value);
+    if(!checked.first) {
+        error = checked.second.empty() ? "invalid value" : checked.second;
+        return std::nullopt;
+    }
+    value = std::move(*checked.first);
+
+    switch(setting.getType()) {
+        case libconfig::Setting::TypeInt:
+        case libconfig::Setting::TypeInt64:
+            if(auto parsed = sx::cfg::parse_number<std::int64_t>(value)) return *parsed;
+            break;
+        case libconfig::Setting::TypeBoolean:
+            if(auto parsed = config_bool(value)) return *parsed;
+            break;
+        case libconfig::Setting::TypeFloat:
+            if(auto parsed = sx::cfg::parse_number<double>(value)) return *parsed;
+            break;
+        case libconfig::Setting::TypeString:
+            return value;
+        case libconfig::Setting::TypeNone:
+        case libconfig::Setting::TypeGroup:
+        case libconfig::Setting::TypeArray:
+        case libconfig::Setting::TypeList:
+            error = "transactional set currently supports scalar values only";
+            return std::nullopt;
+    }
+
+    error = "value does not match the configuration type";
+    return std::nullopt;
+}
+
+bool transaction_set(
+    std::string const& subscriber_id,
+    libconfig::Setting const& setting,
+    std::vector<std::string> const& values,
+    std::string& error) {
+    // CLI arguments are text. Convert them to the exact libconfig scalar type
+    // before they enter the transaction layer, so Set never relies on an
+    // ambiguous string conversion.
+    auto value = transaction_value(setting, values, error);
+    if(!value) return false;
+
+    // Creating a Transaction captures the current revision and acquires its
+    // commit lease. Until this object is destroyed or committed, no other
+    // configuration writer can change that revision underneath us.
+    auto transaction = CfgFactory::make_transaction(subscriber_id);
+    if(!transaction) {
+        error = transaction.error().detail;
+        return false;
+    }
+
+    // The single-operation convenience form performs both remaining phases:
+    // it prepares and validates an isolated candidate, then atomically applies
+    // it to running config and records the resulting revision.
+    const std::string path = setting.getPath();
+    auto committed = transaction->commit(
+        tx::Set {path, std::move(*value)}, "set " + path);
+    if(!committed) {
+        error = committed.error().detail;
+        return false;
+    }
+    return true;
+}
 
 std::string unmask(std::string path) {
     sx::str::string_replace_all(path, ".[x]", "");
@@ -215,6 +298,10 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
         if (!CfgFactory::cfg_obj().exists(section)) { error = "unknown configuration section"; return false; }
         auto& setting = CfgFactory::cfg_obj().lookup(section);
         if (!setting.exists(name.c_str())) { error = "unknown property: " + name; return false; }
+        auto& property_setting = setting[name.c_str()];
+        if(live_apply == CfgValue::live_apply_t::none && property_setting.isScalar()) {
+            return transaction_set(subscriber_id, property_setting, values, error);
+        }
         std::string previous_value;
         if (is_worker_action(live_apply))
             previous_value = std::to_string(static_cast<int>(setting[name.c_str()]));
