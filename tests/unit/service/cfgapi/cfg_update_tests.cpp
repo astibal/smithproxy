@@ -75,6 +75,17 @@ TEST(UpdateBoard, ReturnsOneConsistentRevisionView) {
     EXPECT_EQ(view.entries.back().id, view.current_id);
 }
 
+TEST(UpdateBoard, FindsRevisionSnapshotById) {
+    UpdateBoard board;
+    auto revision = board.init_revision("setting = 1;", "startup");
+
+    auto found = board.revision(revision.id);
+
+    ASSERT_TRUE(found);
+    EXPECT_EQ(found->snapshot, "setting = 1;");
+    EXPECT_FALSE(board.revision("missing-revision"));
+}
+
 TEST(UpdateBoard, ReloadCreatesANewRunningAndSavedRevision) {
     UpdateBoard board;
     auto const initial = board.init_revision("setting = 1;", "startup");

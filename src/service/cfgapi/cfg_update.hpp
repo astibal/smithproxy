@@ -79,6 +79,8 @@ public:
     [[nodiscard]] bool unsaved() const;
     [[nodiscard]] std::string revision_current() const;
     [[nodiscard]] std::string revision_saved() const;
+    [[nodiscard]] std::optional<sx::cfg::CfgRevision> revision(
+        std::string const& id) const;
     [[nodiscard]] std::vector<sx::cfg::CfgRevision> revisions() const;
     [[nodiscard]] RevisionView revision_view() const;
 

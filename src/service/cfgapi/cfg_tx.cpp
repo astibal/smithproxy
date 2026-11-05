@@ -487,7 +487,7 @@ Candidate::LoadResult Candidate::load(std::string const& snapshot) {
         config->readString(snapshot);
     } catch(libconfig::ParseException const& exception) {
         return unexpected(issue(
-            0,
+            Issue::no_operation,
             "invalid_snapshot",
             {},
             "libconfig parse error on line " + std::to_string(exception.getLine()) +
@@ -518,7 +518,10 @@ Candidate::SnapshotResult Candidate::snapshot() {
     auto serialized = cfgapi_detail::serialize_config(*config_);
     if(!serialized) {
         return unexpected(issue(
-            0, "serialization_failed", {}, "Candidate configuration cannot be serialized"));
+            Issue::no_operation,
+            "serialization_failed",
+            {},
+            "Candidate configuration cannot be serialized"));
     }
 
     // Parsing the serialized bytes catches any result which libconfig could
@@ -529,7 +532,7 @@ Candidate::SnapshotResult Candidate::snapshot() {
         verification.readString(*serialized);
     } catch(libconfig::ParseException const& exception) {
         return unexpected(issue(
-            0,
+            Issue::no_operation,
             "serialization_failed",
             {},
             "Serialized candidate cannot be parsed on line " +

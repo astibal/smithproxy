@@ -45,6 +45,7 @@
 #include <mutex>
 #include <chrono>
 #include <optional>
+#include <utility>
  
 #include <libconfig.h++>
 #include <ext/libcidr/cidr.hpp>
@@ -55,6 +56,7 @@
 
 #include "cfg_update.hpp"
 #include "cfg_write_gate.hpp"
+#include "cfg_tx_validate.hpp"
 
 
 
@@ -144,6 +146,15 @@ public:
 
     static std::recursive_mutex& lock() { return get()->lock_; }
     static std::shared_ptr<sx::cfg::CfgWriteGate> write_gate() { return write_gate_; }
+    static sx::cfg::tx::Transaction::CreateResult make_transaction(std::string owner) {
+        return sx::cfg::tx::Transaction::create(*board(), *write_gate(), std::move(owner));
+    }
+    static sx::cfg::tx::Transaction::CreateResult make_transaction(
+        std::string owner,
+        std::string base_revision) {
+        return sx::cfg::tx::Transaction::create(
+            *board(), *write_gate(), std::move(owner), std::move(base_revision));
+    }
     static libconfig::Setting& cfg_root() { return get()->cfgapi.getRoot(); }
     static libconfig::Config&  cfg_obj() { return get()->cfgapi; }
 

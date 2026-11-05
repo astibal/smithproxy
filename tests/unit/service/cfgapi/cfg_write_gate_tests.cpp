@@ -108,6 +108,21 @@ TEST(CfgWriteGate, ExpiredLeaseAllowsOrdinaryWriter) {
     EXPECT_TRUE(gate.enter(config_mutex));
 }
 
+TEST(CfgWriteGate, ValidChecksLeaseAndCurrentRevisionTogether) {
+    auto now = sx::cfg::CfgLease::Clock::time_point {};
+    sx::cfg::CfgWriteGate gate(
+        [&now] { return now; },
+        [] { return "lease-token"; });
+    ASSERT_TRUE(gate.acquire(
+        "revision-1", "gui", [] { return "revision-1"; }, 15s));
+
+    EXPECT_TRUE(gate.valid("lease-token", "revision-1", [] { return "revision-1"; }));
+    EXPECT_FALSE(gate.valid("lease-token", "revision-1", [] { return "revision-2"; }));
+
+    now += 15s;
+    EXPECT_FALSE(gate.valid("lease-token", "revision-1", [] { return "revision-1"; }));
+}
+
 TEST(CfgWriteGate, GuardCanReleaseOnlyTheConfigMutex) {
     sx::cfg::CfgWriteGate gate;
     std::recursive_mutex config_mutex;

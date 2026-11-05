@@ -150,6 +150,11 @@ std::string UpdateBoard::revision_saved() const {
     return saved_revision_;
 }
 
+std::optional<sx::cfg::CfgRevision> UpdateBoard::revision(
+    std::string const& id) const {
+    return history_.find(id);
+}
+
 std::vector<sx::cfg::CfgRevision> UpdateBoard::revisions() const {
     return history_.entries();
 }

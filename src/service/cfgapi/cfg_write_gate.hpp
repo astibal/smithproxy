@@ -67,6 +67,13 @@ public:
         CurrentRevision current_revision,
         CfgLease::Clock::duration ttl = CfgLease::default_ttl);
 
+    // Check the lease and its base revision as one gate operation while
+    // ordinary writers are stopped.
+    [[nodiscard]] bool valid(
+        std::string const& token,
+        std::string const& base_revision,
+        CurrentRevision current_revision);
+
     [[nodiscard]] bool release(std::string const& token);
     [[nodiscard]] std::optional<CfgLease::Grant> active();
 

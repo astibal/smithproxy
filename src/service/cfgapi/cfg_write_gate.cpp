@@ -127,6 +127,18 @@ std::optional<CfgLease::Grant> CfgWriteGate::acquire(
     return lease_.acquire(std::move(base_revision), std::move(owner), ttl);
 }
 
+bool CfgWriteGate::valid(
+    std::string const& token,
+    std::string const& base_revision,
+    CurrentRevision current_revision) {
+    if(!current_revision) {
+        throw std::invalid_argument("configuration write gate requires a revision reader");
+    }
+
+    std::scoped_lock locks(control_mutex_, writer_mutex_);
+    return lease_.valid(token, base_revision) && current_revision() == base_revision;
+}
+
 bool CfgWriteGate::release(std::string const& token) {
     bool released = false;
     {

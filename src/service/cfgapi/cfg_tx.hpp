@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -69,8 +70,11 @@ struct Request {
 };
 
 struct Issue {
+    static constexpr std::size_t no_operation = std::numeric_limits<std::size_t>::max();
+
     // Zero-based position in Request::operations which produced the error.
-    std::size_t operation {0};
+    // Request-level errors use no_operation.
+    std::size_t operation {no_operation};
 
     // Stable machine-readable category suitable for an API response.
     std::string code;
