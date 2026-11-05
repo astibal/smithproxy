@@ -69,7 +69,10 @@ namespace sx::webserver {
         auto cfg_name = jsonize::load_json_params<std::string>(req, "name").value_or("");
         auto changeset = jsonize::load_json_params<json>(req, "changeset");
 
-        auto locks = std::scoped_lock(CfgFactory::write_lock(), CfgFactory::lock());
+        auto guard = CfgFactory::write_gate()->enter(CfgFactory::lock());
+        if(not guard) {
+            return {{"error", "configuration is locked by an active commit lease"}};
+        }
 
 
         if(section_name.empty() or cfg_name.empty() or not changeset.has_value()) {

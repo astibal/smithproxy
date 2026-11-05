@@ -649,7 +649,12 @@ void register_smithproxy_cli2_commands(libcli2::Cli& cli, std::string subscriber
         .argument({"force", "Save even when the input configuration contained errors", false, false, {},
                    [](std::string_view value) { return value == "force"; }})
         .handler([subscriber_id, refresh_prompt](libcli2::Context& context, const libcli2::Invocation& invocation) {
-            auto locks = std::scoped_lock(CfgFactory::write_lock(), CfgFactory::lock());
+            auto guard = CfgFactory::write_gate()->enter(CfgFactory::lock());
+            if(!guard) {
+                context.print(context.decor().error(
+                    "Configuration is locked by an active commit lease"));
+                return -1;
+            }
             const bool force = !invocation.arguments.empty();
             if (CfgFactory::LOAD_ERRORS && !force) {
                 const auto d = context.decor();
@@ -677,7 +682,12 @@ void register_smithproxy_cli2_commands(libcli2::Cli& cli, std::string subscriber
         .help("Reload configuration file")
         .available_if(privileged)
         .handler([subscriber_id, refresh_prompt](libcli2::Context& context, const libcli2::Invocation&) {
-            auto locks = std::scoped_lock(CfgFactory::write_lock(), CfgFactory::lock());
+            auto guard = CfgFactory::write_gate()->enter(CfgFactory::lock());
+            if(!guard) {
+                context.print(context.decor().error(
+                    "Configuration is locked by an active commit lease"));
+                return -1;
+            }
             const bool loaded = SmithProxy::instance().load_config(CfgFactory::get()->config_file, true);
             if (!loaded) {
                 context.print(context.decor().error("Configuration file reload FAILED"));

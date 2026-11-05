@@ -72,7 +72,10 @@ namespace sx::webserver {
 
         if(not section_name.empty() and not varname.empty()) {
             json ret;
-            auto locks = std::scoped_lock(CfgFactory::write_lock(), CfgFactory::lock());
+            auto guard = CfgFactory::write_gate()->enter(CfgFactory::lock());
+            if(not guard) {
+                return {{"error", "configuration is locked by an active commit lease"}};
+            }
 
             std::vector<std::string> args;
             args.emplace_back(varname);

@@ -192,9 +192,11 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
     };
     access.set = [subscriber_id](std::string_view path, std::string_view property,
                                        const std::vector<std::string>& values, std::string& error) {
-        std::unique_lock writer(CfgFactory::write_lock(), std::defer_lock);
-        std::unique_lock lock(CfgFactory::lock(), std::defer_lock);
-        std::lock(writer, lock);
+        auto guard = CfgFactory::write_gate()->enter(CfgFactory::lock());
+        if(!guard) {
+            error = "configuration is locked by an active commit lease";
+            return false;
+        }
         const std::string section(path);
         std::string name(property);
         auto metadata = CfgValueHelp::get().find(section + "." + name);
@@ -220,13 +222,13 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
         if (!written) { error = message.empty() ? "cannot write value" : message; return false; }
         if (!CfgFactory::get()->apply_config_change(setting.getPath()))
             error = "value stored, but live apply failed";
-        lock.unlock();
         // Listener operations may block for a drain, so never hold the configuration
         // mutex while waiting for their threads.
         if (is_listener_action(live_apply) &&
-            !SmithProxy::instance().apply_listener_setting(live_listener(live_apply),
-                                                            previous_enabled)) {
-            lock.lock();
+            !guard->while_config_unlocked([&] {
+                return SmithProxy::instance().apply_listener_setting(
+                    live_listener(live_apply), previous_enabled);
+            })) {
             auto& rollback_setting = CfgFactory::cfg_obj().lookup(section);
             CfgFactory::get()->cfg_write_value(rollback_setting, false, name,
                                                {previous_enabled ? "true" : "false"});
@@ -236,14 +238,16 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
         }
         if (is_worker_action(live_apply)) {
             const auto workers = live_workers(live_apply);
-            if (!SmithProxy::instance().apply_worker_setting(workers)) {
+            if (!guard->while_config_unlocked([&] {
+                    return SmithProxy::instance().apply_worker_setting(workers);
+                })) {
                 // Restore both the stored value and the running listener topology.
-                lock.lock();
                 auto& rollback_setting = CfgFactory::cfg_obj().lookup(section);
                 CfgFactory::get()->cfg_write_value(rollback_setting, false, name, {previous_value});
                 CfgFactory::get()->load_settings();
-                lock.unlock();
-                SmithProxy::instance().apply_worker_setting(workers);
+                guard->while_config_unlocked([&] {
+                    return SmithProxy::instance().apply_worker_setting(workers);
+                });
                 error = "worker change failed; value rolled back";
                 return false;
             }
@@ -282,7 +286,11 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
         return set(path, property, CfgValueCleaner::toggle(current, toggles), error);
     };
     access.add = [subscriber_id](std::string_view path, const std::vector<std::string>& input, std::string& error) {
-        std::scoped_lock locks(CfgFactory::write_lock(), CfgFactory::lock());
+        auto guard = CfgFactory::write_gate()->enter(CfgFactory::lock());
+        if(!guard) {
+            error = "configuration is locked by an active commit lease";
+            return false;
+        }
         auto arguments = input;
         const std::string section = unmask(std::string(path));
         const auto kind = collection_kind(section);
@@ -311,7 +319,11 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
                              error);
     };
     access.remove = [subscriber_id](std::string_view path, const std::vector<std::string>& entries, std::string& error) {
-        std::scoped_lock locks(CfgFactory::write_lock(), CfgFactory::lock());
+        auto guard = CfgFactory::write_gate()->enter(CfgFactory::lock());
+        if(!guard) {
+            error = "configuration is locked by an active commit lease";
+            return false;
+        }
         const std::string section = unmask(std::string(path));
         const auto kind = collection_kind(section);
         if (!CfgFactory::cfg_obj().exists(section)) { error = "unknown configuration section"; return false; }
@@ -348,7 +360,11 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
     };
     access.move = [subscriber_id](std::string_view path, std::string_view source, std::string_view operation,
                                    std::string_view target, std::string& error) {
-        std::scoped_lock locks(CfgFactory::write_lock(), CfgFactory::lock());
+        auto guard = CfgFactory::write_gate()->enter(CfgFactory::lock());
+        if(!guard) {
+            error = "configuration is locked by an active commit lease";
+            return false;
+        }
         const std::string section = unmask(std::string(path));
         if (section != "policy") { error = "move is currently supported only for policy"; return false; }
         int from = -1;

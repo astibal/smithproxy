@@ -54,6 +54,7 @@
 #include <traflog/pcaplog.hpp>
 
 #include "cfg_update.hpp"
+#include "cfg_write_gate.hpp"
 
 
 
@@ -106,13 +107,10 @@ class CfgFactory : public CfgFactoryBase {
 
     libconfig::Config cfgapi;
     std::recursive_mutex lock_;
-    // Serializes complete configuration changes. Unlike lock_, this remains
-    // held while a writer temporarily releases the config mutex for runtime
-    // operations such as listener drain.
-    std::mutex write_lock_;
 
     static inline std::shared_ptr<CfgFactory> self;
     static inline std::shared_ptr<UpdateBoard> update_board;
+    static inline std::shared_ptr<sx::cfg::CfgWriteGate> write_gate_;
 
 public:
     // Each version bump implies a config upgrade - we start on 1000
@@ -132,6 +130,7 @@ public:
     static void init() {
         self = std::make_shared<CfgFactory>();
         update_board = std::make_shared<UpdateBoard>();
+        write_gate_ = std::make_shared<sx::cfg::CfgWriteGate>();
     }
 
     static std::shared_ptr<CfgFactory> get() {
@@ -144,7 +143,7 @@ public:
 
 
     static std::recursive_mutex& lock() { return get()->lock_; }
-    static std::mutex& write_lock() { return get()->write_lock_; }
+    static std::shared_ptr<sx::cfg::CfgWriteGate> write_gate() { return write_gate_; }
     static libconfig::Setting& cfg_root() { return get()->cfgapi.getRoot(); }
     static libconfig::Config&  cfg_obj() { return get()->cfgapi; }
 
@@ -439,7 +438,7 @@ public:
 
     [[nodiscard]] bool save_config() const;
     [[nodiscard]] std::optional<std::string> snapshot() const;
-    // The caller holds write_lock() from before the configuration mutation.
+    // The caller holds a write-gate guard from before the mutation.
     [[nodiscard]] bool record_revision(std::string const& source,
                                        std::string description) const;
 
