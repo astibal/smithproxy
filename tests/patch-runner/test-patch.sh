@@ -38,7 +38,7 @@ Options:
                      rtt, session-list and quic,
                      distributed sections are available: smoke, privsep, tls-policy, routing,
                      rtt, transfer, tls-throughput, quic, tcp-churn, udp-churn, capture,
-                     corpus-regular, corpus-edge, corpus-insanity and fuzz.AREA.
+                     corpus-CATEGORY[.1-.4] and fuzz.AREA.
                      Use with a test profile.
   --local            Add this computer as an explicit execution target.
   --remote HOST      Add an SSH execution target. Repeat for distributed profiles
@@ -389,6 +389,7 @@ FUZZ_AREAS=(h1 h2 tls socks5 dns quic redis mqtt smtp imap pop3 ftp ssh websocke
 source "$HERE/profile-plan.sh"
 case "$ONLY_SUITE" in
     ''|tls|transfer|tls-throughput|starttls|policy|routing|rtt|session-list|quic|smoke|privsep|tls-policy|tcp-churn|udp-churn|capture|lifecycle|corpus-regular|corpus-edge|corpus-insanity) ;;
+    corpus-regular.[1-4]|corpus-edge.[1-4]|corpus-insanity.[1-4]) ;;
     fuzz.*)
         fuzz_spec=${ONLY_SUITE#fuzz.}
         fuzz_area=${fuzz_spec%%.*}
@@ -527,10 +528,11 @@ run_native_tests() {
 
 write_sections_markdown() {
     {
-        echo '| Section | Target | Result | Reason |'
-        echo '|---|---|---:|---|'
-        tail -n +2 "$REPORT/sections.tsv" | while IFS=$'\t' read -r section target display rc reason child_report; do
-            printf '| %s | %s | %s | %s |\n' "$section" "$target" "$display" "$reason"
+        echo '| Section | Target | Result | Duration (ms) | Reason |'
+        echo '|---|---|---:|---:|---|'
+        tail -n +2 "$REPORT/sections.tsv" | while IFS=$'\t' read -r section target display rc reason child_report duration_ms; do
+            printf '| %s | %s | %s | %s | %s |\n' "$section" "$target" "$display" \
+                "${duration_ms:--}" "$reason"
         done
     } > "$REPORT/sections.md"
 }
@@ -538,7 +540,8 @@ write_sections_markdown() {
 run_distributed_sections() {
     local -a sections=() main_sections=() batch_pids=()
     local -A target_manifest=()
-    local section target target_label manifest seeds output rc_file rc display child_report reason
+    local section target target_label manifest seeds output rc_file rc display child_report reason duration_ms
+    local started_ns finished_ns
     local any_fail=0 any_flaky=0 index=0 batch_rc=0
     local bundle_local="$WORK_DIR/coordinator-bundle-$RUN_ID"
     local bundle_remote="$WORK_DIR/coordinator-bundle-$RUN_ID"
@@ -557,19 +560,22 @@ run_distributed_sections() {
         "$bundle_local/tests" "$bundle_local/etc/msg" "$bundle_local/tools/wireshark" \
         "$bundle_local/tests/docs" "$bundle_local/build" "$manifest_dir"
     : > "$REPORT/test.log"
-    printf 'section\ttarget\tresult\trc\treason\treport\n' > "$REPORT/sections.tsv"
+    printf 'section\ttarget\tresult\trc\treason\treport\tduration_ms\n' > "$REPORT/sections.tsv"
 
     if patch_runner_profile_has_native "$PROFILE"; then
         echo 'SECTION START: native target=local-coordinator'
+        started_ns=$(date +%s%N)
         set +e
         run_native_tests 0 > "$REPORT/sections/native.log" 2>&1
         rc=$?
         set -e
+        finished_ns=$(date +%s%N)
+        duration_ms=$(( (finished_ns - started_ns) / 1000000 ))
         if ((rc != 0)); then
             reason=$(grep -E '(^FAIL|failure|FAILED|[Ee]rror)' "$REPORT/sections/native.log" | tail -1 || true)
             [[ -n $reason ]] || reason="native tests exited with rc=$rc"
-            printf 'native\tlocal-coordinator\tFAIL\t%s\t%s\t%s\n' \
-                "$rc" "$reason" "$REPORT/native" >> "$REPORT/sections.tsv"
+            printf 'native\tlocal-coordinator\tFAIL\t%s\t%s\t%s\t%s\n' \
+                "$rc" "$reason" "$REPORT/native" "$duration_ms" >> "$REPORT/sections.tsv"
             { echo '===== section: native target=local-coordinator (FAIL) ====='; cat "$REPORT/sections/native.log"; } >> "$REPORT/test.log"
             echo "SECTION DONE: native target=local-coordinator rc=$rc"
             write_sections_markdown
@@ -577,8 +583,8 @@ run_distributed_sections() {
             TEST_RC=1
             return
         fi
-        printf 'native\tlocal-coordinator\tPASS\t0\tall checks passed\t%s\n' \
-            "$REPORT/native" >> "$REPORT/sections.tsv"
+        printf 'native\tlocal-coordinator\tPASS\t0\tall checks passed\t%s\t%s\n' \
+            "$REPORT/native" "$duration_ms" >> "$REPORT/sections.tsv"
         { echo '===== section: native target=local-coordinator (PASS) ====='; cat "$REPORT/sections/native.log"; echo; } >> "$REPORT/test.log"
         echo 'SECTION DONE: native target=local-coordinator rc=0'
     fi
@@ -686,7 +692,7 @@ run_distributed_sections() {
         set -e
         if ((rc != 0)); then
             reason=$(tail -1 "$REPORT/targets/stage-$target_label.log" || true)
-            printf 'stage-bundle\t%s\tFAIL\t%s\t%s\t%s\n' "$target" "$rc" "${reason:-remote bundle staging failed}" "$REPORT/targets/stage-$target_label.log" >> "$REPORT/sections.tsv"
+            printf 'stage-bundle\t%s\tFAIL\t%s\t%s\t%s\t-\n' "$target" "$rc" "${reason:-remote bundle staging failed}" "$REPORT/targets/stage-$target_label.log" >> "$REPORT/sections.tsv"
             STATUS=FAIL; TEST_RC=1
             return
         fi
@@ -746,6 +752,8 @@ run_distributed_sections() {
             else
                 cp "$output_dir/$job.rc" "$REPORT/sections/$job.rc"
                 cp "$output_dir/$job.log" "$REPORT/sections/$job.log"
+                [[ ! -f $output_dir/$job.duration-ms ]] || \
+                    cp "$output_dir/$job.duration-ms" "$REPORT/sections/$job.duration-ms"
             fi
         done < "$jobs"
         return 0
@@ -790,7 +798,7 @@ run_distributed_sections() {
         target=$(<"$REPORT/sections/$section.target")
         if [[ ! -f $rc_file ]]; then
             printf '%s\n' SKIP > "$REPORT/sections/$section.status"
-            printf '%s\t%s\tSKIP\t-\tblocked by smoke failure\t-\n' "$section" "$target" >> "$REPORT/sections.tsv"
+            printf '%s\t%s\tSKIP\t-\tblocked by smoke failure\t-\t-\n' "$section" "$target" >> "$REPORT/sections.tsv"
             continue
         fi
         rc=$(<"$rc_file")
@@ -811,17 +819,20 @@ run_distributed_sections() {
         else
             display=PASS; reason='all checks passed'
         fi
+        duration_ms=-
+        [[ ! -f $REPORT/sections/$section.duration-ms ]] || \
+            duration_ms=$(<"$REPORT/sections/$section.duration-ms")
         printf '%s\n' "$display" > "$REPORT/sections/$section.status"
-        printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$section" "$target" "$display" "$rc" "$reason" "${child_report:--}" >> "$REPORT/sections.tsv"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$section" "$target" "$display" "$rc" "$reason" "${child_report:--}" "$duration_ms" >> "$REPORT/sections.tsv"
         { echo "===== section: $section target=$target ($display) ====="; cat "$output"; echo; } >> "$REPORT/test.log"
     done
 
-    if [[ -f $REPORT/sections/corpus-regular.rc ]]; then
+    if compgen -G "$REPORT/sections/corpus-*.rc" >/dev/null; then
         CORPUS_SELECTED=$(grep -hE '^family=IPv[46] ' "$REPORT/sections/"corpus-*.log 2>/dev/null | \
             awk '{for (i=1;i<=NF;i++) if ($i ~ /^(passed|flaky|failed|xfailed)=/) {split($i,a,"="); n+=a[2]}} END {print n+0}') || CORPUS_SELECTED=0
         if ((CORPUS_SELECTED == 0)); then
             any_fail=1
-            printf 'corpus-selection\t-\tFAIL\t2\tno corpus case matched MATCH/EXCLUDE\t-\n' >> "$REPORT/sections.tsv"
+            printf 'corpus-selection\t-\tFAIL\t2\tno corpus case matched MATCH/EXCLUDE\t-\t-\n' >> "$REPORT/sections.tsv"
         fi
     fi
     write_sections_markdown
@@ -1082,9 +1093,20 @@ print(*(x.getsockname()[1] for x in s))'
             tcp-churn) LAB_ENV+=("BASE_TRAFFIC_TEST=0" "TCP_CHURN_TEST=1") ;;
             udp-churn) LAB_ENV+=("BASE_TRAFFIC_TEST=0" "UDP_CHURN_TEST=1") ;;
             capture) LAB_ENV+=("CAPTURE_TEST=1" "HTTP2_OBSERVABILITY_TEST=1" "CAPTURE_MATRIX_TEST=1") ;;
-            corpus-regular) LAB_ENV+=("BASE_TRAFFIC_TEST=0" "PPLAY_SUITE_SKIP_RUN=0" "PPLAY_SUITE_CATEGORY=regular" "PPLAY_RESULTS_NAME=corpus-regular" "PPLAY_SUITE_EXCLUDE=capture_*" "PPLAY_SUITE_ALLOW_EMPTY=1") ;;
-            corpus-edge) LAB_ENV+=("BASE_TRAFFIC_TEST=0" "PPLAY_SUITE_SKIP_RUN=0" "PPLAY_SUITE_CATEGORY=edge" "PPLAY_RESULTS_NAME=corpus-edge" "PPLAY_SUITE_EXCLUDE=capture_*" "PPLAY_SUITE_ALLOW_EMPTY=1") ;;
-            corpus-insanity) LAB_ENV+=("BASE_TRAFFIC_TEST=0" "PPLAY_SUITE_SKIP_RUN=0" "PPLAY_SUITE_CATEGORY=insanity" "PPLAY_RESULTS_NAME=corpus-insanity" "PPLAY_SUITE_EXCLUDE=capture_*" "PPLAY_SUITE_ALLOW_EMPTY=1") ;;
+            corpus-regular|corpus-edge|corpus-insanity|corpus-regular.[1-4]|corpus-edge.[1-4]|corpus-insanity.[1-4])
+                corpus_spec=${ONLY_SUITE#corpus-}
+                corpus_category=${corpus_spec%%.*}
+                corpus_shard=1
+                corpus_shard_count=1
+                if [[ $corpus_spec == *.* ]]; then
+                    corpus_shard=${corpus_spec##*.}
+                    corpus_shard_count=4
+                fi
+                LAB_ENV+=("BASE_TRAFFIC_TEST=0" "PPLAY_SUITE_SKIP_RUN=0"
+                    "PPLAY_SUITE_CATEGORY=$corpus_category" "PPLAY_RESULTS_NAME=$ONLY_SUITE"
+                    "PPLAY_SUITE_SHARD_COUNT=$corpus_shard_count" "PPLAY_SUITE_SHARD_INDEX=$corpus_shard"
+                    "PPLAY_SUITE_EXCLUDE=capture_*" "PPLAY_SUITE_ALLOW_EMPTY=1")
+                ;;
             fuzz.*)
                 fuzz_spec=${ONLY_SUITE#fuzz.}
                 fuzz_area=${fuzz_spec%%.*}
@@ -1164,7 +1186,30 @@ fi
 
 TCP_SUMMARY=$(grep -E '^TCP churn:' "$REPORT/test.log" 2>/dev/null | tail -2 | paste -sd ';' - || true)
 UDP_SUMMARY=$(grep -E '^UDP churn:' "$REPORT/test.log" 2>/dev/null | tail -2 | paste -sd ';' - || true)
-CORPUS_SUMMARY=$(grep -E '^(family=IPv[46] )?passed=' "$REPORT/test.log" 2>/dev/null | tail -2 | paste -sd ';' - || true)
+CORPUS_SUMMARY=$(
+    grep -hE '^family=IPv[46] ' "$REPORT/sections"/corpus-*.log 2>/dev/null | awk '
+        {
+            family=$1
+            seen[family]=1
+            for (i=2; i<=NF; i++) {
+                split($i, item, "=")
+                if (item[1] ~ /^(passed|flaky|failed|xfailed|xpassed)$/)
+                    total[family,item[1]] += item[2]
+            }
+        }
+        END {
+            split("family=IPv4 family=IPv6", families)
+            split("passed flaky failed xfailed xpassed", keys)
+            for (f=1; f<=2; f++) if (seen[families[f]]) {
+                if (printed++) printf ";"
+                printf "%s", families[f]
+                for (k=1; k<=5; k++) printf " %s=%d", keys[k], total[families[f],keys[k]]
+            }
+        }' || true
+)
+if [[ -z $CORPUS_SUMMARY ]]; then
+    CORPUS_SUMMARY=$(grep -E '^(family=IPv[46] )?passed=' "$REPORT/test.log" 2>/dev/null | tail -2 | paste -sd ';' - || true)
+fi
 CAPTURE_MATRIX_SUMMARY=$(grep -E '^Capture matrix summary:' "$REPORT/test.log" 2>/dev/null | tail -2 | paste -sd ';' - || true)
 RTT_SUMMARY=$(grep -E '^RTT summary:' "$REPORT/test.log" 2>/dev/null | tail -2 | paste -sd ';' - || true)
 TLS_TRANSFER_SUMMARY=$(grep -E '^TLS transfer:' "$REPORT/test.log" 2>/dev/null | paste -sd ';' - || true)

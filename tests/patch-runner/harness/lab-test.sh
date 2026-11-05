@@ -1092,6 +1092,8 @@ if [[ -n ${PPLAY_SUITE:-} && ${PPLAY_SUITE_SKIP_RUN:-0} != 1 ]]; then
         EXCLUDE="$PPLAY_CORPUS_EXCLUDE" \
         FUZZ_LEVEL="${FUZZ_LEVEL:-}" FUZZ_SEEDS="${FUZZ_SEEDS:-}" \
         FUZZ_AREA="${PPLAY_FUZZ_AREA:-}" \
+        SHARD_COUNT="${PPLAY_SUITE_SHARD_COUNT:-1}" \
+        SHARD_INDEX="${PPLAY_SUITE_SHARD_INDEX:-1}" \
         SCATTER="${FUZZ_SCATTER:-0}" \
         RESULTS="$ROOT/results/${PPLAY_RESULTS_NAME:-pplay-suite}-v4" \
         SMITHPROXY_PID_FILE="$ROOT/data/proxy.pid" \
@@ -1104,6 +1106,8 @@ if [[ -n ${PPLAY_SUITE:-} && ${PPLAY_SUITE_SKIP_RUN:-0} != 1 ]]; then
         EXCLUDE="$PPLAY_CORPUS_EXCLUDE" \
         FUZZ_LEVEL="${FUZZ_LEVEL:-}" FUZZ_SEEDS="${FUZZ_SEEDS:-}" \
         FUZZ_AREA="${PPLAY_FUZZ_AREA:-}" \
+        SHARD_COUNT="${PPLAY_SUITE_SHARD_COUNT:-1}" \
+        SHARD_INDEX="${PPLAY_SUITE_SHARD_INDEX:-1}" \
         SCATTER="${FUZZ_SCATTER:-0}" \
         RESULTS="$ROOT/results/${PPLAY_RESULTS_NAME:-pplay-suite}-v6" \
         SMITHPROXY_PID_FILE="$ROOT/data/proxy.pid" \

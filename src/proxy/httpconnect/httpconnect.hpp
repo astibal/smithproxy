@@ -2,11 +2,13 @@
 #define SMITHPROXY_HTTPCONNECT_HPP
 
 #include <proxy/explicitproxy.hpp>
+#include <proxy/proxy_hooks.hpp>
 #include <proxy/explicitproxycx.hpp>
 #include <proxy/httpconnect/httpconnectrequest.hpp>
 #include <service/core/sessionlist.hpp>
 
 #include <atomic>
+#include <string>
 #include <string_view>
 
 class HttpConnectServerCX : public ExplicitProxyCX {
@@ -25,7 +27,16 @@ public:
     TYPENAME_OVERRIDE("httpConnectServerCX")
 
 private:
+    struct Authentication {
+        bool accepted = false;
+        std::string response;
+    };
+
+    Authentication authenticate_request(std::string_view headers,
+                                        const HttpConnectRequest& target);
+
     void send_error(unsigned int status, std::string_view reason);
+    void send_response(std::string response);
 
     bool close_after_reply_ = false;
     logan_lite log {"com.http-connect"};
@@ -34,6 +45,13 @@ private:
 class HttpConnectProxy : public ExplicitProxy {
 public:
     using ExplicitProxy::ExplicitProxy;
+    ~HttpConnectProxy() override = default;
+    void shutdown() override;
+
+    sx::proxy::ProxyHooks::HttpConnectDecision connect_request(
+        HttpConnectServerCX& client, std::string_view request,
+        const HttpConnectRequest& target, bool authenticated, std::string_view response);
+    void connect_response(std::string& response, bool connected) override;
 
     void on_left_message(baseHostCX* cx) override;
 
@@ -43,6 +61,12 @@ public:
     DECLARE_LOGGING(to_string)
 
 private:
+    void connect_cleanup();
+
+    HttpConnectRequest connect_target_;
+    bool connect_observed_ = false;
+    bool connect_finished_ = false;
+    bool authentication_denied_ = false;
     logan_lite log {"com.http-connect.proxy"};
 };
 

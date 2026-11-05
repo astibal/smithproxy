@@ -41,6 +41,7 @@
 #include <proxy/mitmproxy.hpp>
 
 #include <proxy/proxymaker.hpp>
+#include <proxy/quic_observer.hpp>
 #include <proxy/proxymaker_utils.hpp>
 #include <proxy/connection_start.hpp>
 #include <proxy/connection_identity.hpp>
@@ -378,6 +379,7 @@ namespace sx::proxymaker {
             }
 
             std::string connection_id() const override { return id_; }
+            sx::proxy::QuicObserver* quic_observer() override { return observer_.get(); }
 
             ~QuicSessionSetup() override {
                 if (!notified_) return;
@@ -429,6 +431,12 @@ namespace sx::proxymaker {
                             auto result = sx::proxy::parse_setup_reply(
                                 reply->response.first, reply->response.second);
                             control_->apply(result.body);
+                            const auto& control = result.body.value("control", nlohmann::json::object());
+                            if(result.action == sx::proxy::setup_action::accept &&
+                               control.value("quic_lifecycle", 0) == 1) {
+                                observer_ = std::make_unique<sx::proxy::QuicObserver>(
+                                    id_, control_->strict(), control.value("quic_start_server", 0) == 1);
+                            }
                             valid_reply = result.action != sx::proxy::setup_action::invalid;
                             denied = result.action == sx::proxy::setup_action::drop;
                             if (result.action == sx::proxy::setup_action::not_interested
@@ -453,6 +461,7 @@ namespace sx::proxymaker {
             nlohmann::json details_;
             std::shared_ptr<sx::http::webhooks::webhook_control_t> control_ =
                 std::make_shared<sx::http::webhooks::webhook_control_t>();
+            std::unique_ptr<sx::proxy::QuicObserver> observer_;
             bool started_ = false;
             bool notified_ = false;
             bool allowed_ = false;
@@ -482,18 +491,31 @@ namespace sx::proxymaker {
     int connect(MitmProxy& proxy, MitmHostCX& target) {
         if (not connection_start(proxy)) return -1;
 
-        return target.connect();
+        if(not proxy.hook_server_connect(&target)) return -1;
+
+        const int descriptor = target.connect();
+        if(!target.com()->descriptor_valid(descriptor)) {
+            proxy.hook_server_end(&target, "Upstream connect failed");
+        }
+        return descriptor;
     }
 
     bool connect(MasterProxy* owner, std::unique_ptr<MitmProxy> new_proxy) {
         auto const& log = log::connect();
         if(new_proxy)
             _deb("proxymaker::connect[%s]: connecting", new_proxy->to_string(iINF).c_str());
-        if (not owner || not valid_proxy_endpoints(new_proxy.get())) return false;
-        if (not connection_start(*new_proxy)) return false;
+        if(!new_proxy) return false;
 
-        const bool connected = connect_owned_proxy(owner, std::move(new_proxy));
-        if(!connected) _deb("proxymaker::connect: cannot connect proxy");
+        const bool admitted = owner && valid_proxy_endpoints(new_proxy.get()) &&
+            connection_start(*new_proxy) &&
+            new_proxy->hook_server_connect(new_proxy->first_right());
+        const bool connected = admitted && connect_owned_proxy(owner, new_proxy);
+
+        if(!connected) {
+            _deb("proxymaker::connect: cannot connect proxy");
+            new_proxy->shutdown();
+            new_proxy->finalize();
+        }
         return connected;
     }
 

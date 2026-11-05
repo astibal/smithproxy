@@ -2,9 +2,13 @@
 #include <proxy/mitmproxy.hpp>
 #include <proxy/content_webhook_metadata.hpp>
 #include <proxy/connection_start.hpp>
+#include <proxy/httpconnect/httpconnectrequest.hpp>
+#include <proxy/httpconnect/httpconnectreply.hpp>
 #include <proxy/directional_content.hpp>
 #include <service/http/webhooks.hpp>
 #include <socle/common/base64.hpp>
+
+#include <netdb.h>
 
 using namespace socle;
 
@@ -13,6 +17,90 @@ namespace sx::proxy {
 using HttpApplication = sx::engine::http::app_HttpRequest;
 
 namespace {
+
+bool valid_upstream_sni(std::string_view name) {
+
+    if(name.empty()) return true;
+    if(name.size() > 253 || inet::is_ipv4_address(std::string(name)) ||
+       inet::is_ipv6_address(std::string(name))) {
+        return false;
+    }
+
+    std::size_t label = 0;
+    char previous = '.';
+    for(char ch : name) {
+        if(ch == '.') {
+            if(label == 0 || previous == '-') return false;
+            label = 0;
+        } else {
+            const bool letter = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z');
+            const bool digit = ch >= '0' && ch <= '9';
+            if((!letter && !digit && ch != '-') || (label == 0 && ch == '-')) return false;
+            if(++label > 63) return false;
+        }
+        previous = ch;
+    }
+
+    return previous != '-';
+}
+
+bool alpn_subset(std::string_view proposed, std::string_view offered) {
+
+    if(proposed.size() > 65535) return false;
+    while(!proposed.empty()) {
+        const auto length = static_cast<unsigned char>(proposed.front());
+        if(length == 0 || proposed.size() <= length) return false;
+        const auto protocol = proposed.substr(1, length);
+        proposed.remove_prefix(length + 1);
+
+        bool found = false;
+        auto remaining = offered;
+        while(!remaining.empty()) {
+            const auto size = static_cast<unsigned char>(remaining.front());
+            if(size == 0 || remaining.size() <= size) return false;
+            found = found || remaining.substr(1, size) == protocol;
+            remaining.remove_prefix(size + 1);
+        }
+        if(!found) return false;
+    }
+
+    return true;
+}
+
+nlohmann::json socket_endpoint(baseHostCX* cx, bool peer) {
+
+    if(!cx || cx->socket() < 0)
+        return nullptr;
+
+    sockaddr_storage address{};
+    socklen_t size = sizeof(address);
+    const auto status = peer
+        ? ::getpeername(cx->socket(), reinterpret_cast<sockaddr*>(&address), &size)
+        : ::getsockname(cx->socket(), reinterpret_cast<sockaddr*>(&address), &size);
+
+    if(status != 0)
+        return nullptr;
+
+    char host[NI_MAXHOST]{};
+    char port[NI_MAXSERV]{};
+    if(::getnameinfo(reinterpret_cast<sockaddr*>(&address), size, host, sizeof(host),
+                     port, sizeof(port), NI_NUMERICHOST | NI_NUMERICSERV) != 0)
+        return nullptr;
+
+    return nlohmann::json::array({host, std::stoi(port)});
+}
+
+std::string certificate_pem(X509* certificate) {
+
+    auto output = std::unique_ptr<BIO, decltype(&BIO_free)>(BIO_new(BIO_s_mem()), BIO_free);
+    if(!output || !PEM_write_bio_X509(output.get(), certificate)) {
+        return {};
+    }
+
+    char* bytes = nullptr;
+    const auto length = BIO_get_mem_data(output.get(), &bytes);
+    return length > 0 ? std::string(bytes, static_cast<std::size_t>(length)) : std::string{};
+}
 
 std::string b64_encode(buffer &buffer) {
     return libbase64::encode<std::string, char, unsigned char, true>(buffer.data(), buffer.size());
@@ -23,6 +111,11 @@ std::string b64_decode(std::string const& encoded) {
     // at least one base64 block, so handle this valid zero-byte value directly.
     if(encoded.empty()) return {};
     return libbase64::decode<std::string, char, unsigned char, false>(encoded);
+}
+
+std::string b64_encode_text(std::string_view bytes) {
+    return libbase64::encode<std::string, char, unsigned char, true>(
+        reinterpret_cast<unsigned char const*>(bytes.data()), bytes.size());
 }
 
 // Metadata builders only describe the current payload; they never apply replies.
@@ -94,6 +187,13 @@ void add_content_tls(nlohmann::json& info, const MitmHostCX* right) {
 }
 
 } // namespace
+
+struct ProxyHooks::HttpConnectReplyArgs {
+    const HttpConnectArgs& input;
+    const sx::http::expected_reply& reply;
+    const nlohmann::json& envelope;
+    HttpConnectDecision& decision;
+};
 
 struct ProxyHooks::StartReplyArgs {
     const sx::http::expected_reply& reply;
@@ -170,6 +270,152 @@ nlohmann::json ProxyHooks::start_details(const MitmProxy& proxy, const StartDeta
     return {{"info", std::move(info)}};
 }
 
+nlohmann::json ProxyHooks::http_connect_details(const MitmProxy& proxy, const HttpConnectArgs& args) {
+
+    const auto id = proxy.to_connection_ID();
+    const nlohmann::json envelope = {
+        {"version", 1},
+        {"delivery", "http-connect"},
+        {"connection_id", id},
+        {"exchange_id", 1},
+        {"event", args.event},
+        {"mode", "regular"}
+    };
+
+    nlohmann::json observation = {
+        {"envelope", envelope},
+        {"target", {args.host, args.port}},
+        {"authenticated", args.authenticated},
+        {"response_base64", args.response.empty()
+            ? nlohmann::json(nullptr)
+            : nlohmann::json(b64_encode_text(args.response))}
+    };
+
+    if(args.event == "request") {
+        observation["request_base64"] = b64_encode_text(args.request);
+        observation["client_peername"] = socket_endpoint(args.client, true);
+        observation["client_sockname"] = socket_endpoint(args.client, false);
+    }
+
+    if(args.event == "connected") {
+        observation["peername"] = socket_endpoint(args.server, true);
+        observation["sockname"] = socket_endpoint(args.server, false);
+    }
+
+    nlohmann::json details = {{"http_connect", observation}};
+    if(args.client) {
+        details["info"]["session"] = "tcp_[" + args.client->host() + "]:" + args.client->port() +
+            "+tcp_[" + std::string(args.host) + "]:" + std::to_string(args.port);
+    }
+
+    return details;
+}
+
+void ProxyHooks::http_connect_reply(MitmProxy& proxy, const HttpConnectReplyArgs& args) {
+
+    // Bound and decode the complete callback reply before inspecting its decision.
+    const auto& reply = args.reply;
+    if(!reply || reply->response.first != 200)
+        return;
+
+    const auto& bytes = reply->response.second;
+    if(bytes.size() > 360 * 1024)
+        return;
+
+    auto body = nlohmann::json::parse(bytes, nullptr, false);
+    if(body.is_discarded() || !body.is_object())
+        return;
+
+    try {
+        // A valid decision must belong to this exact connection and event.
+        if(body.at("action") != "http-connect" || body.at("id") != proxy.to_connection_ID() ||
+           body.at("envelope") != args.envelope)
+            return;
+
+        const auto& result = body.at("decision");
+        const auto action = result.at("action").get<std::string>();
+        HttpConnectDecision candidate;
+
+        if(args.input.event == "request" && action == "kill") {
+            candidate.action = HttpConnectDecision::Action::kill;
+        } else if(args.input.event == "request" && action == "continue") {
+            // Reuse the native authority parser for any addon-selected target.
+            const auto& target = result.at("target");
+            if(!target.is_array() || target.size() != 2 || !target[1].is_number_integer() ||
+               target[1] < 1 || target[1] > 65535)
+                return;
+
+            const auto host = target[0].get<std::string>();
+            const auto port = target[1].get<int>();
+            if(host.size() > 255 || port < 1 || port > 65535)
+                return;
+
+            const auto authority = host.find(':') == std::string::npos ? host : "[" + host + "]";
+            const auto parsed = HttpConnectRequest::parse(
+                "CONNECT " + authority + ":" + std::to_string(port) + " HTTP/1.1");
+            if(!parsed)
+                return;
+
+            candidate.action = HttpConnectDecision::Action::proceed;
+            candidate.host = parsed->host;
+            candidate.port = parsed->port;
+        } else if((args.input.event == "request" && action == "local-response") ||
+                  (args.input.event != "request" && action == "send-response")) {
+            // Validate both encoding and HTTP framing before replacing any bytes.
+            const auto encoded = result.at("response_base64").get<std::string>();
+            if(encoded.empty() || encoded.size() > 349528)
+                return;
+
+            candidate.response = libbase64::decode<std::string, char, unsigned char, true>(encoded);
+            if(b64_encode_text(candidate.response) != encoded ||
+               !valid_connect_reply(candidate.response))
+                return;
+
+            candidate.action = args.input.event == "request"
+                ? HttpConnectDecision::Action::local_response
+                : HttpConnectDecision::Action::send_response;
+        } else {
+            return;
+        }
+
+        // Publish only after every field in the candidate has passed validation.
+        args.decision = std::move(candidate);
+    } catch(const std::exception&) {
+        // A malformed decision is never partially applied.
+    }
+}
+
+ProxyHooks::HttpConnectDecision ProxyHooks::http_connect(
+        MitmProxy& proxy, const HttpConnectArgs& args) {
+
+    HttpConnectDecision decision;
+    if(!sx::http::webhooks::is_enabled())
+        return decision;
+
+    try {
+        const auto details = http_connect_details(proxy, args);
+        const auto& envelope = details.at("http_connect").at("envelope");
+
+        sx::http::webhooks::send_action_wait("http-connect", proxy.to_connection_ID(), details,
+            [&](sx::http::expected_reply reply) {
+                HttpConnectReplyArgs reply_args{args, reply, envelope, decision};
+
+                http_connect_reply(proxy, reply_args);
+            });
+    } catch(const nlohmann::json::exception&) {
+        // A client-supplied hostname may not be valid UTF-8. An unencodable
+        // observation follows the same policy as an unavailable callback.
+    }
+
+    // Invalid/unavailable callbacks retain the native decision unless a prior
+    // hook has already negotiated strict control over this connection.
+    if(decision.action == HttpConnectDecision::Action::kill ||
+       (decision.action == HttpConnectDecision::Action::unavailable && proxy.webhook_control_->strict())) {
+        proxy.state().dead(true);
+    }
+    return decision;
+}
+
 bool ProxyHooks::start_reply(MitmProxy& proxy, const StartReplyArgs& args) {
     if(!args.reply) return false;
 
@@ -178,10 +424,39 @@ bool ProxyHooks::start_reply(MitmProxy& proxy, const StartReplyArgs& args) {
     proxy.webhook_control_->apply(result.body);
 
     switch(result.action) {
-        case setup_action::accept:
+        case setup_action::accept: {
+            // Older receivers may use strict content control without knowing
+            // this newer synchronous lifecycle contract. Require version 1.
+            const auto control = result.body.find("control");
+            if(control != result.body.end()) {
+                const auto version = control->find("server_lifecycle");
+                proxy.webhook_server_lifecycle_ = version != control->end() &&
+                    version->is_number_integer() && *version == 1;
+
+                const auto tls = control->find("tls_lifecycle");
+                proxy.webhook_tls_lifecycle_ = tls != control->end() &&
+                    tls->is_number_integer() && *tls == 1;
+
+                const auto hello = control->find("tls_clienthello");
+                proxy.webhook_tls_clienthello_ = hello != control->end() &&
+                    hello->is_number_integer() && *hello == 1;
+
+                const auto start = control->find("tls_start_server");
+                proxy.webhook_tls_start_server_ = start != control->end() &&
+                    start->is_number_integer() && *start == 1;
+
+                const auto client_start = control->find("tls_start_client");
+                proxy.webhook_tls_start_client_ = client_start != control->end() &&
+                    client_start->is_number_integer() && *client_start == 1;
+
+                proxy.tls_observer_enabled(proxy.webhook_tls_clienthello_ ||
+                    proxy.webhook_tls_start_server_ || proxy.webhook_tls_start_client_);
+            }
+
             proxy.webhook_rewrite_allowed_ = result.rewrite;
             proxy.flow_ctx_->allow_rewrite(args.local_rewrite || result.rewrite);
             return true;
+        }
         case setup_action::drop:
             proxy.state().dead(true);
             return true;
@@ -238,7 +513,7 @@ bool ProxyHooks::start(MitmProxy& proxy, const StartArgs&) {
     return !proxy.state().dead();
 }
 
-void ProxyHooks::stop(const MitmProxy& proxy, const StopArgs&) {
+ProxyHooks::Epitaph ProxyHooks::prepare_stop(const MitmProxy& proxy, const StopArgs&) {
 
     nlohmann::json j;
     auto cl = proxy.to_connection_label();
@@ -292,11 +567,402 @@ void ProxyHooks::stop(const MitmProxy& proxy, const StopArgs&) {
         j["info"]["classification"]["lored"] = std::move(classifications);
     }
 
-    if(sx::http::webhooks::is_enabled())
-        sx::http::webhooks::send_action("connection-stop", proxy.to_connection_ID(), j, proxy.webhook_control_);
-    sx::http::webhooks::send_sift_action("connection-stop", proxy.to_connection_ID(), j);
+    return {proxy.to_connection_ID(), std::move(j), nullptr};
+}
 
-    proxy.wh_stop = true;
+void ProxyHooks::stop(const Epitaph& epitaph, const StopArgs&) {
+
+    // Terminal notifications cannot change the retired session's control state.
+    // Each enqueue copies the serialized payload into its own request task.
+    if(sx::http::webhooks::is_enabled()) {
+        if(!epitaph.filter_info.is_null()) {
+            sx::http::webhooks::send_action(
+                "connection-info", epitaph.connection_id, epitaph.filter_info);
+        }
+        sx::http::webhooks::send_action(
+            "connection-stop", epitaph.connection_id, epitaph.details);
+    }
+
+    sx::http::webhooks::send_sift_action(
+        "connection-stop", epitaph.connection_id, epitaph.details);
+}
+
+sx::auth::Result ProxyHooks::authentication(const baseHostCX& client,
+                                           const AuthenticationArgs& args) {
+
+    if(!sx::http::webhooks::is_enabled()) {
+        return args.baseline;
+    }
+
+    // One synchronous exchange owns both its credentials and its response.
+    // No callback captures a frontend that target setup may later replace.
+    static std::atomic_uint64_t sequence{0};
+    const auto id = "auth-" + std::to_string(getpid()) + "-" +
+                    std::to_string(++sequence);
+    std::string status = "unavailable";
+    if(args.baseline.status == sx::auth::Status::accepted) status = "accepted";
+    if(args.baseline.status == sx::auth::Status::rejected) status = "rejected";
+
+    nlohmann::json authentication = {
+        {"version", 1},
+        {"protocol", args.protocol},
+        {"username", args.credentials.username},
+        {"password", args.credentials.password},
+        {"status", status},
+        {"identity", args.baseline.identity},
+        {"groups", args.baseline.groups},
+        {"peer", {{"host", client.host()}, {"port", client.port()}}}
+    };
+    if(!args.protocol_context.is_null()) {
+        authentication["http_connect"] = args.protocol_context;
+    }
+
+    const nlohmann::json event = {
+        {"action", "proxy-authentication"}, {"id", id},
+        {"source", sx::http::webhooks::get_hostid()}, {"type", "proxy"},
+        {"details", {{"authentication", authentication}}}
+    };
+
+    sx::auth::Result observed;
+    observed.error = "Authentication webhook unavailable";
+    std::string payload;
+    try {
+        payload = event.dump();
+    } catch (const nlohmann::json::exception&) {
+        // SOCKS credentials are arbitrary bytes; invalid UTF-8 must not
+        // escape the frontend or accidentally turn into permission.
+        if(args.baseline.status != sx::auth::Status::accepted) return args.baseline;
+        return observed;
+    }
+
+    auto settings = sx::http::AsyncRequest::settings_snapshot();
+    settings.sensitive = true;
+    std::stringstream trace;
+    sx::http::AsyncRequest::emit_url_wait_log(settings, payload, trace,
+        [&](sx::http::expected_reply const& reply) {
+            if(!reply || reply->response.first != 200) return;
+
+            const auto body = nlohmann::json::parse(reply->response.second, nullptr, false);
+            if(!body.is_object() || body.value("action", "") != "proxy-authentication" ||
+               body.value("id", "") != id || !body.contains("version") ||
+               !body["version"].is_number_integer() || body["version"] != 1 ||
+               !body.contains("decision") || !body["decision"].is_string()) return;
+
+            const auto decision = body["decision"].get<std::string>();
+            if(decision == "accept") {
+                observed = args.baseline;
+            } else if(decision == "reject") {
+                observed = {};
+                observed.status = sx::auth::Status::rejected;
+            }
+        });
+
+    // Even a valid acceptance cannot override rejected/unavailable AAA.
+    if(args.baseline.status != sx::auth::Status::accepted) return args.baseline;
+    return observed;
+}
+
+
+bool ProxyHooks::server(MitmProxy& proxy, const ServerArgs& args) {
+
+    const nlohmann::json envelope = {
+        {"version", 1},
+        {"connection_id", proxy.to_connection_ID()},
+        {"attempt", args.attempt},
+        {"event", args.event}
+    };
+    const nlohmann::json observation = {
+        {"envelope", envelope},
+        {"target", {args.cx->host(), std::stoi(args.cx->port())}},
+        {"peername", socket_endpoint(args.cx, true)},
+        {"sockname", socket_endpoint(args.cx, false)},
+        {"client_peername", socket_endpoint(proxy.first_left(), true)},
+        {"client_sockname", socket_endpoint(proxy.first_left(), false)},
+        {"client_closed", !proxy.first_left() || proxy.first_left()->socket() <= 0},
+        {"session_ending", args.session_ending},
+        {"error", args.error}
+    };
+
+    // Transport observations are synchronous so content and CONNECT replies
+    // cannot overtake them. An unavailable observer does not authorize traffic.
+    // Native policy remains in charge; ordinary observer failure is fail-open.
+    bool proceed = !proxy.webhook_control_->strict();
+    sx::http::webhooks::send_action_wait(
+        "server-lifecycle", proxy.to_connection_ID(), {{"server", observation}},
+        [&](const sx::http::expected_reply& reply) {
+            if(!reply || reply->response.first != 200) {
+                return;
+            }
+
+            const auto body = nlohmann::json::parse(reply->response.second, nullptr, false);
+            if(!body.is_object() || body.value("action", "") != "server-lifecycle" ||
+               body.value("id", "") != proxy.to_connection_ID() ||
+               !body.contains("envelope") || body["envelope"] != envelope) {
+                return;
+            }
+
+            // Only a valid explicit veto can stop the pending attempt. Target
+            // mutation requires the separate native routing/policy contract.
+            if(body.contains("proceed") && body["proceed"].is_boolean()) {
+                proceed = body["proceed"].get<bool>();
+            }
+        });
+
+    return proceed;
+}
+
+nlohmann::json ProxyHooks::tls_details(const TlsArgs& args) {
+
+    auto* tls = dynamic_cast<SSLCom*>(args.cx->com());
+    auto* ssl = tls->get_SSL();
+    nlohmann::json details = {
+        {"sni", tls->get_sni().empty() ? nlohmann::json(nullptr) : nlohmann::json(tls->get_sni())},
+        {"alpn_base64", nullptr},
+        {"cipher", nullptr},
+        {"tls_version", nullptr},
+        {"certificates", nlohmann::json::array()},
+        {"error", args.error}
+    };
+
+    // Negotiated values describe the accepted handshake, even if a later read
+    // has already failed. Nothing here changes OpenSSL or transport state.
+    if(args.established && ssl) {
+        const auto alpn = tls->negotiated_alpn();
+        // An accepted handshake without ALPN has an empty selection, not an
+        // unknown value. Preserve that distinction in the public descriptor.
+        details["alpn_base64"] = b64_encode_text(alpn);
+        details["cipher"] = SSL_get_cipher_name(ssl);
+        details["tls_version"] = SSL_get_version(ssl);
+    }
+
+    // OpenSSL includes the leaf in the client-side chain but not necessarily
+    // in the server-side chain. Publish it once, followed by its issuers.
+    if(ssl) {
+        auto leaf = std::unique_ptr<X509, decltype(&X509_free)>(
+            SSL_get_peer_certificate(ssl), X509_free);
+        if(leaf) {
+            details["certificates"].push_back(certificate_pem(leaf.get()));
+        }
+
+        const auto* chain = SSL_get_peer_cert_chain(ssl);
+        for(int index = 0; chain && index < sk_X509_num(chain); ++index) {
+            auto* certificate = sk_X509_value(chain, index);
+            if(!leaf || X509_cmp(leaf.get(), certificate) != 0) {
+                details["certificates"].push_back(certificate_pem(certificate));
+            }
+        }
+    }
+
+    return details;
+}
+
+bool ProxyHooks::tls(MitmProxy& proxy, const TlsArgs& args) {
+
+    const nlohmann::json envelope = {
+        {"version", 1},
+        {"connection_id", proxy.to_connection_ID()},
+        {"attempt", args.attempt},
+        {"side", args.client ? "client" : "server"},
+        {"event", args.established ? "established" : "failed"}
+    };
+    auto observation = tls_details(args);
+    observation["envelope"] = envelope;
+
+    return tls_exchange(proxy, observation);
+}
+
+bool ProxyHooks::tls_start_client(MitmProxy& proxy, const TlsClientStartArgs& args) {
+
+    const nlohmann::json observation = {
+        {"envelope", {{"version", 1}, {"connection_id", proxy.to_connection_ID()},
+            {"attempt", args.attempt}, {"side", "client"}, {"event", "start"}}},
+        {"sni", args.sni}
+    };
+
+    return tls_exchange(proxy, observation);
+}
+
+nlohmann::json ProxyHooks::quic(const QuicArgs& args) {
+
+    nlohmann::json decision = {{"proceed", !args.strict}};
+    const auto& envelope = args.observation.at("envelope");
+
+    sx::http::webhooks::send_action_wait(
+        "quic-lifecycle", args.connection_id, {{"quic", args.observation}},
+        [&](const sx::http::expected_reply& reply) {
+            if(!reply || reply->response.first != 200) return;
+
+            auto body = nlohmann::json::parse(reply->response.second, nullptr, false);
+            if(!body.is_object() || body.value("action", "") != "quic-lifecycle" ||
+               body.value("id", "") != args.connection_id ||
+               !body.contains("envelope") || body["envelope"] != envelope ||
+               !body.contains("proceed") || !body["proceed"].is_boolean()) {
+                return;
+            }
+
+            decision = std::move(body);
+        });
+
+    return decision;
+}
+
+bool ProxyHooks::tls_exchange(MitmProxy& proxy, const nlohmann::json& observation) {
+
+    const auto& envelope = observation.at("envelope");
+
+    // Preserve callback order before application events. As with server hooks,
+    // observer unavailability is fail-open unless strict control was negotiated.
+    bool proceed = !proxy.webhook_control_->strict();
+    sx::http::webhooks::send_action_wait(
+        "tls-lifecycle", proxy.to_connection_ID(), {{"tls", observation}},
+        [&](const sx::http::expected_reply& reply) {
+            if(!reply || reply->response.first != 200) {
+                return;
+            }
+
+            const auto body = nlohmann::json::parse(reply->response.second, nullptr, false);
+            if(!body.is_object() || body.value("action", "") != "tls-lifecycle" ||
+               body.value("id", "") != proxy.to_connection_ID() ||
+               !body.contains("envelope") || body["envelope"] != envelope) {
+                return;
+            }
+
+            if(body.contains("proceed") && body["proceed"].is_boolean()) {
+                proceed = body["proceed"].get<bool>();
+            }
+        });
+
+    return proceed;
+}
+
+ProxyHooks::TlsOfferDecision ProxyHooks::client_hello(MitmProxy& proxy,
+                                                         const ClientHelloArgs& args) {
+
+    const nlohmann::json envelope = {
+        {"version", 1},
+        {"connection_id", proxy.to_connection_ID()},
+        {"attempt", args.attempt},
+        {"side", "client"},
+        {"event", "client-hello"}
+    };
+    const nlohmann::json observation = {
+        {"envelope", envelope},
+        {"client_hello_base64", b64_encode_text(args.body)},
+        {"upstream", {
+            {"sni", args.upstream_sni},
+            {"alpn_base64", args.alpn_blocked || args.upstream_alpn.empty()
+                ? std::string{} : b64_encode_text(args.upstream_alpn)},
+            {"openssl_cipher_list", nullptr}
+        }},
+        {"upstream_alpn_blocked", args.alpn_blocked}
+    };
+
+    return tls_offer(proxy, args, observation);
+}
+
+ProxyHooks::TlsOfferDecision ProxyHooks::tls_start_server(MitmProxy& proxy,
+                                                            const TlsStartArgs& args) {
+
+    const nlohmann::json observation = {
+        {"envelope", {{"version", 1}, {"connection_id", proxy.to_connection_ID()},
+            {"attempt", args.attempt}, {"side", "server"}, {"event", "start"}}},
+        {"upstream", {
+            {"sni", args.upstream_sni},
+            {"alpn_base64", args.alpn_blocked || args.upstream_alpn.empty()
+                ? std::string{} : b64_encode_text(args.upstream_alpn)},
+            {"openssl_cipher_list", args.upstream_ciphers}
+        }}
+    };
+
+    ClientHelloArgs offer;
+    offer.upstream_sni = args.upstream_sni;
+    offer.upstream_alpn = args.upstream_alpn;
+    offer.alpn_blocked = args.alpn_blocked;
+
+    return tls_offer(proxy, offer, observation);
+}
+
+ProxyHooks::TlsOfferDecision ProxyHooks::tls_offer(MitmProxy& proxy,
+                                                      const ClientHelloArgs& args,
+                                                      const nlohmann::json& observation) {
+
+    const auto& envelope = observation.at("envelope");
+    const bool hello = envelope.at("event") == "client-hello";
+
+    // A malformed or unavailable reply must never partially enable bypass.
+    TlsOfferDecision decision;
+    decision.proceed = !proxy.webhook_control_->strict();
+
+    sx::http::webhooks::send_action_wait(
+        "tls-lifecycle", proxy.to_connection_ID(), {{"tls", observation}},
+        [&](const sx::http::expected_reply& reply) {
+            if(!reply || reply->response.first != 200) {
+                return;
+            }
+
+            const auto body = nlohmann::json::parse(reply->response.second, nullptr, false);
+            if(!body.is_object() || body.value("action", "") != "tls-lifecycle" ||
+               body.value("id", "") != proxy.to_connection_ID() ||
+               !body.contains("envelope") || body["envelope"] != envelope ||
+               !body.contains("proceed") || !body["proceed"].is_boolean() ||
+               (hello && (!body.contains("ignore_connection") || !body["ignore_connection"].is_boolean()))) {
+                return;
+            }
+
+            TlsOfferDecision candidate;
+            candidate.proceed = body["proceed"].get<bool>();
+            candidate.ignore_connection = hello && candidate.proceed && body["ignore_connection"].get<bool>();
+
+            // Older receivers omit upstream settings. Validate a complete new
+            // offer before publishing any part of the callback decision.
+            if(body.contains("upstream") && candidate.proceed && !candidate.ignore_connection) {
+                const auto& upstream = body["upstream"];
+                if(!upstream.is_object() || !upstream.contains("sni") || !upstream["sni"].is_string() ||
+                   !upstream.contains("alpn_base64") || !upstream["alpn_base64"].is_string()) {
+                    return;
+                }
+
+                candidate.upstream_sni = upstream["sni"].get<std::string>();
+                const auto encoded = upstream["alpn_base64"].get<std::string>();
+                if(encoded.size() > 87380 ||
+                   (candidate.upstream_sni != args.upstream_sni && !valid_upstream_sni(candidate.upstream_sni))) {
+                    return;
+                }
+
+                candidate.upstream_alpn = b64_decode(encoded);
+                const auto canonical = candidate.upstream_alpn.empty()
+                    ? std::string{} : b64_encode_text(candidate.upstream_alpn);
+                if(canonical != encoded || !alpn_subset(candidate.upstream_alpn, args.upstream_alpn) ||
+                   (args.alpn_blocked && !candidate.upstream_alpn.empty())) {
+                    return;
+                }
+
+                // The adapter supplies OpenSSL syntax, not addon cipher names.
+                // Absence/null preserves native defaults for older receivers.
+                if(upstream.contains("openssl_cipher_list") && !upstream["openssl_cipher_list"].is_null()) {
+                    const auto& value = upstream["openssl_cipher_list"];
+                    if(!value.is_string()) return;
+
+                    const auto ciphers = value.get<std::string>();
+                    if(ciphers.size() > 65535 || ciphers.find('\0') != std::string::npos) return;
+                    candidate.upstream_cipher_list = ciphers;
+                }
+
+                const bool cipher_changed = hello
+                    ? candidate.upstream_cipher_list.has_value()
+                    : upstream.value("openssl_cipher_list", nlohmann::json(nullptr)) !=
+                        observation.at("upstream").at("openssl_cipher_list");
+
+                const auto current_alpn = args.alpn_blocked ? std::string_view{} : args.upstream_alpn;
+                candidate.update_upstream = candidate.upstream_sni != args.upstream_sni ||
+                                            candidate.upstream_alpn != current_alpn ||
+                                            cipher_changed;
+            }
+
+            decision = std::move(candidate);
+        });
+
+    return decision;
 }
 
 void ProxyHooks::readiness(const MitmProxy& proxy, const ReadinessArgs& args) {

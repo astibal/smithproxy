@@ -130,6 +130,16 @@ names, PID files, result files and lifecycle monitor. Host API/CLI ports use
 cross-process `flock` leases, so P4/P6 workers cannot select the same port.
 Internal ports may repeat because their network namespaces are independent.
 
+Before dispatch, known sections are ordered by their duration in the previous
+completed run, longest first. This lets shorter sections fill worker gaps while
+the longest sections are still running. A first run without history keeps the
+profile order. Target-local history lives outside Git at
+`/var/tmp/smithproxy-patch-runner-history/<uid>/section-durations.tsv`; an
+absolute `PATCH_TEST_TIMING_HISTORY` path can isolate an experiment or start a
+new history. Concurrent runs use `flock` and atomic replacement. `schedule.tsv`
+records the selected order and `sections.tsv` records each observed
+`duration_ms`.
+
 Run `tests/patch-runner/test-patch.sh --help` for the authoritative option
 syntax.
 
@@ -282,9 +292,9 @@ native (coordinator gate)
     ├── udp-churn
     ├── capture      (basic capture, capture matrix and HTTP/2 observability)
     ├── lifecycle    (ProxyNightmare plus per-proxy C++ CPU monitor)
-    ├── corpus-regular
-    ├── corpus-edge
-    ├── corpus-insanity
+    ├── corpus-regular.1 .. .4
+    ├── corpus-edge.1 .. .4
+    ├── corpus-insanity.1 .. .4
     └── fuzz.<area>  (one independently scheduled shard per protocol)
 ```
 
@@ -316,7 +326,7 @@ Full-run sections can also be invoked directly:
 
 ```text
 smoke  tls-policy  routing  rtt  transfer  tls-throughput  quic  tcp-churn  udp-churn  capture  lifecycle
-corpus-regular  corpus-edge  corpus-insanity
+corpus-regular[.1-.4]  corpus-edge[.1-.4]  corpus-insanity[.1-.4]
 fuzz.h1  fuzz.h2  fuzz.h2.insanity  fuzz.tls  fuzz.socks5  fuzz.dns  ...
 ```
 
@@ -344,6 +354,12 @@ tests/patch-runner/test-patch.sh sanity --suite capture --remote root@test-runne
 tests/patch-runner/test-patch.sh sanity --suite corpus-edge \
     --remote root@test-runner-1 --env MATCH='h2_generated_*'
 ```
+
+The corpus profile and `full` split every category into four deterministic,
+disjoint shards. Their union is exactly the original category, and the
+target-local scheduler learns each shard's duration independently. The
+unqualified names such as `--suite corpus-edge` remain available for a focused
+unsharded diagnostic run.
 
 ## Fuzz layers and seeds
 
@@ -591,7 +607,7 @@ Full-run worker reports remain below their isolated section work roots. For a
 remote worker, complete per-case lab artifacts remain on that target; the
 coordinator copies back the report metadata used for aggregation.
 
-A full run additionally writes `sections.tsv`, `sections.md`, and
+A full run additionally writes `sections.tsv` (including section durations), `sections.md`, and
 `sections/<name>.log`. Each worker keeps its complete report below
 `<work-root>/sections/<name>/results/`.
 

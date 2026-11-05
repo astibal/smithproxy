@@ -27,10 +27,41 @@ OUTPUT_DIR=$5
 source "$BUNDLE/coordinator-config.sh"
 
 mkdir -p "$OUTPUT_DIR" "$WORK_ROOT/sections"
-mapfile -t JOBS < <(sed '/^[[:space:]]*$/d' "$MANIFEST")
+TIMING_HISTORY=${PATCH_TEST_TIMING_HISTORY:-/var/tmp/smithproxy-patch-runner-history/$(id -u)/section-durations.tsv}
+[[ $TIMING_HISTORY == /* ]] || { echo 'PATCH_TEST_TIMING_HISTORY must be absolute' >&2; exit 2; }
+TIMING_HISTORY_DIR=$(dirname "$TIMING_HISTORY")
+if [[ $TIMING_HISTORY == /var/tmp/smithproxy-patch-runner-history/* ]]; then
+    mkdir -p /var/tmp/smithproxy-patch-runner-history
+    chmod 1777 /var/tmp/smithproxy-patch-runner-history
+fi
+mkdir -p "$TIMING_HISTORY_DIR"
+touch "$TIMING_HISTORY"
+exec 8>"$TIMING_HISTORY.lock"
+flock -s 8
+TIMING_SNAPSHOT=$OUTPUT_DIR/timing-history-before.tsv
+cp "$TIMING_HISTORY" "$TIMING_SNAPSHOT"
+flock -u 8
+
+# Longest-processing-time first minimizes the tail of a fixed worker pool.
+# Unknown sections keep their manifest order behind sections with history.
+mapfile -t JOBS < <(
+    awk -F '\t' 'FILENAME == ARGV[1] { duration[$1]=$2; next }
+        NF { printf "%012d\t%09d\t%s\n", duration[$2]+0, FNR, $0 }' \
+        "$TIMING_SNAPSHOT" "$MANIFEST" |
+        sort -t $'\t' -k1,1nr -k2,2n |
+        cut -f3-
+)
+{
+    printf 'job\tsection\testimated_ms\n'
+    for line in "${JOBS[@]}"; do
+        IFS=$'\t' read -r job section _ <<< "$line"
+        estimate=$(awk -F '\t' -v wanted="$section" '$1 == wanted {print $2; exit}' "$TIMING_SNAPSHOT")
+        printf '%s\t%s\t%s\n' "$job" "$section" "${estimate:-unknown}"
+    done
+} > "$OUTPUT_DIR/schedule.tsv"
 
 run_section() {
-    local line=$1 job section seeds child_rc
+    local line=$1 job section seeds child_rc started_ns finished_ns duration_ms
     local -a fuzz_env=()
     IFS=$'\t' read -r job section seeds <<< "$line"
     [[ $job =~ ^[A-Za-z0-9._-]+$ ]] || { echo "Invalid job: $job" >&2; return 2; }
@@ -40,6 +71,7 @@ run_section() {
         fuzz_env=(--env "FUZZ_SEEDS=$seeds" --env "FUZZ_LEVEL=$PATCH_RUN_FUZZ_LEVEL" --env FUZZ_SCATTER=1)
     fi
 
+    started_ns=$(date +%s%N)
     set +e
     if [[ $section == lifecycle ]]; then
         mkdir -p "$WORK_ROOT/sections/$job"
@@ -65,8 +97,11 @@ run_section() {
     fi
     child_rc=$?
     set -e
+    finished_ns=$(date +%s%N)
+    duration_ms=$(( (finished_ns - started_ns) / 1000000 ))
     printf '%s\n' "$child_rc" > "$OUTPUT_DIR/$job.rc"
-    echo "SECTION DONE: $job suite=$section rc=$child_rc"
+    printf '%s\n' "$duration_ms" > "$OUTPUT_DIR/$job.duration-ms"
+    echo "SECTION DONE: $job suite=$section rc=$child_rc duration_ms=$duration_ms"
     return 0
 }
 
@@ -92,6 +127,23 @@ while ((next < ${#JOBS[@]} || active > 0)); do
         fi
     fi
 done
+
+# Store the latest complete observation for each section. One exclusive lock
+# and an atomic rename keep concurrent top-level runs from corrupting history.
+TIMING_UPDATES=$OUTPUT_DIR/timing-updates.tsv
+: > "$TIMING_UPDATES"
+for line in "${JOBS[@]}"; do
+    IFS=$'\t' read -r job section _ <<< "$line"
+    printf '%s\t%s\t%s\n' "$section" "$(<"$OUTPUT_DIR/$job.duration-ms")" "$(date -u +%FT%TZ)" \
+        >> "$TIMING_UPDATES"
+done
+flock -x 8
+TIMING_TEMP=$TIMING_HISTORY.tmp.$$
+awk -F '\t' 'NF >= 2 { latest[$1]=$0 } END { for (section in latest) print latest[section] }' \
+    "$TIMING_HISTORY" "$TIMING_UPDATES" | sort > "$TIMING_TEMP"
+chmod 0644 "$TIMING_TEMP"
+mv "$TIMING_TEMP" "$TIMING_HISTORY"
+flock -u 8
 
 for line in "${JOBS[@]}"; do
     job=${line%%$'\t'*}

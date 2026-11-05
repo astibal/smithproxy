@@ -115,8 +115,22 @@ MitmProxy::MitmProxy(baseCom* c):
 }
 
 void MitmProxy::attach_flow(MitmHostCX& host, char leg) {
+    host.com()->protocol_hooks_enabled(tls_observer_enabled_);
     host.flow_context(flow_ctx_);
     flow_ctx_->attach(host, leg);
+}
+
+void MitmProxy::tls_observer_enabled(bool enabled) {
+
+    if(tls_observer_enabled_ == enabled) return;
+    tls_observer_enabled_ = enabled;
+
+    // Include delayed contexts: their first handshake may happen on release.
+    for(auto* contexts : {&ls(), &rs(), &lda(), &rda(), &lbs(), &rbs(), &lpc(), &rpc()}) {
+        for(auto* cx : *contexts) {
+            cx->com()->protocol_hooks_enabled(enabled);
+        }
+    }
 }
 
 std::atomic_uint64_t& MitmProxy::sift_payload_limit_per_direction() {
@@ -292,18 +306,19 @@ void MitmProxy::toggle_tlog () {
 
 
 void MitmProxy::shutdown() {
+    tls_observer_enabled(false);
+
     // MasterProxy can defer object destruction until a later busy poll cycle.
     // Retire inspection state when transport shuts down, not when memory is freed.
-    webhook_session_stop();
+    prepare_session_stop();
     readiness_.clear();
     baseProxy::shutdown();
 }
 
 MitmProxy::~MitmProxy() {
-    // Early setup may be followed by a failed connect or by logical-stream
-    // retirement without a socket error callback. Close that setup exactly once.
-    webhook_session_stop();
-    
+    // Base destruction must not dispatch back into the retired derived object.
+    tls_observer_enabled(false);
+
     if(writer_opts()->write_payload) {
         _deb("MitmProxy::destructor: syncing writer");
 
@@ -324,28 +339,6 @@ MitmProxy::~MitmProxy() {
         if(tlog()) tlog()->write_left("Connection stop\n");
     }
 
-
-    if(not filters_.empty() and sx::http::webhooks::is_enabled()) {
-        auto event = nlohmann::json();
-        bool got_something = false;
-
-        for (auto &[name, filter]: filters_) {
-            if(filter->update_states()) {
-                event[name] = filter->to_json(iINF);
-                got_something = true;
-            }
-            else {
-                _dia("filter %s did not profile any useful data for webhook", name.c_str());
-            }
-        }
-
-        if(got_something) {
-            sx::http::webhooks::send_action("connection-info", to_connection_ID(), event, webhook_control_);
-            _dia("webhook sent");
-        } else {
-            _dia("nothing to sent to webhook");
-        }
-    }
 
     current_sessions()--;
 }
@@ -543,11 +536,55 @@ std::optional<std::string> MitmProxy::get_application() const {
     return std::nullopt;
 }
 
-void MitmProxy::webhook_session_stop() const {
+void MitmProxy::prepare_session_stop() {
     if(!wh_start || wh_stop || (!sx::http::webhooks::is_enabled() &&
                                !sx::http::webhooks::sift_enabled())) return;
 
-    sx::proxy::ProxyHooks::stop(*this, sx::proxy::ProxyHooks::StopArgs{});
+    // A failed snapshot must not prevent transport teardown or run again.
+    wh_stop = true;
+    try {
+        // Every retirement path must finish server callbacks before Spider releases
+        // the session. This only orders observations; transport teardown stays put.
+        if(observe_tls(true) == ObserverStatus::Terminate) {
+            state().dead(true);
+        }
+        finish_server_hooks();
+
+        auto snapshot = std::make_unique<sx::proxy::ProxyHooks::Epitaph>(
+            sx::proxy::ProxyHooks::prepare_stop(*this, sx::proxy::ProxyHooks::StopArgs{}));
+
+        // Filters must be sampled while their session context is still alive.
+        for(auto& [name, filter] : filters_) {
+            if(filter->update_states()) {
+                snapshot->filter_info[name] = filter->to_json(iINF);
+            }
+        }
+
+        epitaph_ = std::move(snapshot);
+    }
+    catch(...) {
+        try { _err("MitmProxy::prepare_session_stop: failed to prepare session epitaph"); }
+        catch(...) {}
+    }
+}
+
+
+void MitmProxy::finalize() noexcept {
+
+    // Consume once. The asynchronous request owns its own payload before this
+    // snapshot is released; callbacks must never retain the proxy or its CXs.
+    auto snapshot = std::move(epitaph_);
+    if(!snapshot) return;
+
+    try {
+        sx::proxy::ProxyHooks::stop(*snapshot, sx::proxy::ProxyHooks::StopArgs{});
+    }
+    catch(...) {
+        // Finalization is best effort. Even diagnostic allocation may fail;
+        // neither failure may escape into the owner's resource cleanup.
+        try { _err("MitmProxy::finalize: failed to enqueue session stop"); }
+        catch(...) {}
+    }
 }
 
 
@@ -620,6 +657,81 @@ void MitmProxy::add_filter(std::string const& name, FilterProxy* fp) {
 }
 
 
+void MitmProxy::finish_server_hooks() {
+
+    // Announce session retirement while endpoint metadata is still available.
+    // The existing baseProxy path remains solely responsible for closing CXs.
+    for(const auto& [cx, server] : servers_) {
+        hook_server_end(cx, {}, true);
+    }
+
+    servers_.clear();
+}
+
+bool MitmProxy::hook_server_connect(baseHostCX* cx) {
+
+    if(!wh_start || !webhook_server_lifecycle_ ||
+       !sx::http::webhooks::is_enabled() || !cx || !dynamic_cast<TCPCom*>(cx->com())) {
+        return true;
+    }
+
+    auto& server = servers_.get_or_create(cx);
+    server = {};
+    server.attempt = ++server_sequence_;
+
+    sx::proxy::ProxyHooks::ServerArgs args;
+    args.cx = cx;
+    args.event = "connect";
+    args.attempt = server.attempt;
+
+    if(!sx::proxy::ProxyHooks::server(*this, args)) {
+        hook_server_end(cx, "Connection rejected by addon");
+        return false;
+    }
+
+    return true;
+}
+
+void MitmProxy::hook_server_connected(baseHostCX* cx) {
+
+    auto* server = servers_.find(cx);
+    if(!server || server->connected || server->finished) {
+        return;
+    }
+
+    server->connected = true;
+
+    sx::proxy::ProxyHooks::ServerArgs args;
+    args.cx = cx;
+    args.event = "connected";
+    args.attempt = server->attempt;
+
+    if(!sx::proxy::ProxyHooks::server(*this, args)) {
+        state().dead(true);
+    }
+}
+
+void MitmProxy::hook_server_end(baseHostCX* cx, std::string_view error,
+                                bool session_ending) {
+
+    auto* server = servers_.find(cx);
+    if(!server || server->finished) {
+        return;
+    }
+
+    server->finished = true;
+
+    sx::proxy::ProxyHooks::ServerArgs args;
+    args.cx = cx;
+    args.event = server->connected ? "disconnected" : "error";
+    args.attempt = server->attempt;
+    args.session_ending = session_ending;
+    args.error = !server->connected && error.empty()
+        ? "Upstream connection closed before TCP completion" : error;
+
+    sx::proxy::ProxyHooks::server(*this, args);
+}
+
 void MitmProxy::readiness_webhook(unsigned char side, baseHostCX* cx,
                                   const char* event, std::uint64_t attempt) {
     sx::proxy::ProxyHooks::ReadinessArgs args;
@@ -629,6 +741,94 @@ void MitmProxy::readiness_webhook(unsigned char side, baseHostCX* cx,
     args.attempt = attempt;
 
     sx::proxy::ProxyHooks::readiness(*this, args);
+}
+
+MitmProxy::ObserverStatus MitmProxy::observe_tls(bool retiring) {
+
+    if(!wh_start || (wh_stop && !retiring) || !webhook_tls_lifecycle_ ||
+       !sx::http::webhooks::is_enabled()) {
+        return ObserverStatus::Continue;
+    }
+
+    // The upstream may finish while processing the client's hello. Inspect
+    // both legs before delivering payload or retiring either transport.
+    const auto upstream = observe_tls_side(first_right(), false);
+    const auto client = observe_tls_side(first_left(), true);
+
+    // Observe both legs even when one hook requests termination.
+    if(upstream == ObserverStatus::Terminate || client == ObserverStatus::Terminate) {
+        return ObserverStatus::Terminate;
+    }
+
+    return ObserverStatus::Continue;
+}
+
+MitmProxy::TlsLifecycle& MitmProxy::tls_lifecycle(baseHostCX& cx) {
+
+    auto& observed = tls_.get_or_create(&cx);
+    if(observed.communication != cx.com() ||
+       (cx.socket() > 0 && observed.descriptor != cx.socket())) {
+        observed = {};
+        observed.communication = cx.com();
+        observed.descriptor = cx.socket();
+        observed.attempt = ++tls_sequence_;
+    }
+
+    return observed;
+}
+
+MitmProxy::ObserverStatus MitmProxy::observe_tls_side(baseHostCX* cx, bool client) {
+
+    auto* tls = cx ? dynamic_cast<SSLCom*>(cx->com()) : nullptr;
+    if(!tls) {
+        return ObserverStatus::Continue;
+    }
+
+    auto& observed = tls_lifecycle(*cx);
+
+    if(observed.finished) {
+        tls->clear_tls_proto_history();
+        return ObserverStatus::Continue;
+    }
+
+    const auto& history = tls->tls_proto_history();
+    const auto current = tls->tls_proto_state();
+    const bool established = history.contains(TlsProtoState::established) ||
+                             current == TlsProtoState::established;
+    if(history.overflowed && !observed.history_gap) {
+        _war("TLS observation history overflowed; handshake failure cannot be inferred safely");
+    }
+    observed.history_gap = observed.history_gap || history.overflowed;
+
+    // A later I/O failure must never turn an accepted handshake into tls_failed.
+    // With a history gap, only positive evidence of success remains reliable.
+    const bool pending_handshake = current == TlsProtoState::prepared ||
+        current == TlsProtoState::handshaking || current == TlsProtoState::handshake_want_read ||
+        current == TlsProtoState::handshake_want_write || current == TlsProtoState::checking_peer;
+    const bool interrupted = pending_handshake &&
+        (cx->error() || tls->error() || cx->opening_timeout() || cx->idle_timeout());
+    const bool failed = !observed.history_gap &&
+        (history.contains(TlsProtoState::failed) || current == TlsProtoState::failed || interrupted);
+    tls->clear_tls_proto_history();
+
+    if(!established && !failed) {
+        return ObserverStatus::Continue;
+    }
+
+    observed.finished = true;
+
+    sx::proxy::ProxyHooks::TlsArgs args;
+    args.cx = cx;
+    args.client = client;
+    args.established = established;
+    args.attempt = observed.attempt;
+    args.error = established ? "" : "TLS handshake failed";
+
+    if(!sx::proxy::ProxyHooks::tls(*this, args)) {
+        return ObserverStatus::Terminate;
+    }
+
+    return ObserverStatus::Continue;
 }
 
 void MitmProxy::observe_readiness(unsigned char side, baseHostCX* cx) {
@@ -643,6 +843,9 @@ void MitmProxy::observe_readiness(unsigned char side, baseHostCX* cx) {
     observed.observe_context(cx->socket(), cx->com(), readiness_sequence_);
     if(!observed.connected && tcp->is_connected(cx->socket())) {
         observed.connected = true;
+        if(side == 'r' || side == 'y') {
+            hook_server_connected(cx);
+        }
         readiness_webhook(side, cx, "tcp-connected", observed.attempt);
     }
     // com_status() also checks readiness of the higher layer, such as TLS.
@@ -655,11 +858,21 @@ void MitmProxy::observe_readiness(unsigned char side, baseHostCX* cx) {
 
 bool MitmProxy::handle_cx_read_once(unsigned char side, baseCom* com, baseHostCX* cx) {
     observe_readiness(side, cx);
+
+    if(observe_tls() == ObserverStatus::Terminate) {
+        state().dead(true);
+    }
+
     return baseProxy::handle_cx_read_once(side, com, cx);
 }
 
 bool MitmProxy::handle_cx_write_once(unsigned char side, baseCom* com, baseHostCX* cx) {
     observe_readiness(side, cx);
+
+    if(observe_tls() == ObserverStatus::Terminate) {
+        state().dead(true);
+    }
+
     return baseProxy::handle_cx_write_once(side, com, cx);
 }
 
@@ -678,6 +891,11 @@ bool MitmProxy::handle_cx_events(unsigned char side, baseHostCX* cx) {
     // Sample again after transport I/O advanced a handshake. Retire the record
     // before baseProxy can reconnect, including reuse of the same numeric fd.
     observe_readiness(side, cx);
+
+    if(observe_tls() == ObserverStatus::Terminate) {
+        state().dead(true);
+    }
+
     if(cx->error() || cx->opening_timeout() || cx->idle_timeout())
         readiness_.erase(cx);
     return baseProxy::handle_cx_events(side, cx);
@@ -688,6 +906,10 @@ int MitmProxy::handle_sockets_once(baseCom* xcom) {
     if(stream_handler_) {
         observe_readiness('l', first_left());
         observe_readiness('r', first_right());
+
+        if(observe_tls() == ObserverStatus::Terminate) {
+            state().dead(true);
+        }
     }
 
 
@@ -1317,7 +1539,7 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
             _deb("MitmProxy::proxy: filter %s: proxy marked dead", filter_name.c_str());
 
             // after marking dead, session is not getting on_error anymore
-            webhook_session_stop();
+            prepare_session_stop();
             if(tx) flow_ctx_->discard(*tx);
             stop_io();
             return;
@@ -1466,6 +1688,13 @@ void MitmProxy::write_stream_event(sx::stream_direction direction,
 }
 
 void MitmProxy::on_left_bytes(baseHostCX* cx) {
+
+    // A single read may complete TLS and return application data together.
+    if(observe_tls() == ObserverStatus::Terminate) {
+        state().dead(true);
+        return;
+    }
+
     observe_readiness('l', cx);
 
 
@@ -1555,6 +1784,13 @@ bool MitmProxy::handle_requirements(baseHostCX* cx) {
 }
 
 void MitmProxy::on_right_bytes(baseHostCX* cx) {
+
+    // A single read may complete TLS and return application data together.
+    if(observe_tls() == ObserverStatus::Terminate) {
+        state().dead(true);
+        return;
+    }
+
     observe_readiness('r', cx);
 
 
@@ -1886,7 +2122,7 @@ void MitmProxy::on_error(baseHostCX* cx, char side, const char* side_label) {
             }
         }
 
-        webhook_session_stop();
+        prepare_session_stop();
     }
 }
 
@@ -1934,7 +2170,7 @@ bool MitmProxy::run_timers() {
             }
         }
 
-        webhook_session_stop();
+        prepare_session_stop();
     }
 
     return ret;

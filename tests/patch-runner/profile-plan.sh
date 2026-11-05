@@ -5,7 +5,13 @@
 PATCH_RUNNER_FULL_PROFILES=(native sanity traffic lifecycle corpus fuzz)
 PATCH_RUNNER_REPORTABLE_PROFILES=(native sanity traffic lifecycle corpus fuzz coverage fuzz-dyn benchmark)
 PATCH_RUNNER_TRAFFIC_SECTIONS=(rtt tls-throughput tls-policy routing transfer quic tcp-churn udp-churn capture)
-PATCH_RUNNER_CORPUS_SECTIONS=(corpus-regular corpus-edge corpus-insanity)
+PATCH_RUNNER_CORPUS_SECTIONS=()
+for patch_runner_corpus_category in regular edge insanity; do
+    for patch_runner_corpus_shard in 1 2 3 4; do
+        PATCH_RUNNER_CORPUS_SECTIONS+=("corpus-$patch_runner_corpus_category.$patch_runner_corpus_shard")
+    done
+done
+unset patch_runner_corpus_category patch_runner_corpus_shard
 
 patch_runner_fuzz_sections() {
     local area category

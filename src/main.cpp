@@ -45,6 +45,9 @@
 #endif
 
 
+#include <proxy/tls_observer.hpp>
+#include <proxy/quic_observer.hpp>
+
 #include <cstdlib>
 #include <cerrno>
 #include <cstring>
@@ -515,6 +518,9 @@ void print_help() {
 }
 
 int main(int argc, char *argv[]) {
+
+    sx::proxy::TlsObserver::register_callbacks();
+    sx::proxy::QuicObserver::register_callbacks();
 
     memPool::pool();
 

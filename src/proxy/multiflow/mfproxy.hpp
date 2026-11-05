@@ -20,6 +20,7 @@ struct proxy_limits {
 class flow_proxy {
 public:
     virtual ~flow_proxy() = default;
+    virtual void shutdown() {}
     virtual std::size_t pump_once(std::size_t chunk_size = 16 * 1024) = 0;
     virtual std::size_t pair_count() const = 0;
     virtual std::size_t queued_bytes() const = 0;

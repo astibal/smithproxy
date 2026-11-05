@@ -102,9 +102,9 @@ TEST(ProxyMakerUtils, RejectsFailedUpstreamBeforeRegisteringHandlers) {
     proxy->left = &left;
     proxy->right = &right;
 
-    EXPECT_FALSE(sx::proxymaker::connect_owned_proxy(&owner, std::move(proxy)));
-    EXPECT_EQ(proxy, nullptr);
-    EXPECT_EQ(FakeProxy::destructed, 1);
+    EXPECT_FALSE(sx::proxymaker::connect_owned_proxy(&owner, proxy));
+    EXPECT_NE(proxy, nullptr);
+    EXPECT_EQ(FakeProxy::destructed, 0);
     EXPECT_TRUE(transport.monitored.empty());
     EXPECT_TRUE(transport.write_monitored.empty());
     EXPECT_TRUE(transport.handlers.empty());
@@ -122,7 +122,7 @@ TEST(ProxyMakerUtils, RegistersBothSocketsBeforeTransferringOwnership) {
     proxy->left = &left;
     proxy->right = &right;
 
-    EXPECT_TRUE(sx::proxymaker::connect_owned_proxy(&owner, std::move(proxy)));
+    EXPECT_TRUE(sx::proxymaker::connect_owned_proxy(&owner, proxy));
     ASSERT_NE(owner.child, nullptr);
     EXPECT_EQ(proxy, nullptr);
     EXPECT_EQ(owner.child.get(), identity);
@@ -143,7 +143,7 @@ TEST(ProxyMakerUtils, AcceptsTransportValidatedVirtualDescriptor) {
     proxy->left = &left;
     proxy->right = &right;
 
-    EXPECT_TRUE(sx::proxymaker::connect_owned_proxy(&owner, std::move(proxy)));
+    EXPECT_TRUE(sx::proxymaker::connect_owned_proxy(&owner, proxy));
     ASSERT_NE(owner.child, nullptr);
     EXPECT_EQ(transport.monitored, (std::vector<int>{11}));
     EXPECT_EQ(transport.write_monitored, (std::vector<int>{-2}));

@@ -928,7 +928,8 @@ std::unique_ptr<openssl_connection> connect_openssl_quic(
 
 std::unique_ptr<openssl_connection> connect_openssl_quic(
     SSL_CTX* context, const sockaddr* peer, socklen_t peer_size,
-    std::string const& server_name, std::string const& alpn, std::string* error) {
+    std::string const& server_name, std::string const& alpn, std::string* error,
+    HookEvent const* offer) {
     auto fail = [error](std::string message) {
         if (error) *error = std::move(message);
         return std::unique_ptr<openssl_connection> {};
@@ -978,6 +979,10 @@ std::unique_ptr<openssl_connection> connect_openssl_quic(
     encoded_alpn.insert(encoded_alpn.end(), alpn.begin(), alpn.end());
     if (SSL_set_alpn_protos(ssl.get(), encoded_alpn.data(), encoded_alpn.size()) != 0) {
         return close_and_fail("configure QUIC ALPN: " + openssl_error_stack());
+    }
+
+    if(offer && !apply_hook_offer(ssl.get(), *offer, server_name)) {
+        return close_and_fail("configure QUIC hook settings: " + openssl_error_stack());
     }
 
     auto connection = std::make_unique<openssl_connection>(std::move(ssl), fd);

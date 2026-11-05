@@ -305,6 +305,7 @@ void ExplicitProxy::explicit_handoff(ExplicitProxyCX* cx) {
     upstream_policy_failure_response_ = cx->upstream_policy_failure_response();
     pending_connect_response_offset_ = 0;
     connect_response_ready_ = false;
+    connect_response_observed_ = false;
     close_after_connect_response_ = false;
     extended_local_destination_protection_ = cx->local_destination_protection();
     bool ssl = false;
@@ -459,7 +460,11 @@ void ExplicitProxy::explicit_handoff(ExplicitProxyCX* cx) {
         if(!target_cx->com()->descriptor_valid(real_socket)) {
             _err("SocksProxy::socks5_handoff: upstream connect returned invalid descriptor %d",
                  real_socket);
-            state().dead(true);
+            if(!state().dead() && !pending_connect_response_.empty()) {
+                on_right_error(target_cx);
+            } else {
+                state().dead(true);
+            }
             return;
         }
         com()->set_poll_handler(real_socket,this);
@@ -471,9 +476,36 @@ void ExplicitProxy::explicit_handoff(ExplicitProxyCX* cx) {
     _dia("SocksProxy::socks5_handoff: finished");
 }
 
+void ExplicitProxy::on_right_error(baseHostCX* cx) {
+
+    if(pending_connect_response_.empty()) {
+        MitmProxy::on_right_error(cx);
+        return;
+    }
+
+    // Connect errors and opening timeouts must complete the frontend exchange.
+    // Keep the client alive while a partial error response drains; the event
+    // dispatcher still closes the failed upstream descriptor after this call.
+    if(!connect_response_ready_) {
+        hook_server_end(cx, "Upstream connection failed or timed out");
+        pending_connect_response_ = upstream_failure_response_;
+        close_after_connect_response_ = true;
+        connect_response_ready_ = true;
+        send_pending_connect_response();
+    }
+}
+
 bool ExplicitProxy::send_pending_connect_response() {
     if(pending_connect_response_.empty()) {
         return true;
+    }
+
+    if(!connect_response_observed_) {
+        connect_response_observed_ = true;
+        connect_response(pending_connect_response_, !close_after_connect_response_);
+
+        if(state().dead())
+            return false;
     }
 
     auto* client = first_left();
@@ -519,6 +551,23 @@ bool ExplicitProxy::send_pending_connect_response() {
     return true;
 }
 
+bool ExplicitProxy::handle_cx_read(unsigned char side, baseHostCX* cx,
+                                   bool cross_direction_retry) {
+
+    if(!pending_connect_response_.empty()) {
+        // TCP readiness can release peer waiting before the CONNECT response
+        // has been observed and flushed. Keep both directions out of content
+        // inspection until the explicit protocol has admitted the tunnel.
+        // Preserve an already delivered write event: it completes connect.
+        if(!cx->com()->in_writeset(cx->socket()))
+            cx->defer_read_readiness();
+
+        return true;
+    }
+
+    return MitmProxy::handle_cx_read(side, cx, cross_direction_retry);
+}
+
 bool ExplicitProxy::handle_cx_write(unsigned char side, baseHostCX* cx,
                                     bool cross_direction_retry) {
     if(not pending_connect_response_.empty()) {
@@ -546,6 +595,8 @@ bool ExplicitProxy::handle_cx_write(unsigned char side, baseHostCX* cx,
             }
 
             if(status == 0 && connect_error == 0) {
+                hook_server_connected(cx);
+
                 const auto peer = extended_local_destination_protection_
                     ? sx::proxy::local_destination::inspect_connected_peer(
                           cx->socket(), true)
@@ -573,6 +624,9 @@ bool ExplicitProxy::handle_cx_write(unsigned char side, baseHostCX* cx,
                 pending_connect_response_ = upstream_failure_response_;
                 pending_connect_response_offset_ = 0;
                 close_after_connect_response_ = true;
+            }
+            if(close_after_connect_response_) {
+                hook_server_end(cx, "Upstream connect failed");
             }
             connect_response_ready_ = true;
             return send_pending_connect_response();

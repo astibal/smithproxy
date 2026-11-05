@@ -301,11 +301,13 @@ add_executable(smithproxy
         src/inspect/protocol_views.cpp
         src/proxy/mitmproxy.cpp
         src/proxy/proxy_hooks.cpp
+        src/proxy/tls_observer.cpp
         src/proxy/mitmcom.hpp
         src/proxy/mitmcom.cpp
         src/proxy/ssh/sshprotocol.cpp
         src/proxy/proxymaker.hpp
         src/proxy/proxymaker.cpp
+        src/proxy/quic_observer.cpp
         src/proxy/multiflow/mfflowcom.cpp
         src/proxy/multiflow/mfproxy.cpp
         src/proxy/multiflow/mfmitmproxy.cpp
@@ -313,6 +315,7 @@ add_executable(smithproxy
         src/proxy/quic/h3capture.cpp
         src/proxy/quic/spq1.cpp
         src/proxy/quic/openssl.cpp
+        src/proxy/quic/hooks.cpp
         src/service/quic/quicservice.cpp
         src/proxy/startstoptls.hpp
         src/proxy/startstoptls.cpp
@@ -560,6 +563,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/proxy/quic/spq1_tests.cpp
                 tests/unit/proxy/quic/qpack_vendor_tests.cpp
                 src/proxy/quic/openssl.cpp
+        src/proxy/quic/hooks.cpp
                 tests/unit/proxy/quic/openssl_tests.cpp
                 src/proxy/ssh/sshprotocol.cpp
                 tests/unit/proxy/ssh/sshprotocol_test.cpp
@@ -651,6 +655,16 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 socle/common/tests/biostring_tests.cpp
                 socle/common/tests/cast_tests.cpp
                 )
+        add_executable(sx_gtests_webhook_lifetime
+                tests/unit/service/http/webhook_lifetime_tests.cpp
+                src/service/http/request.cpp)
+        target_compile_options(sx_gtests_webhook_lifetime PRIVATE
+                -include ${PROJECT_SOURCE_DIR}/tests/unit/service/http/webhook_runtime_stub.hpp)
+        target_link_libraries(sx_gtests_webhook_lifetime PRIVATE
+                gtest gtest_main "$<LINK_GROUP:RESCAN,socle_lib,socle_common_lib>"
+                nlohmann_json::nlohmann_json pthread curl crypto ssl)
+        add_test(NAME unit.webhook_lifetime COMMAND sx_gtests_webhook_lifetime)
+
         add_executable(sx_gtests_http1
                 tests/unit/proxy/connection_start_test.cpp
                 tests/unit/inspect/http1_tests.cpp
@@ -799,6 +813,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/proxy/quic/spq1_tests.cpp
                 tests/unit/proxy/quic/qpack_vendor_tests.cpp
                 src/proxy/quic/openssl.cpp
+        src/proxy/quic/hooks.cpp
                 tests/unit/proxy/quic/openssl_tests.cpp
                 src/service/quic/quicservice.cpp
                 tests/unit/service/quic/quicservice_tests.cpp
@@ -813,6 +828,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 src/proxy/quic/h3capture.cpp
                 src/proxy/quic/spq1.cpp
                 src/proxy/quic/openssl.cpp
+        src/proxy/quic/hooks.cpp
                 src/service/quic/quicservice.cpp
                 tests/quic/testbed/quic_test_node.cpp
         )
@@ -1128,6 +1144,7 @@ if(SMITHPROXY_FUZZING)
 
     add_executable(quic_lifecycle_fuzzer
             src/proxy/quic/openssl.cpp
+        src/proxy/quic/hooks.cpp
             src/proxy/quic/wire.cpp
             tests/fuzz/proxy/quic/lifecycle_fuzzer.cpp)
     target_link_libraries(quic_lifecycle_fuzzer socle_lib pthread crypto ssl)

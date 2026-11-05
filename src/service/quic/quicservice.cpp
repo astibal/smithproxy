@@ -556,6 +556,10 @@ void listener_service::progress_handshake(
     // session's tuple. progress_transport() deliberately does not dequeue
     // flow_open, so early application streams remain available to the bridge.
     value.downstream->progress_transport();
+    if(!hook_outcome(value.setup.get(), value.downstream->native_handle(), true)) {
+        start_draining(value, now);
+        return;
+    }
 
     if (value.downstream->closed()) {
         ++handshake_failures_;
@@ -591,6 +595,10 @@ void listener_service::progress_handshake(
     if (!value.upstream) return;
 
     value.upstream->drain_events();
+    if(!hook_outcome(value.setup.get(), value.upstream->native_handle(), false)) {
+        start_draining(value, now);
+        return;
+    }
     if (value.upstream->closed()) {
         ++upstream_failures_;
         log().war("session %llu upstream handshake failed",
@@ -825,12 +833,19 @@ void listener_service::start_draining(session& value,
                                       std::chrono::steady_clock::time_point now,
                                       std::uint64_t protocol_error) {
     if (value.state == session_state::draining) return;
+
+    // Sample outcomes before close retires the handshake evidence.
+    if(value.downstream) hook_outcome(value.setup.get(), value.downstream->native_handle(),
+                                      true, "QUIC handshake ended before completion");
+    if(value.upstream) hook_outcome(value.setup.get(), value.upstream->native_handle(),
+                                    false, "QUIC handshake ended before completion");
     log().dia("session %llu draining protocol-error=%llu forwarded=%llu",
               static_cast<unsigned long long>(value.id),
               static_cast<unsigned long long>(protocol_error),
               static_cast<unsigned long long>(value.forwarded_bytes));
     value.state = session_state::draining;
     value.draining_since = now;
+    if(value.proxy) value.proxy->shutdown();
     value.proxy.reset();
     if (value.downstream) value.downstream->close(protocol_error);
     if (value.upstream) value.upstream->close(protocol_error);
@@ -839,6 +854,7 @@ void listener_service::start_draining(session& value,
 void listener_service::cleanup_sessions() {
     completed_sessions_ += sessions_.size();
     for (auto& linked : sessions_) {
+        if(linked.proxy) linked.proxy->shutdown();
         if (linked.downstream) linked.downstream->close();
         if (linked.upstream) linked.upstream->close();
     }
@@ -1064,8 +1080,8 @@ listener_service::verified_certificate listener_service::verify_and_spoof(
     std::shared_ptr<proxymaker::SessionSetup> setup) {
     verified_certificate verified;
     auto upstream = transparent_
-        ? connect_upstream(destination, server_name, setup.get())
-        : connect_upstream(server_name, setup.get());
+        ? connect_upstream(destination, server_name, setup.get(), true)
+        : connect_upstream(server_name, setup.get(), true);
     if (!upstream) {
         log().war("upstream connect failed sni='%s' target=%s", server_name.c_str(),
                   endpoint_text(destination).c_str());
@@ -1165,7 +1181,7 @@ bool listener_service::install_verified_certificate(
 }
 
 std::shared_ptr<openssl_connection> listener_service::connect_upstream(
-    std::string const& host, proxymaker::SessionSetup* setup) {
+    std::string const& host, proxymaker::SessionSetup* setup, bool probe) {
     if (host.empty() || !client_context_) return nullptr;
     addrinfo hints {};
     hints.ai_family = AF_UNSPEC;
@@ -1186,8 +1202,8 @@ std::shared_ptr<openssl_connection> listener_service::connect_upstream(
         target.size = current->ai_addrlen;
         auto const [target_host, target_port] = endpoint_parts(target);
         auto connection = proxymaker::connect(setup, target_host, target_port, [&] {
-            return connect_openssl_quic(client_context_.get(), current->ai_addr,
-                                       current->ai_addrlen, host, &error);
+            return connect_with_hooks(client_context_.get(), current->ai_addr,
+                                      current->ai_addrlen, host, &error, probe ? nullptr : setup);
         });
         if (connection) result = std::shared_ptr<openssl_connection>(std::move(connection));
     }
@@ -1197,14 +1213,14 @@ std::shared_ptr<openssl_connection> listener_service::connect_upstream(
 
 std::shared_ptr<openssl_connection> listener_service::connect_upstream(
     datagram_endpoint const& target, std::string const& server_name,
-    proxymaker::SessionSetup* setup) {
+    proxymaker::SessionSetup* setup, bool probe) {
     if (!target.valid() || server_name.empty() || !client_context_) return nullptr;
     std::string error;
     auto const [host, port] = endpoint_parts(target);
     auto connection = proxymaker::connect(setup, host, port, [&] {
-        return connect_openssl_quic(
+        return connect_with_hooks(
             client_context_.get(), reinterpret_cast<sockaddr const*>(&target.address),
-            target.size, server_name, &error);
+            target.size, server_name, &error, probe ? nullptr : setup);
     });
     return connection
         ? std::shared_ptr<openssl_connection>(std::move(connection))

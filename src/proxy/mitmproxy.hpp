@@ -82,6 +82,8 @@ struct whitelist_verify_entry {
 };
 
 class FilterProxy;
+namespace sx::proxy { class TlsObserver; }
+
 namespace sx {
 class StreamHandler;
 enum class stream_direction;
@@ -209,6 +211,10 @@ public:
 
     void attach_flow(MitmHostCX& host, char leg);
 
+    // Change only on the owning thread, before the TLS start boundary.
+    void tls_observer_enabled(bool enabled);
+    bool tls_observer_enabled() const { return tls_observer_enabled_; }
+
     StartStopTls& start_stop_tls() noexcept { return start_stop_tls_; }
     StartStopTls const& start_stop_tls() const noexcept { return start_stop_tls_; }
 
@@ -292,19 +298,65 @@ public:
     bool handle_cx_events(unsigned char side, baseHostCX* cx) override;
     void on_left_pc_error(baseHostCX* cx) override;
     void on_right_pc_error(baseHostCX* cx) override;
+    // Ordered observations for actual TCP attempts, independently of TLS.
+    bool hook_server_connect(baseHostCX* cx);
+    void hook_server_connected(baseHostCX* cx);
+    void hook_server_end(baseHostCX* cx, std::string_view error = {},
+                         bool session_ending = false);
+
     void observe_readiness(unsigned char side, baseHostCX* cx);
     void readiness_webhook(unsigned char side, baseHostCX* cx,
                            const char* event, std::uint64_t attempt);
 
 private:
+    void finish_server_hooks();
+    enum class ObserverStatus {
+        Continue,
+        Terminate
+    };
+
+    // Report hook decisions; the caller owns proxy termination.
+    ObserverStatus observe_tls(bool retiring = false);
+    ObserverStatus observe_tls_side(baseHostCX* cx, bool client);
+
+    struct TlsLifecycle {
+        const baseCom* communication = nullptr;
+        int descriptor = 0;
+        std::uint64_t attempt = 0;
+        bool finished = false;
+        bool history_gap = false;
+    };
+    using TlsLifecycleMap = sx::proxy::CxMap<baseHostCX*, TlsLifecycle>;
+
+    TlsLifecycle& tls_lifecycle(baseHostCX& cx);
+
+    TlsLifecycleMap tls_;
+    std::uint64_t tls_sequence_ = 0;
+
+    struct ServerLifecycle {
+        std::uint64_t attempt = 0;
+        bool connected = false;
+        bool finished = false;
+    };
+    using ServerLifecycleMap = sx::proxy::CxMap<baseHostCX*, ServerLifecycle>;
+
+    ServerLifecycleMap servers_;
+    std::uint64_t server_sequence_ = 0;
+
     sx::proxy::ConnectionReadinessMap readiness_;
     std::uint64_t readiness_sequence_ = 0;
 
 public:
     friend class sx::proxy::ProxyHooks;
+    friend class sx::proxy::TlsObserver;
 
     bool wh_start = false;
     bool webhook_rewrite_allowed_ = false;
+    bool webhook_server_lifecycle_ = false;
+    bool webhook_tls_lifecycle_ = false;
+    bool webhook_tls_clienthello_ = false;
+    bool webhook_tls_start_server_ = false;
+    bool webhook_tls_start_client_ = false;
     // Synchronous setup gate, before application content is analyzed/forwarded.
     // False means the connection must not proceed.
     bool webhook_session_start();
@@ -320,7 +372,9 @@ public:
     void add_webhook_stream_details(nlohmann::json& info) const;
 
     mutable bool wh_stop = false;
-    void webhook_session_stop() const;
+    std::unique_ptr<sx::proxy::ProxyHooks::Epitaph> epitaph_;
+    void prepare_session_stop();
+    void finalize() noexcept override;
     void shutdown() override;
 
     bool wh_sni = false;
@@ -374,6 +428,7 @@ private:
     std::string lored_status_;
     std::shared_ptr<FlowCtx> flow_ctx_;
     StartStopTls start_stop_tls_;
+    bool tls_observer_enabled_ = false;
     logan_lite log {"proxy"};
     logan_lite log_dump {"proxy.payload"};
     logan_lite log_content {"proxy.content"};

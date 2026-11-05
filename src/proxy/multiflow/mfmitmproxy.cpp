@@ -81,6 +81,14 @@ public:
         : downstream_(std::move(downstream)), upstream_(std::move(upstream)),
           limits_(limits), context_(std::move(context)) {}
 
+    void shutdown() override {
+        for(auto& [id, current] : pairs_) {
+            current.master->shutdown();
+        }
+        pairs_.clear();
+        closed_ = true;
+    }
+
     std::size_t pump_once(std::size_t chunk_size) override {
         if (!downstream_ || !upstream_ || chunk_size == 0 || closed_) return 0;
         process_events(true, downstream_->drain_events());
@@ -254,6 +262,8 @@ private:
         // The parent QUIC session has already passed admission. Each logical
         // stream still applies its own policy before inspecting stream data.
         if (!proxymaker::connection_start(*proxy)) {
+            proxy->shutdown();
+            proxy->finalize();
             source_connection->reset(source, 0x10c);
             destination_connection->reset(destination, 0x10c);
             return;
@@ -320,7 +330,13 @@ private:
             // child only after those bytes have been handled.
             if (current.master->proxies().empty()) retired_.insert(id);
         }
-        for (auto const id : retired_) pairs_.erase(id);
+        for(auto const id : retired_) {
+            const auto found = pairs_.find(id);
+            if(found == pairs_.end()) continue;
+
+            found->second.master->shutdown();
+            pairs_.erase(found);
+        }
         retired_.clear();
     }
 

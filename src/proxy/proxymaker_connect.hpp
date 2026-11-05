@@ -5,6 +5,8 @@
 #include <string>
 #include <utility>
 
+namespace sx::proxy { class QuicObserver; }
+
 namespace sx::proxymaker {
 
 // A multiplexed session exists before its individual MitmProxy streams. Keep
@@ -12,6 +14,7 @@ namespace sx::proxymaker {
 class SessionSetup {
 public:
     virtual ~SessionSetup() = default;
+    virtual proxy::QuicObserver* quic_observer() { return nullptr; }
     virtual std::string connection_id() const { return {}; }
     virtual bool start(std::string const& host, std::string const& port) = 0;
 };
