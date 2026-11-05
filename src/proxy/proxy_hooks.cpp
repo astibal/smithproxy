@@ -440,7 +440,12 @@ bool ProxyHooks::start_reply(MitmProxy& proxy, const StartReplyArgs& args) {
                 const auto hello = control->find("tls_clienthello");
                 proxy.webhook_tls_clienthello_ = hello != control->end() &&
                     hello->is_number_integer() && *hello == 1;
-                proxy.tls_observer_enabled(proxy.webhook_tls_clienthello_);
+
+                const auto start = control->find("tls_start_server");
+                proxy.webhook_tls_start_server_ = start != control->end() &&
+                    start->is_number_integer() && *start == 1;
+
+                proxy.tls_observer_enabled(proxy.webhook_tls_clienthello_ || proxy.webhook_tls_start_server_);
             }
 
             proxy.webhook_rewrite_allowed_ = result.rewrite;
@@ -783,7 +788,7 @@ bool ProxyHooks::tls(MitmProxy& proxy, const TlsArgs& args) {
     return proceed;
 }
 
-ProxyHooks::ClientHelloDecision ProxyHooks::client_hello(MitmProxy& proxy,
+ProxyHooks::TlsOfferDecision ProxyHooks::client_hello(MitmProxy& proxy,
                                                          const ClientHelloArgs& args) {
 
     const nlohmann::json envelope = {
@@ -805,8 +810,40 @@ ProxyHooks::ClientHelloDecision ProxyHooks::client_hello(MitmProxy& proxy,
         {"upstream_alpn_blocked", args.alpn_blocked}
     };
 
+    return tls_offer(proxy, args, observation);
+}
+
+ProxyHooks::TlsOfferDecision ProxyHooks::tls_start_server(MitmProxy& proxy,
+                                                            const TlsStartArgs& args) {
+
+    const nlohmann::json observation = {
+        {"envelope", {{"version", 1}, {"connection_id", proxy.to_connection_ID()},
+            {"attempt", args.attempt}, {"side", "server"}, {"event", "start"}}},
+        {"upstream", {
+            {"sni", args.upstream_sni},
+            {"alpn_base64", args.alpn_blocked || args.upstream_alpn.empty()
+                ? std::string{} : b64_encode_text(args.upstream_alpn)},
+            {"openssl_cipher_list", args.upstream_ciphers}
+        }}
+    };
+
+    ClientHelloArgs offer;
+    offer.upstream_sni = args.upstream_sni;
+    offer.upstream_alpn = args.upstream_alpn;
+    offer.alpn_blocked = args.alpn_blocked;
+
+    return tls_offer(proxy, offer, observation);
+}
+
+ProxyHooks::TlsOfferDecision ProxyHooks::tls_offer(MitmProxy& proxy,
+                                                      const ClientHelloArgs& args,
+                                                      const nlohmann::json& observation) {
+
+    const auto& envelope = observation.at("envelope");
+    const bool hello = envelope.at("event") == "client-hello";
+
     // A malformed or unavailable reply must never partially enable bypass.
-    ClientHelloDecision decision;
+    TlsOfferDecision decision;
     decision.proceed = !proxy.webhook_control_->strict();
 
     sx::http::webhooks::send_action_wait(
@@ -821,13 +858,13 @@ ProxyHooks::ClientHelloDecision ProxyHooks::client_hello(MitmProxy& proxy,
                body.value("id", "") != proxy.to_connection_ID() ||
                !body.contains("envelope") || body["envelope"] != envelope ||
                !body.contains("proceed") || !body["proceed"].is_boolean() ||
-               !body.contains("ignore_connection") || !body["ignore_connection"].is_boolean()) {
+               (hello && (!body.contains("ignore_connection") || !body["ignore_connection"].is_boolean()))) {
                 return;
             }
 
-            ClientHelloDecision candidate;
+            TlsOfferDecision candidate;
             candidate.proceed = body["proceed"].get<bool>();
-            candidate.ignore_connection = candidate.proceed && body["ignore_connection"].get<bool>();
+            candidate.ignore_connection = hello && candidate.proceed && body["ignore_connection"].get<bool>();
 
             // Older receivers omit upstream settings. Validate a complete new
             // offer before publishing any part of the callback decision.
@@ -864,10 +901,15 @@ ProxyHooks::ClientHelloDecision ProxyHooks::client_hello(MitmProxy& proxy,
                     candidate.upstream_cipher_list = ciphers;
                 }
 
+                const bool cipher_changed = hello
+                    ? candidate.upstream_cipher_list.has_value()
+                    : upstream.value("openssl_cipher_list", nlohmann::json(nullptr)) !=
+                        observation.at("upstream").at("openssl_cipher_list");
+
                 const auto current_alpn = args.alpn_blocked ? std::string_view{} : args.upstream_alpn;
                 candidate.update_upstream = candidate.upstream_sni != args.upstream_sni ||
                                             candidate.upstream_alpn != current_alpn ||
-                                            candidate.upstream_cipher_list.has_value();
+                                            cipher_changed;
             }
 
             decision = std::move(candidate);

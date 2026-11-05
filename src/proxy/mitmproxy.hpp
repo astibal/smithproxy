@@ -355,6 +355,7 @@ public:
     bool webhook_server_lifecycle_ = false;
     bool webhook_tls_lifecycle_ = false;
     bool webhook_tls_clienthello_ = false;
+    bool webhook_tls_start_server_ = false;
     // Synchronous setup gate, before application content is analyzed/forwarded.
     // False means the connection must not proceed.
     bool webhook_session_start();

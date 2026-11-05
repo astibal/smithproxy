@@ -80,6 +80,14 @@ public:
 
     static bool tls(MitmProxy& proxy, const TlsArgs& args);
 
+    struct TlsStartArgs {
+        std::uint64_t attempt = 0;
+        std::string_view upstream_sni;
+        std::string_view upstream_alpn;
+        std::string_view upstream_ciphers;
+        bool alpn_blocked = false;
+    };
+
     struct ClientHelloArgs {
         std::uint64_t attempt = 0;
         std::string_view body;
@@ -87,7 +95,7 @@ public:
         std::string_view upstream_alpn;
         bool alpn_blocked = false;
     };
-    struct ClientHelloDecision {
+    struct TlsOfferDecision {
         bool proceed = true;
         bool ignore_connection = false;
         bool update_upstream = false;
@@ -96,7 +104,15 @@ public:
         std::optional<std::string> upstream_cipher_list;
     };
 
-    static ClientHelloDecision client_hello(MitmProxy& proxy, const ClientHelloArgs& args);
+    static TlsOfferDecision client_hello(MitmProxy& proxy, const ClientHelloArgs& args);
+    static TlsOfferDecision tls_start_server(MitmProxy& proxy, const TlsStartArgs& args);
+
+private:
+    static TlsOfferDecision tls_offer(MitmProxy& proxy, const ClientHelloArgs& args,
+                                         const nlohmann::json& observation);
+
+public:
+
 
     struct HttpConnectArgs {
         std::string_view event;

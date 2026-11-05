@@ -14,7 +14,60 @@ void TlsObserver::register_callbacks() {
 }
 
 socle::ProtocolHookResult TlsObserver::start(baseCom& com) noexcept {
-    return observe(com, "start");
+
+    observe(com, "start");
+
+    bool strict = false;
+    try {
+        auto* cx = com.owner_cx();
+        auto* proxy = cx ? dynamic_cast<MitmProxy*>(cx->parent_proxy()) : nullptr;
+        auto* tls = dynamic_cast<SSLCom*>(&com);
+        if(!proxy || !tls || cx->com() != &com || !proxy->tls_observer_enabled() ||
+           !proxy->webhook_tls_start_server_ || tls->tls_proto_role() != socle::TlsProtoRole::client) {
+            return socle::ProtocolHookResult::Continue;
+        }
+
+        // OpenSSL's client role is the addon API's upstream/server leg.
+        strict = proxy->webhook_control_->strict();
+
+        // Catch up a completed TCP connection before reporting TLS start.
+        // A pending connection keeps its native handshake scheduling.
+        proxy->observe_readiness('r', cx);
+        if(proxy->state().dead() || cx->error() || com.error()) {
+            return socle::ProtocolHookResult::Terminate;
+        }
+
+        const auto ciphers = tls->upstream_cipher_filter();
+
+        ProxyHooks::TlsStartArgs args;
+        args.attempt = proxy->tls_lifecycle(*cx).attempt;
+        args.upstream_sni = tls->get_sni();
+        args.upstream_alpn = tls->get_peer_alpn();
+        args.upstream_ciphers = ciphers;
+        args.alpn_blocked = tls->opt.alpn_block;
+
+        const auto decision = ProxyHooks::tls_start_server(*proxy, args);
+        if(!decision.proceed) {
+            return socle::ProtocolHookResult::Terminate;
+        }
+
+        if(decision.update_upstream) {
+            // Once an update is accepted, application errors must not resume
+            // a handshake with an incomplete or different offer.
+            strict = true;
+            if(!tls->configure_upstream_start(decision.upstream_sni, decision.upstream_alpn,
+                                               decision.upstream_cipher_list)) {
+                return socle::ProtocolHookResult::Terminate;
+            }
+        }
+    }
+    catch(...) {
+        static logan_lite log {"proxy.tls"};
+        _war("TLS start callback failed; applying %s policy", strict ? "strict" : "fail-open");
+        return strict ? socle::ProtocolHookResult::Terminate : socle::ProtocolHookResult::Continue;
+    }
+
+    return socle::ProtocolHookResult::Continue;
 }
 
 socle::ProtocolHookResult TlsObserver::client_hello(baseCom& com) noexcept {
