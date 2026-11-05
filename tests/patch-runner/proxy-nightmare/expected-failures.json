@@ -1,6 +1,1 @@
-{
-  "tls_client_hello_fin": {
-    "log_contains": "timeout: TLS ClientHello/FIN propagation stalled.",
-    "reason": "Smithproxy does not propagate EOF after a TLS ClientHello followed by FIN"
-  }
-}
+{}
