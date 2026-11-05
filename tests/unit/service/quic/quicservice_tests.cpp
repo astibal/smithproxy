@@ -4,6 +4,7 @@
 
 #include "proxy/multiflow/mfflowcom.hpp"
 #include <sslcertstore.hpp>
+#include <proxy/quic_observer.hpp>
 
 #include <chrono>
 #include <ctime>
@@ -514,4 +515,83 @@ TEST_F(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
     origin->close();
     close(origin_fd);
 }
+namespace {
+
+class HookSessionSetup final : public sx::proxymaker::SessionSetup {
+public:
+    sx::proxy::QuicObserver observer {"quic-test", false, true};
+    sx::proxy::QuicObserver* quic_observer() override { return &observer; }
+    bool start(const std::string&, const std::string&) override { return true; }
+};
+
+class QuicHookTest : public QuicListenerService {
+protected:
+    HookSessionSetup setup;
+    quic::Hooks::Callback previous = nullptr;
+    inline static unsigned int starts = 0;
+    inline static unsigned int failures = 0;
+    inline static bool deny = false;
+    inline static bool invalid_cipher = false;
+
+    static bool observe(sx::proxymaker::SessionSetup&, quic::HookEvent& event) noexcept {
+        if(event.kind == quic::HookEvent::Kind::start) {
+            ++starts;
+            if(invalid_cipher) event.ciphers = "not-a-cipher";
+            return !deny;
+        }
+        if(event.kind == quic::HookEvent::Kind::failed) ++failures;
+        return true;
+    }
+
+    void SetUp() override {
+        previous = quic::Hooks::registry().handshake;
+        quic::Hooks::registry().handshake = &observe;
+        starts = failures = 0;
+        deny = invalid_cipher = false;
+    }
+
+    void TearDown() override {
+        quic::Hooks::registry().handshake = previous;
+    }
+};
+
+TEST_F(QuicHookTest, VetoPrecedesSocketCreation) {
+    deny = true;
+    std::string error;
+
+    auto connection = quic::connect_with_hooks(nullptr, nullptr, 0, "test", &error, &setup);
+
+    EXPECT_EQ(connection, nullptr);
+    EXPECT_EQ(starts, 1U);
+    EXPECT_EQ(error, "QUIC start rejected by callback");
+}
+
+TEST_F(QuicHookTest, ProbeDoesNotDispatchAndInvalidCipherFailsClosed) {
+    auto context = quic::make_openssl_quic_context(false);
+    ASSERT_NE(context, nullptr);
+    sockaddr_in address {};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = htons(9);
+    std::string error;
+
+    // No session context is passed to a certificate probe.
+    auto probe = quic::connect_with_hooks(
+        context.get(), reinterpret_cast<sockaddr*>(&address), sizeof(address),
+        "test", &error, nullptr);
+    EXPECT_EQ(starts, 0U);
+    probe.reset();
+
+    invalid_cipher = true;
+    auto connection = quic::connect_with_hooks(
+        context.get(), reinterpret_cast<sockaddr*>(&address), sizeof(address),
+        "test", &error, &setup);
+
+    EXPECT_EQ(connection, nullptr);
+    EXPECT_EQ(starts, 1U);
+    EXPECT_EQ(failures, 1U);
+}
+
+} // namespace
+
 #endif

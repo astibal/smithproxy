@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "proxy/multiflow/multiflow.hpp"
+#include "proxy/quic/hooks.hpp"
 
 #if OPENSSL_VERSION_NUMBER >= 0x30500000L && !defined(OPENSSL_NO_QUIC)
 #define SMITHPROXY_OPENSSL_QUIC 1
@@ -249,8 +250,8 @@ std::unique_ptr<openssl_connection> connect_openssl_quic(
 /** Same connector with an explicit single-protocol ALPN offer. */
 std::unique_ptr<openssl_connection> connect_openssl_quic(
     SSL_CTX* context, const sockaddr* peer, socklen_t peer_size,
-    std::string const& server_name, std::string const& alpn,
-    std::string* error = nullptr);
+    std::string const& server_name, std::string const& alpn, std::string* error = nullptr,
+    HookEvent const* offer = nullptr);
 
 /**
  * Nonblocking OpenSSL QUIC listener over a caller-owned UDP socket.

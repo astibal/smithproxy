@@ -782,6 +782,30 @@ bool ProxyHooks::tls_start_client(MitmProxy& proxy, const TlsClientStartArgs& ar
     return tls_exchange(proxy, observation);
 }
 
+nlohmann::json ProxyHooks::quic(const QuicArgs& args) {
+
+    nlohmann::json decision = {{"proceed", !args.strict}};
+    const auto& envelope = args.observation.at("envelope");
+
+    sx::http::webhooks::send_action_wait(
+        "quic-lifecycle", args.connection_id, {{"quic", args.observation}},
+        [&](const sx::http::expected_reply& reply) {
+            if(!reply || reply->response.first != 200) return;
+
+            auto body = nlohmann::json::parse(reply->response.second, nullptr, false);
+            if(!body.is_object() || body.value("action", "") != "quic-lifecycle" ||
+               body.value("id", "") != args.connection_id ||
+               !body.contains("envelope") || body["envelope"] != envelope ||
+               !body.contains("proceed") || !body["proceed"].is_boolean()) {
+                return;
+            }
+
+            decision = std::move(body);
+        });
+
+    return decision;
+}
+
 bool ProxyHooks::tls_exchange(MitmProxy& proxy, const nlohmann::json& observation) {
 
     const auto& envelope = observation.at("envelope");

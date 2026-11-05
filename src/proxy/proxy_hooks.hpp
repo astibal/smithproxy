@@ -21,6 +21,12 @@ public:
     // Hooks without additional inputs still use the same explicit call shape.
     struct StartDetailsArgs {};
     struct StartArgs {};
+    struct QuicArgs {
+        std::string connection_id;
+        bool strict = false;
+        nlohmann::json observation;
+    };
+    static nlohmann::json quic(const QuicArgs& args);
     // Owned snapshots only: no proxy/CX references survive transport teardown.
     struct Epitaph {
         std::string connection_id;
