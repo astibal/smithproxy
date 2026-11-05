@@ -98,12 +98,18 @@ sx::cfg::CfgRevision UpdateBoard::upgrade(
     return revision;
 }
 
-std::uint64_t UpdateBoard::rollback(std::string const& source) {
+sx::cfg::CfgRevision UpdateBoard::reload(
+    std::string const& source,
+    std::string snapshot,
+    std::string description) {
     std::scoped_lock lock(board_mutex_);
+    auto revision = history_.append(std::move(snapshot), source, std::move(description));
     updater_ = source;
-    current_revision_ = saved_revision_;
-    current_version_ = saved_version_;
-    return current_version_;
+    current_revision_ = revision.id;
+    saved_revision_ = revision.id;
+    ++current_version_;
+    saved_version_ = current_version_;
+    return revision;
 }
 
 std::uint64_t UpdateBoard::save(std::string const& source) {

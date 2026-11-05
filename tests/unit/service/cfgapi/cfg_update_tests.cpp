@@ -75,6 +75,20 @@ TEST(UpdateBoard, ReturnsOneConsistentRevisionView) {
     EXPECT_EQ(view.entries.back().id, view.current_id);
 }
 
+TEST(UpdateBoard, ReloadCreatesANewRunningAndSavedRevision) {
+    UpdateBoard board;
+    auto const initial = board.init_revision("setting = 1;", "startup");
+    board.upgrade("cli", "setting = 2;", "set setting");
+
+    auto const reloaded = board.reload("cli", "setting = 3;", "reload startup config");
+
+    EXPECT_NE(reloaded.id, initial.id);
+    EXPECT_EQ(board.revision_current(), reloaded.id);
+    EXPECT_EQ(board.revision_saved(), reloaded.id);
+    EXPECT_FALSE(board.unsaved());
+    EXPECT_EQ(board.revisions().back().snapshot, "setting = 3;");
+}
+
 TEST(UpdateBoard, RevisionHistoryCanOnlyBeInitializedOnce) {
     UpdateBoard board;
     board.init_revision("setting = 1;", "startup");

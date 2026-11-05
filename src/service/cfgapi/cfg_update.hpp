@@ -65,7 +65,12 @@ public:
         std::string snapshot,
         std::string description);
 
-    std::uint64_t rollback(std::string const& source);
+    // Record a configuration loaded from the startup file. The new revision
+    // becomes both running and saved state.
+    sx::cfg::CfgRevision reload(
+        std::string const& source,
+        std::string snapshot,
+        std::string description);
     std::uint64_t save(std::string const& source);
 
     [[nodiscard]] std::string updater() const;

@@ -649,6 +649,7 @@ void register_smithproxy_cli2_commands(libcli2::Cli& cli, std::string subscriber
         .argument({"force", "Save even when the input configuration contained errors", false, false, {},
                    [](std::string_view value) { return value == "force"; }})
         .handler([subscriber_id, refresh_prompt](libcli2::Context& context, const libcli2::Invocation& invocation) {
+            auto locks = std::scoped_lock(CfgFactory::write_lock(), CfgFactory::lock());
             const bool force = !invocation.arguments.empty();
             if (CfgFactory::LOAD_ERRORS && !force) {
                 const auto d = context.decor();
@@ -676,13 +677,22 @@ void register_smithproxy_cli2_commands(libcli2::Cli& cli, std::string subscriber
         .help("Reload configuration file")
         .available_if(privileged)
         .handler([subscriber_id, refresh_prompt](libcli2::Context& context, const libcli2::Invocation&) {
+            auto locks = std::scoped_lock(CfgFactory::write_lock(), CfgFactory::lock());
             const bool loaded = SmithProxy::instance().load_config(CfgFactory::get()->config_file, true);
-            CfgFactory::board()->rollback(subscriber_id);
             if (!loaded) {
                 context.print(context.decor().error("Configuration file reload FAILED"));
                 return -1;
             }
+            auto snapshot = CfgFactory::get()->snapshot();
+            if(!snapshot) {
+                context.print(context.decor().error(
+                    "Configuration reloaded, but its revision snapshot could not be created"));
+                return -1;
+            }
+            CfgFactory::board()->reload(
+                subscriber_id, std::move(*snapshot), "reload startup configuration");
             CfgFactory::board()->ack_current(subscriber_id);
+            CfgFactory::board()->ack_saved(subscriber_id);
             if (refresh_prompt) refresh_prompt();
             const auto d = context.decor();
             context.print(d.success("Configuration file reloaded") +
