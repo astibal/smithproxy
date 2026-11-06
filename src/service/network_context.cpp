@@ -662,7 +662,7 @@ void NetworkCtx::publish(bool valid) {
     auto next_mutable = std::make_shared<InterfaceSnapshot>(*table_.snapshot(++generation_, valid));
     const auto defaults = valid ? detail::query_routes(nullptr) : std::nullopt;
     next_mutable->assign_automatic_roles(defaults.value_or(std::set<std::uint32_t>{}));
-    next_mutable->roles_valid = valid && defaults.has_value();
+    next_mutable->roles_valid = valid && defaults.has_value() && next_mutable->all_interfaces_have_roles();
     std::shared_ptr<const InterfaceSnapshot> next = std::move(next_mutable);
     std::atomic_store_explicit(&snapshot_, std::move(next), std::memory_order_release);
 }
@@ -794,4 +794,10 @@ std::optional<std::string> sx::net::InterfaceSnapshot::interface_role(std::uint3
         if(interface.index == index && !interface.role.empty()) return interface.role;
     }
     return std::nullopt;
+}
+
+bool sx::net::InterfaceSnapshot::all_interfaces_have_roles() const noexcept {
+    return std::all_of(interfaces.begin(), interfaces.end(), [](const auto& interface) {
+        return interface.index != 0 && !interface.name.empty() && !interface.role.empty();
+    });
 }

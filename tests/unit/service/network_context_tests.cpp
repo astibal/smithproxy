@@ -220,3 +220,21 @@ TEST(NetworkCtx, StartAttemptCanAlwaysBeStoppedCleanly) {
 }
 
 } // namespace
+
+TEST(NetworkRoles, EveryInterfaceHasExactlyOneAutomaticRole) {
+    sx::net::InterfaceSnapshot snapshot;
+    snapshot.interfaces = {{1, "lo", IFF_LOOPBACK}, {2, "lan", 0}, {3, "wan", 0}, {4, "unaddressed", 0}};
+    EXPECT_FALSE(snapshot.all_interfaces_have_roles());
+    snapshot.assign_automatic_roles({3});
+    EXPECT_TRUE(snapshot.all_interfaces_have_roles());
+    snapshot.valid = snapshot.roles_valid = true;
+    EXPECT_EQ(snapshot.interface_role(1), "Local");
+    EXPECT_EQ(snapshot.interface_role(2), "Inside");
+    EXPECT_EQ(snapshot.interface_role(3), "Outside");
+    EXPECT_EQ(snapshot.interface_role(4), "Inside");
+    EXPECT_FALSE(snapshot.interface_role(0));
+    snapshot.assign_automatic_roles({});
+    EXPECT_EQ(snapshot.interface_role(3), "Inside");
+    snapshot.roles_valid = false;
+    EXPECT_FALSE(snapshot.interface_role(2));
+}

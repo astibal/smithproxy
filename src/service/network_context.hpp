@@ -44,6 +44,7 @@ struct InterfaceSnapshot {
     std::vector<InterfaceInfo> interfaces;
     std::vector<InterfaceAddress> addresses;
 
+    [[nodiscard]] bool all_interfaces_have_roles() const noexcept;
     void assign_automatic_roles(const std::set<std::uint32_t>& uplinks);
     [[nodiscard]] std::optional<std::string> interface_role(std::uint32_t index) const;
     [[nodiscard]] std::optional<std::string> interface_name(std::uint32_t index) const;
