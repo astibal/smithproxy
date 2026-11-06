@@ -80,7 +80,7 @@
 #include <utils/tenants.hpp>
 #include <service/daemon.hpp>
 #include <service/privileged_file.hpp>
-#include <service/interface_monitor.hpp>
+#include <service/network_context.hpp>
 #include <service/gre_broker.hpp>
 #include <service/cli/cli_broker.hpp>
 #include <service/api/api_broker.hpp>
@@ -902,16 +902,16 @@ int main(int argc, char *argv[]) {
 
     Log::get()->events().insert(INF, "Smithproxy %s%s starting", SMITH_VERSION, SMITH_DEVEL > 0 ? "-dev" : "");
 
-    auto& interface_monitor = sx::net::InterfaceMonitor::instance();
-    if(interface_monitor.start()) {
-        const auto interfaces = interface_monitor.snapshot();
+    auto& network_context = sx::net::NetworkCtx::instance();
+    if(network_context.start()) {
+        const auto interfaces = network_context.snapshot();
         Log::get()->events().insert(
             INF, "interface monitor ready: %zu interfaces, %zu addresses",
             interfaces->interfaces.size(), interfaces->addresses.size());
     } else {
         Log::get()->events().insert(
             WAR, "interface monitor initial synchronization failed: %s; retrying",
-            interface_monitor.last_error().c_str());
+            network_context.last_error().c_str());
     }
 
     SmithProxy::instance().create_dns_thread();

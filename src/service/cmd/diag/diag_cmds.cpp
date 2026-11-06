@@ -60,7 +60,7 @@
 
 #include <service/core/smithproxy.hpp>
 #include <service/core/sessionlist.hpp>
-#include <service/interface_monitor.hpp>
+#include <service/network_context.hpp>
 #include <service/cmd/diag/diag_cmds.hpp>
 #include <service/httpd/httpd.hpp>
 #include <service/cfgapi/cfgapi.hpp>
@@ -1145,7 +1145,7 @@ int cli_diag_sys_netlink_info(DiagCli* cli, const char* command,
                               char* argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
 
-    const auto& monitor = sx::net::InterfaceMonitor::instance();
+    const auto& monitor = sx::net::NetworkCtx::instance();
     const auto stats = monitor.stats();
     const auto snapshot = monitor.snapshot();
     if(!snapshot) {

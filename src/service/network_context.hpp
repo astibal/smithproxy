@@ -45,7 +45,7 @@ struct InterfaceSnapshot {
                                         std::size_t address_size) const noexcept;
 };
 
-struct InterfaceMonitorStats {
+struct NetworkCtxStats {
     bool running = false;
     std::uint64_t synchronization_attempts = 0;
     std::uint64_t synchronization_successes = 0;
@@ -95,26 +95,29 @@ private:
 
 } // namespace detail
 
-class InterfaceMonitor {
+class NetworkCtx {
 public:
-    InterfaceMonitor(const InterfaceMonitor&) = delete;
-    InterfaceMonitor& operator=(const InterfaceMonitor&) = delete;
+    NetworkCtx(const NetworkCtx&) = delete;
+    NetworkCtx& operator=(const NetworkCtx&) = delete;
 
-    static InterfaceMonitor& instance();
+    static NetworkCtx& instance();
 
     // Starts one reader thread and waits until its first dump succeeds or
     // fails. A failed initial attempt is retried in the background.
     [[nodiscard]] bool start();
     void stop() noexcept;
 
+    // Numeric destinations only. A failed lookup is unknown, never interface 0.
+    [[nodiscard]] std::optional<std::uint32_t> route_lookup(const std::string& destination) const;
+
     [[nodiscard]] bool running() const noexcept;
     [[nodiscard]] std::shared_ptr<const InterfaceSnapshot> snapshot() const noexcept;
-    [[nodiscard]] InterfaceMonitorStats stats() const noexcept;
+    [[nodiscard]] NetworkCtxStats stats() const noexcept;
     [[nodiscard]] std::string last_error() const;
 
 private:
-    InterfaceMonitor();
-    ~InterfaceMonitor();
+    NetworkCtx();
+    ~NetworkCtx();
 
     void run() noexcept;
     void publish(bool valid);

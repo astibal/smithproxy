@@ -1,4 +1,4 @@
-#include <service/interface_monitor.hpp>
+#include <service/network_context.hpp>
 
 #include <gtest/gtest.h>
 
@@ -189,8 +189,8 @@ TEST(InterfaceTable, ReportsInterruptedDump) {
     EXPECT_TRUE(result.dump_interrupted);
 }
 
-TEST(InterfaceMonitor, StartAttemptCanAlwaysBeStoppedCleanly) {
-    auto& monitor = sx::net::InterfaceMonitor::instance();
+TEST(NetworkCtx, StartAttemptCanAlwaysBeStoppedCleanly) {
+    auto& monitor = sx::net::NetworkCtx::instance();
     const bool synchronized = monitor.start();
     const auto snapshot = monitor.snapshot();
 

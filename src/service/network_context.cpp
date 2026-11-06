@@ -1,4 +1,4 @@
-#include <service/interface_monitor.hpp>
+#include <service/network_context.hpp>
 
 #include <algorithm>
 #include <cerrno>
@@ -554,20 +554,20 @@ std::shared_ptr<const InterfaceSnapshot> InterfaceTable::snapshot(
 
 } // namespace detail
 
-InterfaceMonitor::InterfaceMonitor() {
+NetworkCtx::NetworkCtx() {
     snapshot_ = table_.snapshot(0, false);
 }
 
-InterfaceMonitor::~InterfaceMonitor() {
+NetworkCtx::~NetworkCtx() {
     stop();
 }
 
-InterfaceMonitor& InterfaceMonitor::instance() {
-    static InterfaceMonitor monitor;
+NetworkCtx& NetworkCtx::instance() {
+    static NetworkCtx monitor;
     return monitor;
 }
 
-bool InterfaceMonitor::start() {
+bool NetworkCtx::start() {
     std::unique_lock lock(lifecycle_mutex_);
     if(worker_.joinable()) {
         return running_.load(std::memory_order_acquire) &&
@@ -585,12 +585,12 @@ bool InterfaceMonitor::start() {
     stop_requested_.store(false, std::memory_order_release);
     initial_complete_ = false;
     initial_success_ = false;
-    worker_ = std::thread(&InterfaceMonitor::run, this);
+    worker_ = std::thread(&NetworkCtx::run, this);
     initial_condition_.wait(lock, [this] { return initial_complete_; });
     return initial_success_;
 }
 
-void InterfaceMonitor::stop() noexcept {
+void NetworkCtx::stop() noexcept {
     std::thread worker;
     int stop_fd = -1;
     {
@@ -614,15 +614,15 @@ void InterfaceMonitor::stop() noexcept {
     }
 }
 
-bool InterfaceMonitor::running() const noexcept {
+bool NetworkCtx::running() const noexcept {
     return running_.load(std::memory_order_acquire);
 }
 
-std::shared_ptr<const InterfaceSnapshot> InterfaceMonitor::snapshot() const noexcept {
+std::shared_ptr<const InterfaceSnapshot> NetworkCtx::snapshot() const noexcept {
     return std::atomic_load_explicit(&snapshot_, std::memory_order_acquire);
 }
 
-InterfaceMonitorStats InterfaceMonitor::stats() const noexcept {
+NetworkCtxStats NetworkCtx::stats() const noexcept {
     return {
         running_.load(std::memory_order_acquire),
         synchronization_attempts_.load(std::memory_order_relaxed),
@@ -633,17 +633,17 @@ InterfaceMonitorStats InterfaceMonitor::stats() const noexcept {
     };
 }
 
-std::string InterfaceMonitor::last_error() const {
+std::string NetworkCtx::last_error() const {
     std::lock_guard lock(error_mutex_);
     return last_error_;
 }
 
-void InterfaceMonitor::publish(bool valid) {
+void NetworkCtx::publish(bool valid) {
     auto next = table_.snapshot(++generation_, valid);
     std::atomic_store_explicit(&snapshot_, std::move(next), std::memory_order_release);
 }
 
-void InterfaceMonitor::publish_invalid(const std::string& error) {
+void NetworkCtx::publish_invalid(const std::string& error) {
     {
         std::lock_guard lock(error_mutex_);
         last_error_ = error;
@@ -651,7 +651,7 @@ void InterfaceMonitor::publish_invalid(const std::string& error) {
     publish(false);
 }
 
-void InterfaceMonitor::signal_initial_result(bool success) {
+void NetworkCtx::signal_initial_result(bool success) {
     std::lock_guard lock(lifecycle_mutex_);
     if(initial_complete_) return;
     initial_success_ = success;
@@ -659,11 +659,11 @@ void InterfaceMonitor::signal_initial_result(bool success) {
     initial_condition_.notify_all();
 }
 
-bool InterfaceMonitor::stop_requested() const noexcept {
+bool NetworkCtx::stop_requested() const noexcept {
     return stop_requested_.load(std::memory_order_acquire);
 }
 
-void InterfaceMonitor::run() noexcept {
+void NetworkCtx::run() noexcept {
     (void)::pthread_setname_np(::pthread_self(), "sxy_ifmon");
     running_.store(true, std::memory_order_release);
     bool initial_reported = false;
@@ -748,3 +748,10 @@ void InterfaceMonitor::run() noexcept {
 }
 
 } // namespace sx::net
+
+#include <service/network_route.hpp>
+std::optional<std::uint32_t> sx::net::NetworkCtx::route_lookup(const std::string& destination) const {
+    const auto result = detail::query_routes(&destination);
+    if(!result || result->size() != 1) return std::nullopt;
+    return *result->begin();
+}
