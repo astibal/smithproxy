@@ -10,6 +10,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <set>
 #include <thread>
 #include <vector>
 
@@ -19,6 +20,7 @@ struct InterfaceInfo {
     std::uint32_t index = 0;
     std::string name;
     std::uint32_t flags = 0;
+    std::string role{};
 };
 
 struct InterfaceAddress {
@@ -34,12 +36,16 @@ struct InterfaceAddress {
     [[nodiscard]] std::string text() const;
 };
 
+
 struct InterfaceSnapshot {
     std::uint64_t generation = 0;
     bool valid = false;
+    bool roles_valid = false;
     std::vector<InterfaceInfo> interfaces;
     std::vector<InterfaceAddress> addresses;
 
+    void assign_automatic_roles(const std::set<std::uint32_t>& uplinks);
+    [[nodiscard]] std::optional<std::string> interface_role(std::uint32_t index) const;
     [[nodiscard]] std::optional<std::string> interface_name(std::uint32_t index) const;
     [[nodiscard]] bool contains_address(int family, const void* address,
                                         std::size_t address_size) const noexcept;

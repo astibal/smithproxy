@@ -1,4 +1,6 @@
 #include <service/network_context.hpp>
+#include <service/network_route.hpp>
+#include <net/if.h>
 
 #include <algorithm>
 #include <cerrno>
@@ -29,6 +31,7 @@ enum class EventKind {
     delete_link,
     new_address,
     delete_address,
+    route_change,
 };
 
 struct ParsedEvent {
@@ -245,6 +248,13 @@ ParsedBatch parse_datagram(const void* data, std::size_t size,
             case RTM_DELADDR:
                 parsed = parse_address(header, event, output.result.error);
                 break;
+            case RTM_NEWROUTE:
+            case RTM_DELROUTE:
+            case RTM_NEWRULE:
+            case RTM_DELRULE:
+                event.kind = EventKind::route_change;
+                parsed = true;
+                break;
             default:
                 relevant = false;
                 break;
@@ -275,12 +285,19 @@ int open_route_socket(std::string& error) {
 
     sockaddr_nl address{};
     address.nl_family = AF_NETLINK;
-    address.nl_groups = RTMGRP_LINK | RTMGRP_IPV4_IFADDR | RTMGRP_IPV6_IFADDR;
+    address.nl_groups = RTMGRP_LINK | RTMGRP_IPV4_IFADDR | RTMGRP_IPV6_IFADDR |
+        RTMGRP_IPV4_ROUTE | RTMGRP_IPV6_ROUTE | RTMGRP_IPV4_RULE;
     if(::bind(fd, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) != 0) {
         const int saved_errno = errno;
         ::close(fd);
         error = std::string("cannot subscribe NETLINK_ROUTE socket: ") +
                 std::strerror(saved_errno);
+        return -1;
+    }
+    const int group = RTNLGRP_IPV6_RULE;
+    if(::setsockopt(fd, SOL_NETLINK, NETLINK_ADD_MEMBERSHIP, &group, sizeof group) != 0) {
+        error = "cannot subscribe IPv6 routing rules";
+        ::close(fd);
         return -1;
     }
     return fd;
@@ -488,6 +505,9 @@ NetlinkBatchResult InterfaceTable::apply_netlink_datagram(
 
     for(const auto& event : parsed.events) {
         switch(event.kind) {
+            case EventKind::route_change:
+                parsed.result.changed = true;
+                break;
             case EventKind::new_link: {
                 const auto found = interfaces_.find(event.interface.index);
                 if(found == interfaces_.end() || !same_interface(found->second, event.interface)) {
@@ -639,7 +659,11 @@ std::string NetworkCtx::last_error() const {
 }
 
 void NetworkCtx::publish(bool valid) {
-    auto next = table_.snapshot(++generation_, valid);
+    auto next_mutable = std::make_shared<InterfaceSnapshot>(*table_.snapshot(++generation_, valid));
+    const auto defaults = valid ? detail::query_routes(nullptr) : std::nullopt;
+    next_mutable->assign_automatic_roles(defaults.value_or(std::set<std::uint32_t>{}));
+    next_mutable->roles_valid = valid && defaults.has_value();
+    std::shared_ptr<const InterfaceSnapshot> next = std::move(next_mutable);
     std::atomic_store_explicit(&snapshot_, std::move(next), std::memory_order_release);
 }
 
@@ -714,7 +738,7 @@ void NetworkCtx::run() noexcept {
             initial_reported = true;
         }
 
-        bool resynchronize = false;
+        bool resynchronize = !snapshot()->roles_valid;
         while(!stop_requested() && !resynchronize) {
             auto received = receive_datagram(netlink_fd, stop_fd_, table_, 0, -1);
             switch(received.status) {
@@ -731,6 +755,7 @@ void NetworkCtx::run() noexcept {
                     if(received.batch.changed) {
                         changed_event_datagrams_.fetch_add(1, std::memory_order_relaxed);
                         publish(true);
+                        if(!snapshot()->roles_valid) resynchronize = true;
                     }
                     break;
                 case ReceiveStatus::would_block:
@@ -740,7 +765,7 @@ void NetworkCtx::run() noexcept {
         }
         ::close(netlink_fd);
         if(stop_requested()) break;
-        if(resynchronize && !wait_for_retry_or_stop(stop_fd_, 100)) continue;
+        if(resynchronize && !wait_for_retry_or_stop(stop_fd_, 1000)) continue;
     }
 
     if(!initial_reported) signal_initial_result(false);
@@ -754,4 +779,19 @@ std::optional<std::uint32_t> sx::net::NetworkCtx::route_lookup(const std::string
     const auto result = detail::query_routes(&destination);
     if(!result || result->size() != 1) return std::nullopt;
     return *result->begin();
+}
+
+void sx::net::InterfaceSnapshot::assign_automatic_roles(const std::set<std::uint32_t>& uplinks) {
+    for(auto& interface : interfaces) {
+        interface.role = (interface.flags & IFF_LOOPBACK) ? "Local" :
+            uplinks.count(interface.index) ? "Outside" : "Inside";
+    }
+}
+
+std::optional<std::string> sx::net::InterfaceSnapshot::interface_role(std::uint32_t index) const {
+    if(!valid || !roles_valid || index == 0) return std::nullopt;
+    for(const auto& interface : interfaces) {
+        if(interface.index == index && !interface.role.empty()) return interface.role;
+    }
+    return std::nullopt;
 }
