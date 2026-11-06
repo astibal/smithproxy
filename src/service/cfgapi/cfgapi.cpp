@@ -1,3 +1,4 @@
+#include <proxy/network_policy.hpp>
 /*
     Smithproxy- transparent proxy with SSL inspection capabilities.
     Copyright (c) 2014, Ales Stibal <astib@mag0.net>, All rights reserved.
@@ -1725,6 +1726,17 @@ int CfgFactory::load_db_policy () {
             }
 
             load_if_exists(cur_object, "name", rule->policy_name);
+            for(const auto* field : {"ingress_role", "egress_role"}) {
+                if(!cur_object.exists(field)) continue;
+                auto& target = std::string(field) == "ingress_role" ? rule->ingress_role : rule->egress_role;
+                if(cur_object[field].getType() != Setting::TypeString ||
+                   std::string(static_cast<const char*>(cur_object[field])).empty()) {
+                    rule->cfg_err_is_disabled = true;
+                    soft_error = true;
+                    err_event(policy_index, "interface role must be a nonempty string");
+                } else target = static_cast<const char*>(cur_object[field]);
+            }
+
             rule->element_name() = rule->policy_name.empty()
                 ? string_format("policy-%d", policy_index)
                 : rule->policy_name;
@@ -2047,10 +2059,15 @@ int CfgFactory::policy_match (baseProxy *proxy) {
 
     std::scoped_lock<std::recursive_mutex> l(lock_);
     
+    if(!proxy) return -1;
+    auto left = proxy->ls(); left.insert(left.end(), proxy->lda().begin(), proxy->lda().end());
+    auto right = proxy->rs(); right.insert(right.end(), proxy->rda().begin(), proxy->rda().end());
+    const auto network = sx::net::NetworkCtx::instance().snapshot();
+    if(!sx::proxy::prepare_network_policy(db_policy_list, left, right, *network)) return -1;
     int x = 0;
     for( auto const& rule: db_policy_list) {
 
-        bool r = rule->match(proxy);
+        bool r = rule->match(proxy, network.get());
         
         if(r) {
             _deb("policy_match: matched #%d", x);
@@ -2076,10 +2093,12 @@ int CfgFactory::policy_match (baseProxy *proxy) {
 int CfgFactory::policy_match (std::vector<baseHostCX *> &left, std::vector<baseHostCX *> &right) {
     std::scoped_lock<std::recursive_mutex> l(lock_);
     
+    const auto network = sx::net::NetworkCtx::instance().snapshot();
+    if(!sx::proxy::prepare_network_policy(db_policy_list, left, right, *network)) return -1;
     int x = 0;
     for( auto const& rule: db_policy_list) {
 
-        bool r = rule->match(left, right);
+        bool r = rule->match(left, right, network.get());
         
         if(r) {
             _dia("cfgapi_obj_policy_match_lr: matched #%d", x);
@@ -5704,6 +5723,8 @@ int CfgFactory::save_policy(Config& ex) const {
 
         item.add("disabled", Setting::TypeBoolean) = pol->is_disabled;
         item.add("name", Setting::TypeString) = pol->policy_name;
+        if(!pol->ingress_role.empty()) item.add("ingress_role", Setting::TypeString) = pol->ingress_role;
+        if(!pol->egress_role.empty()) item.add("egress_role", Setting::TypeString) = pol->egress_role;
 
         item.add("proto", Setting::TypeString) = pol->proto->element_name();
 
