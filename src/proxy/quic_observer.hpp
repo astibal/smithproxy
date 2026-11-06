@@ -10,8 +10,8 @@ namespace sx::proxy {
 // verification completes before the forwarding worker invokes this observer.
 class QuicObserver {
 public:
-    QuicObserver(std::string id, bool strict, bool start)
-        : id_(std::move(id)), strict_(strict), start_(start) {}
+    QuicObserver(std::string id, bool strict, bool start, bool meta = false)
+        : id_(std::move(id)), meta_(meta), strict_(strict), start_(start) {}
 
     static void register_callbacks();
     bool outcome_pending(bool client) const { return !outcomes_[client ? 0 : 1]; }
@@ -21,6 +21,7 @@ private:
     bool observe(quic::HookEvent& event);
 
     std::string id_;
+    bool meta_ = false;
     bool strict_ = false;
     bool start_ = false;
     std::array<bool, 2> outcomes_ {};

@@ -47,6 +47,7 @@ bool QuicObserver::observe(quic::HookEvent& event) {
     ProxyHooks::QuicArgs args;
     args.connection_id = id_;
     args.strict = strict_;
+    args.meta = meta_;
     args.observation = {
         {"protocol", "quic"},
         {"envelope", {{"version", 1}, {"connection_id", id_}, {"attempt", attempts_[event.client ? 0 : 1]},
