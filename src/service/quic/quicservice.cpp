@@ -478,6 +478,41 @@ void listener_service::attach_staged_upstream(session& value) {
     if (!value.target_endpoint.valid()) value.target_endpoint = value.upstream->peer_endpoint();
 }
 
+bool listener_service::prepare_resumed_upstream(session& value) {
+
+    auto const server_name = value.downstream->server_name();
+    auto const [target_host, target_port] = endpoint_parts(value.target_endpoint);
+    if(server_name.empty() || !value.client_endpoint.valid()
+       || (transparent_ && (target_host.empty() || target_port != std::to_string(bound_port_)))) {
+        ++upstream_failures_;
+        log().war("resumed session %llu has no valid SNI or original tuple",
+                  static_cast<unsigned long long>(value.id));
+        return false;
+    }
+
+    // The ticket authenticates the downstream handshake only. The new upstream
+    // still uses peer/hostname verification and the usual policy and hook path.
+    if(setup_factory_) {
+        auto const [host, port] = endpoint_parts(value.client_endpoint);
+        value.setup = setup_factory_(host, port);
+    }
+
+    value.upstream = transparent_
+        ? connect_upstream(value.target_endpoint, server_name, value.setup.get())
+        : connect_upstream(server_name, value.setup.get());
+    dispatcher_bindings_.erase(value.downstream->native_handle());
+
+    if(!value.upstream) {
+        ++upstream_failures_;
+        log().war("resumed session %llu cannot create upstream connection",
+                  static_cast<unsigned long long>(value.id));
+        return false;
+    }
+
+    if(!value.target_endpoint.valid()) value.target_endpoint = value.upstream->peer_endpoint();
+    return true;
+}
+
 void listener_service::accept_connections() {
     while (auto accepted = listener_->accept()) {
         auto connection = std::shared_ptr<openssl_connection>(std::move(accepted));
@@ -504,6 +539,8 @@ void listener_service::accept_connections() {
         auto* ssl = incoming.downstream->native_handle();
         if (auto binding = dispatcher_bindings_.find(ssl);
             binding != dispatcher_bindings_.end()) {
+            if(binding->second.client.valid()) incoming.client_endpoint = binding->second.client;
+            incoming.target_endpoint = binding->second.destination;
             incoming.capture_association = binding->second.association;
             if (capture_native_) {
                 if (auto pending = pending_captures_.find(incoming.capture_association);
@@ -556,6 +593,17 @@ void listener_service::progress_handshake(
     // session's tuple. progress_transport() deliberately does not dequeue
     // flow_open, so early application streams remain available to the bridge.
     value.downstream->progress_transport();
+
+    // A resumed handshake does not enter OpenSSL's certificate callback.
+    // Prepare its normal verified forwarding leg before publishing outcomes.
+    if(verify_upstream_ && !value.upstream && value.downstream->handshake_complete()
+       && SSL_session_reused(value.downstream->native_handle())) {
+        if(!prepare_resumed_upstream(value)) {
+            start_draining(value, now);
+            return;
+        }
+    }
+
     if(!hook_outcome(value.setup.get(), value.downstream->native_handle(), true)) {
         start_draining(value, now);
         return;
@@ -921,6 +969,7 @@ int listener_service::bind_capture_session(SSL* downstream) {
     auto const generation = next_dispatcher_binding_generation_++;
     if (next_dispatcher_binding_generation_ == 0) ++next_dispatcher_binding_generation_;
     dispatcher_bindings_[downstream] = dispatcher_binding {
+        listener_->current_peer(), listener_->current_local(),
         association, generation, std::chrono::steady_clock::now()};
     if (association == 0) {
         log().war("downstream ClientHello has no QUIC dispatcher association");
