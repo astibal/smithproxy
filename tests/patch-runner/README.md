@@ -334,6 +334,8 @@ Every selected suite still performs API startup, no-bypass and cleanup checks.
 The four original focused suites (`tls`, `policy`, `rtt`, `session-list`) also
 retain the basic dual-stack HTTP/TLS/UDP smoke around their named check. The
 `quic` suite runs its dedicated HTTP/3 origin, diagnostics, PCAP and GRE checks.
+The TLS profile matrix and separate QUIC enforcement probes are documented in
+[TLS profile coverage](../../docs/TLS_PROFILE_COVERAGE.md).
 `lifecycle` uses a private outer user/mount/network namespace. Every concurrent
 run owns its proxy, CPU monitor, control socket and results. The runner reads
 `proxy-nightmare.lock`, checks out its exact Git commit, builds and tests `pn`,
@@ -525,6 +527,8 @@ Frequently useful `--env NAME=VALUE` controls:
 | `SESSION_LIST_P95_LIMIT_MS` / `SESSION_LIST_MAX_LIMIT_MS` | `1000` / `3000` | CLI snapshot gates |
 | `TLS_WRITE_CHUNK` | `20480` | Maximum plaintext bytes offered to one `SSL_write()`; intended for comparative transfer tests |
 | `SSL_USE_KTLS` | config default | Request OpenSSL KTLS for focused enabled/disabled comparisons |
+| `TLS_PROFILE_TEST` | follows `TLS_SUITE_TEST` | Real TLS 1.2/1.3 profile enforcement on both legs, IPv4/IPv6, including reuse, PFS and certificate exceptions |
+| `QUIC_TLS_PROFILE_TEST` | unset | Focused QUIC profile probe: `baseline`, `no_reuse`, `no_pfs`, `no_alpn`, or `old_ticket`; verifies admission and per-policy ticket isolation |
 | `KTLS_PROBE_TEST` / `KTLS_EXPECT_ACTIVE` | `0` / `any` | Hold a TLS flow, record both legs' effective BIO KTLS state, optionally require `on` or `off` |
 | `TLS_TEST_VERSION` / `TLS_TEST_CIPHER` | unset | Pin both legs to TLS 1.2/1.3 and, for TLS 1.2, pin the cipher for focused KTLS checks |
 

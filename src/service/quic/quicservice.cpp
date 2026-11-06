@@ -492,7 +492,7 @@ bool listener_service::prepare_resumed_upstream(session& value) {
 
     // The ticket authenticates the downstream handshake only. The new upstream
     // still uses peer/hostname verification and the usual policy and hook path.
-    if(setup_factory_) {
+    if(!value.setup && setup_factory_) {
         auto const [host, port] = endpoint_parts(value.client_endpoint);
         value.setup = setup_factory_(host, port);
     }
@@ -542,6 +542,7 @@ void listener_service::accept_connections() {
             if(binding->second.client.valid()) incoming.client_endpoint = binding->second.client;
             incoming.target_endpoint = binding->second.destination;
             incoming.capture_association = binding->second.association;
+            incoming.setup = binding->second.setup;
             if (capture_native_) {
                 if (auto pending = pending_captures_.find(incoming.capture_association);
                     pending != pending_captures_.end()) {
@@ -940,12 +941,56 @@ bool detail::same_dispatcher_callback_association(
 }
 
 #if SMITHPROXY_OPENSSL_QUIC
-int listener_service::client_hello_callback(SSL* ssl, int*, void* argument) {
+int listener_service::client_hello_callback(SSL* ssl, int* alert, void* argument) {
     auto* service = static_cast<listener_service*>(argument);
-    if (service) service->bind_capture_session(ssl);
-    // Association metadata is observational: inability to retain it must
-    // never reject an otherwise valid client handshake.
-    return SSL_CLIENT_HELLO_SUCCESS;
+    try {
+        if(service && service->prepare_tls_policy(ssl)) return SSL_CLIENT_HELLO_SUCCESS;
+    } catch (...) {
+        // No C++ exception may cross OpenSSL's callback boundary.
+        log().err("QUIC TLS policy preparation raised an exception");
+    }
+    if(alert) *alert = SSL_AD_ACCESS_DENIED;
+    return SSL_CLIENT_HELLO_ERROR;
+}
+
+bool listener_service::prepare_tls_policy(SSL* downstream) {
+
+    const bool associated = bind_capture_session(downstream) != 0;
+    if(!setup_factory_) return true; // Standalone transport fixtures have no policy provider.
+    if(!associated) return !transparent_; // Direct socket fixtures have no dispatcher tuple.
+
+    auto& binding = dispatcher_bindings_.at(downstream);
+    if(binding.setup) return true; // Callback re-entry must retain the same policy snapshot.
+
+    auto const [source_host, source_port] = endpoint_parts(binding.client);
+    auto const [target_host, target_port] = endpoint_parts(binding.destination);
+    if(source_host.empty() || target_host.empty()) return false;
+
+    auto setup = setup_factory_(source_host, source_port);
+    auto policy = setup ? setup->tls_policy(target_host, target_port) : std::nullopt;
+    if(!policy) return false;
+
+    // QUIC requires TLS 1.3 key exchange and an application protocol. Refuse
+    // incompatible profiles rather than silently relaxing either restriction.
+    if(!policy->use_pfs || policy->alpn_block) {
+        log().war("QUIC TLS profile rejects target=%s:%s: pfs=%d alpn-block=%d",
+                  target_host.c_str(), target_port.c_str(), policy->use_pfs, policy->alpn_block);
+        return false;
+    }
+
+    if(policy->disable_reuse) {
+        // Stop new tickets and isolate this handshake from tickets previously
+        // issued under a permissive profile in the shared listener context.
+        static constexpr unsigned char no_reuse[] = "smithproxy-quic-no-reuse";
+        if(SSL_set_num_tickets(downstream, 0) != 1 ||
+           SSL_set_session_id_context(downstream, no_reuse, sizeof(no_reuse) - 1) != 1) {
+            log().war("QUIC TLS profile cannot disable downstream session reuse");
+            return false;
+        }
+    }
+
+    binding.setup = std::move(setup);
+    return true;
 }
 
 int listener_service::bind_capture_session(SSL* downstream) {
@@ -970,7 +1015,7 @@ int listener_service::bind_capture_session(SSL* downstream) {
     if (next_dispatcher_binding_generation_ == 0) ++next_dispatcher_binding_generation_;
     dispatcher_bindings_[downstream] = dispatcher_binding {
         listener_->current_peer(), listener_->current_local(),
-        association, generation, std::chrono::steady_clock::now()};
+        association, generation, std::chrono::steady_clock::now(), {}};
     if (association == 0) {
         log().war("downstream ClientHello has no QUIC dispatcher association");
         return 0;
@@ -1104,8 +1149,8 @@ int listener_service::prepare_verified_certificate(SSL* downstream) {
     log().deb("starting certificate job sni='%s' peer=%s target=%s",
               server_name.c_str(), endpoint_text(peer_endpoint).c_str(),
               endpoint_text(destination).c_str());
-    std::shared_ptr<proxymaker::SessionSetup> setup;
-    if (setup_factory_) {
+    auto setup = binding == dispatcher_bindings_.end() ? nullptr : binding->second.setup;
+    if(!setup && setup_factory_) {
         auto const [host, port] = endpoint_parts(peer_endpoint);
         setup = setup_factory_(host, port);
     }

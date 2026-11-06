@@ -146,6 +146,8 @@ private:
     /** Bind a newly parsed ClientHello to the dispatcher's stable CID family. */
     static int client_hello_callback(SSL* ssl, int* alert, void* argument);
     int bind_capture_session(SSL* downstream);
+    /** Apply the selected profile before OpenSSL can accept a session ticket. */
+    bool prepare_tls_policy(SSL* downstream);
     /** Start or collect one origin-verification job for a downstream handshake. */
     int prepare_verified_certificate(SSL* downstream);
     struct verified_certificate;
@@ -263,6 +265,7 @@ private:
         std::uint64_t association = 0;
         std::uint64_t generation = 0;
         std::chrono::steady_clock::time_point updated = std::chrono::steady_clock::now();
+        std::shared_ptr<proxymaker::SessionSetup> setup;
     };
     std::map<SSL*, dispatcher_binding> dispatcher_bindings_; ///< ClientHello until accept.
     std::uint64_t next_dispatcher_binding_generation_ = 1;

@@ -49,6 +49,7 @@ CAPTURE_TEST=${CAPTURE_TEST:-0}
 CAPTURE_MATRIX_TEST=${CAPTURE_MATRIX_TEST:-0}
 RTT_TEST=${RTT_TEST:-0}
 TLS_SUITE_TEST=${TLS_SUITE_TEST:-0}
+export TLS_PROFILE_TEST=${TLS_PROFILE_TEST:-$TLS_SUITE_TEST}
 TLS_TRANSFER_TEST=${TLS_TRANSFER_TEST:-0}
 TLS_THROUGHPUT_TEST=${TLS_THROUGHPUT_TEST:-0}
 KTLS_PROBE_TEST=${KTLS_PROBE_TEST:-0}
@@ -432,6 +433,16 @@ if [[ $PRIVSEP_TEST == 1 ]]; then
     grep -q 'runner-origin-ok peer=fd00:20::1' "$ROOT/results/privsep-http6.txt"
     echo 'PASS6 privsep TCP/HTTP: unprivileged core uses transparent listener'
 fi
+if [[ -n ${QUIC_TLS_PROFILE_TEST:-} ]]; then
+    # This is a separate admission probe: a rejecting profile must not first
+    # pass the normal H3 traffic/observability positive-control suite.
+    ip netns exec "$NS" python3 "$ROOT/runner/tests/suites/tls/quic_profile.py" --enable-diagnostics
+    ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/suites/tls/quic_profile.py" \
+        --profile "$QUIC_TLS_PROFILE_TEST" --ca-file "$ROOT/config/certs/ca-cert.pem" \
+        --proxy-log "$ROOT/data/messages.default.log" \
+        --output "$ROOT/results/quic-tls-profile.json"
+    exit 0
+fi
 if [[ $BASE_TRAFFIC_TEST == 1 ]]; then
 ip netns exec "$CLIENT" curl --noproxy '*' -fsS --max-time 15 http://198.18.20.2:8080/ > "$ROOT/results/http4.txt"
 grep -q 'runner-origin-ok peer=198.18.20.1' "$ROOT/results/http4.txt"
@@ -593,6 +604,17 @@ if [[ $SESSION_LIST_STRESS_TEST == 1 ]]; then
     python3 "$ROOT/runner/tests/suites/session-list/report.py" \
         "$ROOT/results/session-list.json"
     echo 'PASS session list: detailed snapshots remained complete and responsive under load'
+fi
+if [[ ${TLS_PROFILE_TEST:-0} == 1 ]]; then
+    TLS_PROFILE_RESULT=0
+    for family in 4 6; do
+        profile_host=198.18.20.2
+        [[ $family == 4 ]] || profile_host=fd00:20::2
+        ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/suites/tls/profile_matrix.py" \
+            --host "$profile_host" --ca-file "$ROOT/config/certs/ca-cert.pem" \
+            --output "$ROOT/results/tls-profile${family}.json" || TLS_PROFILE_RESULT=1
+    done
+    [[ $TLS_PROFILE_RESULT == 0 ]] || exit 1
 fi
 if [[ $TLS_SUITE_TEST == 1 ]]; then
     run_tls_autodetect_test() {
