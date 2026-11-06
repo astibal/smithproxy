@@ -151,9 +151,7 @@ inline bool wait_for_route_reply(int fd, std::chrono::steady_clock::time_point d
     }
 }
 
-// Private socket per request: replies cannot be consumed by the monitor or
-// another worker. Bound the complete exchange, including interrupted polls.
-inline std::optional<RouteInterfaces> query_routes(const std::string* destination) {
+inline std::optional<RouteRequest> make_route_request(const std::string* destination) {
     RouteRequest request{};
     request.header.nlmsg_len = NLMSG_LENGTH(sizeof(rtmsg));
     request.header.nlmsg_type = RTM_GETROUTE;
@@ -163,7 +161,71 @@ inline std::optional<RouteInterfaces> query_routes(const std::string* destinatio
     if(destination && !set_route_destination(request, *destination)) {
         return std::nullopt;
     }
+    return request;
+}
 
+inline bool send_route_request(int fd, const RouteRequest& request) {
+    sockaddr_nl kernel{};
+    kernel.nl_family = AF_NETLINK;
+    return ::sendto(fd, &request, request.header.nlmsg_len, 0,
+                    reinterpret_cast<sockaddr*>(&kernel), sizeof kernel) >= 0;
+}
+
+// One datagram may contain several replies. A dump can span several datagrams.
+inline RouteReplyStatus receive_route_replies(int fd, bool lookup, RouteInterfaces& indices) {
+    alignas(nlmsghdr) std::array<unsigned char, 65536> data{};
+    sockaddr_nl sender{};
+    iovec io{data.data(), data.size()};
+    msghdr message{};
+    message.msg_name = &sender;
+    message.msg_namelen = sizeof sender;
+    message.msg_iov = &io;
+    message.msg_iovlen = 1;
+
+    const auto count = ::recvmsg(fd, &message, 0);
+    if(count < 0 && (errno == EINTR || errno == EAGAIN)) {
+        return RouteReplyStatus::pending;
+    }
+    // Only complete datagrams from the kernel are authoritative.
+    if(count <= 0 || (message.msg_flags & MSG_TRUNC) || sender.nl_pid != 0) {
+        return RouteReplyStatus::invalid;
+    }
+
+    int remaining = static_cast<int>(count);
+    for(auto* header = reinterpret_cast<nlmsghdr*>(data.data()); NLMSG_OK(header, remaining);
+        header = NLMSG_NEXT(header, remaining)) {
+        const auto status = process_route_reply(*header, lookup, indices);
+        if(status != RouteReplyStatus::pending) {
+            return status;
+        }
+    }
+    return remaining == 0 ? RouteReplyStatus::pending : RouteReplyStatus::invalid;
+}
+
+inline std::optional<RouteInterfaces> collect_route_replies(int fd, bool lookup) {
+    RouteInterfaces indices;
+    // Retries and multipart replies share one deadline; neither extends it.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
+    while(wait_for_route_reply(fd, deadline)) {
+        switch(receive_route_replies(fd, lookup, indices)) {
+            case RouteReplyStatus::complete:
+                return indices;
+            case RouteReplyStatus::invalid:
+                return std::nullopt;
+            case RouteReplyStatus::pending:
+                break;
+        }
+    }
+    return std::nullopt;
+}
+
+inline std::optional<RouteInterfaces> query_routes(const std::string* destination) {
+    const auto request = make_route_request(destination);
+    if(!request) {
+        return std::nullopt;
+    }
+
+    // A private socket keeps replies separate from the monitor and other workers.
     const int fd = ::socket(AF_NETLINK, SOCK_RAW | SOCK_CLOEXEC | SOCK_NONBLOCK, NETLINK_ROUTE);
     if(fd < 0) {
         return std::nullopt;
@@ -173,52 +235,10 @@ inline std::optional<RouteInterfaces> query_routes(const std::string* destinatio
         ~SocketGuard() { ::close(fd); }
     } guard{fd};
 
-    sockaddr_nl kernel{};
-    kernel.nl_family = AF_NETLINK;
-    if(::sendto(fd, &request, request.header.nlmsg_len, 0,
-                reinterpret_cast<sockaddr*>(&kernel), sizeof kernel) < 0) {
+    if(!send_route_request(fd, *request)) {
         return std::nullopt;
     }
-
-    RouteInterfaces indices;
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
-    for(;;) {
-        if(!wait_for_route_reply(fd, deadline)) {
-            return std::nullopt;
-        }
-
-        alignas(nlmsghdr) std::array<unsigned char, 65536> data{};
-        sockaddr_nl sender{};
-        iovec io{data.data(), data.size()};
-        msghdr message{};
-        message.msg_name = &sender;
-        message.msg_namelen = sizeof sender;
-        message.msg_iov = &io;
-        message.msg_iovlen = 1;
-        const auto count = ::recvmsg(fd, &message, 0);
-        if(count < 0 && (errno == EINTR || errno == EAGAIN)) {
-            continue;
-        }
-        if(count <= 0 || (message.msg_flags & MSG_TRUNC) || sender.nl_pid != 0) {
-            return std::nullopt;
-        }
-
-        int remaining = static_cast<int>(count);
-        for(auto* header = reinterpret_cast<nlmsghdr*>(data.data()); NLMSG_OK(header, remaining);
-            header = NLMSG_NEXT(header, remaining)) {
-            switch(process_route_reply(*header, destination != nullptr, indices)) {
-                case RouteReplyStatus::complete:
-                    return indices;
-                case RouteReplyStatus::invalid:
-                    return std::nullopt;
-                case RouteReplyStatus::pending:
-                    break;
-            }
-        }
-        if(remaining != 0) {
-            return std::nullopt;
-        }
-    }
+    return collect_route_replies(fd, destination != nullptr);
 }
 
 } // namespace sx::net::detail

@@ -661,13 +661,20 @@ std::string NetworkCtx::last_error() const {
 
 void NetworkCtx::publish(bool valid) {
     std::lock_guard lock(roles_mutex_);
-    auto next_mutable = std::make_shared<InterfaceSnapshot>(*table_.snapshot(++generation_, valid));
+
+    auto next = std::make_shared<InterfaceSnapshot>(*table_.snapshot(++generation_, valid));
+
+    // Custom rules override automatic roles, using the same interface snapshot.
     const auto defaults = valid ? detail::query_routes(nullptr) : std::nullopt;
-    next_mutable->assign_automatic_roles(defaults.value_or(std::set<std::uint32_t>{}));
-    next_mutable->assign_roles(role_rules_);
-    next_mutable->roles_valid = valid && defaults.has_value() && next_mutable->all_interfaces_have_roles();
-    std::shared_ptr<const InterfaceSnapshot> next = std::move(next_mutable);
-    std::atomic_store_explicit(&snapshot_, std::move(next), std::memory_order_release);
+    next->assign_automatic_roles(defaults.value_or(std::set<std::uint32_t>{}));
+    next->assign_roles(role_rules_);
+
+    // Unknown default routes must not turn an uplink into an authoritative Inside role.
+    next->roles_valid = valid && defaults.has_value() && next->all_interfaces_have_roles();
+
+    // Readers see the complete immutable snapshot in a single publication.
+    std::shared_ptr<const InterfaceSnapshot> published = std::move(next);
+    std::atomic_store_explicit(&snapshot_, std::move(published), std::memory_order_release);
 }
 
 void NetworkCtx::publish_invalid(const std::string& error) {
