@@ -36,15 +36,25 @@ struct InterfaceAddress {
     [[nodiscard]] std::string text() const;
 };
 
+struct InterfaceRoleRule {
+    std::string if_name;
+    std::string if_address;
+    std::string role{};
+    int family = 0;
+    int prefix = 0;
+    std::array<std::uint8_t, 16> network{};
+};
 
 struct InterfaceSnapshot {
     std::uint64_t generation = 0;
     bool valid = false;
     bool roles_valid = false;
+    std::set<std::uint32_t> uplinks;
     std::vector<InterfaceInfo> interfaces;
     std::vector<InterfaceAddress> addresses;
 
     [[nodiscard]] bool all_interfaces_have_roles() const noexcept;
+    void assign_roles(const std::vector<InterfaceRoleRule>& rules);
     void assign_automatic_roles(const std::set<std::uint32_t>& uplinks);
     [[nodiscard]] std::optional<std::string> interface_role(std::uint32_t index) const;
     [[nodiscard]] std::optional<std::string> interface_name(std::uint32_t index) const;
@@ -114,6 +124,9 @@ public:
     [[nodiscard]] bool start();
     void stop() noexcept;
 
+    void set_role_rules(std::vector<InterfaceRoleRule> rules);
+    [[nodiscard]] std::vector<InterfaceRoleRule> role_rules() const;
+
     // Numeric destinations only. A failed lookup is unknown, never interface 0.
     [[nodiscard]] std::optional<std::uint32_t> route_lookup(const std::string& destination) const;
 
@@ -132,6 +145,8 @@ private:
     void signal_initial_result(bool success);
     [[nodiscard]] bool stop_requested() const noexcept;
 
+    mutable std::mutex roles_mutex_;
+    std::vector<InterfaceRoleRule> role_rules_;
     mutable std::mutex lifecycle_mutex_;
     mutable std::mutex error_mutex_;
     std::condition_variable initial_condition_;

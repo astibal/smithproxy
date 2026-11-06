@@ -76,6 +76,12 @@ try:
       }
     }''')
     expected = socket.if_nametoindex('proxy0')
+    if len(sys.argv) > 1:
+        run('ip', 'route', 'add', 'blackhole', '203.0.113.0/24')
+        print(run(sys.argv[1], str(expected), 'Inside'), end='')
+        run('ip', 'route', 'add', 'default', 'via', '192.0.2.2')
+        print(run(sys.argv[1], str(expected), 'Outside'), end='')
+        run('ip', 'route', 'del', 'default')
     for family, destination in [(socket.AF_INET, '192.0.2.1'), (socket.AF_INET6, '2001:db8:1::1'),
                                 (socket.AF_INET, '198.51.100.10'), (socket.AF_INET6, '2001:db8:2::10')]:
         for transport in [socket.SOCK_STREAM, socket.SOCK_DGRAM]:

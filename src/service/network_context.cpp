@@ -1,6 +1,7 @@
 #include <service/network_context.hpp>
 #include <service/network_route.hpp>
 #include <net/if.h>
+#include <stdexcept>
 
 #include <algorithm>
 #include <cerrno>
@@ -659,9 +660,11 @@ std::string NetworkCtx::last_error() const {
 }
 
 void NetworkCtx::publish(bool valid) {
+    std::lock_guard lock(roles_mutex_);
     auto next_mutable = std::make_shared<InterfaceSnapshot>(*table_.snapshot(++generation_, valid));
     const auto defaults = valid ? detail::query_routes(nullptr) : std::nullopt;
     next_mutable->assign_automatic_roles(defaults.value_or(std::set<std::uint32_t>{}));
+    next_mutable->assign_roles(role_rules_);
     next_mutable->roles_valid = valid && defaults.has_value() && next_mutable->all_interfaces_have_roles();
     std::shared_ptr<const InterfaceSnapshot> next = std::move(next_mutable);
     std::atomic_store_explicit(&snapshot_, std::move(next), std::memory_order_release);
@@ -781,7 +784,8 @@ std::optional<std::uint32_t> sx::net::NetworkCtx::route_lookup(const std::string
     return *result->begin();
 }
 
-void sx::net::InterfaceSnapshot::assign_automatic_roles(const std::set<std::uint32_t>& uplinks) {
+void sx::net::InterfaceSnapshot::assign_automatic_roles(const std::set<std::uint32_t>& defaults) {
+    uplinks = defaults;
     for(auto& interface : interfaces) {
         interface.role = (interface.flags & IFF_LOOPBACK) ? "Local" :
             uplinks.count(interface.index) ? "Outside" : "Inside";
@@ -800,4 +804,44 @@ bool sx::net::InterfaceSnapshot::all_interfaces_have_roles() const noexcept {
     return std::all_of(interfaces.begin(), interfaces.end(), [](const auto& interface) {
         return interface.index != 0 && !interface.name.empty() && !interface.role.empty();
     });
+}
+
+void sx::net::InterfaceSnapshot::assign_roles(const std::vector<InterfaceRoleRule>& rules) {
+    for(auto& interface : interfaces) {
+        for(const auto& rule : rules) {
+            if(!rule.if_name.empty() && rule.if_name != interface.name) continue;
+            if(!rule.if_address.empty()) {
+                bool found = false;
+                for(const auto& address : addresses) {
+                    if(address.interface_index != interface.index || address.family != rule.family) continue;
+                    bool same = true;
+                    for(int bit = 0; bit < rule.prefix; ++bit) {
+                        const unsigned mask = 0x80U >> (bit % 8);
+                        if((address.address[bit/8] & mask) != (rule.network[bit/8] & mask)) { same = false; break; }
+                    }
+                    if(same) { found = true; break; }
+                }
+                if(!found) continue;
+            }
+            interface.role = rule.role;
+            break;
+        }
+    }
+}
+
+void sx::net::NetworkCtx::set_role_rules(std::vector<InterfaceRoleRule> rules) {
+    std::lock_guard lock(roles_mutex_);
+    auto next = std::make_shared<InterfaceSnapshot>(*snapshot());
+    next->assign_automatic_roles(next->uplinks);
+    next->assign_roles(rules);
+    if(!next->all_interfaces_have_roles()) throw std::invalid_argument("incomplete interface roles");
+    role_rules_ = std::move(rules);
+    next->generation = ++generation_;
+    std::shared_ptr<const InterfaceSnapshot> immutable = std::move(next);
+    std::atomic_store_explicit(&snapshot_, std::move(immutable), std::memory_order_release);
+}
+
+std::vector<sx::net::InterfaceRoleRule> sx::net::NetworkCtx::role_rules() const {
+    std::lock_guard lock(roles_mutex_);
+    return role_rules_;
 }

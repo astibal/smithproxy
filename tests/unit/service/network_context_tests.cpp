@@ -238,3 +238,62 @@ TEST(NetworkRoles, EveryInterfaceHasExactlyOneAutomaticRole) {
     snapshot.roles_valid = false;
     EXPECT_FALSE(snapshot.interface_role(2));
 }
+
+#include <service/interface_roles.hpp>
+
+TEST(NetworkRoles, OrderedRulesMatchInterfaceAddressesAndRoundTrip) {
+    libconfig::Config config;
+    config.readString(R"(settings = { interfaces = (
+        { match = { if_name = "guest"; }; role = "Guest"; },
+        { match = { if_address = "10.20.0.0/16"; }; role = "Office"; },
+        { match = { if_address = "2001:db8::/32"; }; role = "V6"; }
+    ); };)");
+    auto rules = sx::net::parse_interface_roles(config.lookup("settings"));
+    sx::net::InterfaceSnapshot snapshot;
+    snapshot.interfaces = {{2,"guest",0}, {3,"office",0}, {4,"office2",0}, {5,"v6",0}, {6,"fallback",0}};
+    for(unsigned index : {2,3,4,5}) {
+        sx::net::InterfaceAddress address;
+        address.interface_index = index;
+        address.family = index == 5 ? AF_INET6 : AF_INET;
+        address.address_size = index == 5 ? 16 : 4;
+        ASSERT_EQ(inet_pton(address.family, index == 5 ? "2001:db8::5" : "10.20.30.1", address.address.data()), 1);
+        snapshot.addresses.push_back(address);
+    }
+    snapshot.assign_automatic_roles({6});
+    snapshot.assign_roles(rules);
+    snapshot.valid = snapshot.roles_valid = true;
+    EXPECT_EQ(snapshot.interface_role(2), "Guest");
+    EXPECT_EQ(snapshot.interface_role(3), "Office");
+    EXPECT_EQ(snapshot.interface_role(4), "Office");
+    EXPECT_EQ(snapshot.interface_role(5), "V6");
+    EXPECT_EQ(snapshot.interface_role(6), "Outside");
+    EXPECT_TRUE(snapshot.all_interfaces_have_roles());
+    libconfig::Config copy;
+    auto& settings = copy.getRoot().add("settings", libconfig::Setting::TypeGroup);
+    sx::net::save_interface_roles(settings, rules);
+    const auto again = sx::net::parse_interface_roles(settings);
+    ASSERT_EQ(again.size(), rules.size());
+    for(std::size_t i=0; i<rules.size(); ++i) {
+        EXPECT_EQ(again[i].role, rules[i].role);
+        EXPECT_EQ(again[i].if_address, rules[i].if_address);
+        EXPECT_EQ(again[i].if_name, rules[i].if_name);
+    }
+}
+
+TEST(NetworkRoles, InvalidCandidateHasNoRuntimeSideEffects) {
+    auto& context = sx::net::NetworkCtx::instance();
+    const auto before = context.snapshot();
+    for(const char* text : {
+        "interfaces = ({match={network=\"10.0.0.0/8\";};role=\"Bad\";});",
+        "interfaces = ({match={if_address=\"10.0.0.0/33\";};role=\"Bad\";});",
+        "interfaces = ({match={};role=\"Bad\";});",
+        "interfaces = ({match={if_name=\"x\";};role=\"\";});",
+        "interfaces = {};"}) {
+        libconfig::Config config;
+        config.readString(text);
+        EXPECT_THROW(sx::net::parse_interface_roles(config.getRoot()), std::invalid_argument);
+        EXPECT_EQ(context.snapshot(), before);
+    }
+    libconfig::Config omitted;
+    EXPECT_TRUE(sx::net::parse_interface_roles(omitted.getRoot()).empty());
+}

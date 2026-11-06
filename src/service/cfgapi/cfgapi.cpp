@@ -1,3 +1,4 @@
+#include <service/interface_roles.hpp>
 #include <proxy/network_policy.hpp>
 /*
     Smithproxy- transparent proxy with SSL inspection capabilities.
@@ -843,6 +844,17 @@ bool CfgFactory::load_settings () {
 
     if(! cfgapi.getRoot().exists("settings"))
         return false;
+
+    // Parse the complete ordered map before publishing; omission clears it on
+    // reload/transaction rollback. Candidate parsers can use the same pure API.
+    try {
+        auto roles = sx::net::parse_interface_roles(cfgapi.getRoot()["settings"]);
+        sx::net::NetworkCtx::instance().set_role_rules(std::move(roles));
+    } catch(const std::exception& error) {
+        LOAD_ERRORS = true;
+        _err("invalid settings.interfaces: %s", error.what());
+        return false;
+    }
 
     load_if_exists(cfgapi.getRoot()["settings"], "accept_tproxy", accept_tproxy);
     load_if_exists(cfgapi.getRoot()["settings"], "accept_redirect", accept_redirect);
@@ -5953,6 +5965,7 @@ int save_settings(Config& ex) {
         ex.getRoot().add("settings", Setting::TypeGroup);
 
     Setting& objects = ex.getRoot()["settings"];
+    sx::net::save_interface_roles(objects, sx::net::NetworkCtx::instance().role_rules());
 
 
     objects.add("accept_tproxy", Setting::TypeBoolean) = CfgFactory::get()->accept_tproxy;

@@ -1184,6 +1184,12 @@ int cli_diag_sys_netlink_info(DiagCli* cli, const char* command,
            << std::setw(44) << "address/prefix"
            << std::setw(7) << "scope" << "flags\n";
 
+    output << "  roles valid: " << (snapshot->roles_valid ? "yes" : "no") << '\n';
+    for(const auto& interface : snapshot->interfaces) {
+        output << "  role: " << interface.index << ' ' << interface.name
+               << " -> " << interface.role << '\n';
+    }
+
     for(const auto& address : snapshot->addresses) {
         const char* family = address.family == AF_INET ? "IPv4" :
                              address.family == AF_INET6 ? "IPv6" : "other";
