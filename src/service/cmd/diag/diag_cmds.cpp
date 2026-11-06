@@ -1711,23 +1711,39 @@ int cli_diag_proxy_session_list(DiagCli *cli, const char *command, char *argv[],
     return cli_diag_proxy_session_list_extra(cli, command, args, flags);
 }
 
-int cli_diag_proxy_quic_list(DiagCli* cli, [[maybe_unused]] const char *command,
-                             [[maybe_unused]] char *argv[], [[maybe_unused]] int argc) {
+static void print_quic_sessions(DiagCli* cli, int flags, bool listener_summary) {
+
+    // QUIC snapshots describe the transport, not an SSLCom or TCP OS buffer.
+    // Keep protocol-specific filters honest rather than inventing those fields.
+    if(flag_check<int>(flags, SL_SSH_DETAILS)) return;
+    if((flags & (SL_IO_EMPTY | SL_IO_OSBUF_NZ)) &&
+       !flag_check<int>(flags, SL_IO_ALL)) return;
+
+    const auto decor = cli->context.decor();
     auto const& services = SmithProxy::instance().quic_services;
     std::size_t total = 0;
     for (std::size_t listener = 0; listener < services.size(); ++listener) {
         auto const& service = services[listener];
         auto const sessions = service->session_diagnostics();
-        auto const counters = service->diagnostics();
-        cli_print(cli, "QUIC listener[%zu]: udp/*:%u, sessions: %zu, accepted: %llu, completed: %llu",
-                  listener, service->bound_port(), sessions.size(),
-                  static_cast<unsigned long long>(counters.accepted_sessions),
-                  static_cast<unsigned long long>(counters.completed_sessions));
+
+        if(listener_summary) {
+            auto const counters = service->diagnostics();
+            cli_print(cli, "QUIC listener[%zu]: udp/*:%u, sessions: %zu, accepted: %llu, completed: %llu",
+                      listener, service->bound_port(), sessions.size(),
+                      static_cast<unsigned long long>(counters.accepted_sessions),
+                      static_cast<unsigned long long>(counters.completed_sessions));
+        }
+
         for (auto const& session : sessions) {
-            cli_print(cli, "QUIC|MitM|l:<udp_%s> <+> r:<udp_%s>",
-                      session.client.c_str(), session.target.c_str());
-            cli_print(cli, "    id: %llu  state: %s  age: %llums  idle: %llums",
-                      static_cast<unsigned long long>(session.id), session.state.c_str(),
+            if(flag_check<int>(flags, SL_ACTIVE) &&
+               (session.forwarded_bytes == 0 || session.idle_ms >= 5000)) continue;
+
+            // Match the ordinary list's decorated title and indented details.
+            cli->context.print(decor.command(string_format(
+                "QUIC|MitM|l:<udp_%s> <+> r:<udp_%s>",
+                session.client.c_str(), session.target.c_str())));
+            cli_print(cli, "    listener: %zu  id: %llu  state: %s  age: %llums  idle: %llums",
+                      listener, static_cast<unsigned long long>(session.id), session.state.c_str(),
                       static_cast<unsigned long long>(session.age_ms),
                       static_cast<unsigned long long>(session.idle_ms));
             cli_print(cli, "    SNI: %s", session.server_name.empty()
@@ -1742,8 +1758,17 @@ int cli_diag_proxy_quic_list(DiagCli* cli, [[maybe_unused]] const char *command,
         }
         total += sessions.size();
     }
-    if (services.empty()) cli_print(cli, "No QUIC listeners configured.");
-    cli_print(cli, "QUIC sessions total: %zu", total);
+    if(listener_summary) {
+        if(services.empty()) cli_print(cli, "No QUIC listeners configured.");
+        cli_print(cli, "QUIC sessions total: %zu", total);
+    }
+}
+
+
+int cli_diag_proxy_quic_list(DiagCli* cli, [[maybe_unused]] const char *command,
+                             [[maybe_unused]] char *argv[], [[maybe_unused]] int argc) {
+
+    print_quic_sessions(cli, SL_NONE, true);
     return CLI_OK;
 }
 
@@ -2381,6 +2406,11 @@ int cli_diag_proxy_session_list_extra (DiagCli *cli, const char *command, std::v
     }
 
     cli_print(cli, "%s", request->text_result().c_str());
+
+    // QUIC workers already publish owned snapshots; never inspect their live
+    // sessions from the CLI thread or add another dataplane snapshot request.
+    print_quic_sessions(cli, sl_flags, false);
+
     if( sl_flags == SL_NONE ) {
         unsigned long l = MitmProxy::total_mtr_up().get();
         unsigned long r = MitmProxy::total_mtr_down().get();

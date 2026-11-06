@@ -387,6 +387,16 @@ code to observe `EAGAIN`, `ECONNRESET` or EOF.
 
 ## Observability
 
+`diag proxy session list` includes QUIC transport sessions alongside ordinary
+proxy sessions. QUIC rows use the same decorated title and indented details,
+including the listener-local session ID, endpoints, SNI, ALPN and stream counters.
+The CLI reads worker-published snapshots, never live QUIC connection objects.
+
+`diag proxy quic list` remains available with listener counters and totals.
+The unified list respects `active` (traffic within five seconds), excludes QUIC
+from `ssh`, and includes it in `tls` and `io-all`. TCP OS-buffer filters do not
+include QUIC because those measurements are not available in its snapshot.
+
 Every log/session record should carry:
 
 ```text

@@ -544,8 +544,14 @@ if [[ $QUIC_TEST == 1 ]]; then
     done
     (( $(grep -c '^REQUEST stream=' "$ROOT/results/h3-origin.log" || true) >= 4 ))
 
-    { printf 'enable\r\ndiag proxy quic list\r\n'; sleep 1; printf 'quit\r\n'; } | \
+    # Exercise the unified list while HTTP/3 streams are live, then retain
+    # compatibility coverage for the dedicated transport view and SSH filter.
+    { printf 'enable\r\ndiag proxy session list\r\n'; sleep 1; printf 'quit\r\n'; } | \
         timeout 8 ip netns exec "$NS" nc 127.0.0.1 50000 > "$QUIC_CLI" 2>&1
+    { printf 'enable\r\ndiag proxy quic list\r\n'; sleep 1; printf 'quit\r\n'; } | \
+        timeout 8 ip netns exec "$NS" nc 127.0.0.1 50000 > "$QUIC_RESULT/cli-quic.txt" 2>&1
+    { printf 'enable\r\ndiag proxy session list ssh\r\n'; sleep 1; printf 'quit\r\n'; } | \
+        timeout 8 ip netns exec "$NS" nc 127.0.0.1 50000 > "$QUIC_RESULT/cli-ssh.txt" 2>&1
     wait "$QUIC_CLIENT_PID"
     QUIC_CLIENT_PID=
     kill -INT "$QUIC_GRE_PID" "$QUIC_NATIVE_PID" 2>/dev/null || true

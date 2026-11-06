@@ -187,11 +187,22 @@ def validate_native(capture, keylog, expected_urls):
 
 def validate_cli(path, minimum_streams):
     text = path.read_text(errors="replace")
-    required = ["QUIC listener[0]", "QUIC|MitM|", "SNI: origin.runner.lab",
+    required = ["QUIC|MitM|", "SNI: origin.runner.lab",
                 "ALPN: downstream=h3 upstream=h3"]
     missing = [marker for marker in required if marker not in text]
     if missing:
         raise AssertionError(f"CLI snapshot missing: {missing}")
+    # The ordinary session list includes transport sessions without the
+    # listener-summary section; the older dedicated command remains usable.
+    if "QUIC listener[" in text or "Proxy performance:" not in text:
+        raise AssertionError("expected the unified proxy session list")
+    dedicated = path.with_name("cli-quic.txt").read_text(errors="replace")
+    if "QUIC listener[0]" not in dedicated or "QUIC|MitM|" not in dedicated:
+        raise AssertionError("dedicated QUIC listing regressed")
+    ssh_only = path.with_name("cli-ssh.txt").read_text(errors="replace")
+    if "QUIC|MitM|" in ssh_only:
+        raise AssertionError("SSH-only session list included QUIC")
+
     stream_counts = []
     for line in text.splitlines():
         if "streams:" not in line:
