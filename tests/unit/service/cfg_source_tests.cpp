@@ -70,6 +70,8 @@ TEST_F(SourceTest, RecognizesOnlyResourceNamespaces) {
     EXPECT_FALSE(CfgManifest::is_resource_path("pki/"));
     EXPECT_FALSE(CfgManifest::is_resource_path("smithproxy.cfg"));
     EXPECT_FALSE(CfgManifest::is_resource_path("unknown/file"));
+    EXPECT_FALSE(CfgManifest::is_resource_path("ssh/../host-key"));
+    EXPECT_FALSE(CfgManifest::is_resource_path("messages//page.html"));
 }
 
 TEST_F(SourceTest, RejectsMissingOrInvalidManifest) {

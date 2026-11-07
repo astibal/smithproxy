@@ -7,10 +7,12 @@
 
 #include <cerrno>
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fcntl.h>
+#include <sstream>
 #include <utility>
 #include <vector>
 
@@ -314,6 +316,9 @@ public:
         if (bind_) {
             ssh_bind_free(bind_);
         }
+        if (imported_host_key_) {
+            ssh_key_free(imported_host_key_);
+        }
         if (client_fd_ >= 0) {
             ::close(client_fd_);
         }
@@ -446,12 +451,37 @@ public:
             return false;
         }
 
-        if (options_.host_key.empty()) {
+        if (!options_.host_key_pem && options_.host_key.empty()) {
             set_error("SSH MITM host key is not configured");
             return false;
         }
-        if (ssh_bind_options_set(bind_, SSH_BIND_OPTIONS_HOSTKEY,
-                                 options_.host_key.c_str()) != SSH_OK) {
+        if (options_.host_key_pem) {
+            // libssh's base64 importer expects the encoded OpenSSH payload,
+            // without PEM armor or whitespace. An empty or malformed native
+            // entry fails here and never falls through to the legacy file.
+            std::string encoded;
+            bool inside = false;
+            std::istringstream pem(*options_.host_key_pem);
+            for (std::string line; std::getline(pem, line);) {
+                if (line.rfind("-----BEGIN ", 0) == 0) { inside = true; continue; }
+                if (line.rfind("-----END ", 0) == 0) break;
+                if (inside) {
+                    for (unsigned char c : line) {
+                        if (!std::isspace(c)) encoded.push_back(static_cast<char>(c));
+                    }
+                }
+            }
+            if (encoded.empty() ||
+                ssh_pki_import_privkey_base64(encoded.c_str(), nullptr, nullptr,
+                                              nullptr, &imported_host_key_) != SSH_OK ||
+                ssh_bind_options_set(bind_, SSH_BIND_OPTIONS_IMPORT_KEY,
+                                     imported_host_key_) != SSH_OK) {
+                set_error(libssh_error(bind_, "cannot import SSH MITM host key"));
+                return false;
+            }
+        }
+        else if (ssh_bind_options_set(bind_, SSH_BIND_OPTIONS_HOSTKEY,
+                                      options_.host_key.c_str()) != SSH_OK) {
             set_error(libssh_error(bind_, "cannot configure SSH MITM host key"));
             return false;
         }
@@ -1438,6 +1468,7 @@ public:
     int client_fd_ = -1;
     int upstream_fd_ = -1;
     ssh_bind bind_ = nullptr;
+    ssh_key imported_host_key_ = nullptr;
     ssh_session downstream_ = nullptr;
     ssh_session upstream_ = nullptr;
     ssh_callbacks_struct upstream_callbacks_{};

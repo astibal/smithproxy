@@ -3756,6 +3756,15 @@ int CfgFactory::policy_apply (baseHostCX *originator, MitmProxy *proxy, int matc
                 auto options = sx::ssh::transport_options{};
                 options.profile_name = rule->profile_ssh->element_name();
                 options.host_key = rule->profile_ssh->host_key;
+                constexpr std::string_view legacy_root = "/etc/smithproxy/";
+                if (options.host_key.rfind(legacy_root, 0) == 0) {
+                    auto resource = resolve_resource(
+                        "ssh/" + options.host_key.substr(legacy_root.size()),
+                        options.host_key);
+                    if (resource.is_native()) {
+                        options.host_key_pem = resource.content();
+                    }
+                }
                 options.hostkeys = rule->profile_ssh->hostkey_policy == "strict"
                     ? sx::ssh::hostkey_policy::strict
                     : rule->profile_ssh->hostkey_policy == "accept-new"

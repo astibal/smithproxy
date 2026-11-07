@@ -26,6 +26,23 @@ bool has_prefix(std::string_view path, std::string_view prefix) {
     return path.size() > prefix.size() && path.compare(0, prefix.size(), prefix) == 0;
 }
 
+bool safe_logical_path(std::string_view path) {
+    if (path.empty() || path.front() == '/' || path.back() == '/' ||
+        path.find('\\') != std::string_view::npos ||
+        path.find("//") != std::string_view::npos) {
+        return false;
+    }
+    for (std::size_t start = 0; start < path.size();) {
+        const auto end = path.find('/', start);
+        const auto part = path.substr(start, end == std::string_view::npos
+            ? path.size() - start : end - start);
+        if (part == "." || part == "..") return false;
+        if (end == std::string_view::npos) break;
+        start = end + 1;
+    }
+    return true;
+}
+
 // Define the complete v1 archive namespace in one place. Unknown roots fail
 // closed instead of becoming accidentally persistent product state.
 bool allowed_path(std::string_view path) {
@@ -115,8 +132,9 @@ void CfgManifest::validate(const CfgTar& archive) {
 }
 
 bool CfgManifest::is_resource_path(std::string_view path) {
-    return has_prefix(path, "pki/") || has_prefix(path, "messages/") ||
-           has_prefix(path, "scripts/") || has_prefix(path, "ssh/");
+    return safe_logical_path(path) &&
+           (has_prefix(path, "pki/") || has_prefix(path, "messages/") ||
+            has_prefix(path, "scripts/") || has_prefix(path, "ssh/"));
 }
 
 CfgResource::CfgResource(Kind kind, std::string logical_path, std::string value)
