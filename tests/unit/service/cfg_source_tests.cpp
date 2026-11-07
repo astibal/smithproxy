@@ -254,10 +254,15 @@ TEST_F(SourceTest, BuildsSavePayloadWithoutLosingArchiveResources) {
     write_archive(archive);
     const auto source = CfgSource::open(paths_);
 
-    const auto saved = CfgTar::read(source.save_payload("settings : { changed = true; };\n"));
+    const auto save = source.prepare_save("settings : { changed = true; };\n");
+    const auto saved = CfgTar::read(save.replacement);
 
     EXPECT_EQ(saved.at("smithproxy.cfg").data, "settings : { changed = true; };\n");
     EXPECT_EQ(saved.at("pki/ca/default/cert.pem").data, "certificate");
+    ASSERT_TRUE(save.previous);
+    const auto previous = CfgTar::read(*save.previous);
+    EXPECT_EQ(previous.at("smithproxy.cfg").data, "settings : {};\n");
+    EXPECT_EQ(previous.at("pki/ca/default/cert.pem").data, "certificate");
     EXPECT_EQ(source.main_config(), "settings : {};\n");
     EXPECT_EQ(CfgTar::read(source.archive_payload()).at("smithproxy.cfg").data,
               "settings : {};\n");
@@ -268,7 +273,7 @@ TEST_F(SourceTest, AdvancesNativeSourceOnlyWhenSaveIsAccepted) {
     auto source = CfgSource::open(paths_);
 
     const std::string changed = "settings : { changed = true; };\n";
-    source.save_payload(changed);
+    source.prepare_save(changed);
     EXPECT_EQ(source.main_config(), "settings : {};\n");
 
     source.accept_saved_main(changed);
@@ -278,7 +283,9 @@ TEST_F(SourceTest, AdvancesNativeSourceOnlyWhenSaveIsAccepted) {
 
 TEST_F(SourceTest, LegacySavePayloadIsPlainConfiguration) {
     const auto source = CfgSource::open(paths_);
-    EXPECT_EQ(source.save_payload("plain config"), "plain config");
+    const auto save = source.prepare_save("plain config");
+    EXPECT_EQ(save.replacement, "plain config");
+    EXPECT_FALSE(save.previous);
     EXPECT_THROW(source.archive_payload(), CfgTarError);
 }
 

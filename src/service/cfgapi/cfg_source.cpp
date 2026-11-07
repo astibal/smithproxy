@@ -262,11 +262,11 @@ std::vector<std::string> CfgSource::resources(std::string_view logical_dir) cons
 }
 
 // Translate a new main configuration into the bytes expected by the selected
-// persistent format. For CfgTar this copies the archive, replaces exactly one
-// existing entry and serializes the complete validated result.
-std::string CfgSource::save_payload(std::string main_config) const {
+// persistent format. For CfgTar this also returns the exact accepted archive
+// which must be made recoverable before the replacement is installed.
+CfgSaveData CfgSource::prepare_save(std::string main_config) const {
     if (!is_cftar()) {
-        return main_config;
+        return {std::move(main_config), std::nullopt};
     }
 
     // Work on a copy so a failed validation or write cannot mutate the source
@@ -274,7 +274,7 @@ std::string CfgSource::save_payload(std::string main_config) const {
     auto updated = archive();
     updated.replace(main_config_path, std::move(main_config));
     CfgManifest::validate(updated);
-    return updated.write();
+    return {updated.write(), archive().write()};
 }
 
 // Advance the cached archive only after its prepared payload has reached disk.

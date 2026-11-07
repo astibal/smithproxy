@@ -6410,11 +6410,21 @@ bool CfgFactory::save_config() const {
         }
 
         // Preserve every native resource while replacing only smithproxy.cfg.
-        // Legacy sources intentionally produce the unchanged text payload.
+        // Native storage also keeps the exact previously accepted archive as
+        // a recovery copy. If that write fails, the active archive remains
+        // untouched and UpdateBoard continues to report an unsaved revision.
         std::string main_content;
+        std::optional<std::string> previous;
         if(config_source_) {
             main_content = content;
-            content = config_source_->save_payload(main_content);
+            auto save = config_source_->prepare_save(main_content);
+            content = std::move(save.replacement);
+            previous = std::move(save.previous);
+        }
+        if(previous &&
+           sx::privsep::files::config_backup(CfgFactory::get()->config_file,
+                                              "previous", *previous) != 0) {
+            throw FileIOException();
         }
         if(sx::privsep::files::config_write(CfgFactory::get()->config_file, content) != 0) {
             throw FileIOException();

@@ -62,6 +62,14 @@ private:
     std::string value_;
 };
 
+// Contains every byte needed for one persistent configuration replacement.
+// Native storage carries the previously accepted archive as a recovery copy;
+// legacy storage has no managed backup and therefore leaves previous empty.
+struct CfgSaveData {
+    std::string replacement;
+    std::optional<std::string> previous;
+};
+
 // Resolves the persistent configuration source used for one process start.
 // It preserves an explicit legacy-file request, otherwise prefers CfgTar and
 // permits legacy fallback only when the archive is genuinely absent. A chosen
@@ -112,10 +120,10 @@ public:
     // interpreting or executing their contents.
     std::vector<std::string> resources(std::string_view logical_dir) const;
 
-    // Prepare bytes for the active storage format. Legacy storage receives the
-    // serialized config directly; CfgTar storage receives a complete archive
-    // with only smithproxy.cfg replaced and every resource preserved.
-    std::string save_payload(std::string main_config) const;
+    // Prepare a complete replacement and, for native storage, the exact
+    // previously accepted archive. The caller persists previous first and
+    // must not install replacement when that recovery write fails.
+    CfgSaveData prepare_save(std::string main_config) const;
 
     // Advance the in-memory native source after its save payload has been
     // atomically installed. Legacy sources carry no cached file contents.
