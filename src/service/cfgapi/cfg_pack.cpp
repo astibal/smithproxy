@@ -93,6 +93,14 @@ std::string read_input(const std::string& path) {
     return data;
 }
 
+bool absent_optional_input(const CfgPack::File& file) {
+    if (!file.optional) return false;
+    struct stat state {};
+    if (::lstat(file.source_path.c_str(), &state) == 0) return false;
+    if (errno == ENOENT) return true;
+    fail_errno("cannot inspect optional CfgTar input " + file.source_path);
+}
+
 } // namespace
 
 CfgTar CfgPack::build(const Input& input) {
@@ -111,6 +119,7 @@ CfgTar CfgPack::build(const Input& input) {
         if (file.source_path.empty()) {
             fail("CfgTar resource source path is required");
         }
+        if (absent_optional_input(file)) continue;
         archive.add(file.archive_path, read_input(file.source_path), file.executable);
     }
 

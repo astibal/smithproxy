@@ -20,6 +20,7 @@ public:
         std::string archive_path;
         std::string source_path;
         bool executable = false;
+        bool optional = false;
     };
 
     struct Input {

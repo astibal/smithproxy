@@ -335,6 +335,37 @@ void prepare_native_pki() {
             SSLFactory::config_t::PO_KEYF);
 }
 
+std::vector<sx::cfg::CfgPack::File> legacy_cftar_resources() {
+    using File = sx::cfg::CfgPack::File;
+    return {
+        // The renderer consumes four base templates. Keep the established
+        // variants as portable configuration data for later theme selection.
+        File{"messages/en/test.txt", "/etc/smithproxy/msg/en/test.txt", false, true},
+        File{"messages/en/html_page.txt", "/etc/smithproxy/msg/en/html_page.txt", false, true},
+        File{"messages/en/html_img_warning.txt", "/etc/smithproxy/msg/en/html_img_warning.txt", false, true},
+        File{"messages/en/tls_replacement.txt", "/etc/smithproxy/msg/en/tls_replacement.txt", false, true},
+        File{"messages/en/tls_replacement_common.txt", "/etc/smithproxy/msg/en/tls_replacement_common.txt", false, true},
+        File{"messages/en/tls_replacement_light.txt", "/etc/smithproxy/msg/en/tls_replacement_light.txt", false, true},
+        File{"messages/en/tls_replacement_dark.txt", "/etc/smithproxy/msg/en/tls_replacement_dark.txt", false, true},
+        File{"messages/en/tls_replacement_branded.txt", "/etc/smithproxy/msg/en/tls_replacement_branded.txt", false, true},
+
+        // Default PKI roles are individually optional for compatibility with
+        // deliberately reduced installations. Any present unsafe file still
+        // fails migration instead of being silently skipped.
+        File{"pki/ca/default/ca-cert.pem", "/etc/smithproxy/certs/default/ca-cert.pem", false, true},
+        File{"pki/ca/default/ca-key.pem", "/etc/smithproxy/certs/default/ca-key.pem", false, true},
+        File{"pki/ca/default/srv-cert.pem", "/etc/smithproxy/certs/default/srv-cert.pem", false, true},
+        File{"pki/ca/default/srv-key.pem", "/etc/smithproxy/certs/default/srv-key.pem", false, true},
+        File{"pki/ca/default/cl-cert.pem", "/etc/smithproxy/certs/default/cl-cert.pem", false, true},
+        File{"pki/ca/default/cl-key.pem", "/etc/smithproxy/certs/default/cl-key.pem", false, true},
+        File{"pki/ca/default/portal-cert.pem", "/etc/smithproxy/certs/default/portal-cert.pem", false, true},
+        File{"pki/ca/default/portal-key.pem", "/etc/smithproxy/certs/default/portal-key.pem", false, true},
+        File{"pki/ca/default/sslca.json", "/etc/smithproxy/certs/default/sslca.json", false, true},
+
+        File{"ssh/ssh_host_ed25519_key", "/etc/smithproxy/ssh_host_ed25519_key", false, true},
+    };
+}
+
 void prepare_mem_debugs() {
     if(CfgFactory::get()->cfg_openssl_mem_dbg) {
 
@@ -806,7 +837,7 @@ int main(int argc, char *argv[]) {
                     {
                         CfgFactory::get()->config_file,
                         "/etc/smithproxy/smithproxy.startup.cfg",
-                        {},
+                        legacy_cftar_resources(),
                     },
                     "/etc/smithproxy/smithproxy.cftar",
                 };

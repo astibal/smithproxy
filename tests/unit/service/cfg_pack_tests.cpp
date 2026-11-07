@@ -122,4 +122,23 @@ TEST_F(PackTest, LeavesNoArchiveWhenMigrationInputIsIncomplete) {
     EXPECT_FALSE(std::filesystem::exists(output));
 }
 
+TEST_F(PackTest, SkipsAbsentOptionalResourceButPacksItWhenPresent) {
+    input_.files.push_back({"ssh/host-key", directory_ + "/host-key", false, true});
+    auto archive = CfgPack::build(input_);
+    EXPECT_FALSE(archive.contains("ssh/host-key"));
+
+    write("host-key", "private key");
+    archive = CfgPack::build(input_);
+    EXPECT_EQ(archive.at("ssh/host-key").data, "private key");
+}
+
+TEST_F(PackTest, OptionalResourceDoesNotHideUnsafeOrUnreadableInput) {
+    const auto target = write("target", "data");
+    const auto link = directory_ + "/optional-link";
+    ASSERT_EQ(::symlink(target.c_str(), link.c_str()), 0);
+    input_.files.push_back({"scripts/link", link, false, true});
+
+    EXPECT_THROW(CfgPack::build(input_), CfgTarError);
+}
+
 } // namespace
