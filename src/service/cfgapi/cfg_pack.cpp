@@ -118,4 +118,29 @@ CfgTar CfgPack::build(const Input& input) {
     return archive;
 }
 
+bool CfgPack::migrate(const Migration& migration) {
+    if (migration.archive_path.empty()) {
+        fail("CfgTar migration output path is required");
+    }
+
+    try {
+        build(migration.input).write_file(migration.archive_path);
+        return true;
+    }
+    catch (const CfgTarError&) {
+        // A destination that appeared after source selection must never be
+        // replaced. Validate it before accepting the concurrent migration.
+        struct stat state {};
+        if (::lstat(migration.archive_path.c_str(), &state) == 0) {
+            if (!S_ISREG(state.st_mode)) {
+                throw;
+            }
+            auto archive = CfgTar::read_file(migration.archive_path);
+            CfgManifest::validate(archive);
+            return false;
+        }
+        throw;
+    }
+}
+
 } // namespace sx::cfg

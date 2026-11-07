@@ -78,6 +78,7 @@
 #include <libconfig.h++>
 
 #include <service/cfgapi/cfgapi.hpp>
+#include <service/cfgapi/cfg_pack.hpp>
 #include <utils/tenants.hpp>
 #include <service/daemon.hpp>
 #include <service/privileged_file.hpp>
@@ -729,6 +730,7 @@ int main(int argc, char *argv[]) {
         Log::get()->level(DIA);
     }
     bool CONFIG_LOADED = false;
+    bool migrate_default_legacy = false;
     try {
         sx::cfg::CfgSource::Paths source_paths {
             "/etc/smithproxy/smithproxy.cftar",
@@ -743,8 +745,9 @@ int main(int argc, char *argv[]) {
            CfgFactory::get()->config_file != "/etc/smithproxy/smithproxy.cfg") {
             source_paths.explicit_config = CfgFactory::get()->config_file;
         }
-        CONFIG_LOADED = SmithProxy::instance().load_config(
-            sx::cfg::CfgSource::open(std::move(source_paths)));
+        auto source = sx::cfg::CfgSource::open(std::move(source_paths));
+        migrate_default_legacy = !is_custom_config_file && !source.is_cftar();
+        CONFIG_LOADED = SmithProxy::instance().load_config(std::move(source));
     }
     catch(const std::exception& error) {
         _fat("Unable to select configuration source: %s", error.what());
@@ -761,7 +764,43 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        if(upgraded_status) {
+        bool migrated_to_cftar = false;
+        if(migrate_default_legacy && !CfgFactory::get()->config_file_check_only) {
+            try {
+                sx::cfg::CfgPack::Migration migration {
+                    {
+                        CfgFactory::get()->config_file,
+                        "/etc/smithproxy/smithproxy.startup.cfg",
+                        {},
+                    },
+                    "/etc/smithproxy/smithproxy.cftar",
+                };
+
+                const bool created = sx::cfg::CfgPack::migrate(migration);
+                _not("native configuration archive %s",
+                     created ? "created" : "accepted after concurrent creation");
+
+                sx::cfg::CfgSource::Paths source_paths {
+                    migration.archive_path,
+                    CfgFactory::get()->config_file,
+                    std::nullopt,
+                };
+                CONFIG_LOADED = SmithProxy::instance().load_config(
+                    sx::cfg::CfgSource::open(std::move(source_paths)), true);
+                migrated_to_cftar = CONFIG_LOADED;
+                if(!CONFIG_LOADED) {
+                    _cri("new native configuration archive FAILED to load");
+                }
+            }
+            catch(const std::exception& error) {
+                // Migration never replaces the working legacy files. Keep the
+                // process usable and retry the absent archive on the next boot.
+                _err("cannot create native configuration archive: %s", error.what());
+                log.event(ERR, "Native configuration migration failed: %s", error.what());
+            }
+        }
+
+        if(upgraded_status && !migrated_to_cftar) {
             CONFIG_LOADED = SmithProxy::instance().reload_config();
             if(CONFIG_LOADED) {
                 _not("upgraded config file has been reloaded");

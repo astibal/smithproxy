@@ -124,7 +124,7 @@ class CfgFactory : public CfgFactoryBase {
 public:
     // Each version bump implies a config upgrade - we start on 1000
     // see upgrade_schema() - control config upgrade
-    constexpr static inline const int SCHEMA_VERSION  = 1048;
+    constexpr static inline const int SCHEMA_VERSION  = 1049;
 
     static inline std::atomic_bool LOAD_ERRORS = false;
     static constexpr std::string_view CT_UNAVAILABLE_WARNING =

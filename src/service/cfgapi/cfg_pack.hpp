@@ -28,9 +28,19 @@ public:
         std::vector<File> files;
     };
 
+    struct Migration {
+        Input input;
+        std::string archive_path;
+    };
+
     // Read every input exactly once, assemble the canonical v1 namespace and
     // validate the result before returning it to a writer.
     static CfgTar build(const Input& input);
+
+    // Create the first native archive without replacing any path that appeared
+    // concurrently. Returning false means another valid archive already owns
+    // the destination; all other failures remain explicit exceptions.
+    static bool migrate(const Migration& migration);
 };
 
 } // namespace sx::cfg

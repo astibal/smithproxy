@@ -685,6 +685,12 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added per-direction Sift payload budget");
         return true;
     }
+    else if(upgrade_to_num == 1049) {
+        // Persist the current schema before the startup path promotes a
+        // standalone legacy installation to its first native archive.
+        log.event(INF, "prepared configuration for native CfgTar storage");
+        return true;
+    }
 
 
     return false;

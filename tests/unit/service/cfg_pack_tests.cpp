@@ -86,4 +86,40 @@ TEST_F(PackTest, RejectsDuplicateAndUnsupportedArchivePaths) {
     EXPECT_THROW(CfgPack::build(input_), CfgTarError);
 }
 
+TEST_F(PackTest, MigratesLegacyFilesWithoutReplacingTheDestination) {
+    const auto output = directory_ + "/smithproxy.cftar";
+    const CfgPack::Migration migration {input_, output};
+
+    EXPECT_TRUE(CfgPack::migrate(migration));
+    EXPECT_EQ(sx::cfg::CfgTar::read_file(output).at("smithproxy.cfg").data,
+              "settings : {};\n");
+
+    write("main.cfg", "settings : { changed = true; };\n");
+    EXPECT_FALSE(CfgPack::migrate(migration));
+    EXPECT_EQ(sx::cfg::CfgTar::read_file(output).at("smithproxy.cfg").data,
+              "settings : {};\n");
+}
+
+TEST_F(PackTest, RejectsInvalidExistingMigrationDestination) {
+    const auto output = write("smithproxy.cftar", "not a tar archive");
+    EXPECT_THROW(CfgPack::migrate({input_, output}), CfgTarError);
+}
+
+TEST_F(PackTest, RejectsSymlinkMigrationDestination) {
+    const auto target = write("target.cftar", "untouched");
+    const auto output = directory_ + "/smithproxy.cftar";
+    ASSERT_EQ(::symlink(target.c_str(), output.c_str()), 0);
+
+    EXPECT_THROW(CfgPack::migrate({input_, output}), CfgTarError);
+    EXPECT_EQ(std::ifstream(target).peek(), 'u');
+}
+
+TEST_F(PackTest, LeavesNoArchiveWhenMigrationInputIsIncomplete) {
+    const auto output = directory_ + "/smithproxy.cftar";
+    input_.startup_config = directory_ + "/missing-startup.cfg";
+
+    EXPECT_THROW(CfgPack::migrate({input_, output}), CfgTarError);
+    EXPECT_FALSE(std::filesystem::exists(output));
+}
+
 } // namespace
