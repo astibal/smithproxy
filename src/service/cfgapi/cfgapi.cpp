@@ -99,6 +99,40 @@ sx::cfg::SaveResult CfgFactory::save_running(
     return saver.save(expected_revision, source);
 }
 
+sx::cfg::ArchiveRestoreResult CfgFactory::restore_startup_archive(
+    std::string const& expected_revision,
+    std::string const& expected_hash,
+    std::string const& payload) {
+    auto factory = get();
+
+    const bool native_source = factory->config_source_ &&
+                               factory->config_source_->is_cftar();
+
+    // CfgFactory supplies storage capabilities; restore orchestration remains
+    // isolated in the testable coordinator.
+    sx::cfg::CfgArchiveRestorer restorer({
+        *board(),
+        *write_gate(),
+        lock(),
+        native_source,
+        factory->startup_archive_pending_,
+        // Preserve resources not represented by the libconfig tree.
+        [factory] { return factory->config_source_->archive_payload(); },
+        [factory](const std::string& current, const std::string& replacement) {
+            // Keep one exact recovery copy before atomically replacing the
+            // active startup archive. A failed backup leaves it untouched.
+            if(sx::privsep::files::config_backup(
+                   factory->config_file, "previous", current) != 0) {
+                return false;
+            }
+            return sx::privsep::files::config_write(
+                       factory->config_file, replacement) == 0;
+        },
+    });
+
+    return restorer.restore(expected_revision, expected_hash, payload);
+}
+
 bool CfgFactory::ct_requested() const {
     return std::any_of(db_prof_tls.begin(), db_prof_tls.end(),
         [](const auto& entry) {
@@ -288,6 +322,11 @@ std::string CfgFactory::previous_archive_payload() {
     const auto archive = sx::cfg::CfgTar::read(payload);
     sx::cfg::CfgManifest::validate(archive);
     return payload;
+}
+
+bool CfgFactory::startup_archive_pending() const {
+    std::scoped_lock<std::recursive_mutex> guard(CfgFactory::lock());
+    return startup_archive_pending_;
 }
 
 std::shared_ptr<CfgAddress> CfgFactory::lookup_address (const char *name) {
@@ -6332,6 +6371,16 @@ int CfgFactory::save_captures(Config& ex) const {
 bool CfgFactory::save_config() const {
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+
+    // After restore, cfgapi still represents the old running process while the
+    // file already contains the next startup state. Serializing cfgapi now would
+    // destroy the explicitly restored archive, so only restart can clear this
+    // intentional split.
+    if(startup_archive_pending_) {
+        _err("configuration save refused: restored startup archive awaits restart");
+        log.event(ERR, "Configuration NOT saved: restart required after archive restore");
+        return false;
+    }
 
     Config ex;
 

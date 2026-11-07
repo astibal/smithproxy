@@ -56,6 +56,7 @@
 
 #include "cfg_update.hpp"
 #include "cfg_source.hpp"
+#include "cfg_archive_restore.hpp"
 #include "cfg_write_gate.hpp"
 #include "cfg_tx_validate.hpp"
 
@@ -119,6 +120,10 @@ class CfgFactory : public CfgFactoryBase {
     // mutable because the historically const save_config() advances the cached
     // archive only after durable replacement succeeds.
     mutable std::optional<sx::cfg::CfgSource> config_source_;
+    // A restored archive is the next startup configuration, while cfgapi still
+    // describes the running process. Block ordinary saves until restart so the
+    // explicitly restored bytes cannot be overwritten by that older state.
+    mutable bool startup_archive_pending_ = false;
     std::recursive_mutex lock_;
 
     static inline std::shared_ptr<CfgFactory> self;
@@ -160,6 +165,10 @@ public:
     static sx::cfg::SaveResult save_running(
         std::string const& expected_revision,
         std::string const& source);
+    static sx::cfg::ArchiveRestoreResult restore_startup_archive(
+        std::string const& expected_revision,
+        std::string const& expected_hash,
+        std::string const& payload);
     static sx::cfg::tx::Transaction::CreateResult make_transaction(std::string owner) {
         auto factory = get();
         return sx::cfg::tx::Transaction::create(
@@ -400,6 +409,10 @@ public:
     // Read and validate the recovery archive through the privileged file
     // capability. The returned bytes are suitable for an exact download.
     std::string previous_archive_payload();
+
+    // True after a successful restore that deliberately requires a process
+    // restart before its configuration and resources become active.
+    [[nodiscard]] bool startup_archive_pending() const;
     void  cleanup();
 
     static void cfg_clone_setting(libconfig::Setting& dst, libconfig::Setting& orig, int index = -1 );

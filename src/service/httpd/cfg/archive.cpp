@@ -95,4 +95,82 @@ Http_JsonResponseParams cfg_archive_validate(
     return response;
 }
 
+Http_JsonResponseParams cfg_archive_restore(
+    MHD_Connection* connection,
+    [[maybe_unused]] std::string const& method,
+    std::string const& request) {
+    // Keep the body as exact CFtar bytes; preconditions travel in headers.
+    const auto* revision = MHD_lookup_connection_value(
+        connection, MHD_HEADER_KIND, "X-Smithproxy-Expected-Revision");
+    const auto* hash = MHD_lookup_connection_value(
+        connection, MHD_HEADER_KIND, "X-Smithproxy-Archive-SHA256");
+
+    Http_JsonResponseParams response;
+    response.content_type = "application/json";
+
+    // Restore is never blind: state and archive must have been inspected first.
+    if(!revision || !*revision || !hash || !*hash) {
+        response.response_code = MHD_HTTP_BAD_REQUEST;
+        response.response = {
+            {"state", "error"},
+            {"error", {
+                {"code", "missing_restore_precondition"},
+                {"detail", "restore requires expected revision and archive SHA-256 headers"},
+            }},
+        };
+        return response;
+    }
+
+    const auto result = CfgFactory::restore_startup_archive(revision, hash, request);
+
+    // Success means durable startup replacement, not live reload.
+    if(result.ok()) {
+        response.response_code = MHD_HTTP_OK;
+        response.response = {
+            {"state", "restored"},
+            {"revision", result.revision.current_id},
+            {"content_hash", result.content_hash},
+            {"restart_required", true},
+        };
+        return response;
+    }
+
+    // Preserve domain-specific failures so the GUI can offer the right remedy.
+    std::string code;
+    unsigned int status = MHD_HTTP_CONFLICT;
+    using Status = sx::cfg::ArchiveRestoreStatus;
+    switch(result.status) {
+        case Status::invalid_archive:
+            code = "invalid_archive";
+            status = MHD_HTTP_UNPROCESSABLE_ENTITY;
+            break;
+        case Status::hash_mismatch:
+            code = "archive_hash_mismatch";
+            status = MHD_HTTP_UNPROCESSABLE_ENTITY;
+            break;
+        case Status::lease_busy: code = "write_lease_busy"; break;
+        case Status::stale_revision: code = "stale_revision"; break;
+        case Status::unsaved_running: code = "unsaved_running_config"; break;
+        case Status::native_unavailable: code = "native_archive_unavailable"; break;
+        case Status::restart_pending: code = "restart_already_required"; break;
+        case Status::write_failed:
+            code = "archive_install_failed";
+            status = MHD_HTTP_INTERNAL_SERVER_ERROR;
+            break;
+        case Status::restored: break;
+    }
+
+    response.response_code = status;
+    response.response = {
+        {"state", "error"},
+        {"revision", result.revision.current_id},
+        {"content_hash", result.content_hash},
+        {"error", {
+            {"code", std::move(code)},
+            {"detail", result.detail},
+        }},
+    };
+    return response;
+}
+
 }  // namespace sx::webserver

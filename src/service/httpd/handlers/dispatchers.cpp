@@ -225,6 +225,16 @@ namespace sx::webserver::dispatchers {
             sx::privsep::files::max_config_payload;
         server.addController(std::shared_ptr<lmh::Controller>(cfg_archive_validate_handler));
 
+        // Restore accepts raw CFtar bytes under the standard auth and size limit.
+        auto* cfg_archive_restore_handler = new Http_Responder(
+            "POST",
+            "/api/config/archive/restore",
+            authorized::token_protected<Http_JsonResponseParams>(&cfg_archive_restore));
+        cfg_archive_restore_handler->Content_Type = "application/json";
+        cfg_archive_restore_handler->Max_Request_Body_Size =
+            sx::privsep::files::max_config_payload;
+        server.addController(std::shared_ptr<lmh::Controller>(cfg_archive_restore_handler));
+
         auto* cfg_save_handler = new Http_Responder(
             "POST",
             "/api/config/save",

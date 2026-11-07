@@ -299,6 +299,7 @@ add_executable(smithproxy
         src/service/cfgapi/cfg_tx_validate.cpp
         src/service/cfgapi/cfg_tx_basket.cpp
         src/service/cfgapi/cfg_save.cpp
+        src/service/cfgapi/cfg_archive_restore.cpp
         src/service/httpd/cfg/save.cpp
         src/service/httpd/cfg/archive.cpp
         src/service/httpd/cfg/transaction.cpp
@@ -642,6 +643,10 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/service/cfgapi/cfg_tx_basket_tests.cpp
                 src/service/cfgapi/cfg_save.cpp
                 tests/unit/service/cfgapi/cfg_save_tests.cpp
+                src/service/cfgapi/cfg_tar.cpp
+                src/service/cfgapi/cfg_source.cpp
+                src/service/cfgapi/cfg_archive_restore.cpp
+                tests/unit/service/cfgapi/cfg_archive_restore_tests.cpp
                 src/service/httpd/cfg/save.cpp
                 tests/unit/service/httpd/cfg_save_tests.cpp
                 src/service/httpd/cfg/transaction.cpp
@@ -796,7 +801,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 SMITHPROXY_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
         target_link_libraries(sx_gtests gtest gtest_main smithproxy_libcli smithproxy_qpack socle_lib pthread crypto ssl crypt
-                ${UNWIND_LIB})
+                LibArchive::LibArchive nlohmann_json::nlohmann_json ${UNWIND_LIB})
         add_executable(sx_gtests_cfg_tar
                 src/service/cfgapi/cfg_tar.cpp
                 src/service/cfgapi/cfg_source.cpp

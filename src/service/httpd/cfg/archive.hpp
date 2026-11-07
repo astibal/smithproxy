@@ -19,4 +19,9 @@ Http_JsonResponseParams cfg_archive_previous_download(
 Http_JsonResponseParams cfg_archive_validate(
     MHD_Connection* connection, std::string const& method, std::string const& request);
 
+// Install a previously validated CFtar as the next startup configuration.
+// The running process remains untouched and reports restart_required.
+Http_JsonResponseParams cfg_archive_restore(
+    MHD_Connection* connection, std::string const& method, std::string const& request);
+
 }  // namespace sx::webserver

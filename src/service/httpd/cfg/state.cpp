@@ -18,12 +18,19 @@ nlohmann::json cfg_state(
     auto const revisions = CfgFactory::board()->revision_state();
     auto config = jsonize::from(CfgFactory::cfg_root());
 
+    // restart_required distinguishes a restored startup archive from ordinary
+    // unsaved running changes. In the former case save is intentionally blocked
+    // because it would overwrite the restored bytes before activation.
     return {
         {"state", "ready"},
         {"revision", revisions.current_id},
         {"saved_revision", revisions.saved_id},
         {"unsaved", revisions.unsaved},
-        {"capabilities", {{"explicit_save", true}}},
+        {"restart_required", CfgFactory::get()->startup_archive_pending()},
+        {"capabilities", {
+            {"explicit_save", true},
+            {"archive_restore", true},
+        }},
         {"config", std::move(config)},
     };
 }
