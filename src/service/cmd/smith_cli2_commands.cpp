@@ -688,7 +688,7 @@ void register_smithproxy_cli2_commands(libcli2::Cli& cli, std::string subscriber
                     "Configuration is locked by an active commit lease"));
                 return -1;
             }
-            const bool loaded = SmithProxy::instance().load_config(CfgFactory::get()->config_file, true);
+            const bool loaded = SmithProxy::instance().reload_config();
             if (!loaded) {
                 context.print(context.decor().error("Configuration file reload FAILED"));
                 return -1;

@@ -139,6 +139,14 @@ CfgSource CfgSource::open(Paths paths) {
     return CfgSource(Kind::legacy, std::move(paths.legacy), std::nullopt);
 }
 
+// Reconstruct the same validated source model as open(), but use archive bytes
+// obtained through the privileged file channel instead of opening the path.
+CfgSource CfgSource::read_archive(std::string path, std::string_view bytes) {
+    auto archive = CfgTar::read(bytes);
+    CfgManifest::validate(archive);
+    return CfgSource(Kind::cftar, std::move(path), std::move(archive));
+}
+
 CfgSource::Kind CfgSource::kind() const noexcept {
     return kind_;
 }
@@ -164,6 +172,38 @@ std::string_view CfgSource::main_config() const {
 
 std::string_view CfgSource::startup_config() const {
     return archive().at(startup_config_path).data;
+}
+
+// Translate a new main configuration into the bytes expected by the selected
+// persistent format. For CfgTar this copies the archive, replaces exactly one
+// existing entry and serializes the complete validated result.
+std::string CfgSource::save_payload(std::string main_config) const {
+    if (!is_cftar()) {
+        return main_config;
+    }
+
+    // Work on a copy so a failed validation or write cannot mutate the source
+    // that still describes the configuration running in this process.
+    auto updated = archive();
+    updated.replace(main_config_path, std::move(main_config));
+    CfgManifest::validate(updated);
+    return updated.write();
+}
+
+// Advance the cached archive only after its prepared payload has reached disk.
+// This keeps archive_payload() aligned with the last successful durable save.
+void CfgSource::accept_saved_main(std::string main_config) {
+    if (!is_cftar()) {
+        return;
+    }
+    archive_->replace(main_config_path, std::move(main_config));
+    CfgManifest::validate(*archive_);
+}
+
+// Serialize the currently accepted native source byte-for-byte deterministically.
+// archive() supplies the format check and rejects this operation for legacy.
+std::string CfgSource::archive_payload() const {
+    return archive().write();
 }
 
 } // namespace sx::cfg

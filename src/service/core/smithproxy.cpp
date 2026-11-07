@@ -74,7 +74,7 @@ SmithProxy::~SmithProxy () {
 
 void SmithProxy::reload() {
     _war("reloading configuration (excluding signatures)");
-    SmithProxy::instance().load_config(CfgFactory::get()->config_file,true);
+    SmithProxy::instance().reload_config();
     _dia("USR1 signal handler finished");
 }
 
@@ -1144,16 +1144,37 @@ bool SmithProxy::init_syslog() {
     return true;
 }
 
+// Keep direct filename callers on the explicit legacy path. Automatic CfgTar
+// preference is decided once by main(), not inferred from a file extension.
 bool SmithProxy::load_config(std::string& config_f, bool reload) {
-    const bool loaded = CfgFactory::get()->cfgapi_init(config_f.c_str());
+    sx::cfg::CfgSource::Paths paths;
+    paths.explicit_config = config_f;
+    return load_config(sx::cfg::CfgSource::open(std::move(paths)), reload);
+}
+
+// Install one already selected source into CfgFactory, then apply the parsed
+// configuration and runtime hooks exactly as the historical loader did.
+bool SmithProxy::load_config(sx::cfg::CfgSource source, bool reload) {
+    const bool loaded = CfgFactory::get()->cfgapi_init(std::move(source));
     if(!loaded) {
         _fat("Unable to load config.");
     }
 
-    CfgFactory::get()->config_file = config_f;
     return CfgFactory::get()->apply_config(reload) &&
            apply_config_hooks(reload) &&
            loaded;
+}
+
+// Re-open the current storage format and apply it as a runtime reload. Failure
+// leaves source selection intact and is reported to the signal or CLI caller.
+bool SmithProxy::reload_config() {
+    try {
+        return load_config(CfgFactory::get()->reload_source(), true);
+    }
+    catch(const std::exception& error) {
+        _err("Unable to reopen configuration source: %s", error.what());
+        return false;
+    }
 }
 
 bool SmithProxy::apply_config_hooks(bool reload) {

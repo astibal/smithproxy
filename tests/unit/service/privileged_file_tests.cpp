@@ -160,6 +160,15 @@ TEST_F(PrivilegedFileTest, BackupSuffixIsRestrictedAndComputedByHelper) {
     EXPECT_EQ(errno, EINVAL);
 }
 
+TEST_F(PrivilegedFileTest, CfgTarBackupKeepsNativeExtension) {
+    const auto archive = (root_ / "smithproxy.cftar").string();
+    EXPECT_EQ(sx::privsep::files::write_backup_atomic(archive, "1.2.3", "backup"), 0);
+
+    std::string content;
+    EXPECT_EQ(sx::privsep::files::read_file(archive + ".1.2.3.bak.cftar", content), 0);
+    EXPECT_EQ(content, "backup");
+}
+
 TEST_F(PrivilegedFileTest, ServerReadsWritesAndBacksUpOnlyConfiguredTarget) {
     ASSERT_EQ(sx::privsep::files::write_file_atomic(targets_.config, "initial"), 0);
     int channels[2] = {-1, -1};

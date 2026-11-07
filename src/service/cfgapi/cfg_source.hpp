@@ -53,6 +53,10 @@ public:
     // preferred and fully validated. Only an absent CfgTar permits fallback.
     static CfgSource open(Paths paths);
 
+    // Construct a native source from bytes supplied by a privileged reader.
+    // This is the reload path after Smithproxy has dropped filesystem rights.
+    static CfgSource read_archive(std::string path, std::string_view bytes);
+
     // Describe the selected format and the exact source path. These accessors
     // do not perform I/O; source selection is complete after open().
     Kind kind() const noexcept;
@@ -64,6 +68,19 @@ public:
     const CfgTar& archive() const;
     std::string_view main_config() const;
     std::string_view startup_config() const;
+
+    // Prepare bytes for the active storage format. Legacy storage receives the
+    // serialized config directly; CfgTar storage receives a complete archive
+    // with only smithproxy.cfg replaced and every resource preserved.
+    std::string save_payload(std::string main_config) const;
+
+    // Advance the in-memory native source after its save payload has been
+    // atomically installed. Legacy sources carry no cached file contents.
+    void accept_saved_main(std::string main_config);
+
+    // Return the exact current archive for a pre-upgrade backup. Legacy callers
+    // already hold their parsed configuration and use its serialized form.
+    std::string archive_payload() const;
 
 private:
     // Construction stays private to prevent unvalidated CfgTar sources from

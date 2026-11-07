@@ -53,6 +53,11 @@ public:
     static CfgTar read(std::string_view bytes, Limits limits);
 
     void add(std::string path, std::string data, bool executable = false);
+
+    // Replace one known entry without changing the archive namespace. This is
+    // used when a transaction updates content such as the main configuration;
+    // missing paths remain an error rather than being created accidentally.
+    void replace(std::string_view path, std::string data, bool executable = false);
     bool contains(std::string_view path) const;
     const Entry& at(std::string_view path) const;
     const Entries& entries() const noexcept;

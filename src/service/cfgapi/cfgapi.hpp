@@ -55,6 +55,7 @@
 #include <traflog/pcaplog.hpp>
 
 #include "cfg_update.hpp"
+#include "cfg_source.hpp"
 #include "cfg_write_gate.hpp"
 #include "cfg_tx_validate.hpp"
 
@@ -108,6 +109,12 @@ private:
 class CfgFactory : public CfgFactoryBase {
 
     libconfig::Config cfgapi;
+    // Describes the persistent bytes backing cfgapi. Keeping source policy
+    // beside the parsed config prevents save and backup paths from guessing
+    // whether config_file names a legacy text file or a native archive. It is
+    // mutable because the historically const save_config() advances the cached
+    // archive only after durable replacement succeeds.
+    mutable std::optional<sx::cfg::CfgSource> config_source_;
     std::recursive_mutex lock_;
 
     static inline std::shared_ptr<CfgFactory> self;
@@ -349,7 +356,12 @@ public:
 
     std::vector<AddressInfo> db_nameservers;
 
-    bool  cfgapi_init(const char* fnm);
+    bool cfgapi_init(const char* fnm);
+    bool cfgapi_init(sx::cfg::CfgSource source);
+
+    // Re-open the same logical source for reload. A native archive is parsed
+    // and validated again; an explicit legacy path remains explicit.
+    sx::cfg::CfgSource reload_source();
     void  cleanup();
 
     static void cfg_clone_setting(libconfig::Setting& dst, libconfig::Setting& orig, int index = -1 );

@@ -728,7 +728,27 @@ int main(int argc, char *argv[]) {
     if(CfgFactory::get()->config_file_check_only) {
         Log::get()->level(DIA);
     }
-    bool CONFIG_LOADED = SmithProxy::instance().load_config(CfgFactory::get()->config_file);
+    bool CONFIG_LOADED = false;
+    try {
+        sx::cfg::CfgSource::Paths source_paths {
+            "/etc/smithproxy/smithproxy.cftar",
+            CfgFactory::get()->config_file,
+            std::nullopt,
+        };
+
+        // A command-line or tenant-specific path is an explicit legacy source.
+        // Only the standalone default path participates in automatic CfgTar
+        // preference and absent-archive fallback.
+        if(is_custom_config_file ||
+           CfgFactory::get()->config_file != "/etc/smithproxy/smithproxy.cfg") {
+            source_paths.explicit_config = CfgFactory::get()->config_file;
+        }
+        CONFIG_LOADED = SmithProxy::instance().load_config(
+            sx::cfg::CfgSource::open(std::move(source_paths)));
+    }
+    catch(const std::exception& error) {
+        _fat("Unable to select configuration source: %s", error.what());
+    }
 
     if(CONFIG_LOADED) {
         bool upgraded_status = false;
@@ -742,7 +762,7 @@ int main(int argc, char *argv[]) {
         }
 
         if(upgraded_status) {
-            CONFIG_LOADED = SmithProxy::instance().load_config(CfgFactory::get()->config_file);
+            CONFIG_LOADED = SmithProxy::instance().reload_config();
             if(CONFIG_LOADED) {
                 _not("upgraded config file has been reloaded");
             }

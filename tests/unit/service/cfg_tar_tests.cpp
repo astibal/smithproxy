@@ -143,6 +143,21 @@ TEST(CfgTar, ReportsMissingEntriesWithoutMutatingArchive) {
     EXPECT_EQ(archive.entries().size(), 1U);
 }
 
+TEST(CfgTar, ReplacesOnlyExistingEntriesAndKeepsSizeAccounting) {
+    CfgTar archive({4, 6, 7, 32});
+    archive.add("one", "12345");
+    archive.add("two", "12");
+
+    archive.replace("one", "1", true);
+    EXPECT_EQ(archive.at("one").data, "1");
+    EXPECT_TRUE(archive.at("one").executable);
+    EXPECT_THROW(archive.replace("missing", "x"), CfgTarError);
+
+    archive.replace("one", "12345");
+    EXPECT_THROW(archive.replace("one", "123456"), CfgTarError);
+    EXPECT_EQ(archive.at("one").data, "12345");
+}
+
 TEST(CfgTar, RejectsUnsafePaths) {
     CfgTar archive;
     EXPECT_THROW(archive.add("/etc/passwd", "x"), CfgTarError);

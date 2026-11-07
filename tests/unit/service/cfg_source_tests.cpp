@@ -138,6 +138,50 @@ TEST_F(SourceTest, PrefersAndExposesValidArchive) {
     EXPECT_EQ(source.startup_config(), "SMITH_RUN_TRANSPARENT=1\n");
 }
 
+TEST_F(SourceTest, ReadsValidatedArchiveFromPrivilegedBytes) {
+    const auto bytes = valid_archive().write();
+    const auto source = CfgSource::read_archive(paths_.archive, bytes);
+
+    EXPECT_TRUE(source.is_cftar());
+    EXPECT_EQ(source.path(), paths_.archive);
+    EXPECT_EQ(source.main_config(), "settings : {};\n");
+    EXPECT_THROW(CfgSource::read_archive(paths_.archive, "not an archive"), CfgTarError);
+}
+
+TEST_F(SourceTest, BuildsSavePayloadWithoutLosingArchiveResources) {
+    auto archive = valid_archive();
+    archive.add("pki/ca/default/cert.pem", "certificate");
+    write_archive(archive);
+    const auto source = CfgSource::open(paths_);
+
+    const auto saved = CfgTar::read(source.save_payload("settings : { changed = true; };\n"));
+
+    EXPECT_EQ(saved.at("smithproxy.cfg").data, "settings : { changed = true; };\n");
+    EXPECT_EQ(saved.at("pki/ca/default/cert.pem").data, "certificate");
+    EXPECT_EQ(source.main_config(), "settings : {};\n");
+    EXPECT_EQ(CfgTar::read(source.archive_payload()).at("smithproxy.cfg").data,
+              "settings : {};\n");
+}
+
+TEST_F(SourceTest, AdvancesNativeSourceOnlyWhenSaveIsAccepted) {
+    write_archive(valid_archive());
+    auto source = CfgSource::open(paths_);
+
+    const std::string changed = "settings : { changed = true; };\n";
+    source.save_payload(changed);
+    EXPECT_EQ(source.main_config(), "settings : {};\n");
+
+    source.accept_saved_main(changed);
+    EXPECT_EQ(source.main_config(), changed);
+    EXPECT_EQ(CfgTar::read(source.archive_payload()).at("smithproxy.cfg").data, changed);
+}
+
+TEST_F(SourceTest, LegacySavePayloadIsPlainConfiguration) {
+    const auto source = CfgSource::open(paths_);
+    EXPECT_EQ(source.save_payload("plain config"), "plain config");
+    EXPECT_THROW(source.archive_payload(), CfgTarError);
+}
+
 TEST_F(SourceTest, ExistingInvalidArchiveNeverFallsBack) {
     std::ofstream(paths_.legacy) << "legacy";
     std::ofstream(paths_.archive) << "broken archive";

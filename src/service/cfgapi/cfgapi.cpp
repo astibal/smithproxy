@@ -133,30 +133,77 @@ std::map<std::string, std::shared_ptr<CfgElement>>& CfgFactory::section_db(std::
     throw std::invalid_argument(msg.c_str());
 }
 
+// Preserve the historical file API as an explicitly selected legacy source.
 bool CfgFactory::cfgapi_init(const char* fnm) {
+    sx::cfg::CfgSource::Paths paths;
+    paths.explicit_config = fnm;
+    return cfgapi_init(sx::cfg::CfgSource::open(std::move(paths)));
+}
+
+// Parse the main configuration exposed by a fully selected source. The source
+// becomes active only after parsing succeeds, so a failed reload does not alter
+// the persistent target used by subsequent save or backup operations.
+bool CfgFactory::cfgapi_init(sx::cfg::CfgSource source) {
 
     std::scoped_lock<std::recursive_mutex> l(lock_);
 
-    _dia("Reading config file");
+    _dia("Reading configuration source %s", source.path().c_str());
     
-    // Read the file. If there is an error, report it and exit.
+    // Native archives are already held and validated by CfgSource. Legacy
+    // files keep using the privileged reader so reload works after uid drop.
     try {
         std::string content;
-        if(sx::privsep::files::config_read(fnm, content) != 0) throw FileIOException();
+        if(source.is_cftar()) {
+            content = source.main_config();
+        }
+        else if(sx::privsep::files::config_read(source.path(), content) != 0) {
+            throw FileIOException();
+        }
         cfgapi.readString(content);
     }
     catch(const FileIOException &fioex)
     {
-        _err("I/O error while reading config file: %s: %s", fnm, fioex.what());
+        _err("I/O error while reading config source: %s: %s", source.path().c_str(), fioex.what());
         return false;   
     }
     catch(const ParseException &pex)
     {
-        _err("Parse error in %s at %s:%d - %s", fnm, pex.getFile(), pex.getLine(), pex.getError());
+        _err("Parse error in %s at %s:%d - %s", source.path().c_str(),
+             pex.getFile(), pex.getLine(), pex.getError());
         return false;
     }
-    
+
+    config_file = source.path();
+    config_source_ = std::move(source);
     return true;
+}
+
+// Re-open the active source using the privileged channel where needed. Native
+// bytes pass through complete TAR and manifest validation before being returned.
+sx::cfg::CfgSource CfgFactory::reload_source() {
+    std::string path;
+    bool native = false;
+    {
+        // Copy the small source identity under the config lock, then release it
+        // before filesystem IPC and archive parsing.
+        std::scoped_lock<std::recursive_mutex> l(lock_);
+        if (!config_source_) {
+            throw sx::cfg::CfgTarError("configuration source is not initialized");
+        }
+        path = config_source_->path();
+        native = config_source_->is_cftar();
+    }
+
+    sx::cfg::CfgSource::Paths paths;
+    if (native) {
+        std::string bytes;
+        if (sx::privsep::files::config_read(path, bytes) != 0) {
+            throw sx::cfg::CfgTarError("cannot read native configuration source");
+        }
+        return sx::cfg::CfgSource::read_archive(std::move(path), bytes);
+    }
+    paths.explicit_config = std::move(path);
+    return sx::cfg::CfgSource::open(std::move(paths));
 }
 
 std::shared_ptr<CfgAddress> CfgFactory::lookup_address (const char *name) {
@@ -687,10 +734,6 @@ bool CfgFactory::upgrade_and_save() {
 
     auto backup = [this, &serialize](std::string const& prev_ver) {
         try {
-            std::stringstream ss;
-            ss << CfgFactory::get()->config_file;
-            ss << "." << prev_ver << ".bak.cfg";
-
             #if ( LIBCONFIGXX_VER_MAJOR >= 1 && LIBCONFIGXX_VER_MINOR < 7 )
             cfgapi.setOptions(Setting::OptionOpenBraceOnSeparateLine);
             #else
@@ -699,13 +742,21 @@ bool CfgFactory::upgrade_and_save() {
 
             cfgapi.setTabWidth(4);
             std::string content;
-            if(!serialize(cfgapi, content)
-               || sx::privsep::files::config_backup(CfgFactory::get()->config_file,
-                                                     prev_ver, content) != 0) {
+            if(!serialize(cfgapi, content)) {
+                throw FileIOException();
+            }
+
+            // A native backup must contain the whole pre-upgrade archive, not
+            // merely the main libconfig member extracted from it.
+            if(config_source_ && config_source_->is_cftar()) {
+                content = config_source_->archive_payload();
+            }
+            if(sx::privsep::files::config_backup(CfgFactory::get()->config_file,
+                                                 prev_ver, content) != 0) {
                 throw FileIOException();
             }
         }
-        catch(ConfigException const& e) {
+        catch(std::exception const& e) {
             _err("error writing config file backup %s", e.what());
             return false;
         }
@@ -6291,15 +6342,28 @@ bool CfgFactory::save_config() const {
         std::string content;
         if(serialized) content.assign(data, size);
         ::free(data);
-        if(!serialized || sx::privsep::files::config_write(CfgFactory::get()->config_file,
-                                                           content) != 0) {
+        if(!serialized) {
             throw FileIOException();
+        }
+
+        // Preserve every native resource while replacing only smithproxy.cfg.
+        // Legacy sources intentionally produce the unchanged text payload.
+        std::string main_content;
+        if(config_source_) {
+            main_content = content;
+            content = config_source_->save_payload(main_content);
+        }
+        if(sx::privsep::files::config_write(CfgFactory::get()->config_file, content) != 0) {
+            throw FileIOException();
+        }
+        if(config_source_) {
+            config_source_->accept_saved_main(std::move(main_content));
         }
         log.event(NOT, "Configuration saved");
 
         return true;
     }
-    catch(ConfigException const& e) {
+    catch(std::exception const& e) {
         _err("error writing config file %s", e.what());
         log.event(ERR, "Configuration NOT saved: %s", e.what());
 

@@ -87,6 +87,16 @@ bool safe_version(std::string_view value) {
     });
 }
 
+// Keep legacy backup names unchanged while making a native backup recognizable
+// and directly usable as a CfgTar file.
+std::string backup_path(const std::string& path, std::string_view version) {
+    constexpr std::string_view archive_extension = ".cftar";
+    const bool native = path.size() >= archive_extension.size() &&
+        path.compare(path.size() - archive_extension.size(), archive_extension.size(),
+                     archive_extension) == 0;
+    return path + "." + std::string(version) + (native ? ".bak.cftar" : ".bak.cfg");
+}
+
 int make_content_fd(const std::string& content) {
     if(content.size() > max_file_size) { errno = EFBIG; return -1; }
     const int fd = ::memfd_create("smithproxy-config", MFD_CLOEXEC);
@@ -183,7 +193,7 @@ public:
         if(request.fd < 0 || (!backup && !request.payload.empty())
            || (backup && !safe_version(request.payload))) return error_reply(EINVAL);
         const std::string destination = backup
-            ? target_ + "." + request.payload + ".bak.cfg" : target_;
+            ? backup_path(target_, request.payload) : target_;
         if(atomic_replace_from_fd(destination, request.fd) != 0) return error_reply(errno);
         return {};
     }
@@ -331,7 +341,7 @@ int write_file_atomic(const std::string& path, const std::string& content) {
 int write_backup_atomic(const std::string& path, const std::string& version_text,
                         const std::string& content) {
     if(!safe_version(version_text)) { errno = EINVAL; return -1; }
-    return write_file_atomic(path + "." + version_text + ".bak.cfg", content);
+    return write_file_atomic(backup_path(path, version_text), content);
 }
 
 Client::Client(int fd, std::chrono::milliseconds timeout): sx::comm::Client(fd, timeout) {}

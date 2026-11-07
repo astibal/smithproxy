@@ -275,6 +275,33 @@ void CfgTar::add(std::string path, std::string data, bool executable) {
     total_size_ += position->second.data.size();
 }
 
+// Replace the data and executable flag of an entry that is already present.
+// The map key and entry count stay unchanged. Size limits are evaluated as if
+// the old data had first been removed, and a rejected replacement leaves both
+// the entry and aggregate-size accounting untouched.
+void CfgTar::replace(std::string_view path, std::string data, bool executable) {
+    const auto checked = checked_path(path, limits_);
+    const auto position = entries_.find(checked);
+    if (position == entries_.end()) {
+        fail("cannot replace missing CfgTar path: " + checked);
+    }
+
+    // Temporarily remove the previous size so check_size() evaluates the
+    // prospective archive. Restore the accounting if validation fails.
+    const auto previous_size = static_cast<std::uint64_t>(position->second.data.size());
+    total_size_ -= previous_size;
+    try {
+        check_size(data.size());
+    }
+    catch (...) {
+        total_size_ += previous_size;
+        throw;
+    }
+
+    position->second = Entry{std::move(data), executable};
+    total_size_ += static_cast<std::uint64_t>(position->second.data.size());
+}
+
 bool CfgTar::contains(std::string_view path) const {
     return entries_.find(std::string(path)) != entries_.end();
 }
