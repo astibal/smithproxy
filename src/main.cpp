@@ -304,6 +304,37 @@ void prepare_html_renderer() {
     }
 }
 
+void prepare_native_pki() {
+    auto& factory = SSLFactory::factory();
+    auto legacy_dir = factory.certs_path();
+    if (!legacy_dir.empty() && legacy_dir.back() != '/') legacy_dir += '/';
+
+    auto resolve = [&](std::optional<std::string>& target,
+                       const char* archive_name, const char* legacy_name) {
+        auto resource = CfgFactory::get()->resolve_resource(
+            std::string("pki/ca/default/") + archive_name, legacy_dir + legacy_name);
+        if (resource.is_native()) target = resource.content();
+        else target.reset();
+    };
+
+    resolve(factory.config.native_ca_cert, SSLFactory::config_t::CA_CERTF,
+            SSLFactory::config_t::CA_CERTF);
+    resolve(factory.config.native_ca_key, SSLFactory::config_t::CA_KEYF,
+            SSLFactory::config_t::CA_KEYF);
+    resolve(factory.config.native_sr_cert, SSLFactory::config_t::SR_CERTF,
+            SSLFactory::config_t::SR_CERTF);
+    resolve(factory.config.native_sr_key, SSLFactory::config_t::SR_KEYF,
+            SSLFactory::config_t::SR_KEYF);
+    resolve(factory.config.native_cl_cert, SSLFactory::config_t::CL_CERTF,
+            SSLFactory::config_t::CL_CERTF);
+    resolve(factory.config.native_cl_key, SSLFactory::config_t::CL_KEYF,
+            SSLFactory::config_t::CL_KEYF);
+    resolve(factory.config.native_po_cert, SSLFactory::config_t::PO_CERTF,
+            SSLFactory::config_t::PO_CERTF);
+    resolve(factory.config.native_po_key, SSLFactory::config_t::PO_KEYF,
+            SSLFactory::config_t::PO_KEYF);
+}
+
 void prepare_mem_debugs() {
     if(CfgFactory::get()->cfg_openssl_mem_dbg) {
 
@@ -1006,6 +1037,7 @@ int main(int argc, char *argv[]) {
 
     // launch listeners
 
+    prepare_native_pki();
     if(SmithProxy::instance().create_listeners()) {
 
         // init to get certificates and info

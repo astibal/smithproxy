@@ -40,6 +40,23 @@ int select_h3(SSL*, const unsigned char** output, unsigned char* output_size,
         : SSL_TLSEXT_ERR_ALERT_FATAL;
 }
 
+bool use_pem_credentials(SSL_CTX* context, const std::string& certificate,
+                         const std::string& private_key) {
+    auto cert_bio = std::unique_ptr<BIO, decltype(&BIO_free)>(
+        BIO_new_mem_buf(certificate.data(), static_cast<int>(certificate.size())), BIO_free);
+    auto key_bio = std::unique_ptr<BIO, decltype(&BIO_free)>(
+        BIO_new_mem_buf(private_key.data(), static_cast<int>(private_key.size())), BIO_free);
+    if (!cert_bio || !key_bio) return false;
+
+    auto cert = std::unique_ptr<X509, decltype(&X509_free)>(
+        PEM_read_bio_X509_AUX(cert_bio.get(), nullptr, nullptr, nullptr), X509_free);
+    auto key = std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)>(
+        PEM_read_bio_PrivateKey(key_bio.get(), nullptr, nullptr, nullptr), EVP_PKEY_free);
+    return cert && key && SSL_CTX_use_certificate(context, cert.get()) == 1
+        && SSL_CTX_use_PrivateKey(context, key.get()) == 1
+        && SSL_CTX_check_private_key(context) == 1;
+}
+
 std::string endpoint_text(datagram_endpoint const& endpoint) {
     if (!endpoint.valid()) return "-";
     char host[NI_MAXHOST] {};
@@ -122,9 +139,13 @@ listener_service::listener_service(std::uint16_t port, std::string certificate,
                                    std::string upstream_host,
                                    flow_proxy_factory proxy_factory,
                                    bool capture_native,
-                                   proxymaker::SessionSetupFactory setup_factory)
+                                   proxymaker::SessionSetupFactory setup_factory,
+                                   std::optional<std::string> certificate_pem,
+                                   std::optional<std::string> private_key_pem)
     : port_(port), certificate_(std::move(certificate)),
-      private_key_(std::move(private_key)), transparent_(transparent),
+      private_key_(std::move(private_key)),
+      certificate_pem_(std::move(certificate_pem)),
+      private_key_pem_(std::move(private_key_pem)), transparent_(transparent),
       upstream_port_(upstream_port), upstream_host_(std::move(upstream_host)),
       verify_upstream_(verify_upstream), lifecycle_(lifecycle), limits_(limits),
       setup_factory_(std::move(setup_factory)),
@@ -260,9 +281,14 @@ bool listener_service::prepare() {
         fail("cannot create OpenSSL QUIC context: " + openssl_error_stack());
         return false;
     }
-    if (SSL_CTX_use_certificate_chain_file(context_.get(), certificate_.c_str()) != 1
-        || SSL_CTX_use_PrivateKey_file(context_.get(), private_key_.c_str(), SSL_FILETYPE_PEM) != 1
-        || SSL_CTX_check_private_key(context_.get()) != 1) {
+    const bool native_credentials = certificate_pem_.has_value() || private_key_pem_.has_value();
+    const bool credentials_loaded = native_credentials
+        ? certificate_pem_ && private_key_pem_
+            && use_pem_credentials(context_.get(), *certificate_pem_, *private_key_pem_)
+        : SSL_CTX_use_certificate_chain_file(context_.get(), certificate_.c_str()) == 1
+            && SSL_CTX_use_PrivateKey_file(context_.get(), private_key_.c_str(), SSL_FILETYPE_PEM) == 1
+            && SSL_CTX_check_private_key(context_.get()) == 1;
+    if (!credentials_loaded) {
         fail("cannot load QUIC certificate/key: " + openssl_error_stack());
         return false;
     }

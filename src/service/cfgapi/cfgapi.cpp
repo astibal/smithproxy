@@ -207,7 +207,7 @@ sx::cfg::CfgSource CfgFactory::reload_source() {
 }
 
 sx::cfg::CfgResource CfgFactory::resolve_resource(std::string logical_path,
-                                                  std::string legacy_path) const {
+                                                  std::string legacy_path) {
     std::scoped_lock<std::recursive_mutex> lock(lock_);
     if (!config_source_) {
         throw sx::cfg::CfgTarError("configuration source is not initialized");
@@ -217,7 +217,7 @@ sx::cfg::CfgResource CfgFactory::resolve_resource(std::string logical_path,
 
 std::map<std::string, std::string> CfgFactory::native_resources(
     std::string logical_dir, std::string legacy_dir,
-    const std::vector<std::string>& names) const {
+    const std::vector<std::string>& names) {
     if (!logical_dir.empty() && logical_dir.back() != '/') logical_dir += '/';
     if (!legacy_dir.empty() && legacy_dir.back() != '/') legacy_dir += '/';
 

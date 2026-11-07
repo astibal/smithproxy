@@ -64,6 +64,38 @@
 extern "C" int __lsan_do_recoverable_leak_check();
 #endif
 
+namespace {
+
+struct QuicCredentials {
+    std::string certificate_path;
+    std::string private_key_path;
+    std::optional<std::string> certificate_pem;
+    std::optional<std::string> private_key_pem;
+};
+
+QuicCredentials quic_credentials() {
+    auto directory = SSLFactory::factory().certs_path();
+    if (!directory.empty() && directory.back() != '/') directory += '/';
+
+    QuicCredentials result {
+        directory + SSLFactory::config_t::SR_CERTF,
+        directory + SSLFactory::config_t::SR_KEYF,
+        std::nullopt,
+        std::nullopt,
+    };
+    auto certificate = CfgFactory::get()->resolve_resource(
+        std::string("pki/ca/default/") + SSLFactory::config_t::SR_CERTF,
+        result.certificate_path);
+    auto private_key = CfgFactory::get()->resolve_resource(
+        std::string("pki/ca/default/") + SSLFactory::config_t::SR_KEYF,
+        result.private_key_path);
+    if (certificate.is_native()) result.certificate_pem = certificate.content();
+    if (private_key.is_native()) result.private_key_pem = private_key.content();
+    return result;
+}
+
+} // namespace
+
 SmithProxy::~SmithProxy () {
 
 #ifndef MEMPOOL_DISABLE
@@ -139,16 +171,16 @@ bool SmithProxy::create_tproxy_listeners() {
         if (!sx::quic::openssl_quic_available()) {
             _war("QUIC listener disabled: linked OpenSSL has no QUIC server support (OpenSSL 3.5+ required)");
         } else {
-            auto certs_path = SSLFactory::factory().certs_path();
-            if (!certs_path.empty() && certs_path.back() != '/') certs_path += '/';
+            auto credentials = quic_credentials();
             auto service = std::make_unique<sx::quic::listener_service>(
                 static_cast<std::uint16_t>(std::stoi(CfgFactory::get()->listen_quic_port)),
-                certs_path + SSLFactory::config_t::SR_CERTF,
-                certs_path + SSLFactory::config_t::SR_KEYF,
+                credentials.certificate_path, credentials.private_key_path,
                 true, 443, true, sx::quic::lifecycle_options {}, sx::quic::resource_limits {},
                 std::string {}, sx::multiflow::make_mitm_flow_proxy,
                 CfgFactory::get()->capture_local.enabled || CfgFactory::get()->capture_remote.enabled,
-                sx::proxymaker::make_quic_session_setup);
+                sx::proxymaker::make_quic_session_setup,
+                std::move(credentials.certificate_pem),
+                std::move(credentials.private_key_pem));
             if (!service->prepare()) {
                 _err("Failed to setup QUIC listener: %s", service->last_error().c_str());
                 return false;
@@ -440,18 +472,18 @@ bool SmithProxy::create_listeners() {
                         _war("QUIC currently uses one event-loop thread; quic_workers=%d requested",
                              CfgFactory::get()->num_workers_quic);
                     }
-                    auto certs_path = SSLFactory::factory().certs_path();
-                    if (!certs_path.empty() && certs_path.back() != '/') certs_path += '/';
+                    auto credentials = quic_credentials();
                     auto service = std::make_unique<sx::quic::listener_service>(
                         static_cast<std::uint16_t>(std::stoi(CfgFactory::get()->listen_quic_port)),
-                        certs_path + SSLFactory::config_t::SR_CERTF,
-                        certs_path + SSLFactory::config_t::SR_KEYF,
+                        credentials.certificate_path, credentials.private_key_path,
                         true, 443, true, sx::quic::lifecycle_options {},
                         sx::quic::resource_limits {}, std::string {},
                         sx::multiflow::make_mitm_flow_proxy,
                         CfgFactory::get()->capture_local.enabled
                             || CfgFactory::get()->capture_remote.enabled,
-                        sx::proxymaker::make_quic_session_setup);
+                        sx::proxymaker::make_quic_session_setup,
+                        std::move(credentials.certificate_pem),
+                        std::move(credentials.private_key_pem));
                     if (!service->prepare()) {
                         _fat("Failed to setup QUIC listener: %s", service->last_error().c_str());
                         return false;

@@ -13,6 +13,7 @@
 #include <memory>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -106,7 +107,9 @@ public:
                      std::string upstream_host = {},
                      flow_proxy_factory proxy_factory = {},
                      bool capture_native = false,
-                     proxymaker::SessionSetupFactory setup_factory = {});
+                     proxymaker::SessionSetupFactory setup_factory = {},
+                     std::optional<std::string> certificate_pem = std::nullopt,
+                     std::optional<std::string> private_key_pem = std::nullopt);
     ~listener_service();
 
     listener_service(listener_service const&) = delete;
@@ -166,6 +169,8 @@ private:
     std::uint16_t bound_port_ = 0;               ///< Actual port, relevant when port_ is zero.
     std::string certificate_;                    ///< Bootstrap/default certificate chain.
     std::string private_key_;                    ///< Bootstrap/default private key.
+    std::optional<std::string> certificate_pem_; ///< Authoritative in-memory CfgTar certificate.
+    std::optional<std::string> private_key_pem_; ///< Authoritative in-memory CfgTar private key.
     bool transparent_;                           ///< Enable Linux transparent metadata/options.
     std::uint16_t upstream_port_;                ///< Non-transparent test fallback port.
     std::string upstream_host_;                  ///< Optional explicit non-transparent target.
