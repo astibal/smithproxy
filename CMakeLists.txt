@@ -120,6 +120,7 @@ target_include_directories(nlohmann_json INTERFACE
     "${PROJECT_SOURCE_DIR}/third_party/nlohmann/include")
 
 find_package (LibConfig REQUIRED)
+find_package (LibArchive REQUIRED)
 if (LIBCONFIGPP_FOUND)
     include_directories(${LIBCONFIGPP_INCLUDE_DIRS})
 endif (LIBCONFIGPP_FOUND)
@@ -291,6 +292,7 @@ add_executable(smithproxy
         src/service/httpd/cfg/state.cpp
         src/service/cfgapi/cfg_update.cpp
         src/service/cfgapi/cfg_revision.cpp
+        src/service/cfgapi/cfg_tar.cpp
         src/staticcontent.cpp
 
         src/proxy/mitmhost.cpp
@@ -771,7 +773,14 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
         target_compile_definitions(tls_testbed PRIVATE
                 SMITHPROXY_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
-        target_link_libraries(sx_gtests gtest gtest_main smithproxy_libcli smithproxy_qpack socle_lib pthread crypto ssl crypt ${UNWIND_LIB})
+        target_link_libraries(sx_gtests gtest gtest_main smithproxy_libcli smithproxy_qpack socle_lib pthread crypto ssl crypt
+                ${UNWIND_LIB})
+        add_executable(sx_gtests_cfg_tar
+                src/service/cfgapi/cfg_tar.cpp
+                tests/unit/service/cfg_tar_tests.cpp)
+        target_link_libraries(sx_gtests_cfg_tar PRIVATE gtest gtest_main LibArchive::LibArchive)
+        add_test(NAME unit.cfg_tar COMMAND sx_gtests_cfg_tar)
+        set_tests_properties(unit.cfg_tar PROPERTIES LABELS "native;unit")
         if("${USE_PAM}" STREQUAL "Y")
             target_link_libraries(sx_gtests pam)
         endif()
@@ -1182,6 +1191,12 @@ if(SMITHPROXY_FUZZING)
     target_compile_options(http2_content_framing_fuzzer PRIVATE
             -Wno-error=missing-template-arg-list-after-template-kw)
     smithproxy_fuzzer(http2_content_framing_fuzzer)
+
+    add_executable(cfg_tar_fuzzer
+            src/service/cfgapi/cfg_tar.cpp
+            tests/fuzz/service/cfg_tar_fuzzer.cpp)
+    target_link_libraries(cfg_tar_fuzzer LibArchive::LibArchive)
+    smithproxy_fuzzer(cfg_tar_fuzzer)
 endif()
 
 option(SMITHPROXY_TLS_FUZZING "Build Clang TLS libFuzzer targets" OFF)
@@ -1265,7 +1280,8 @@ if((CMAKE_SYSTEM_PROCESSOR MATCHES "arm") OR (CMAKE_SYSTEM_PROCESSOR STREQUAL "a
     target_link_libraries (smithproxy atomic)
 endif()
 
-target_link_libraries(smithproxy smithproxy_libcli smithproxy_qpack socle_lib pthread ssl crypto rt ${UNWIND_LIB})
+target_link_libraries(smithproxy smithproxy_libcli smithproxy_qpack socle_lib pthread ssl crypto rt
+        LibArchive::LibArchive ${UNWIND_LIB})
 
 if("${USE_LIBSSH}" STREQUAL "Y")
     target_compile_definitions(smithproxy PRIVATE USE_LIBSSH)
