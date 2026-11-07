@@ -293,6 +293,7 @@ add_executable(smithproxy
         src/service/cfgapi/cfg_update.cpp
         src/service/cfgapi/cfg_revision.cpp
         src/service/cfgapi/cfg_tar.cpp
+        src/service/cfgapi/cfg_source.cpp
         src/staticcontent.cpp
 
         src/proxy/mitmhost.cpp
@@ -777,8 +778,11 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 ${UNWIND_LIB})
         add_executable(sx_gtests_cfg_tar
                 src/service/cfgapi/cfg_tar.cpp
-                tests/unit/service/cfg_tar_tests.cpp)
-        target_link_libraries(sx_gtests_cfg_tar PRIVATE gtest gtest_main LibArchive::LibArchive)
+                src/service/cfgapi/cfg_source.cpp
+                tests/unit/service/cfg_tar_tests.cpp
+                tests/unit/service/cfg_source_tests.cpp)
+        target_link_libraries(sx_gtests_cfg_tar PRIVATE gtest gtest_main
+                LibArchive::LibArchive nlohmann_json::nlohmann_json)
         add_test(NAME unit.cfg_tar COMMAND sx_gtests_cfg_tar)
         set_tests_properties(unit.cfg_tar PROPERTIES LABELS "native;unit")
         if("${USE_PAM}" STREQUAL "Y")
@@ -1194,8 +1198,9 @@ if(SMITHPROXY_FUZZING)
 
     add_executable(cfg_tar_fuzzer
             src/service/cfgapi/cfg_tar.cpp
+            src/service/cfgapi/cfg_source.cpp
             tests/fuzz/service/cfg_tar_fuzzer.cpp)
-    target_link_libraries(cfg_tar_fuzzer LibArchive::LibArchive)
+    target_link_libraries(cfg_tar_fuzzer LibArchive::LibArchive nlohmann_json::nlohmann_json)
     smithproxy_fuzzer(cfg_tar_fuzzer)
 endif()
 

@@ -1,4 +1,4 @@
-#include <service/cfgapi/cfg_tar.hpp>
+#include <service/cfgapi/cfg_source.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -34,6 +34,21 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
     }
     catch (const sx::cfg::CfgTarError&) {
         // Invalid and hostile inputs are the normal parser result.
+    }
+
+    // Exercise manifest parsing independently of the TAR container. Keeping
+    // the mandatory configuration entries valid drives fuzzing into semantic
+    // JSON checks instead of stopping at archive framing.
+    try {
+        sx::cfg::CfgTar archive;
+        archive.add(std::string(sx::cfg::CfgManifest::path),
+                    std::string(reinterpret_cast<const char*>(data), size));
+        archive.add("smithproxy.cfg", "settings : {};\n");
+        archive.add("smithproxy.startup.cfg", "SMITH_RUN_TRANSPARENT=1\n");
+        sx::cfg::CfgManifest::validate(archive);
+    }
+    catch (const sx::cfg::CfgTarError&) {
+        // Invalid manifests are expected and must remain contained here.
     }
     return 0;
 }

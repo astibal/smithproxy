@@ -296,11 +296,25 @@ CfgTar CfgTar::read_file(const std::string& path) {
 }
 
 CfgTar CfgTar::read_file(const std::string& path, Limits limits) {
+    Fd file(::open(path.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC));
+    if (file.get() < 0) {
+        fail_errno("cannot open CfgTar " + path);
+    }
+    struct stat state {};
+    if (::fstat(file.get(), &state) != 0) {
+        fail_errno("cannot open CfgTar " + path);
+    }
+    if (!S_ISREG(state.st_mode)) {
+        fail("CfgTar is not a regular file: " + path);
+    }
+
+    // Keep the descriptor alive until after libarchive releases its reader.
+    // Local destruction order is reversed, hence the reader is declared last.
     ArchiveReadPtr input(archive_read_new(), archive_read_free);
     // Enable only the TAR format. In particular, do not enable libarchive's
     // decompression filters: .cftar is deliberately an uncompressed format.
     if (!input || archive_read_support_format_tar(input.get()) != ARCHIVE_OK ||
-        archive_read_open_filename(input.get(), path.c_str(), 64 * 1024) != ARCHIVE_OK) {
+        archive_read_open_fd(input.get(), file.get(), 64 * 1024) != ARCHIVE_OK) {
         fail(input ? archive_error(input.get(), "cannot open CfgTar") : "cannot allocate archive reader");
     }
 
