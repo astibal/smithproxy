@@ -46,6 +46,9 @@ def main() -> int:
             '    quic_port = "443";\n'
             "};\n"
         )
+        (etc / "smithproxy.startup.cfg").write_text(
+            'echo "legacy-startup-$2"\n'
+        )
 
         executable(
             bin_dir / "iptables",
@@ -112,6 +115,51 @@ def main() -> int:
         recovered_watch = run("watch", environment)
         assert recovered_watch.returncode == 0, recovered_watch.stdout
         assert log_file.read_text().count("state recovered") == 1
+
+        # A valid native archive supplies both main and startup configuration.
+        # Change the legacy files afterwards to prove they are not mixed in.
+        native_main = (etc / "smithproxy.cfg").read_text().replace(
+            "quic_workers = -1", "quic_workers = 1"
+        )
+        (etc / "native.cfg").write_text(native_main)
+        (etc / "native.startup.cfg").write_text(
+            'echo "native-startup-$2"\n'
+        )
+        archive = etc / "smithproxy.cftar"
+        created = subprocess.run(
+            [
+                environment["SMITHPROXY_CFTAR_CMD"],
+                "create",
+                "--config",
+                str(etc / "native.cfg"),
+                "--startup",
+                str(etc / "native.startup.cfg"),
+                "--output",
+                str(archive),
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        assert created.returncode == 0, created.stdout
+
+        environment["NETWORK_FORCE_LOG"] = "1"
+        native = run("check", environment)
+        environment.pop("NETWORK_FORCE_LOG")
+        assert native.returncode == 0, native.stdout
+        assert "native-startup-before" in native.stdout
+        assert "QUIC interception enabled" in native.stdout
+        assert "legacy-startup" not in native.stdout
+
+        # Presence controls fallback. A broken native archive must stop the
+        # network service instead of resurrecting the legacy files.
+        archive.write_text("broken archive")
+        environment["NETWORK_FORCE_LOG"] = "1"
+        broken = run("check", environment)
+        environment.pop("NETWORK_FORCE_LOG")
+        assert broken.returncode != 0, broken.stdout
+        assert "Cannot load validated network configuration" in broken.stdout
 
     return 0
 

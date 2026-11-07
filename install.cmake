@@ -1,6 +1,6 @@
 if(UNIX)
     SET(CMAKE_INSTALL_PREFIX /usr)
-    install(TARGETS smithproxy DESTINATION bin)
+    install(TARGETS smithproxy smithproxy-cftar DESTINATION bin)
     install(FILES man/smithproxy.1 DESTINATION share/man/man1)
     install(FILES man/smithproxy.cfg.5 DESTINATION share/man/man5)
     install(FILES man/smithproxy-mitm.7 DESTINATION share/man/man7)

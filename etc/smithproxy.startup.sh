@@ -93,6 +93,9 @@ BYPASS_CONNECTIONS="" # multiple values are semicolon-separated srcip:dstip:dstp
 
 SMITHPROXY_ETC_DIR="${SMITHPROXY_ETC_DIR:-/etc/smithproxy}"
 SMITHPROXY_RUN_DIR="${SMITHPROXY_RUN_DIR:-/run/smithproxy}"
+SMITHPROXY_CFTAR_CMD="${SMITHPROXY_CFTAR_CMD:-/usr/bin/smithproxy-cftar}"
+SMITHPROXY_CONFIG_DIR="${SMITHPROXY_ETC_DIR}"
+SMITHPROXY_NATIVE_DIR=""
 
 tenant_table="${SMITHPROXY_ETC_DIR}/smithproxy.tenants.cfg"
 tenant_id="default"
@@ -121,6 +124,58 @@ function logit {
 function network_watch_log {
     NETWORK_FORCE_LOG=1 logit "$1"
 }
+
+# Select the same persistent source as the core service. A present native
+# archive is fail-closed: both files must come from one fully validated CfgTar.
+# The temporary directory is private and exists only for this script process.
+function prepare_config_source {
+    local archive="${SMITHPROXY_ETC_DIR}/smithproxy.cftar"
+
+    # Multi-tenant instances retain their explicit historical files. CfgTar v1
+    # currently represents only the standalone/default configuration.
+    if [[ "${tenant_id}" != "default" && "${tenant_id}" != "0" ]]; then
+        return
+    fi
+    if [[ -f "${SMITHPROXY_ETC_DIR}/smithproxy.${tenant_id}.cfg" ]]; then
+        return
+    fi
+    if [[ ! -e "${archive}" && ! -L "${archive}" ]]; then
+        return
+    fi
+    if [[ ! -x "${SMITHPROXY_CFTAR_CMD}" ]]; then
+        logit "ERROR: CfgTar reader is not executable: ${SMITHPROXY_CFTAR_CMD}"
+        exit 1
+    fi
+
+    install -d -m 0700 "${SMITHPROXY_RUN_DIR}"
+    SMITHPROXY_NATIVE_DIR=$(mktemp -d "${SMITHPROXY_RUN_DIR}/sx-network-cftar.XXXXXX") || {
+        logit "ERROR: Cannot create private CfgTar runtime directory."
+        exit 1
+    }
+    chmod 0700 "${SMITHPROXY_NATIVE_DIR}"
+
+    if ! "${SMITHPROXY_CFTAR_CMD}" get "${archive}" smithproxy.cfg \
+            >"${SMITHPROXY_NATIVE_DIR}/smithproxy.cfg" ||
+       ! "${SMITHPROXY_CFTAR_CMD}" get "${archive}" smithproxy.startup.cfg \
+            >"${SMITHPROXY_NATIVE_DIR}/smithproxy.startup.cfg"; then
+        logit "ERROR: Cannot load validated network configuration from ${archive}."
+        exit 1
+    fi
+    chmod 0600 "${SMITHPROXY_NATIVE_DIR}/smithproxy.cfg" \
+               "${SMITHPROXY_NATIVE_DIR}/smithproxy.startup.cfg"
+    SMITHPROXY_CONFIG_DIR="${SMITHPROXY_NATIVE_DIR}"
+}
+
+# Remove only the mktemp directory created by prepare_config_source(). The
+# variable is initialized by this script and never accepted from the caller.
+function cleanup_config_source {
+    if [[ -n "${SMITHPROXY_NATIVE_DIR}" ]]; then
+        rm -rf -- "${SMITHPROXY_NATIVE_DIR}"
+        SMITHPROXY_NATIVE_DIR=""
+    fi
+}
+
+trap cleanup_config_source EXIT
 
 function tenant_apply {
 
@@ -155,7 +210,8 @@ function tenant_apply {
         fi
     fi
 
-    SX_CFG="${SMITHPROXY_ETC_DIR}/smithproxy.cfg"
+    prepare_config_source
+    SX_CFG="${SMITHPROXY_CONFIG_DIR}/smithproxy.cfg"
 
     if [ -f "${SMITHPROXY_ETC_DIR}/smithproxy.${tenant_id}.cfg" ]; then
         SX_CFG="${SMITHPROXY_ETC_DIR}/smithproxy.${tenant_id}.cfg"
@@ -817,8 +873,8 @@ tenant_apply $1 $2
 
 
 # source defaults - could be used to override variables above
-if [[ -f "${SMITHPROXY_ETC_DIR}/smithproxy.startup.cfg" ]]; then
- . "${SMITHPROXY_ETC_DIR}/smithproxy.startup.cfg" $1 "before"
+if [[ -f "${SMITHPROXY_CONFIG_DIR}/smithproxy.startup.cfg" ]]; then
+ . "${SMITHPROXY_CONFIG_DIR}/smithproxy.startup.cfg" $1 "before"
 fi
 
 case "$1" in
@@ -861,8 +917,8 @@ esac
 
 case "$1" in
     start|stop|bypass|unbypass)
-      if [[ -f "${SMITHPROXY_ETC_DIR}/smithproxy.startup.cfg" ]]; then
-       . "${SMITHPROXY_ETC_DIR}/smithproxy.startup.cfg" $1 "after"
+      if [[ -f "${SMITHPROXY_CONFIG_DIR}/smithproxy.startup.cfg" ]]; then
+       . "${SMITHPROXY_CONFIG_DIR}/smithproxy.startup.cfg" $1 "after"
       fi
       ;;
 esac

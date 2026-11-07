@@ -490,7 +490,10 @@ if(BUILD_TESTING)
                 COMMAND ${PATCH_RUNNER_PYTHON}
                 ${PROJECT_SOURCE_DIR}/tests/network/sx_network_check_test.py)
         set_tests_properties(unit.sx_network_check
-                PROPERTIES LABELS "native;unit;network" TIMEOUT 15)
+                PROPERTIES
+                LABELS "native;unit;network"
+                TIMEOUT 15
+                ENVIRONMENT "SMITHPROXY_CFTAR_CMD=$<TARGET_FILE:smithproxy-cftar>")
         add_subdirectory(tests/patch-runner/cpu-monitor)
         add_test(NAME unit.patch_runner_profile_plan
                 COMMAND ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-profile-plan.sh)
