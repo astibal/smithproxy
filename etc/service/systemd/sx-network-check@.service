@@ -1,0 +1,7 @@
+[Unit]
+Description=Check Smithproxy Networking - tenant %i
+After=sx-network@%i.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/sx_network watch %i

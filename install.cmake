@@ -42,6 +42,13 @@ if(UNIX)
             PERMISSIONS
             OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
 
+    install(FILES
+            etc/service/systemd/sx-network-check@.service
+            etc/service/systemd/sx-network-check@.timer
+            DESTINATION /usr/lib/systemd/system
+            PERMISSIONS
+            OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
+
 
     install(FILES etc/smithproxy_cli.sh DESTINATION bin
             PERMISSIONS

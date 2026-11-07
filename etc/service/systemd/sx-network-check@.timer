@@ -1,0 +1,13 @@
+[Unit]
+Description=Monitor Smithproxy Networking - tenant %i
+After=sx-network@%i.service
+PartOf=sx-network@%i.service
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Unit=sx-network-check@%i.service
+
+[Install]
+WantedBy=timers.target

@@ -462,6 +462,11 @@ target_link_libraries(smithproxy-webhook-broker pthread)
 option(SMITHPROXY_OPTIMIZED_TESTS "Build native tests outside Debug" OFF)
 if(BUILD_TESTING)
         find_program(PATCH_RUNNER_PYTHON NAMES python3 REQUIRED)
+        add_test(NAME unit.sx_network_check
+                COMMAND ${PATCH_RUNNER_PYTHON}
+                ${PROJECT_SOURCE_DIR}/tests/network/sx_network_check_test.py)
+        set_tests_properties(unit.sx_network_check
+                PROPERTIES LABELS "native;unit;network" TIMEOUT 15)
         add_subdirectory(tests/patch-runner/cpu-monitor)
         add_test(NAME unit.patch_runner_profile_plan
                 COMMAND ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-profile-plan.sh)

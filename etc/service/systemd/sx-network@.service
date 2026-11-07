@@ -1,6 +1,8 @@
 [Unit]
 Description=Smithproxy Networking - tenant %i
 After=network.target remote-fs.target nss-lookup.target
+Wants=sx-network-check@%i.timer
+Before=sx-network-check@%i.timer
 
 [Service]
 Type=OneShot
