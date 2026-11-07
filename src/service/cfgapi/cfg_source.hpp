@@ -70,6 +70,23 @@ struct CfgSaveData {
     std::optional<std::string> previous;
 };
 
+// Safe administrative view of the selected persistent source. Entry contents
+// are intentionally absent so listing an archive can never disclose keys or
+// other configuration material.
+struct CfgArchiveInfo {
+    struct Entry {
+        std::string path;
+        std::uint64_t size = 0;
+        bool executable = false;
+    };
+
+    bool native = false;
+    std::string path;
+    unsigned int format_version = 0;
+    std::uint64_t payload_size = 0;
+    std::vector<Entry> entries;
+};
+
 // Resolves the persistent configuration source used for one process start.
 // It preserves an explicit legacy-file request, otherwise prefers CfgTar and
 // permits legacy fallback only when the archive is genuinely absent. A chosen
@@ -103,6 +120,10 @@ public:
     Kind kind() const noexcept;
     const std::string& path() const noexcept;
     bool is_cftar() const noexcept;
+
+    // Describe the selected source without exposing entry contents. Legacy
+    // sources report only their path; native sources include archive metadata.
+    CfgArchiveInfo info() const;
 
     // Available only for a CfgTar source. Legacy loading remains in the
     // existing privileged file path until the runtime integration patch.

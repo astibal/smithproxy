@@ -387,6 +387,10 @@ public:
     // In particular, scripts/ entries remain inert until an explicit caller
     // requests and authorizes an action in a later feature.
     std::vector<std::string> resources(std::string_view logical_dir);
+
+    // Return a content-free administrative inventory of the active persistent
+    // configuration source.
+    sx::cfg::CfgArchiveInfo archive_info();
     void  cleanup();
 
     static void cfg_clone_setting(libconfig::Setting& dst, libconfig::Setting& orig, int index = -1 );

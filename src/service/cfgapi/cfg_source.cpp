@@ -210,6 +210,21 @@ bool CfgSource::is_cftar() const noexcept {
     return kind_ == Kind::cftar;
 }
 
+CfgArchiveInfo CfgSource::info() const {
+    CfgArchiveInfo result;
+    result.native = is_cftar();
+    result.path = path_;
+    if (!result.native) return result;
+
+    result.format_version = CfgManifest::version;
+    result.entries.reserve(archive().entries().size());
+    for (const auto& [path, entry] : archive().entries()) {
+        result.payload_size += entry.data.size();
+        result.entries.push_back({path, entry.data.size(), entry.executable});
+    }
+    return result;
+}
+
 const CfgTar& CfgSource::archive() const {
     if (!archive_) {
         fail("legacy configuration has no CfgTar archive");

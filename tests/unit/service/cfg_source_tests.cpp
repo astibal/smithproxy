@@ -2,8 +2,11 @@
 
 #include <service/cfgapi/cfg_source.hpp>
 
+#include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <numeric>
 #include <string>
 #include <unistd.h>
 
@@ -150,6 +153,40 @@ TEST_F(SourceTest, PrefersAndExposesValidArchive) {
     EXPECT_EQ(source.path(), paths_.archive);
     EXPECT_EQ(source.main_config(), "settings : {};\n");
     EXPECT_EQ(source.startup_config(), "SMITH_RUN_TRANSPARENT=1\n");
+}
+
+TEST_F(SourceTest, ReportsContentFreeNativeArchiveInventory) {
+    auto archive = valid_archive();
+    archive.add("scripts/check.sh", "#!/bin/sh\n", true);
+    write_archive(archive);
+    const auto source = CfgSource::open(paths_);
+
+    const auto info = source.info();
+
+    EXPECT_TRUE(info.native);
+    EXPECT_EQ(info.path, paths_.archive);
+    EXPECT_EQ(info.format_version, CfgManifest::version);
+    ASSERT_EQ(info.entries.size(), 4U);
+    const auto script = std::find_if(info.entries.begin(), info.entries.end(),
+        [](const auto& entry) { return entry.path == "scripts/check.sh"; });
+    ASSERT_NE(script, info.entries.end());
+    EXPECT_EQ(script->size, 10U);
+    EXPECT_TRUE(script->executable);
+    EXPECT_EQ(info.payload_size,
+              std::accumulate(info.entries.begin(), info.entries.end(), std::uint64_t {0},
+                  [](auto total, const auto& entry) { return total + entry.size; }));
+}
+
+TEST_F(SourceTest, ReportsLegacySourceWithoutArchiveEntries) {
+    const auto source = CfgSource::open(paths_);
+
+    const auto info = source.info();
+
+    EXPECT_FALSE(info.native);
+    EXPECT_EQ(info.path, paths_.legacy);
+    EXPECT_EQ(info.format_version, 0U);
+    EXPECT_EQ(info.payload_size, 0U);
+    EXPECT_TRUE(info.entries.empty());
 }
 
 TEST_F(SourceTest, ReadsValidatedArchiveFromPrivilegedBytes) {
