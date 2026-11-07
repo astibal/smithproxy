@@ -210,6 +210,22 @@ TEST_F(SourceTest, RejectsInvalidResourceRequestInsteadOfGuessingFallback) {
     EXPECT_THROW(source.resolve("pki/cert.pem", ""), CfgTarError);
 }
 
+TEST_F(SourceTest, ListsStoredScriptsWithoutReadingOrExecutingThem) {
+    auto archive = valid_archive();
+    archive.add("scripts/capture-off.macro", "set capture off");
+    archive.add("scripts/collect-debug.sh", "#!/bin/sh\n", true);
+    archive.add("messages/en/page.html", "page");
+    write_archive(archive);
+    const auto source = CfgSource::open(paths_);
+
+    EXPECT_EQ(source.resources("scripts/"),
+              (std::vector<std::string>{"scripts/capture-off.macro",
+                                        "scripts/collect-debug.sh"}));
+    EXPECT_TRUE(source.resources("ssh/").empty());
+    EXPECT_THROW(source.resources("scripts"), CfgTarError);
+    EXPECT_THROW(source.resources("unknown/"), CfgTarError);
+}
+
 TEST_F(SourceTest, BuildsSavePayloadWithoutLosingArchiveResources) {
     auto archive = valid_archive();
     archive.add("pki/ca/default/cert.pem", "certificate");

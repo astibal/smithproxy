@@ -231,6 +231,14 @@ std::map<std::string, std::string> CfgFactory::native_resources(
     return result;
 }
 
+std::vector<std::string> CfgFactory::resources(std::string_view logical_dir) {
+    std::scoped_lock<std::recursive_mutex> lock(lock_);
+    if (!config_source_) {
+        throw sx::cfg::CfgTarError("configuration source is not initialized");
+    }
+    return config_source_->resources(logical_dir);
+}
+
 std::shared_ptr<CfgAddress> CfgFactory::lookup_address (const char *name) {
     std::scoped_lock<std::recursive_mutex> l(lock_);
     

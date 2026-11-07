@@ -375,6 +375,11 @@ public:
     std::map<std::string, std::string> native_resources(
         std::string logical_dir, std::string legacy_dir,
         const std::vector<std::string>& names);
+
+    // List stored native resources without assigning them runtime semantics.
+    // In particular, scripts/ entries remain inert until an explicit caller
+    // requests and authorizes an action in a later feature.
+    std::vector<std::string> resources(std::string_view logical_dir);
     void  cleanup();
 
     static void cfg_clone_setting(libconfig::Setting& dst, libconfig::Setting& orig, int index = -1 );

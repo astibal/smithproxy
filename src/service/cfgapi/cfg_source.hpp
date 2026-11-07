@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <service/cfgapi/cfg_tar.hpp>
 
@@ -105,6 +106,11 @@ public:
     // existing archive entry always wins, including an empty entry. Only its
     // complete absence permits the caller-provided legacy path to be returned.
     CfgResource resolve(std::string logical_path, std::string legacy_path) const;
+
+    // Enumerate native resources below one closed namespace. This exposes
+    // stored scripts and macros to explicit administrative commands without
+    // interpreting or executing their contents.
+    std::vector<std::string> resources(std::string_view logical_dir) const;
 
     // Prepare bytes for the active storage format. Legacy storage receives the
     // serialized config directly; CfgTar storage receives a complete archive

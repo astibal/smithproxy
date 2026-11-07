@@ -243,6 +243,24 @@ CfgResource CfgSource::resolve(std::string logical_path, std::string legacy_path
     return {CfgResource::Kind::legacy, std::move(logical_path), std::move(legacy_path)};
 }
 
+std::vector<std::string> CfgSource::resources(std::string_view logical_dir) const {
+    if (logical_dir.empty() || logical_dir.back() != '/' ||
+        !CfgManifest::is_resource_path(std::string(logical_dir) + "item")) {
+        fail("invalid CfgTar resource directory: " + std::string(logical_dir));
+    }
+
+    std::vector<std::string> result;
+    if (!is_cftar()) return result;
+    for (const auto& [path, entry] : archive().entries()) {
+        (void)entry;
+        if (path.size() > logical_dir.size() &&
+            path.compare(0, logical_dir.size(), logical_dir) == 0) {
+            result.push_back(path);
+        }
+    }
+    return result;
+}
+
 // Translate a new main configuration into the bytes expected by the selected
 // persistent format. For CfgTar this copies the archive, replaces exactly one
 // existing entry and serializes the complete validated result.
