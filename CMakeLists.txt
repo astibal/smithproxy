@@ -298,6 +298,8 @@ add_executable(smithproxy
         src/service/cfgapi/cfg_tx.cpp
         src/service/cfgapi/cfg_tx_validate.cpp
         src/service/cfgapi/cfg_tx_basket.cpp
+        src/service/cfgapi/cfg_save.cpp
+        src/service/httpd/cfg/save.cpp
         src/service/httpd/cfg/transaction.cpp
         src/service/httpd/cfg/state.cpp
         src/service/cfgapi/cfg_update.cpp
@@ -637,6 +639,10 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/service/cfgapi/cfg_tx_validate_tests.cpp
                 src/service/cfgapi/cfg_tx_basket.cpp
                 tests/unit/service/cfgapi/cfg_tx_basket_tests.cpp
+                src/service/cfgapi/cfg_save.cpp
+                tests/unit/service/cfgapi/cfg_save_tests.cpp
+                src/service/httpd/cfg/save.cpp
+                tests/unit/service/httpd/cfg_save_tests.cpp
                 src/service/httpd/cfg/transaction.cpp
                 tests/unit/service/httpd/cfg_transaction_tests.cpp
                 src/service/cfgapi/cfg_update.cpp

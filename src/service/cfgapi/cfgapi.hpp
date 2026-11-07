@@ -59,6 +59,10 @@
 #include "cfg_write_gate.hpp"
 #include "cfg_tx_validate.hpp"
 
+namespace sx::cfg {
+struct SaveResult;
+}
+
 
 
 
@@ -153,6 +157,9 @@ public:
 
     static std::recursive_mutex& lock() { return get()->lock_; }
     static std::shared_ptr<sx::cfg::CfgWriteGate> write_gate() { return write_gate_; }
+    static sx::cfg::SaveResult save_running(
+        std::string const& expected_revision,
+        std::string const& source);
     static sx::cfg::tx::Transaction::CreateResult make_transaction(std::string owner) {
         auto factory = get();
         return sx::cfg::tx::Transaction::create(

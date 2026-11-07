@@ -23,6 +23,7 @@ nlohmann::json cfg_state(
         {"revision", revisions.current_id},
         {"saved_revision", revisions.saved_id},
         {"unsaved", revisions.unsaved},
+        {"capabilities", {{"explicit_save", true}}},
         {"config", std::move(config)},
     };
 }

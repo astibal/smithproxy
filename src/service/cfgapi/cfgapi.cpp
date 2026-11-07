@@ -50,6 +50,7 @@
 
 
 #include <service/cfgapi/cfgapi.hpp>
+#include <service/cfgapi/cfg_save.hpp>
 #include <service/cfgapi/cfg_numeric.hpp>
 #include <service/cfgapi/cfg_serialization.hpp>
 #include <service/cfgapi/cfgvalue.hpp>
@@ -81,6 +82,20 @@
 #include <service/http/webhooks.hpp>
 
 using namespace libconfig;
+
+sx::cfg::SaveResult CfgFactory::save_running(
+    std::string const& expected_revision,
+    std::string const& source) {
+    auto factory = get();
+    sx::cfg::CfgSaver saver({
+        *board(),
+        *write_gate(),
+        lock(),
+        LOAD_ERRORS,
+        [factory] { return factory->save_config(); },
+    });
+    return saver.save(expected_revision, source);
+}
 
 bool CfgFactory::ct_requested() const {
     return std::any_of(db_prof_tls.begin(), db_prof_tls.end(),
