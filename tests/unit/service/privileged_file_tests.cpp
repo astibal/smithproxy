@@ -116,12 +116,10 @@ TEST_F(PrivilegedFileTest, AtomicWriteRejectsSymlinkAndDirectoryTargets) {
     EXPECT_EQ(content, "original");
 }
 
-TEST_F(PrivilegedFileTest, ConfigSizeIsBounded) {
-    const std::string oversized(16U * 1024U * 1024U + 1U, 'x');
-    errno = 0;
-    EXPECT_EQ(sx::privsep::files::write_file_atomic(targets_.config, oversized), -1);
-    EXPECT_EQ(errno, EFBIG);
-    EXPECT_FALSE(std::filesystem::exists(targets_.config));
+TEST_F(PrivilegedFileTest, ConfigSupportsNativeArchiveSizedPayload) {
+    const std::string archive(20U * 1024U * 1024U, 'x');
+    ASSERT_EQ(sx::privsep::files::write_file_atomic(targets_.config, archive), 0);
+    EXPECT_EQ(std::filesystem::file_size(targets_.config), archive.size());
 }
 
 TEST_F(PrivilegedFileTest, ConcurrentAtomicReplacementNeverMixesPayloadsOrLeavesTemps) {
@@ -421,7 +419,8 @@ TEST_F(PrivilegedFileTest, OversizedDescriptorContentDoesNotReplaceConfig) {
         ::close(channels[1]);
         const int content = ::memfd_create("oversized-config", MFD_CLOEXEC);
         ASSERT_GE(content, 0);
-        ASSERT_EQ(::ftruncate(content, 16U * 1024U * 1024U + 1U), 0);
+        ASSERT_EQ(::ftruncate(content,
+                             sx::privsep::files::max_config_payload + 1U), 0);
         sx::privsep::files::Reply response;
         errno = 0;
         EXPECT_EQ(client.request(static_cast<std::uint8_t>(sx::privsep::files::Opcode::ConfigWrite),

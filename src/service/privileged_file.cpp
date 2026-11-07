@@ -24,7 +24,7 @@
 
 namespace {
 
-constexpr std::size_t max_file_size = 16U * 1024U * 1024U;
+constexpr std::size_t max_file_size = sx::privsep::files::max_config_payload;
 
 std::mutex state_mutex;
 std::shared_ptr<sx::privsep::files::Client> installed_client;

@@ -31,6 +31,7 @@
   # read etc
   /etc/smithproxy/** r,
   /etc/smithproxy/*.cfg rw,
+  /etc/smithproxy/*.cftar rw,
   /etc/smithproxy/certs/**/ip/** rw,
   /etc/smithproxy/certs/**/sni/** rw,
   /etc/smithproxy/certs/**/cc-ip/** rw,

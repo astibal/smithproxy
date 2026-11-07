@@ -226,6 +226,28 @@ TEST_F(SourceTest, ListsStoredScriptsWithoutReadingOrExecutingThem) {
     EXPECT_THROW(source.resources("unknown/"), CfgTarError);
 }
 
+TEST_F(SourceTest, CompleteNativeBundleResolvesWithoutLegacyFiles) {
+    auto archive = valid_archive();
+    const std::vector<std::pair<std::string, std::string>> resources {
+        {"messages/en/test.txt", "native message"},
+        {"pki/ca/default/ca-cert.pem", "native CA"},
+        {"pki/ca/default/ca-key.pem", "native CA key"},
+        {"pki/ca/default/srv-cert.pem", "native server"},
+        {"pki/ca/default/srv-key.pem", "native server key"},
+        {"ssh/ssh_host_ed25519_key", "native SSH key"},
+        {"scripts/capture-off.macro", "native macro"},
+    };
+    for (const auto& [path, content] : resources) archive.add(path, content);
+    write_archive(archive);
+    const auto source = CfgSource::open(paths_);
+
+    for (const auto& [path, content] : resources) {
+        const auto resolved = source.resolve(path, directory_ + "/does-not-exist");
+        ASSERT_TRUE(resolved.is_native()) << path;
+        EXPECT_EQ(resolved.content(), content) << path;
+    }
+}
+
 TEST_F(SourceTest, BuildsSavePayloadWithoutLosingArchiveResources) {
     auto archive = valid_archive();
     archive.add("pki/ca/default/cert.pem", "certificate");

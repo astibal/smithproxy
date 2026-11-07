@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -9,6 +10,11 @@
 #include <service/comm.hpp>
 
 namespace sx::privsep::files {
+
+// A serialized CfgTar may contain 256 MiB of resource data plus deterministic
+// TAR headers. Keep the privileged transport bound finite but large enough for
+// every archive accepted by CfgTar.
+constexpr std::size_t max_config_payload = 272U * 1024U * 1024U;
 
 struct Targets {
     std::string config;
