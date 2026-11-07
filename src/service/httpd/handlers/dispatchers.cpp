@@ -12,6 +12,7 @@
 #include <service/httpd/cfg/get.hpp>
 #include <service/httpd/cfg/save.hpp>
 #include <service/httpd/cfg/state.hpp>
+#include <service/httpd/cfg/archive.hpp>
 #include <service/httpd/cfg/transaction.hpp>
 
 #include <service/httpd/wh/whcontrol.hpp>
@@ -200,6 +201,19 @@ namespace sx::webserver::dispatchers {
             authorized::token_protected<json>(&cfg_state));
         cfg_state_handler->Content_Type = "application/json";
         server.addController(std::shared_ptr<lmh::Controller>(cfg_state_handler));
+
+        auto* cfg_archive_download_handler = new Http_Responder(
+            "GET",
+            "/api/config/archive/download",
+            authorized::token_protected<Http_JsonResponseParams>(&cfg_archive_download));
+        server.addController(std::shared_ptr<lmh::Controller>(cfg_archive_download_handler));
+
+        auto* cfg_archive_previous_download_handler = new Http_Responder(
+            "GET",
+            "/api/config/archive/previous/download",
+            authorized::token_protected<Http_JsonResponseParams>(&cfg_archive_previous_download));
+        server.addController(
+            std::shared_ptr<lmh::Controller>(cfg_archive_previous_download_handler));
 
         auto* cfg_save_handler = new Http_Responder(
             "POST",

@@ -43,6 +43,7 @@
 #include <cstdlib>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <thread>
 
@@ -246,8 +247,13 @@ struct HttpSessions {
 
 std::thread* create_httpd_thread(unsigned short port, int listener_fd = -1);
 
+// One HTTP response may carry either structured JSON or exact binary bytes.
+// Keeping both forms in the common envelope lets authentication and routing
+// stay identical for API metadata and native archive downloads.
 struct Http_JsonResponseParams : public lmh::ResponseParams {
     nlohmann::json response;
+    std::optional<std::string> binary;
+    std::optional<std::string> content_type;
 };
 
 template <typename Callable>
@@ -326,11 +332,14 @@ public:
         // body and headers.
         if(ret.response_code >= 100) {
 
-            auto ct = std::make_pair("Content-Type", Content_Type);
+            auto ct = std::make_pair("Content-Type", ret.content_type.value_or(Content_Type));
             ret.headers.emplace_back(std::move(ct));
             std::copy(Http_Response_Headers.begin(), Http_Response_Headers.end(), std::back_inserter(ret.headers));
 
-            if(ret.response.is_string()) {
+            if(ret.binary) {
+                response.write(ret.binary->data(), static_cast<std::streamsize>(ret.binary->size()));
+            }
+            else if(ret.response.is_string()) {
                 response << ret.response.template get<std::string>();
             }
             else {

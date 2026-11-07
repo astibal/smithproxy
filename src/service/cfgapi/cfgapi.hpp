@@ -391,6 +391,15 @@ public:
     // Return a content-free administrative inventory of the active persistent
     // configuration source.
     sx::cfg::CfgArchiveInfo archive_info();
+
+    // Serialize the active native archive exactly as it would be persisted.
+    // Legacy sources fail explicitly because they are not complete CFtar
+    // configuration bundles.
+    std::string archive_payload();
+
+    // Read and validate the recovery archive through the privileged file
+    // capability. The returned bytes are suitable for an exact download.
+    std::string previous_archive_payload();
     void  cleanup();
 
     static void cfg_clone_setting(libconfig::Setting& dst, libconfig::Setting& orig, int index = -1 );

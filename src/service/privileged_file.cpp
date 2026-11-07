@@ -187,6 +187,12 @@ public:
             if(fd < 0) return error_reply(errno);
             return {0, {}, fd};
         }
+        if(opcode == Opcode::ConfigBackupRead) {
+            if(request.fd >= 0 || !safe_version(request.payload)) return error_reply(EINVAL);
+            const int fd = open_regular_readonly(backup_path(target_, request.payload));
+            if(fd < 0) return error_reply(errno);
+            return {0, {}, fd};
+        }
 
         const bool backup = opcode == Opcode::ConfigBackup;
         if(opcode != Opcode::ConfigWrite && !backup) return error_reply(EOPNOTSUPP);
@@ -376,6 +382,20 @@ int Client::config_backup(const std::string& version_text, const std::string& co
     const int saved = errno; ::close(fd); errno = saved; return result;
 }
 
+int Client::config_backup_read(const std::string& version_text, std::string& output) {
+    if(!safe_version(version_text)) { errno = EINVAL; return -1; }
+    Reply response;
+    if(request(static_cast<std::uint8_t>(Opcode::ConfigBackupRead),
+               version_text, -1, response) != 0) return -1;
+    if(response.fd < 0) { errno = EPROTO; return -1; }
+    const int result = read_fd(response.fd, output);
+    const int saved = errno;
+    ::close(response.fd);
+    response.fd = -1;
+    errno = saved;
+    return result;
+}
+
 int Client::pid_exists(bool& output) {
     Reply response;
     if(request(static_cast<std::uint8_t>(Opcode::PidExists), {}, -1, response) != 0) return -1;
@@ -402,7 +422,8 @@ Server::Server(int fd, Targets targets): sx::comm::Server(fd) {
     register_operation(Opcode::Ping, std::move(ping));
     register_operation(Opcode::ConfigRead, config);
     register_operation(Opcode::ConfigWrite, config);
-    register_operation(Opcode::ConfigBackup, std::move(config));
+    register_operation(Opcode::ConfigBackup, config);
+    register_operation(Opcode::ConfigBackupRead, std::move(config));
     register_operation(Opcode::PidExists, pid);
     register_operation(Opcode::PidWrite, pid);
     register_operation(Opcode::PidRemove, std::move(pid));
@@ -472,6 +493,16 @@ int config_backup(const std::string& path, const std::string& version_text,
         return client->config_backup(version_text, content);
     }
     return write_backup_atomic(path, version_text, content);
+}
+
+int config_backup_read(const std::string& path, const std::string& version_text,
+                       std::string& output) {
+    if(!safe_version(version_text)) { errno = EINVAL; return -1; }
+    if(auto client = current_client()) {
+        if(!target_matches(path, installed_targets.config)) { errno = EACCES; return -1; }
+        return client->config_backup_read(version_text, output);
+    }
+    return read_file(backup_path(path, version_text), output);
 }
 
 int pid_exists(const std::string& path, bool& output) {

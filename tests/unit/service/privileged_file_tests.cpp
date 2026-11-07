@@ -183,6 +183,9 @@ TEST_F(PrivilegedFileTest, ServerReadsWritesAndBacksUpOnlyConfiguredTarget) {
     EXPECT_EQ(content, "initial");
     EXPECT_EQ(client->config_write("replacement"), 0);
     EXPECT_EQ(client->config_backup("2.0", "saved"), 0);
+    std::string backup;
+    EXPECT_EQ(client->config_backup_read("2.0", backup), 0);
+    EXPECT_EQ(backup, "saved");
     client.reset();
     helper.join();
 
@@ -190,6 +193,19 @@ TEST_F(PrivilegedFileTest, ServerReadsWritesAndBacksUpOnlyConfiguredTarget) {
     EXPECT_EQ(content, "replacement");
     EXPECT_EQ(sx::privsep::files::read_file(targets_.config + ".2.0.bak.cfg", content), 0);
     EXPECT_EQ(content, "saved");
+}
+
+TEST_F(PrivilegedFileTest, BackupReadRejectsUnsafeVersionAndMissingFile) {
+    std::string content;
+    errno = 0;
+    EXPECT_EQ(sx::privsep::files::config_backup_read(
+                  targets_.config, "../../escape", content), -1);
+    EXPECT_EQ(errno, EINVAL);
+
+    errno = 0;
+    EXPECT_EQ(sx::privsep::files::config_backup_read(
+                  targets_.config, "missing", content), -1);
+    EXPECT_EQ(errno, ENOENT);
 }
 
 TEST_F(PrivilegedFileTest, RegisteredVirtualOperationExtendsProtocolWithoutDispatcherChanges) {

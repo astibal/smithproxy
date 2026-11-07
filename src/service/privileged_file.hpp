@@ -29,6 +29,7 @@ enum class Opcode : std::uint8_t {
     PidExists = 5,
     PidWrite = 6,
     PidRemove = 7,
+    ConfigBackupRead = 8,
 };
 
 // The wire format is intentionally small and is strongly inspired by Socle's
@@ -47,6 +48,7 @@ public:
     int config_read(std::string& output);
     int config_write(const std::string& content);
     int config_backup(const std::string& version, const std::string& content);
+    int config_backup_read(const std::string& version, std::string& output);
     int pid_exists(bool& output);
     int pid_write(pid_t pid);
     int pid_remove();
@@ -75,6 +77,8 @@ int config_read(const std::string& path, std::string& output);
 int config_write(const std::string& path, const std::string& content);
 int config_backup(const std::string& path, const std::string& version,
                   const std::string& content);
+int config_backup_read(const std::string& path, const std::string& version,
+                       std::string& output);
 int pid_exists(const std::string& path, bool& output);
 int pid_write(const std::string& path, pid_t pid);
 int pid_remove(const std::string& path);

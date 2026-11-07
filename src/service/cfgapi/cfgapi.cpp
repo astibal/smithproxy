@@ -42,7 +42,9 @@
 #include <sys/ioctl.h>
 
 #include <cstdio>
+#include <cerrno>
 #include <cstdlib>
+#include <cstring>
 #include <vector>
 
 #include <socle.hpp>
@@ -260,6 +262,32 @@ sx::cfg::CfgArchiveInfo CfgFactory::archive_info() {
         throw sx::cfg::CfgTarError("configuration source is not initialized");
     }
     return config_source_->info();
+}
+
+std::string CfgFactory::archive_payload() {
+    std::scoped_lock<std::recursive_mutex> lock(CfgFactory::lock());
+    if (!config_source_) {
+        throw sx::cfg::CfgTarError("configuration source is not initialized");
+    }
+    return config_source_->archive_payload();
+}
+
+std::string CfgFactory::previous_archive_payload() {
+    std::scoped_lock<std::recursive_mutex> lock(CfgFactory::lock());
+    if (!config_source_ || !config_source_->is_cftar()) {
+        throw sx::cfg::CfgTarError("native configuration archive is not active");
+    }
+
+    std::string payload;
+    if (sx::privsep::files::config_backup_read(config_file, "previous", payload) != 0) {
+        const int error = errno;
+        throw sx::cfg::CfgTarError(
+            "cannot read previous configuration archive: " +
+            std::string(std::strerror(error)));
+    }
+    const auto archive = sx::cfg::CfgTar::read(payload);
+    sx::cfg::CfgManifest::validate(archive);
+    return payload;
 }
 
 std::shared_ptr<CfgAddress> CfgFactory::lookup_address (const char *name) {
