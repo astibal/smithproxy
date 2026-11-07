@@ -73,4 +73,31 @@ TEST(StaticContent, LoadsAndRendersCompleteTemplateSet) {
               "TLS|still|using|previous");
 }
 
+TEST(StaticContent, NativeTemplateOverridesOnlyItsExactLegacyFile) {
+    std::string pattern = "/tmp/smithproxy-static-native-XXXXXX";
+    std::vector<char> storage(pattern.begin(), pattern.end());
+    storage.push_back('\0');
+    auto* created = ::mkdtemp(storage.data());
+    ASSERT_NE(created, nullptr);
+    std::filesystem::path root(created);
+    struct Cleanup {
+        std::filesystem::path path;
+        ~Cleanup() { std::filesystem::remove_all(path); }
+    } cleanup{root};
+
+    std::ofstream(root / "test.txt") << "legacy test";
+    std::ofstream(root / "html_img_warning.txt") << "legacy warning";
+    std::ofstream(root / "html_page.txt") << "legacy {{ message }}";
+    std::ofstream(root / "tls_replacement.txt") << "legacy tls";
+    auto directory = root.string() + "/";
+
+    ASSERT_TRUE(html()->load_files(directory, {{"test.txt", "native test"}}));
+    EXPECT_EQ(html()->render_noargs("test"), "native test");
+    EXPECT_EQ(html()->render_tls_replacement("", "", ""), "legacy tls");
+
+    // Empty native content is still authoritative and must not reopen legacy.
+    ASSERT_TRUE(html()->load_files(directory, {{"test.txt", ""}}));
+    EXPECT_EQ(html()->render_noargs("test"), "");
+}
+
 }  // namespace

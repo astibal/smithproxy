@@ -1187,7 +1187,11 @@ bool SmithProxy::apply_config_hooks(bool reload) {
     // lock is needed here to not try to match against potentially empty/partial policy list
     std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
     try {
-        if(reload && !html()->load_files(CfgFactory::get()->dir_msg_templates)) {
+        auto& directory = CfgFactory::get()->dir_msg_templates;
+        const auto native = CfgFactory::get()->native_resources(
+            "messages/en", directory,
+            {"test.txt", "html_page.txt", "html_img_warning.txt", "tls_replacement.txt"});
+        if(reload && !html()->load_files(directory, native)) {
             _err("Cannot reload messages from '%s'; keeping the previous complete template set",
                  CfgFactory::get()->dir_msg_templates.c_str());
         }

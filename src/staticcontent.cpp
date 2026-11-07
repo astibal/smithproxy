@@ -49,10 +49,19 @@
 
 Loader::Result StaticContent::ConfinedLoader::load(std::string const& name) {
     constexpr std::size_t max_template_size = 1024U * 1024U;
-    if(root_.empty() || name.empty() || name == "." || name == ".." ||
+    if(name.empty() || name == "." || name == ".." ||
        name.find('/') != std::string::npos ||
        name.find('\\') != std::string::npos) {
         return {false, {}, "Unsafe template name " + name};
+    }
+
+    // A native entry is authoritative even when it is empty. Filesystem I/O
+    // is attempted only when the exact logical entry was absent from CfgTar.
+    if (auto it = native_.find(name); it != native_.end()) {
+        return {true, it->second, {}};
+    }
+    if(root_.empty()) {
+        return {false, {}, "Template root is empty"};
     }
 
     const int directory = ::open(root_.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC |
@@ -108,12 +117,14 @@ Loader::Result StaticContent::ConfinedLoader::load(std::string const& name) {
     return {true, std::move(content), {}};
 }
 
-bool StaticContent::load_files(std::string& dir) {
+bool StaticContent::load_files(std::string& dir,
+                               std::map<std::string, std::string> native) {
     bool ret = true;
     
     try {
         auto lc_ = std::scoped_lock(lock);
         loader_file_.root(dir);
+        loader_file_.native(std::move(native));
         std::vector<std::pair<std::string, std::unique_ptr<Template>>> loaded;
 
         for(const std::string name: { "test", "html_page", "html_img_warning",

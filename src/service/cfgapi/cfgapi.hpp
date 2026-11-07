@@ -362,6 +362,19 @@ public:
     // Re-open the same logical source for reload. A native archive is parsed
     // and validated again; an explicit legacy path remains explicit.
     sx::cfg::CfgSource reload_source();
+
+    // Resolve a persistent resource against the source selected for the
+    // running configuration. The returned value owns native bytes or the
+    // explicit legacy path, so it remains valid after this method unlocks.
+    sx::cfg::CfgResource resolve_resource(std::string logical_path,
+                                          std::string legacy_path) const;
+
+    // Resolve a named directory as individual resources. The returned map
+    // contains native entries only; absent entries deliberately remain for the
+    // consumer's established legacy directory loader.
+    std::map<std::string, std::string> native_resources(
+        std::string logical_dir, std::string legacy_dir,
+        const std::vector<std::string>& names) const;
     void  cleanup();
 
     static void cfg_clone_setting(libconfig::Setting& dst, libconfig::Setting& orig, int index = -1 );

@@ -292,7 +292,11 @@ void prepare_html_renderer() {
 
     auto const& log = DaemonFactory::instance()->get_log();
 
-    if(!html()->load_files(CfgFactory::get()->dir_msg_templates)) {
+    auto& directory = CfgFactory::get()->dir_msg_templates;
+    const auto native = CfgFactory::get()->native_resources(
+        "messages/en", directory,
+        {"test.txt", "html_page.txt", "html_img_warning.txt", "tls_replacement.txt"});
+    if(!html()->load_files(directory, native)) {
         _err("Cannot load messages from '%s', replacements will not work correctly !!!", CfgFactory::get()->dir_msg_templates.c_str());
     } else {
         std::string test = "test";

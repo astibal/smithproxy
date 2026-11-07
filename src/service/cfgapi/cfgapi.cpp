@@ -206,6 +206,31 @@ sx::cfg::CfgSource CfgFactory::reload_source() {
     return sx::cfg::CfgSource::open(std::move(paths));
 }
 
+sx::cfg::CfgResource CfgFactory::resolve_resource(std::string logical_path,
+                                                  std::string legacy_path) const {
+    std::scoped_lock<std::recursive_mutex> lock(lock_);
+    if (!config_source_) {
+        throw sx::cfg::CfgTarError("configuration source is not initialized");
+    }
+    return config_source_->resolve(std::move(logical_path), std::move(legacy_path));
+}
+
+std::map<std::string, std::string> CfgFactory::native_resources(
+    std::string logical_dir, std::string legacy_dir,
+    const std::vector<std::string>& names) const {
+    if (!logical_dir.empty() && logical_dir.back() != '/') logical_dir += '/';
+    if (!legacy_dir.empty() && legacy_dir.back() != '/') legacy_dir += '/';
+
+    std::map<std::string, std::string> result;
+    for (const auto& name : names) {
+        auto resource = resolve_resource(logical_dir + name, legacy_dir + name);
+        if (resource.is_native()) {
+            result.emplace(name, resource.content());
+        }
+    }
+    return result;
+}
+
 std::shared_ptr<CfgAddress> CfgFactory::lookup_address (const char *name) {
     std::scoped_lock<std::recursive_mutex> l(lock_);
     

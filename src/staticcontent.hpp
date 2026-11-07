@@ -43,14 +43,18 @@
 #include <ptr_cache.hpp>
 #include <ext/nltemplate/nltemplate.hpp>
 
+#include <map>
+
 using namespace ext::nltemplate;
 
 class StaticContent {
 
     class ConfinedLoader final : public Loader {
         std::string root_;
+        std::map<std::string, std::string> native_;
     public:
         void root(std::string value) { root_ = std::move(value); }
+        void native(std::map<std::string, std::string> value) { native_ = std::move(value); }
         Result load(std::string const& name) override;
     };
 
@@ -68,7 +72,8 @@ public:
     // should be populated externally, on start
     static inline uint32_t boot_random {0};
 
-    bool load_files(std::string& dir);
+    bool load_files(std::string& dir,
+                    std::map<std::string, std::string> native = {});
     
     std::string render_noargs(std::string const& s);
 
