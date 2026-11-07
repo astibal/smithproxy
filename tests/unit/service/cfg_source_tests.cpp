@@ -199,6 +199,20 @@ TEST_F(SourceTest, ReadsValidatedArchiveFromPrivilegedBytes) {
     EXPECT_THROW(CfgSource::read_archive(paths_.archive, "not an archive"), CfgTarError);
 }
 
+TEST_F(SourceTest, InspectsUploadWithoutSelectingItAsAConfigurationSource) {
+    auto archive = valid_archive();
+    archive.add("messages/en/page.html", "page");
+    const auto bytes = archive.write();
+
+    const auto info = CfgSource::inspect_archive(bytes);
+
+    EXPECT_TRUE(info.native);
+    EXPECT_TRUE(info.path.empty());
+    EXPECT_EQ(info.format_version, CfgManifest::version);
+    EXPECT_EQ(info.entries.size(), 4U);
+    EXPECT_THROW(CfgSource::inspect_archive("not an archive"), CfgTarError);
+}
+
 TEST_F(SourceTest, ResolvesPresentNativeResourceWithoutLegacyFallback) {
     auto archive = valid_archive();
     archive.add("messages/en/page.html", "native page");

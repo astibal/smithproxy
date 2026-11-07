@@ -16,4 +16,7 @@ Http_JsonResponseParams cfg_archive_download(
 Http_JsonResponseParams cfg_archive_previous_download(
     MHD_Connection* connection, std::string const& method, std::string const& request);
 
+Http_JsonResponseParams cfg_archive_validate(
+    MHD_Connection* connection, std::string const& method, std::string const& request);
+
 }  // namespace sx::webserver

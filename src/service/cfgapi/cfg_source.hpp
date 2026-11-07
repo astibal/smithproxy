@@ -115,6 +115,10 @@ public:
     // This is the reload path after Smithproxy has dropped filesystem rights.
     static CfgSource read_archive(std::string path, std::string_view bytes);
 
+    // Parse and fully validate an uploaded archive without selecting or
+    // mutating the running configuration source.
+    static CfgArchiveInfo inspect_archive(std::string_view bytes);
+
     // Describe the selected format and the exact source path. These accessors
     // do not perform I/O; source selection is complete after open().
     Kind kind() const noexcept;

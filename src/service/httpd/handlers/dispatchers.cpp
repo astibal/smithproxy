@@ -14,6 +14,7 @@
 #include <service/httpd/cfg/state.hpp>
 #include <service/httpd/cfg/archive.hpp>
 #include <service/httpd/cfg/transaction.hpp>
+#include <service/privileged_file.hpp>
 
 #include <service/httpd/wh/whcontrol.hpp>
 
@@ -214,6 +215,15 @@ namespace sx::webserver::dispatchers {
             authorized::token_protected<Http_JsonResponseParams>(&cfg_archive_previous_download));
         server.addController(
             std::shared_ptr<lmh::Controller>(cfg_archive_previous_download_handler));
+
+        auto* cfg_archive_validate_handler = new Http_Responder(
+            "POST",
+            "/api/config/archive/validate",
+            authorized::token_protected<Http_JsonResponseParams>(&cfg_archive_validate));
+        cfg_archive_validate_handler->Content_Type = "application/json";
+        cfg_archive_validate_handler->Max_Request_Body_Size =
+            sx::privsep::files::max_config_payload;
+        server.addController(std::shared_ptr<lmh::Controller>(cfg_archive_validate_handler));
 
         auto* cfg_save_handler = new Http_Responder(
             "POST",

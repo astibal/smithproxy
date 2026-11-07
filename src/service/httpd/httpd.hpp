@@ -262,8 +262,6 @@ class Http_Responder : public lmh::DynamicController {
     std::string path;
 
     Callable responder;
-    static constexpr std::size_t max_request_body_size = 8U * 1024U * 1024U;
-
     static inline const std::vector<std::pair<std::string, std::string>> Http_Response_Headers  = {
             { "X-Vendor", "smithproxy " SMITH_VERSION },
             { "Access-Control-Allow-Origin", "*" }
@@ -272,6 +270,7 @@ class Http_Responder : public lmh::DynamicController {
 public:
 
     std::string Content_Type = "application/text";
+    std::size_t Max_Request_Body_Size = 8U * 1024U * 1024U;
     Http_Responder(std::string m, std::string p, Callable r)
             : meth(std::move(m)), path(std::move(p)), responder(r) {};
 
@@ -306,11 +305,11 @@ public:
             }
         }
         else if(*upload_data_size > 0) {
-            if(*upload_data_size > max_request_body_size ||
-               body->request_data.size() > max_request_body_size - *upload_data_size) {
+            if(*upload_data_size > Max_Request_Body_Size ||
+               body->request_data.size() > Max_Request_Body_Size - *upload_data_size) {
                 // Keep a bounded marker until libmicrohttpd's final callback.
                 body->request_data.clear();
-                body->request_data.resize(max_request_body_size + 1);
+                body->request_data.resize(Max_Request_Body_Size + 1);
             } else {
                 body->request_data.append(upload_data, *upload_data_size);
             }
@@ -319,7 +318,7 @@ public:
         }
 
         Http_JsonResponseParams ret;
-        if(body && body->request_data.size() > max_request_body_size) {
+        if(body && body->request_data.size() > Max_Request_Body_Size) {
             ret.response_code = 413;
             ret.response = {{"error", "request body too large"}};
         } else {

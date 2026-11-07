@@ -198,6 +198,12 @@ CfgSource CfgSource::read_archive(std::string path, std::string_view bytes) {
     return CfgSource(Kind::cftar, std::move(path), std::move(archive));
 }
 
+CfgArchiveInfo CfgSource::inspect_archive(std::string_view bytes) {
+    auto archive = CfgTar::read(bytes);
+    CfgManifest::validate(archive);
+    return CfgSource(Kind::cftar, {}, std::move(archive)).info();
+}
+
 CfgSource::Kind CfgSource::kind() const noexcept {
     return kind_;
 }
