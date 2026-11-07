@@ -277,6 +277,16 @@ target_include_directories(smithproxy_libcli PUBLIC
         ${PROJECT_SOURCE_DIR}/src/service/libcli
 )
 
+add_executable(smithproxy-cftar
+        src/service/cfgapi/cftar_main.cpp
+        src/service/cfgapi/cfg_pack.cpp
+        src/service/cfgapi/cfg_source.cpp
+        src/service/cfgapi/cfg_tar.cpp
+)
+target_include_directories(smithproxy-cftar PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(smithproxy-cftar PRIVATE
+        LibArchive::LibArchive nlohmann_json::nlohmann_json)
+
 add_executable(smithproxy
 
         src/main.cpp
@@ -294,6 +304,7 @@ add_executable(smithproxy
         src/service/cfgapi/cfg_revision.cpp
         src/service/cfgapi/cfg_tar.cpp
         src/service/cfgapi/cfg_source.cpp
+        src/service/cfgapi/cfg_pack.cpp
         src/staticcontent.cpp
 
         src/proxy/mitmhost.cpp
@@ -779,8 +790,10 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
         add_executable(sx_gtests_cfg_tar
                 src/service/cfgapi/cfg_tar.cpp
                 src/service/cfgapi/cfg_source.cpp
+                src/service/cfgapi/cfg_pack.cpp
                 tests/unit/service/cfg_tar_tests.cpp
-                tests/unit/service/cfg_source_tests.cpp)
+                tests/unit/service/cfg_source_tests.cpp
+                tests/unit/service/cfg_pack_tests.cpp)
         target_link_libraries(sx_gtests_cfg_tar PRIVATE gtest gtest_main
                 LibArchive::LibArchive nlohmann_json::nlohmann_json)
         add_test(NAME unit.cfg_tar COMMAND sx_gtests_cfg_tar)
