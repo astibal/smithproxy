@@ -44,6 +44,8 @@
 #include <map>
 #include <mutex>
 #include <chrono>
+#include <optional>
+#include <utility>
  
 #include <libconfig.h++>
 #include <ext/libcidr/cidr.hpp>
@@ -51,6 +53,10 @@
 #include <policy/policy.hpp>
 #include <sslcom.hpp>
 #include <traflog/pcaplog.hpp>
+
+#include "cfg_update.hpp"
+#include "cfg_write_gate.hpp"
+#include "cfg_tx_validate.hpp"
 
 
 
@@ -87,97 +93,6 @@ public:
     int  apply_tenant_index(std::string& what, unsigned int const& idx) const;
 };
 
-struct UpdateBoard {
-    static constexpr inline uint64_t starting_num = 1000L;
-
-    struct UpdateInfo {
-        uint64_t seen_current { starting_num };
-        uint64_t seen_saved { starting_num };
-    };
-
-    // pair of seen current version, seen saved version - maintained by subscriber
-    using update_info_t = UpdateInfo;
-
-    // subscriber-id -> update info
-    using subscriber_map_t = std::unordered_map<std::string, update_info_t>;
-
-    void subscribe(std::string const& sub_id) { board_[sub_id] = { current_version_, saved_version_ }; };
-    void unsubscribe(std::string const& sub_id) { board_.erase(sub_id); };
-
-    update_info_t& at(std::string const& sub_id) {
-        return board_[sub_id];
-    };
-    update_info_t& operator[](std::string const& sub_id) { return at(sub_id); }
-
-    bool differs_current(std::string const& sub_id) {
-        return ( at(sub_id).seen_current != current_version_ );
-    }
-    bool differs_saved(std::string const& sub_id) {
-        return ( at(sub_id).seen_saved != saved_version_ );
-    }
-    bool differs(std::string const& sub_id) {
-        return ( differs_current(sub_id) or differs_saved(sub_id) );
-    }
-
-    // return current version difference
-    // negative - means rollback to older version
-    // zero - versions are the same
-    // positive - seen version is newer, config is updated
-    int64_t current_delta(std::string const& sub_id) {
-        return current_version_ - at(sub_id).seen_current;
-    }
-
-    // return saved version difference
-    // negative - older save has been applied
-    // zero - no new saves
-    // positive - new config version has been saved
-    int64_t saved_delta(std::string const& sub_id) {
-        return saved_version_ - at(sub_id).seen_saved;
-    }
-
-
-    void ack_current(std::string const& sub_id) {
-        at(sub_id).seen_current = current_version_;
-    }
-    void ack_saved(std::string const& sub_id) {
-        at(sub_id).seen_saved = saved_version_;
-    }
-
-
-    uint64_t upgrade(std::string const& sid) { updater_ = sid; return ++current_version_; }
-    uint64_t rollback(std::string const& sid) { updater_ = sid; return current_version_ = saved_version_; }
-    uint64_t save(std::string const& sid) { updater_ = sid; saved_version_ = current_version_; return saved_version_; }
-
-    std::string const& updater() const {return updater_; }
-    uint64_t version_current() const noexcept { return current_version_; }
-    uint64_t version_saved() const noexcept { return saved_version_; }
-
-    uint64_t current_version_ = starting_num;
-    uint64_t saved_version_ = starting_num;
-    subscriber_map_t board_;
-    std::string updater_;
-};
-
-
-//RAII sub mechanics
-
-struct UpdateBoardSubscriber {
-    UpdateBoardSubscriber() = delete;
-    UpdateBoardSubscriber(std::string const& sub_id, std::shared_ptr<UpdateBoard> board) : my_id(sub_id), board_(board) {};
-    ~UpdateBoardSubscriber() {
-        auto shr = board_.lock();
-        if(shr) {
-            shr->unsubscribe(my_id);
-        }
-    }
-
-    auto board() { return board_.lock(); }
-
-    std::string my_id;
-    std::weak_ptr<UpdateBoard> board_;
-};
-
-
 struct SignatureTree;
 
 struct DNS_Setup {
@@ -197,6 +112,7 @@ class CfgFactory : public CfgFactoryBase {
 
     static inline std::shared_ptr<CfgFactory> self;
     static inline std::shared_ptr<UpdateBoard> update_board;
+    static inline std::shared_ptr<sx::cfg::CfgWriteGate> write_gate_;
 
 public:
     // Each version bump implies a config upgrade - we start on 1000
@@ -216,6 +132,7 @@ public:
     static void init() {
         self = std::make_shared<CfgFactory>();
         update_board = std::make_shared<UpdateBoard>();
+        write_gate_ = std::make_shared<sx::cfg::CfgWriteGate>();
     }
 
     static std::shared_ptr<CfgFactory> get() {
@@ -228,6 +145,40 @@ public:
 
 
     static std::recursive_mutex& lock() { return get()->lock_; }
+    static std::shared_ptr<sx::cfg::CfgWriteGate> write_gate() { return write_gate_; }
+    static sx::cfg::tx::Transaction::CreateResult make_transaction(std::string owner) {
+        auto factory = get();
+        return sx::cfg::tx::Transaction::create(
+            *board(),
+            *write_gate(),
+            lock(),
+            std::move(owner),
+            [factory](std::string const& snapshot) {
+                return factory->apply_snapshot(snapshot);
+            });
+    }
+    static sx::cfg::tx::Transaction::CreateResult make_transaction(
+        std::string owner,
+        std::string base_revision) {
+        auto factory = get();
+        return sx::cfg::tx::Transaction::create(
+            *board(),
+            *write_gate(),
+            lock(),
+            std::move(owner),
+            std::move(base_revision),
+            [factory](std::string const& snapshot) {
+                return factory->apply_snapshot(snapshot);
+            });
+    }
+    sx::cfg::tx::Result<sx::cfg::tx::Committed> commit_new_entry(
+        sx::cfg::tx::Transaction& transaction,
+        std::string const& section,
+        std::string const& entry_name,
+        std::string description);
+    sx::cfg::tx::Result<sx::cfg::tx::Prepared> prepare_operations(
+        sx::cfg::tx::Transaction& transaction,
+        std::vector<sx::cfg::tx::Op> operations);
     static libconfig::Setting& cfg_root() { return get()->cfgapi.getRoot(); }
     static libconfig::Config&  cfg_obj() { return get()->cfgapi; }
 
@@ -406,6 +357,10 @@ public:
 
     static std::pair<bool, std::string> cfg_add_prepare_params(std::string const& section, std::vector<std::string>& args);
     std::pair<bool, std::string> cfg_add_entry(std::string const& section_name, std::string const& entry_name);
+    bool build_new_entry(libconfig::Setting& collection,
+                         std::string const& section,
+                         std::string const& entry_name) const;
+    [[nodiscard]] bool supports_new_entry(std::string const& section) const;
     static bool _apply_new_entry(std::string const& section, std::string const& entry_name);
 
     bool write_value(libconfig::Setting& setting, std::optional<std::string> string_value, libconfig::Setting::Type add_as_type = libconfig::Setting::TypeNone);
@@ -521,6 +476,14 @@ public:
     bool move_policy(int what, int where, op_move op);
 
     [[nodiscard]] bool save_config() const;
+    [[nodiscard]] std::optional<std::string> snapshot() const;
+    [[nodiscard]] bool replace_config(std::string const& snapshot);
+    [[nodiscard]] bool apply_config(bool reload);
+    [[nodiscard]] sx::cfg::tx::Result<void> apply_snapshot(
+        std::string const& snapshot);
+    // The caller holds a write-gate guard from before the mutation.
+    [[nodiscard]] bool record_revision(std::string const& source,
+                                       std::string description) const;
 
 
     size_t cleanup_db_address ();

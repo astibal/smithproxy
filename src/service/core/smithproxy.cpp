@@ -1145,67 +1145,31 @@ bool SmithProxy::init_syslog() {
 }
 
 bool SmithProxy::load_config(std::string& config_f, bool reload) {
-    bool ret = true;
-    auto this_daemon = DaemonFactory::instance();
-    auto const& log = instance().log;
-
-    using namespace libconfig;
-    if(! CfgFactory::get()->cfgapi_init(config_f.c_str()) ) {
+    const bool loaded = CfgFactory::get()->cfgapi_init(config_f.c_str());
+    if(!loaded) {
         _fat("Unable to load config.");
-        ret = false;
     }
 
     CfgFactory::get()->config_file = config_f;
+    return CfgFactory::get()->apply_config(reload) &&
+           apply_config_hooks(reload) &&
+           loaded;
+}
+
+bool SmithProxy::apply_config_hooks(bool reload) {
+    bool ret = true;
+    auto this_daemon = DaemonFactory::instance();
+
+    using namespace libconfig;
 
     // Add another level of lock. File is already loaded. We need to apply its content.
     // lock is needed here to not try to match against potentially empty/partial policy list
     std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
     try {
-
-        if(reload) {
-            CfgFactory::get()->cleanup();
-        }
-        auto prev_LOAD_ERRORS = CfgFactory::LOAD_ERRORS.load();
-
-        CfgFactory::LOAD_ERRORS = false;
-        CfgFactory::get()->load_internal();
-
-        CfgFactory::get()->load_db_address();
-        CfgFactory::get()->load_db_port();
-        CfgFactory::get()->load_db_proto();
-        CfgFactory::get()->load_db_prof_detection();
-        CfgFactory::get()->load_db_prof_content();
-        CfgFactory::get()->load_db_prof_tls();
-        CfgFactory::get()->load_db_prof_ssh();
-        CfgFactory::get()->load_db_prof_alg_dns();
-        CfgFactory::get()->load_db_prof_script();
-        CfgFactory::get()->load_db_prof_auth();
-        CfgFactory::get()->load_db_routing();
-
-        CfgFactory::get()->load_db_features();
-
-        // clean policy list: list behavior, elements are not overwritten, but added
-        CfgFactory::get()->cleanup_db_policy();
-        CfgFactory::get()->load_db_policy();
-
-
-        SigFactory::get().signature_tree().reset();
-        SigFactory::get().signature_tree().group_add(true);
-        SigFactory::get().signature_tree().group_add(true);
-
-        // load starttls signatures into 0 sensor (group)
-        CfgFactory::get()->load_signatures(CfgFactory::cfg_obj(), "starttls_signatures", SigFactory::get().signature_tree(), 0);
-
-        // load detection signatures into sensor (group) specified by signature. If none specified, it will be placed into 1 (base group)
-        CfgFactory::get()->load_signatures(CfgFactory::cfg_obj(), "detection_signatures", SigFactory::get().signature_tree());
-
-        CfgFactory::get()->load_settings();
         if(reload && !html()->load_files(CfgFactory::get()->dir_msg_templates)) {
             _err("Cannot reload messages from '%s'; keeping the previous complete template set",
                  CfgFactory::get()->dir_msg_templates.c_str());
         }
-        CfgFactory::get()->load_captures();
-        CfgFactory::get()->load_debug();
 
         // don't mess with logging if just reloading
         if(! reload) {
@@ -1283,9 +1247,6 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
             }
         }
 
-        if(prev_LOAD_ERRORS and not CfgFactory::LOAD_ERRORS) {
-            Log::get()->events().insert(NOT,"Configuration errors have been resolved.");
-        }
     }
     catch(const SettingNotFoundException &nfex) {
 

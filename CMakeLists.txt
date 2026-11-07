@@ -280,7 +280,17 @@ add_executable(smithproxy
 
         src/main.cpp
         src/smithlog.cpp
+        src/utils/crypto.cpp
         src/service/cfgapi/cfgapi.cpp
+        src/service/cfgapi/cfg_lease.cpp
+        src/service/cfgapi/cfg_write_gate.cpp
+        src/service/cfgapi/cfg_tx.cpp
+        src/service/cfgapi/cfg_tx_validate.cpp
+        src/service/cfgapi/cfg_tx_basket.cpp
+        src/service/httpd/cfg/transaction.cpp
+        src/service/httpd/cfg/state.cpp
+        src/service/cfgapi/cfg_update.cpp
+        src/service/cfgapi/cfg_revision.cpp
         src/staticcontent.cpp
 
         src/proxy/mitmhost.cpp
@@ -526,6 +536,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/utils/str_test.cpp
                 tests/unit/utils/fs_test.cpp
                 tests/unit/utils/atomic_json_tests.cpp
+                src/utils/crypto.cpp
+                tests/unit/utils/crypto_tests.cpp
                 tests/unit/base/staticcontent_tests.cpp
                 tests/unit/ext/nltemplate/nltemplate_tests.cpp
                 tests/unit/inspect/dns_tests.cpp
@@ -597,6 +609,23 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/service/core/live_listener_lifecycle_tests.cpp
                 src/service/cfgapi/cfgvalue.cpp
                 tests/unit/service/cfgapi/cfgvalue_tests.cpp
+                tests/unit/service/cfgapi/cfg_serialization_tests.cpp
+                src/service/cfgapi/cfg_lease.cpp
+                tests/unit/service/cfgapi/cfg_lease_tests.cpp
+                src/service/cfgapi/cfg_write_gate.cpp
+                tests/unit/service/cfgapi/cfg_write_gate_tests.cpp
+                src/service/cfgapi/cfg_tx.cpp
+                tests/unit/service/cfgapi/cfg_tx_tests.cpp
+                src/service/cfgapi/cfg_tx_validate.cpp
+                tests/unit/service/cfgapi/cfg_tx_validate_tests.cpp
+                src/service/cfgapi/cfg_tx_basket.cpp
+                tests/unit/service/cfgapi/cfg_tx_basket_tests.cpp
+                src/service/httpd/cfg/transaction.cpp
+                tests/unit/service/httpd/cfg_transaction_tests.cpp
+                src/service/cfgapi/cfg_update.cpp
+                tests/unit/service/cfgapi/cfg_update_tests.cpp
+                src/service/cfgapi/cfg_revision.cpp
+                tests/unit/service/cfgapi/cfg_revision_tests.cpp
                 tests/unit/base/smithlog_tests.cpp
                 tests/unit/service/core/authpam_tests.cpp
                 tests/unit/service/daemon_tests.cpp
@@ -770,6 +799,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
         target_link_libraries(tls_testbed gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(transfer_testbed gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries (sx_gtests nlohmann_json::nlohmann_json)
+        target_compile_definitions(sx_gtests PRIVATE SX_CFG_TRANSACTION_CODEC_ONLY)
 
         # Focused QUIC integration target. It intentionally avoids the legacy
         # unrelated application tests while keeping the complete MultiFlow,
