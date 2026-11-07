@@ -27,6 +27,38 @@ public:
     // Validate the manifest and the complete archive namespace. The main and
     // startup configurations are mandatory; unknown top-level paths fail.
     static void validate(const CfgTar& archive);
+
+    // Report whether a logical path belongs to a persistent resource
+    // namespace. Control files at the archive root are deliberately excluded.
+    static bool is_resource_path(std::string_view path);
+};
+
+// Owns the result of one resource lookup. Native content is copied out of the
+// current archive so callers may safely keep it across a configuration reload;
+// a legacy result owns only the explicit filesystem path supplied by caller.
+class CfgResource {
+public:
+    enum class Kind {
+        native,
+        legacy,
+    };
+
+    Kind kind() const noexcept;
+    bool is_native() const noexcept;
+    const std::string& logical_path() const noexcept;
+
+    // Exactly one accessor is valid for each Kind. Misuse is a programming
+    // error and fails explicitly rather than returning an ambiguous empty value.
+    const std::string& content() const;
+    const std::string& legacy_path() const;
+
+private:
+    friend class CfgSource;
+    CfgResource(Kind kind, std::string logical_path, std::string value);
+
+    Kind kind_;
+    std::string logical_path_;
+    std::string value_;
 };
 
 // Resolves the persistent configuration source used for one process start.
@@ -68,6 +100,11 @@ public:
     const CfgTar& archive() const;
     std::string_view main_config() const;
     std::string_view startup_config() const;
+
+    // Resolve one logical resource with a strict archive-first policy. An
+    // existing archive entry always wins, including an empty entry. Only its
+    // complete absence permits the caller-provided legacy path to be returned.
+    CfgResource resolve(std::string logical_path, std::string legacy_path) const;
 
     // Prepare bytes for the active storage format. Legacy storage receives the
     // serialized config directly; CfgTar storage receives a complete archive

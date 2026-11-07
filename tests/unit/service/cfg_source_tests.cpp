@@ -10,6 +10,7 @@
 namespace {
 
 using sx::cfg::CfgManifest;
+using sx::cfg::CfgResource;
 using sx::cfg::CfgSource;
 using sx::cfg::CfgTar;
 using sx::cfg::CfgTarError;
@@ -58,6 +59,17 @@ TEST_F(SourceTest, ValidatesKnownResourceNamespaces) {
     archive.add("ssh/host-key", "key");
 
     EXPECT_NO_THROW(CfgManifest::validate(archive));
+}
+
+TEST_F(SourceTest, RecognizesOnlyResourceNamespaces) {
+    EXPECT_TRUE(CfgManifest::is_resource_path("pki/ca/default/cert.pem"));
+    EXPECT_TRUE(CfgManifest::is_resource_path("messages/en/page.html"));
+    EXPECT_TRUE(CfgManifest::is_resource_path("scripts/action.macro"));
+    EXPECT_TRUE(CfgManifest::is_resource_path("ssh/host-key"));
+
+    EXPECT_FALSE(CfgManifest::is_resource_path("pki/"));
+    EXPECT_FALSE(CfgManifest::is_resource_path("smithproxy.cfg"));
+    EXPECT_FALSE(CfgManifest::is_resource_path("unknown/file"));
 }
 
 TEST_F(SourceTest, RejectsMissingOrInvalidManifest) {
@@ -146,6 +158,54 @@ TEST_F(SourceTest, ReadsValidatedArchiveFromPrivilegedBytes) {
     EXPECT_EQ(source.path(), paths_.archive);
     EXPECT_EQ(source.main_config(), "settings : {};\n");
     EXPECT_THROW(CfgSource::read_archive(paths_.archive, "not an archive"), CfgTarError);
+}
+
+TEST_F(SourceTest, ResolvesPresentNativeResourceWithoutLegacyFallback) {
+    auto archive = valid_archive();
+    archive.add("messages/en/page.html", "native page");
+    archive.add("messages/en/empty.html", "");
+    write_archive(archive);
+    const auto source = CfgSource::open(paths_);
+
+    const auto page = source.resolve("messages/en/page.html", "/etc/legacy/page.html");
+    EXPECT_EQ(page.kind(), CfgResource::Kind::native);
+    EXPECT_TRUE(page.is_native());
+    EXPECT_EQ(page.logical_path(), "messages/en/page.html");
+    EXPECT_EQ(page.content(), "native page");
+    EXPECT_THROW(page.legacy_path(), CfgTarError);
+
+    // Empty is still an authoritative native value, not a fallback signal.
+    EXPECT_TRUE(source.resolve("messages/en/empty.html", "/etc/legacy/empty.html")
+                    .is_native());
+}
+
+TEST_F(SourceTest, ResolvesAbsentNativeResourceToExplicitLegacyPath) {
+    write_archive(valid_archive());
+    const auto source = CfgSource::open(paths_);
+
+    const auto resource = source.resolve("pki/ca/default/cert.pem",
+                                         "/etc/smithproxy/certs/ca/default/cert.pem");
+    EXPECT_EQ(resource.kind(), CfgResource::Kind::legacy);
+    EXPECT_FALSE(resource.is_native());
+    EXPECT_EQ(resource.legacy_path(),
+              "/etc/smithproxy/certs/ca/default/cert.pem");
+    EXPECT_THROW(resource.content(), CfgTarError);
+}
+
+TEST_F(SourceTest, LegacySourceAlwaysResolvesToExplicitLegacyPath) {
+    const auto source = CfgSource::open(paths_);
+    const auto resource = source.resolve("ssh/host-key", "/etc/smithproxy/ssh-key");
+
+    EXPECT_FALSE(resource.is_native());
+    EXPECT_EQ(resource.legacy_path(), "/etc/smithproxy/ssh-key");
+}
+
+TEST_F(SourceTest, RejectsInvalidResourceRequestInsteadOfGuessingFallback) {
+    const auto source = CfgSource::open(paths_);
+
+    EXPECT_THROW(source.resolve("smithproxy.cfg", paths_.legacy), CfgTarError);
+    EXPECT_THROW(source.resolve("pki/", paths_.legacy), CfgTarError);
+    EXPECT_THROW(source.resolve("pki/cert.pem", ""), CfgTarError);
 }
 
 TEST_F(SourceTest, BuildsSavePayloadWithoutLosingArchiveResources) {

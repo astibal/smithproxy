@@ -35,8 +35,7 @@ bool allowed_path(std::string_view path) {
 
     // These namespaces contain persistent configuration resources. Merely
     // storing a file under scripts/ never causes it to be executed.
-    return has_prefix(path, "pki/") || has_prefix(path, "messages/") ||
-           has_prefix(path, "scripts/") || has_prefix(path, "ssh/");
+    return CfgManifest::is_resource_path(path);
 }
 
 // Distinguish an absent archive from every other inspection error. Only
@@ -115,6 +114,40 @@ void CfgManifest::validate(const CfgTar& archive) {
     }
 }
 
+bool CfgManifest::is_resource_path(std::string_view path) {
+    return has_prefix(path, "pki/") || has_prefix(path, "messages/") ||
+           has_prefix(path, "scripts/") || has_prefix(path, "ssh/");
+}
+
+CfgResource::CfgResource(Kind kind, std::string logical_path, std::string value)
+    : kind_(kind), logical_path_(std::move(logical_path)), value_(std::move(value)) {}
+
+CfgResource::Kind CfgResource::kind() const noexcept {
+    return kind_;
+}
+
+bool CfgResource::is_native() const noexcept {
+    return kind_ == Kind::native;
+}
+
+const std::string& CfgResource::logical_path() const noexcept {
+    return logical_path_;
+}
+
+const std::string& CfgResource::content() const {
+    if (!is_native()) {
+        fail("legacy CfgTar resource has no native content: " + logical_path_);
+    }
+    return value_;
+}
+
+const std::string& CfgResource::legacy_path() const {
+    if (is_native()) {
+        fail("native CfgTar resource has no legacy path: " + logical_path_);
+    }
+    return value_;
+}
+
 CfgSource::CfgSource(Kind kind, std::string path, std::optional<CfgTar> archive)
     : kind_(kind), path_(std::move(path)), archive_(std::move(archive)) {}
 
@@ -172,6 +205,24 @@ std::string_view CfgSource::main_config() const {
 
 std::string_view CfgSource::startup_config() const {
     return archive().at(startup_config_path).data;
+}
+
+CfgResource CfgSource::resolve(std::string logical_path, std::string legacy_path) const {
+    if (!CfgManifest::is_resource_path(logical_path)) {
+        fail("invalid CfgTar resource path: " + logical_path);
+    }
+
+    // Presence is the only fallback decision. Content interpretation belongs
+    // to its consumer, so malformed or empty native data can never resurrect a
+    // stale legacy file behind the administrator's back.
+    if (is_cftar() && archive().contains(logical_path)) {
+        auto content = archive().at(logical_path).data;
+        return {CfgResource::Kind::native, std::move(logical_path), std::move(content)};
+    }
+    if (legacy_path.empty()) {
+        fail("legacy fallback path is empty for CfgTar resource: " + logical_path);
+    }
+    return {CfgResource::Kind::legacy, std::move(logical_path), std::move(legacy_path)};
 }
 
 // Translate a new main configuration into the bytes expected by the selected
