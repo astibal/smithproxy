@@ -56,11 +56,13 @@
 
 #include "cfg_update.hpp"
 #include "cfg_archive.hpp"
+#include "cfg_archive_monitor.hpp"
 #include "cfg_archive_restore.hpp"
 #include "cfg_resource_write.hpp"
 #include "cfg_runtime_tree.hpp"
 #include "cfg_write_gate.hpp"
 #include "cfg_tx_validate.hpp"
+#include <service/reload/file_reload_service.hpp>
 
 namespace sx::cfg {
 struct SaveResult;
@@ -154,6 +156,11 @@ class CfgFactory : public CfgFactoryBase {
     mutable bool startup_archive_pending_ = false;
     // Own the materialized runtime view of resources selected at startup.
     std::optional<sx::cfg::CfgRuntimeTree> runtime_tree_;
+    // The shared reload worker observes persistent CFtar generations without
+    // ever applying them to the running configuration.
+    std::shared_ptr<sx::cfg::CfgArchiveMonitor> archive_monitor_;
+    sx::reload::FileReloadService archive_monitor_service_;
+    sx::reload::FileReloadService::resource_id archive_monitor_id_ {0};
     std::recursive_mutex lock_;
     ResourceArchive resource_archive_;
 
@@ -174,7 +181,10 @@ public:
     CfgFactory(): resource_archive_(*this) {}
     CfgFactory(CfgFactory const &) = delete;
     void operator=(const CfgFactory&) = delete;
-    ~CfgFactory() override { cleanup(); }
+    ~CfgFactory() override {
+        archive_monitor_service_.stop();
+        cleanup();
+    }
 
     static void init() {
         self = std::make_shared<CfgFactory>();
@@ -459,8 +469,12 @@ public:
     std::string materialize_runtime_archive();
 
     // True after a successful restore that deliberately requires a process
-    // restart before its configuration and resources become active.
+    // restart, or after an external CFtar replacement is observed.
     [[nodiscard]] bool startup_archive_pending() const;
+    // Start persistent archive observation after privilege separation is ready.
+    void start_archive_monitor();
+    // Return the latest external archive observation error, if any.
+    [[nodiscard]] std::string archive_monitor_error() const;
     void  cleanup();
 
     static void cfg_clone_setting(libconfig::Setting& dst, libconfig::Setting& orig, int index = -1 );
@@ -595,6 +609,16 @@ public:
     // The caller holds a write-gate guard from before the mutation.
     [[nodiscard]] bool record_revision(std::string const& source,
                                        std::string description) const;
+
+private:
+    // Replace the monitored generation after a configuration source is loaded.
+    void configure_archive_monitor_locked();
+    // Advance the monitor after Smithproxy successfully publishes known bytes.
+    void accept_archive_monitor(std::string_view payload) const;
+    // Read the lock-free external-change signal while the config lock is held.
+    [[nodiscard]] bool external_archive_change_locked() const;
+
+public:
 
 
     size_t cleanup_db_address ();

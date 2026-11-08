@@ -1055,6 +1055,10 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
+    // Observe external CFtar replacement only after the privileged reader is
+    // available. Detection marks restart pending; it never mutates runtime.
+    CfgFactory::get()->start_archive_monitor();
+
     // openssl mem debugs
     prepare_mem_debugs();
 

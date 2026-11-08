@@ -45,6 +45,7 @@ protected:
             restart_pending,
             [this] { return current_archive; },
             std::move(writer),
+            external_change,
         });
         return restorer.restore(revision, expected_hash, payload);
     }
@@ -53,6 +54,7 @@ protected:
     sx::cfg::CfgWriteGate gate;
     std::recursive_mutex config_mutex;
     bool restart_pending = false;
+    bool external_change = false;
     int writes = 0;
     std::string current_archive = "current archive bytes";
     std::string current_seen;
@@ -113,6 +115,14 @@ TEST_F(ArchiveRestoreTest, RejectsALegacyConfigurationSource) {
 
 TEST_F(ArchiveRestoreTest, RejectsASecondRestoreBeforeRestart) {
     restart_pending = true;
+    const auto result = restore(board.revision_current(), hash);
+
+    EXPECT_EQ(result.status, sx::cfg::ArchiveRestoreStatus::restart_pending);
+    EXPECT_EQ(writes, 0);
+}
+
+TEST_F(ArchiveRestoreTest, RejectsRestoreAfterExternalArchiveReplacement) {
+    external_change = true;
     const auto result = restore(board.revision_current(), hash);
 
     EXPECT_EQ(result.status, sx::cfg::ArchiveRestoreStatus::restart_pending);

@@ -307,6 +307,7 @@ add_executable(smithproxy
         src/service/cfgapi/cfg_tx_basket.cpp
         src/service/cfgapi/cfg_save.cpp
         src/service/cfgapi/cfg_archive_restore.cpp
+        src/service/cfgapi/cfg_archive_monitor.cpp
         src/service/cfgapi/cfg_resource_write.cpp
         src/service/cfgapi/cfg_runtime_tree.cpp
         src/service/httpd/cfg/save.cpp
@@ -748,6 +749,17 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/service/reload/reloadable_resource_test.cpp
         )
 
+        add_executable(sx_gtests_cfg_archive_monitor
+                src/utils/crypto.cpp
+                src/service/comm.cpp
+                src/service/privileged_file.cpp
+                src/service/reload/file_reload_service.cpp
+                src/service/cfgapi/cfg_tar.cpp
+                src/service/cfgapi/cfg_archive.cpp
+                src/service/cfgapi/cfg_archive_monitor.cpp
+                tests/unit/service/cfg_archive_monitor_tests.cpp
+        )
+
         add_executable(sx_gtests_interface_monitor
                 src/service/interface_monitor.cpp
                 tests/unit/service/interface_monitor_tests.cpp
@@ -850,6 +862,9 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
         target_link_libraries(sx_gtests_interface_monitor gtest gtest_main pthread)
         target_link_libraries(sx_gtests_privsep gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(sx_gtests_file_privsep gtest gtest_main socle_lib pthread crypto ssl)
+        target_link_libraries(sx_gtests_cfg_archive_monitor PRIVATE
+                gtest gtest_main socle_lib pthread crypto ssl
+                LibArchive::LibArchive nlohmann_json::nlohmann_json)
         target_link_libraries(sx_gtests_gre_broker gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(sx_gtests_cli_broker gtest gtest_main pthread)
         target_link_libraries(sx_gtests_api_broker gtest gtest_main pthread)
@@ -917,6 +932,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
             add_test(NAME unit.startstoptls COMMAND sx_gtests_startstoptls)
             add_test(NAME unit.httpconnect COMMAND sx_gtests_httpconnect)
             add_test(NAME unit.reloadable COMMAND sx_gtests_reloadable)
+            add_test(NAME unit.cfg_archive_monitor COMMAND sx_gtests_cfg_archive_monitor)
             add_test(NAME unit.interface_monitor COMMAND sx_gtests_interface_monitor)
             add_test(NAME unit.privsep COMMAND sx_gtests_privsep)
             add_test(NAME unit.file_privsep COMMAND sx_gtests_file_privsep)
@@ -950,7 +966,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                     COMMAND ${PROJECT_SOURCE_DIR}/tools/test-linux-distros.sh)
             set_tests_properties(
                     unit.core unit.listener_lifecycle unit.http1 unit.startstoptls unit.httpconnect unit.reloadable
-                    unit.interface_monitor
+                    unit.cfg_archive_monitor unit.interface_monitor
                     PROPERTIES LABELS "native;unit")
             set_tests_properties(unit.listener_lifecycle
                     PROPERTIES WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}")
@@ -990,6 +1006,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
             set_tests_properties(external.inet external.pcap_experiments external.dns
                     PROPERTIES TIMEOUT 180)
             set_tests_properties(unit.reloadable PROPERTIES LABELS "native;unit;reload")
+            set_tests_properties(unit.cfg_archive_monitor
+                    PROPERTIES LABELS "native;unit;reload;config;security")
             set_tests_properties(unit.interface_monitor PROPERTIES LABELS "native;unit;network")
             set_tests_properties(integration.tls_testbed PROPERTIES LABELS "native;integration;tls")
             set_tests_properties(integration.quic_testbed PROPERTIES LABELS "native;integration;quic")

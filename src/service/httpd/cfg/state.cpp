@@ -27,6 +27,7 @@ nlohmann::json cfg_state(
         {"saved_revision", revisions.saved_id},
         {"unsaved", revisions.unsaved},
         {"restart_required", CfgFactory::get()->startup_archive_pending()},
+        {"archive_monitor_error", CfgFactory::get()->archive_monitor_error()},
         {"capabilities", {
             {"explicit_save", true},
             {"archive_restore", true},

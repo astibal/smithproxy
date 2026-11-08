@@ -128,8 +128,10 @@ sx::cfg::ArchiveRestoreResult CfgFactory::restore_startup_archive(
             // Subsequent resource edits must start from the restored startup
             // archive rather than the configuration still running in memory.
             factory->config_archive_->accept_saved_archive(replacement);
+            factory->accept_archive_monitor(replacement);
             return true;
         },
+        factory->external_archive_change_locked(),
     });
 
     return restorer.restore(expected_revision, expected_hash, payload);
@@ -165,6 +167,7 @@ bool CfgFactory::ResourceArchive::install(
 void CfgFactory::ResourceArchive::accept(std::string_view bytes) {
     // Advance the in-memory startup view only after durable installation.
     owner_.config_archive_->accept_saved_archive(bytes);
+    owner_.accept_archive_monitor(bytes);
 }
 
 sx::cfg::ResourceWriteResult CfgFactory::write_archive_resource(
@@ -177,6 +180,7 @@ sx::cfg::ResourceWriteResult CfgFactory::write_archive_resource(
     sx::cfg::CfgResourceWriter writer({
         *board(), *write_gate(), lock(), factory->resource_archive_,
         factory->startup_archive_pending_,
+        factory->external_archive_change_locked(),
     });
     return writer.write(std::move(expected_revision), std::move(expected_archive_hash),
                         std::move(path), std::move(content), executable);
@@ -275,6 +279,7 @@ bool CfgFactory::cfgapi_init(sx::cfg::CfgArchive source) {
 
     config_file = source.path();
     config_archive_ = std::move(source);
+    configure_archive_monitor_locked();
     return true;
 }
 
@@ -394,7 +399,45 @@ std::string CfgFactory::materialize_runtime_archive() {
 
 bool CfgFactory::startup_archive_pending() const {
     std::scoped_lock<std::recursive_mutex> guard(CfgFactory::lock());
-    return startup_archive_pending_;
+    return startup_archive_pending_ || external_archive_change_locked();
+}
+
+void CfgFactory::configure_archive_monitor_locked() {
+    if(archive_monitor_id_ != 0) {
+        archive_monitor_service_.remove(archive_monitor_id_);
+        archive_monitor_id_ = 0;
+    }
+    archive_monitor_.reset();
+
+    if(!config_archive_ || !config_archive_->is_cftar()) return;
+
+    archive_monitor_ = std::make_shared<sx::cfg::CfgArchiveMonitor>(
+        sx::cfg::CfgArchiveMonitor::Context{
+            config_archive_->path(), config_archive_->archive_payload()});
+    archive_monitor_id_ = archive_monitor_service_.add(
+        archive_monitor_, std::chrono::seconds(2));
+    if(archive_monitor_id_ == 0) {
+        archive_monitor_.reset();
+        throw sx::cfg::CfgTarError("cannot register configuration archive monitor");
+    }
+}
+
+void CfgFactory::start_archive_monitor() {
+    std::scoped_lock<std::recursive_mutex> guard(CfgFactory::lock());
+    if(archive_monitor_) archive_monitor_service_.start();
+}
+
+void CfgFactory::accept_archive_monitor(std::string_view payload) const {
+    if(archive_monitor_) archive_monitor_->accept(payload);
+}
+
+bool CfgFactory::external_archive_change_locked() const {
+    return archive_monitor_ && archive_monitor_->change_detected();
+}
+
+std::string CfgFactory::archive_monitor_error() const {
+    std::scoped_lock<std::recursive_mutex> guard(CfgFactory::lock());
+    return archive_monitor_ ? archive_monitor_->last_error() : std::string {};
 }
 
 std::shared_ptr<CfgAddress> CfgFactory::lookup_address (const char *name) {
@@ -6444,9 +6487,9 @@ bool CfgFactory::save_config() const {
     // file already contains the next startup state. Serializing cfgapi now would
     // destroy the explicitly restored archive, so only restart can clear this
     // intentional split.
-    if(startup_archive_pending_) {
-        _err("configuration save refused: restored startup archive awaits restart");
-        log.event(ERR, "Configuration NOT saved: restart required after archive restore");
+    if(startup_archive_pending_ || external_archive_change_locked()) {
+        _err("configuration save refused: startup archive change awaits restart");
+        log.event(ERR, "Configuration NOT saved: restart required after archive change");
         return false;
     }
 
@@ -6584,6 +6627,7 @@ bool CfgFactory::save_config() const {
         }
         if(config_archive_) {
             config_archive_->accept_saved_main(std::move(main_content));
+            accept_archive_monitor(config_archive_->archive_payload());
         }
         log.event(NOT, "Configuration saved");
 

@@ -54,7 +54,7 @@ ArchiveRestoreResult CfgArchiveRestorer::restore(
         return {ArchiveRestoreStatus::native_unavailable, revision, hash, {}};
 
     // Do not replace a restored archive before it has been activated.
-    if(context_.restart_pending)
+    if(context_.restart_pending || context_.external_change)
         return {ArchiveRestoreStatus::restart_pending, revision, hash, {}};
 
     // The installer backs up the current archive before atomic publication.

@@ -53,7 +53,8 @@ protected:
     sx::cfg::ResourceWriteResult write(
         std::string revision, std::string hash, std::string path,
         std::optional<std::string> content) {
-        sx::cfg::CfgResourceWriter writer({board, gate, mutex, archive, restart_pending});
+        sx::cfg::CfgResourceWriter writer(
+            {board, gate, mutex, archive, restart_pending, external_change});
         return writer.write(std::move(revision), std::move(hash), std::move(path),
                             std::move(content), false);
     }
@@ -67,6 +68,7 @@ protected:
     std::recursive_mutex mutex;
     TestResourceArchive archive;
     bool restart_pending = false;
+    bool external_change = false;
 };
 
 TEST_F(ResourceWriteTest, WritesAndAdoptsAResource) {
@@ -90,6 +92,15 @@ TEST_F(ResourceWriteTest, RejectsUnsavedRunningConfiguration) {
     const auto result = write(board.revision_current(), hash(),
                               "messages/en/page.html", std::string("page"));
     EXPECT_EQ(result.status, sx::cfg::ResourceWriteStatus::unsaved_running);
+}
+
+TEST_F(ResourceWriteTest, RejectsWriteAfterExternalArchiveReplacement) {
+    external_change = true;
+    const auto result = write(board.revision_current(), hash(),
+                              "messages/en/page.html", std::string("page"));
+    EXPECT_EQ(result.status, sx::cfg::ResourceWriteStatus::write_failed);
+    EXPECT_EQ(result.detail, "startup archive changed and requires restart");
+    EXPECT_EQ(archive.installs, 0);
 }
 
 TEST_F(ResourceWriteTest, DoesNotAdoptFailedStorageWrite) {

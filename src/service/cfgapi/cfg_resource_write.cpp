@@ -27,6 +27,10 @@ ResourceWriteResult CfgResourceWriter::write(
         return {ResourceWriteStatus::stale_revision, revision, {}, {}};
     if(revision.unsaved)
         return {ResourceWriteStatus::unsaved_running, revision, {}, {}};
+    if(context_.restart_pending || context_.external_change) {
+        return {ResourceWriteStatus::write_failed, revision, {},
+                "startup archive changed and requires restart"};
+    }
     if(!context_.archive.available()) {
         return {ResourceWriteStatus::native_unavailable, revision, {}, {}};
     }

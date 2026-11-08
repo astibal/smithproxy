@@ -39,10 +39,12 @@ public:
         // Two archives must not replace each other before either is activated.
         bool native_source = false;
         bool& restart_pending;
-
         // Storage policy remains in CfgFactory and privileged-file code.
         ArchiveReader current_archive;
         ArchiveWriter install;
+
+        // A separately detected on-disk generation blocks another restore.
+        bool external_change = false;
     };
 
     explicit CfgArchiveRestorer(Context context);

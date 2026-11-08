@@ -51,6 +51,8 @@ public:
         std::recursive_mutex& config_mutex;
         CfgResourceArchive& archive;
         bool& restart_pending;
+        // Prevent writes on top of a generation changed outside Smithproxy.
+        bool external_change = false;
     };
 
     explicit CfgResourceWriter(Context context);
