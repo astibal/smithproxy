@@ -158,6 +158,20 @@ TEST(CfgTar, ReplacesOnlyExistingEntriesAndKeepsSizeAccounting) {
     EXPECT_EQ(archive.at("one").data, "12345");
 }
 
+TEST(CfgTar, UpsertsAndRemovesEntriesWithCorrectSizeAccounting) {
+    CfgTar archive({3, 8, 8, 32});
+    archive.add("one", "1234");
+
+    archive.upsert("one", "1", true);
+    archive.upsert("two", "1234567");
+    EXPECT_TRUE(archive.at("one").executable);
+    EXPECT_THROW(archive.upsert("three", "x"), CfgTarError);
+
+    EXPECT_TRUE(archive.remove("two"));
+    EXPECT_FALSE(archive.remove("two"));
+    EXPECT_NO_THROW(archive.upsert("three", "1234567"));
+}
+
 TEST(CfgTar, RejectsUnsafePaths) {
     CfgTar archive;
     EXPECT_THROW(archive.add("/etc/passwd", "x"), CfgTarError);

@@ -1,6 +1,7 @@
-#include "cfg_source.hpp"
+#include "cfg_archive.hpp"
 
 #include <nlohmann/json.hpp>
+#include <utils/crypto.hpp>
 
 #include <cerrno>
 #include <cstring>
@@ -166,14 +167,14 @@ const std::string& CfgResource::legacy_path() const {
     return value_;
 }
 
-CfgSource::CfgSource(Kind kind, std::string path, std::optional<CfgTar> archive)
+CfgArchive::CfgArchive(Kind kind, std::string path, std::optional<CfgTar> archive)
     : kind_(kind), path_(std::move(path)), archive_(std::move(archive)) {}
 
-CfgSource CfgSource::open(Paths paths) {
+CfgArchive CfgArchive::open(Paths paths) {
     // Command-line intent is authoritative and keeps config-check workflows
     // independent of the system-wide CfgTar.
     if (paths.explicit_config) {
-        return CfgSource(Kind::legacy, std::move(*paths.explicit_config), std::nullopt);
+        return CfgArchive(Kind::legacy, std::move(*paths.explicit_config), std::nullopt);
     }
 
     // Existence, not successful parsing, controls fallback. A present but bad
@@ -184,45 +185,48 @@ CfgSource CfgSource::open(Paths paths) {
         // CfgTar Kind whose manifest or namespace has not passed validation.
         auto archive = CfgTar::read_file(paths.archive);
         CfgManifest::validate(archive);
-        return CfgSource(Kind::cftar, std::move(paths.archive), std::move(archive));
+        return CfgArchive(Kind::cftar, std::move(paths.archive), std::move(archive));
     }
 
-    return CfgSource(Kind::legacy, std::move(paths.legacy), std::nullopt);
+    return CfgArchive(Kind::legacy, std::move(paths.legacy), std::nullopt);
 }
 
 // Reconstruct the same validated source model as open(), but use archive bytes
 // obtained through the privileged file channel instead of opening the path.
-CfgSource CfgSource::read_archive(std::string path, std::string_view bytes) {
+CfgArchive CfgArchive::read_archive(std::string path, std::string_view bytes) {
     auto archive = CfgTar::read(bytes);
     CfgManifest::validate(archive);
-    return CfgSource(Kind::cftar, std::move(path), std::move(archive));
+    return CfgArchive(Kind::cftar, std::move(path), std::move(archive));
 }
 
-CfgArchiveInfo CfgSource::inspect_archive(std::string_view bytes) {
+CfgArchiveInfo CfgArchive::inspect_archive(std::string_view bytes) {
     auto archive = CfgTar::read(bytes);
     CfgManifest::validate(archive);
-    return CfgSource(Kind::cftar, {}, std::move(archive)).info();
+    return CfgArchive(Kind::cftar, {}, std::move(archive)).info();
 }
 
-CfgSource::Kind CfgSource::kind() const noexcept {
+CfgArchive::Kind CfgArchive::kind() const noexcept {
     return kind_;
 }
 
-const std::string& CfgSource::path() const noexcept {
+const std::string& CfgArchive::path() const noexcept {
     return path_;
 }
 
-bool CfgSource::is_cftar() const noexcept {
+bool CfgArchive::is_cftar() const noexcept {
     return kind_ == Kind::cftar;
 }
 
-CfgArchiveInfo CfgSource::info() const {
+CfgArchiveInfo CfgArchive::info() const {
     CfgArchiveInfo result;
     result.native = is_cftar();
     result.path = path_;
     if (!result.native) return result;
 
     result.format_version = CfgManifest::version;
+    if(const auto hash = sx::crypto::sha256(archive().write())) {
+        result.content_hash = "sha256:" + *hash;
+    }
     result.entries.reserve(archive().entries().size());
     for (const auto& [path, entry] : archive().entries()) {
         result.payload_size += entry.data.size();
@@ -231,22 +235,22 @@ CfgArchiveInfo CfgSource::info() const {
     return result;
 }
 
-const CfgTar& CfgSource::archive() const {
+const CfgTar& CfgArchive::archive() const {
     if (!archive_) {
         fail("legacy configuration has no CfgTar archive");
     }
     return *archive_;
 }
 
-std::string_view CfgSource::main_config() const {
+std::string_view CfgArchive::main_config() const {
     return archive().at(main_config_path).data;
 }
 
-std::string_view CfgSource::startup_config() const {
+std::string_view CfgArchive::startup_config() const {
     return archive().at(startup_config_path).data;
 }
 
-CfgResource CfgSource::resolve(std::string logical_path, std::string legacy_path) const {
+CfgResource CfgArchive::resolve(std::string logical_path, std::string legacy_path) const {
     if (!CfgManifest::is_resource_path(logical_path)) {
         fail("invalid CfgTar resource path: " + logical_path);
     }
@@ -264,7 +268,7 @@ CfgResource CfgSource::resolve(std::string logical_path, std::string legacy_path
     return {CfgResource::Kind::legacy, std::move(logical_path), std::move(legacy_path)};
 }
 
-std::vector<std::string> CfgSource::resources(std::string_view logical_dir) const {
+std::vector<std::string> CfgArchive::resources(std::string_view logical_dir) const {
     if (logical_dir.empty() || logical_dir.back() != '/' ||
         !CfgManifest::is_resource_path(std::string(logical_dir) + "item")) {
         fail("invalid CfgTar resource directory: " + std::string(logical_dir));
@@ -285,7 +289,7 @@ std::vector<std::string> CfgSource::resources(std::string_view logical_dir) cons
 // Translate a new main configuration into the bytes expected by the selected
 // persistent format. For CfgTar this also returns the exact accepted archive
 // which must be made recoverable before the replacement is installed.
-CfgSaveData CfgSource::prepare_save(std::string main_config) const {
+CfgSaveData CfgArchive::prepare_save(std::string main_config) const {
     if (!is_cftar()) {
         return {std::move(main_config), std::nullopt};
     }
@@ -298,9 +302,32 @@ CfgSaveData CfgSource::prepare_save(std::string main_config) const {
     return {updated.write(), archive().write()};
 }
 
+CfgSaveData CfgArchive::prepare_resource(
+    std::string path,
+    std::optional<std::string> content,
+    bool executable) const {
+    if(!is_cftar()) fail("native resources require a CfgTar source");
+    if(!CfgManifest::is_resource_path(path)) {
+        fail("invalid CfgTar resource path: " + path);
+    }
+
+    // Work on a copy. The selected source must continue to describe durable
+    // storage until the caller has backed up and published the replacement.
+    auto updated = archive();
+    if(content) {
+        updated.upsert(std::move(path), std::move(*content), executable);
+    }
+    else if(!updated.remove(path)) {
+        fail("cannot remove missing CfgTar resource: " + path);
+    }
+
+    CfgManifest::validate(updated);
+    return {updated.write(), archive().write()};
+}
+
 // Advance the cached archive only after its prepared payload has reached disk.
 // This keeps archive_payload() aligned with the last successful durable save.
-void CfgSource::accept_saved_main(std::string main_config) {
+void CfgArchive::accept_saved_main(std::string main_config) {
     if (!is_cftar()) {
         return;
     }
@@ -308,9 +335,16 @@ void CfgSource::accept_saved_main(std::string main_config) {
     CfgManifest::validate(*archive_);
 }
 
+void CfgArchive::accept_saved_archive(std::string_view bytes) {
+    if(!is_cftar()) fail("legacy configuration cannot adopt a CfgTar archive");
+    auto updated = CfgTar::read(bytes);
+    CfgManifest::validate(updated);
+    archive_ = std::move(updated);
+}
+
 // Serialize the currently accepted native source byte-for-byte deterministically.
 // archive() supplies the format check and rejects this operation for legacy.
-std::string CfgSource::archive_payload() const {
+std::string CfgArchive::archive_payload() const {
     return archive().write();
 }
 

@@ -1,6 +1,6 @@
 #include "cfg_archive_restore.hpp"
 
-#include "cfg_source.hpp"
+#include "cfg_archive.hpp"
 
 #include <utils/crypto.hpp>
 
@@ -18,7 +18,7 @@ ArchiveRestoreResult CfgArchiveRestorer::restore(
     // unnecessarily block ordinary configuration writers.
     std::string hash;
     try {
-        CfgSource::inspect_archive(payload);
+        CfgArchive::inspect_archive(payload);
 
         // Bind restore to the exact bytes accepted by the validation request.
         auto digest = sx::crypto::sha256(payload);

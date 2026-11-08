@@ -306,6 +306,25 @@ void prepare_html_renderer() {
 
 void prepare_native_pki() {
     auto& factory = SSLFactory::factory();
+
+    // Custom certificate matching still discovers sni/ip/cc-* directories by
+    // path. Give it a private runtime view while default keys stay in memory.
+    if(const auto runtime = CfgFactory::get()->materialize_runtime_archive();
+       !runtime.empty()) {
+        factory.certs_path() = runtime + "/pki/ca/default/";
+        const auto trust = CfgFactory::get()->resources("pki/trust/");
+        if(std::find(trust.begin(), trust.end(), "pki/trust/ca-bundle.pem") !=
+           trust.end()) {
+            factory.ca_file() = runtime + "/pki/trust/ca-bundle.pem";
+            factory.ca_path().clear();
+        }
+        else if(std::any_of(trust.begin(), trust.end(), [](const auto& path) {
+                    return path.rfind("pki/trust/directory/", 0) == 0;
+                })) {
+            factory.ca_file().clear();
+            factory.ca_path() = runtime + "/pki/trust/directory";
+        }
+    }
     auto legacy_dir = factory.certs_path();
     if (!legacy_dir.empty() && legacy_dir.back() != '/') legacy_dir += '/';
 
@@ -348,19 +367,6 @@ std::vector<sx::cfg::CfgPack::File> legacy_cftar_resources() {
         File{"messages/en/tls_replacement_light.txt", "/etc/smithproxy/msg/en/tls_replacement_light.txt", false, true},
         File{"messages/en/tls_replacement_dark.txt", "/etc/smithproxy/msg/en/tls_replacement_dark.txt", false, true},
         File{"messages/en/tls_replacement_branded.txt", "/etc/smithproxy/msg/en/tls_replacement_branded.txt", false, true},
-
-        // Default PKI roles are individually optional for compatibility with
-        // deliberately reduced installations. Any present unsafe file still
-        // fails migration instead of being silently skipped.
-        File{"pki/ca/default/ca-cert.pem", "/etc/smithproxy/certs/default/ca-cert.pem", false, true},
-        File{"pki/ca/default/ca-key.pem", "/etc/smithproxy/certs/default/ca-key.pem", false, true},
-        File{"pki/ca/default/srv-cert.pem", "/etc/smithproxy/certs/default/srv-cert.pem", false, true},
-        File{"pki/ca/default/srv-key.pem", "/etc/smithproxy/certs/default/srv-key.pem", false, true},
-        File{"pki/ca/default/cl-cert.pem", "/etc/smithproxy/certs/default/cl-cert.pem", false, true},
-        File{"pki/ca/default/cl-key.pem", "/etc/smithproxy/certs/default/cl-key.pem", false, true},
-        File{"pki/ca/default/portal-cert.pem", "/etc/smithproxy/certs/default/portal-cert.pem", false, true},
-        File{"pki/ca/default/portal-key.pem", "/etc/smithproxy/certs/default/portal-key.pem", false, true},
-        File{"pki/ca/default/sslca.json", "/etc/smithproxy/certs/default/sslca.json", false, true},
 
         File{"ssh/ssh_host_ed25519_key", "/etc/smithproxy/ssh_host_ed25519_key", false, true},
     };
@@ -798,7 +804,7 @@ int main(int argc, char *argv[]) {
     bool CONFIG_LOADED = false;
     bool migrate_default_legacy = false;
     try {
-        sx::cfg::CfgSource::Paths source_paths {
+        sx::cfg::CfgArchive::Paths archive_paths {
             "/etc/smithproxy/smithproxy.cftar",
             CfgFactory::get()->config_file,
             std::nullopt,
@@ -809,9 +815,9 @@ int main(int argc, char *argv[]) {
         // preference and absent-archive fallback.
         if(is_custom_config_file ||
            CfgFactory::get()->config_file != "/etc/smithproxy/smithproxy.cfg") {
-            source_paths.explicit_config = CfgFactory::get()->config_file;
+            archive_paths.explicit_config = CfgFactory::get()->config_file;
         }
-        auto source = sx::cfg::CfgSource::open(std::move(source_paths));
+        auto source = sx::cfg::CfgArchive::open(std::move(archive_paths));
         migrate_default_legacy = !is_custom_config_file && !source.is_cftar();
         CONFIG_LOADED = SmithProxy::instance().load_config(std::move(source));
     }
@@ -838,21 +844,40 @@ int main(int argc, char *argv[]) {
                         CfgFactory::get()->config_file,
                         "/etc/smithproxy/smithproxy.startup.cfg",
                         legacy_cftar_resources(),
+                        {},
                     },
                     "/etc/smithproxy/smithproxy.cftar",
                 };
+                // Preserve default and custom certificate subdirectories as
+                // one closed PKI tree. Descriptor-based traversal rejects
+                // symlinks and special files at every level.
+                migration.input.directories.push_back({
+                    "pki/ca/default", "/etc/smithproxy/certs/default", true});
+
+                // Product-managed trust material is portable configuration.
+                // System trust stores remain external operating-system state.
+                const auto& trust_file = SSLFactory::factory().ca_file();
+                if(trust_file.rfind("/etc/smithproxy/", 0) == 0) {
+                    migration.input.files.push_back({
+                        "pki/trust/ca-bundle.pem", trust_file, false, false});
+                }
+                const auto& trust_path = SSLFactory::factory().ca_path();
+                if(trust_path.rfind("/etc/smithproxy/", 0) == 0) {
+                    migration.input.directories.push_back({
+                        "pki/trust/directory", trust_path, false});
+                }
 
                 const bool created = sx::cfg::CfgPack::migrate(migration);
                 _not("native configuration archive %s",
                      created ? "created" : "accepted after concurrent creation");
 
-                sx::cfg::CfgSource::Paths source_paths {
+                sx::cfg::CfgArchive::Paths archive_paths {
                     migration.archive_path,
                     CfgFactory::get()->config_file,
                     std::nullopt,
                 };
                 CONFIG_LOADED = SmithProxy::instance().load_config(
-                    sx::cfg::CfgSource::open(std::move(source_paths)), true);
+                    sx::cfg::CfgArchive::open(std::move(archive_paths)), true);
                 migrated_to_cftar = CONFIG_LOADED;
                 if(!CONFIG_LOADED) {
                     _cri("new native configuration archive FAILED to load");

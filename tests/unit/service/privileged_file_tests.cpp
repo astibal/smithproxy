@@ -167,6 +167,36 @@ TEST_F(PrivilegedFileTest, CfgTarBackupKeepsNativeExtension) {
     EXPECT_EQ(content, "backup");
 }
 
+TEST_F(PrivilegedFileTest, ConfigInstallBacksUpAndReplacesExpectedGeneration) {
+    const auto archive = (root_ / "smithproxy.cftar").string();
+    ASSERT_EQ(sx::privsep::files::write_file_atomic(archive, "generation one"), 0);
+
+    ASSERT_EQ(sx::privsep::files::config_install(
+                  archive, "generation one", "generation two"), 0);
+
+    std::string content;
+    ASSERT_EQ(sx::privsep::files::read_file(archive, content), 0);
+    EXPECT_EQ(content, "generation two");
+    ASSERT_EQ(sx::privsep::files::read_file(
+                  archive + ".previous.bak.cftar", content), 0);
+    EXPECT_EQ(content, "generation one");
+}
+
+TEST_F(PrivilegedFileTest, ConfigInstallRefusesStaleExpectedGeneration) {
+    ASSERT_EQ(sx::privsep::files::write_file_atomic(targets_.config, "current"), 0);
+
+    errno = 0;
+    EXPECT_EQ(sx::privsep::files::config_install(
+                  targets_.config, "stale", "replacement"), -1);
+    EXPECT_EQ(errno, ESTALE);
+
+    std::string content;
+    ASSERT_EQ(sx::privsep::files::read_file(targets_.config, content), 0);
+    EXPECT_EQ(content, "current");
+    EXPECT_FALSE(std::filesystem::exists(
+        targets_.config + ".previous.bak.cfg"));
+}
+
 TEST_F(PrivilegedFileTest, ServerReadsWritesAndBacksUpOnlyConfiguredTarget) {
     ASSERT_EQ(sx::privsep::files::write_file_atomic(targets_.config, "initial"), 0);
     int channels[2] = {-1, -1};
@@ -182,6 +212,7 @@ TEST_F(PrivilegedFileTest, ServerReadsWritesAndBacksUpOnlyConfiguredTarget) {
     EXPECT_EQ(client->config_read(content), 0);
     EXPECT_EQ(content, "initial");
     EXPECT_EQ(client->config_write("replacement"), 0);
+    EXPECT_EQ(client->config_install("replacement", "installed"), 0);
     EXPECT_EQ(client->config_backup("2.0", "saved"), 0);
     std::string backup;
     EXPECT_EQ(client->config_backup_read("2.0", backup), 0);
@@ -190,6 +221,9 @@ TEST_F(PrivilegedFileTest, ServerReadsWritesAndBacksUpOnlyConfiguredTarget) {
     helper.join();
 
     EXPECT_EQ(sx::privsep::files::read_file(targets_.config, content), 0);
+    EXPECT_EQ(content, "installed");
+    EXPECT_EQ(sx::privsep::files::read_file(
+                  targets_.config + ".previous.bak.cfg", content), 0);
     EXPECT_EQ(content, "replacement");
     EXPECT_EQ(sx::privsep::files::read_file(targets_.config + ".2.0.bak.cfg", content), 0);
     EXPECT_EQ(content, "saved");

@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <service/cfgapi/cfg_archive_restore.hpp>
-#include <service/cfgapi/cfg_source.hpp>
+#include <service/cfgapi/cfg_archive.hpp>
 #include <utils/crypto.hpp>
 
 #include <mutex>

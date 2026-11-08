@@ -1,5 +1,7 @@
 #include <service/privileged_file.hpp>
 
+#include <utils/crypto.hpp>
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -17,6 +19,7 @@
 #include <unordered_set>
 #include <vector>
 #include <sys/mman.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -162,6 +165,55 @@ int atomic_replace_from_fd(const std::string& path, int source) {
     return result;
 }
 
+std::string content_hash(std::string_view content) {
+    const auto digest = sx::crypto::sha256(content);
+    return digest ? "sha256:" + *digest : std::string {};
+}
+
+// Serialize daemon and offline-tool writers through the stable sidecar inode.
+// The current file is read only after the lock is held, so the expected hash,
+// recovery copy and active replacement describe one indivisible generation.
+int install_config_from_fd(
+    const std::string& path, std::string_view expected_hash, int replacement) {
+    const auto lock_path = path + ".lock";
+    const int lock = ::open(
+        lock_path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
+    if(lock < 0) return -1;
+    while(::flock(lock, LOCK_EX) != 0) {
+        if(errno == EINTR) continue;
+        const int saved = errno;
+        ::close(lock);
+        errno = saved;
+        return -1;
+    }
+
+    std::string current;
+    int result = sx::privsep::files::read_file(path, current);
+    if(result == 0 && content_hash(current) != expected_hash) {
+        errno = ESTALE;
+        result = -1;
+    }
+    if(result == 0) {
+        const int previous = make_content_fd(current);
+        if(previous < 0) {
+            result = -1;
+        }
+        else {
+            result = atomic_replace_from_fd(backup_path(path, "previous"), previous);
+            const int saved = errno;
+            ::close(previous);
+            errno = saved;
+        }
+    }
+    if(result == 0) result = atomic_replace_from_fd(path, replacement);
+
+    const int saved = errno;
+    ::flock(lock, LOCK_UN);
+    ::close(lock);
+    errno = saved;
+    return result;
+}
+
 sx::privsep::files::Reply error_reply(int error) {
     return sx::comm::error_reply(error);
 }
@@ -192,6 +244,16 @@ public:
             const int fd = open_regular_readonly(backup_path(target_, request.payload));
             if(fd < 0) return error_reply(errno);
             return {0, {}, fd};
+        }
+        if(opcode == Opcode::ConfigInstall) {
+            if(request.fd < 0 || request.payload.size() != 71 ||
+               request.payload.compare(0, 7, "sha256:") != 0) {
+                return error_reply(EINVAL);
+            }
+            if(install_config_from_fd(target_, request.payload, request.fd) != 0) {
+                return error_reply(errno);
+            }
+            return {};
         }
 
         const bool backup = opcode == Opcode::ConfigBackup;
@@ -373,6 +435,23 @@ int Client::config_write(const std::string& content) {
     const int saved = errno; ::close(fd); errno = saved; return result;
 }
 
+int Client::config_install(
+    const std::string& expected, const std::string& replacement) {
+    // Send only the expected digest through the control payload. The bounded
+    // replacement travels in a sealed-purpose descriptor like ConfigWrite.
+    const auto expected_hash = content_hash(expected);
+    if(expected_hash.empty()) { errno = EIO; return -1; }
+    const int fd = make_content_fd(replacement);
+    if(fd < 0) return -1;
+    Reply response;
+    const int result = request(
+        static_cast<std::uint8_t>(Opcode::ConfigInstall), expected_hash, fd, response);
+    const int saved = errno;
+    ::close(fd);
+    errno = saved;
+    return result;
+}
+
 int Client::config_backup(const std::string& version_text, const std::string& content) {
     if(!safe_version(version_text)) { errno = EINVAL; return -1; }
     const int fd = make_content_fd(content);
@@ -423,6 +502,7 @@ Server::Server(int fd, Targets targets): sx::comm::Server(fd) {
     register_operation(Opcode::ConfigRead, config);
     register_operation(Opcode::ConfigWrite, config);
     register_operation(Opcode::ConfigBackup, config);
+    register_operation(Opcode::ConfigInstall, config);
     register_operation(Opcode::ConfigBackupRead, std::move(config));
     register_operation(Opcode::PidExists, pid);
     register_operation(Opcode::PidWrite, pid);
@@ -484,6 +564,27 @@ int config_write(const std::string& path, const std::string& content) {
         return client->config_write(content);
     }
     return write_file_atomic(path, content);
+}
+
+int config_install(
+    const std::string& path,
+    const std::string& expected,
+    const std::string& replacement) {
+    // The facade keeps pre-privsep tests and the installed helper on identical
+    // compare-backup-replace semantics.
+    if(auto client = current_client()) {
+        if(!target_matches(path, installed_targets.config)) { errno = EACCES; return -1; }
+        return client->config_install(expected, replacement);
+    }
+    const auto expected_hash = content_hash(expected);
+    if(expected_hash.empty()) { errno = EIO; return -1; }
+    const int fd = make_content_fd(replacement);
+    if(fd < 0) return -1;
+    const int result = install_config_from_fd(path, expected_hash, fd);
+    const int saved = errno;
+    ::close(fd);
+    errno = saved;
+    return result;
 }
 
 int config_backup(const std::string& path, const std::string& version_text,

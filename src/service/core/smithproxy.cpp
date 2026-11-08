@@ -1179,14 +1179,14 @@ bool SmithProxy::init_syslog() {
 // Keep direct filename callers on the explicit legacy path. Automatic CfgTar
 // preference is decided once by main(), not inferred from a file extension.
 bool SmithProxy::load_config(std::string& config_f, bool reload) {
-    sx::cfg::CfgSource::Paths paths;
+    sx::cfg::CfgArchive::Paths paths;
     paths.explicit_config = config_f;
-    return load_config(sx::cfg::CfgSource::open(std::move(paths)), reload);
+    return load_config(sx::cfg::CfgArchive::open(std::move(paths)), reload);
 }
 
 // Install one already selected source into CfgFactory, then apply the parsed
 // configuration and runtime hooks exactly as the historical loader did.
-bool SmithProxy::load_config(sx::cfg::CfgSource source, bool reload) {
+bool SmithProxy::load_config(sx::cfg::CfgArchive source, bool reload) {
     const bool loaded = CfgFactory::get()->cfgapi_init(std::move(source));
     if(!loaded) {
         _fat("Unable to load config.");

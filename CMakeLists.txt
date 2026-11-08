@@ -278,14 +278,21 @@ target_include_directories(smithproxy_libcli PUBLIC
 )
 
 add_executable(smithproxy-cftar
+        src/utils/crypto.cpp
         src/service/cfgapi/cftar_main.cpp
+        src/service/cfgapi/cftar_cli.cpp
         src/service/cfgapi/cfg_pack.cpp
-        src/service/cfgapi/cfg_source.cpp
+        src/service/cfgapi/cfg_archive.cpp
+        src/service/cfgapi/cfg_archive_session.cpp
+        src/service/cfgapi/cfg_exposure.cpp
+        src/service/cfgapi/cfg_file_lock.cpp
+        src/service/cfgapi/cfg_runtime_tree.cpp
         src/service/cfgapi/cfg_tar.cpp
 )
 target_include_directories(smithproxy-cftar PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(smithproxy-cftar PRIVATE
-        LibArchive::LibArchive nlohmann_json::nlohmann_json)
+        smithproxy_libcli pthread crypto LibArchive::LibArchive
+        nlohmann_json::nlohmann_json ${LIBCONFIGPP_LIBRARIES})
 
 add_executable(smithproxy
 
@@ -300,6 +307,8 @@ add_executable(smithproxy
         src/service/cfgapi/cfg_tx_basket.cpp
         src/service/cfgapi/cfg_save.cpp
         src/service/cfgapi/cfg_archive_restore.cpp
+        src/service/cfgapi/cfg_resource_write.cpp
+        src/service/cfgapi/cfg_runtime_tree.cpp
         src/service/httpd/cfg/save.cpp
         src/service/httpd/cfg/archive.cpp
         src/service/httpd/cfg/transaction.cpp
@@ -307,7 +316,7 @@ add_executable(smithproxy
         src/service/cfgapi/cfg_update.cpp
         src/service/cfgapi/cfg_revision.cpp
         src/service/cfgapi/cfg_tar.cpp
-        src/service/cfgapi/cfg_source.cpp
+        src/service/cfgapi/cfg_archive.cpp
         src/service/cfgapi/cfg_pack.cpp
         src/staticcontent.cpp
 
@@ -644,9 +653,11 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 src/service/cfgapi/cfg_save.cpp
                 tests/unit/service/cfgapi/cfg_save_tests.cpp
                 src/service/cfgapi/cfg_tar.cpp
-                src/service/cfgapi/cfg_source.cpp
+                src/service/cfgapi/cfg_archive.cpp
                 src/service/cfgapi/cfg_archive_restore.cpp
                 tests/unit/service/cfgapi/cfg_archive_restore_tests.cpp
+                src/service/cfgapi/cfg_resource_write.cpp
+                tests/unit/service/cfgapi/cfg_resource_write_tests.cpp
                 src/service/httpd/cfg/save.cpp
                 tests/unit/service/httpd/cfg_save_tests.cpp
                 src/service/httpd/cfg/transaction.cpp
@@ -754,6 +765,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
         )
 
         add_executable(sx_gtests_file_privsep
+                src/utils/crypto.cpp
                 src/service/comm.cpp
                 src/service/privileged_file.cpp
                 tests/unit/service/comm_tests.cpp
@@ -803,14 +815,22 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
         target_link_libraries(sx_gtests gtest gtest_main smithproxy_libcli smithproxy_qpack socle_lib pthread crypto ssl crypt
                 LibArchive::LibArchive nlohmann_json::nlohmann_json ${UNWIND_LIB})
         add_executable(sx_gtests_cfg_tar
+                src/utils/crypto.cpp
                 src/service/cfgapi/cfg_tar.cpp
-                src/service/cfgapi/cfg_source.cpp
+                src/service/cfgapi/cfg_archive.cpp
+                src/service/cfgapi/cfg_archive_session.cpp
+                src/service/cfgapi/cfg_exposure.cpp
+                src/service/cfgapi/cfg_file_lock.cpp
                 src/service/cfgapi/cfg_pack.cpp
+                src/service/cfgapi/cfg_runtime_tree.cpp
                 tests/unit/service/cfg_tar_tests.cpp
-                tests/unit/service/cfg_source_tests.cpp
-                tests/unit/service/cfg_pack_tests.cpp)
+                tests/unit/service/cfg_archive_tests.cpp
+                tests/unit/service/cfg_archive_session_tests.cpp
+                tests/unit/service/cfg_pack_tests.cpp
+                tests/unit/service/cfg_runtime_tree_tests.cpp)
         target_link_libraries(sx_gtests_cfg_tar PRIVATE gtest gtest_main
-                LibArchive::LibArchive nlohmann_json::nlohmann_json)
+                pthread crypto LibArchive::LibArchive nlohmann_json::nlohmann_json
+                ${LIBCONFIGPP_LIBRARIES})
         add_test(NAME unit.cfg_tar COMMAND sx_gtests_cfg_tar)
         set_tests_properties(unit.cfg_tar PROPERTIES LABELS "native;unit")
         if("${USE_PAM}" STREQUAL "Y")
@@ -1226,7 +1246,7 @@ if(SMITHPROXY_FUZZING)
 
     add_executable(cfg_tar_fuzzer
             src/service/cfgapi/cfg_tar.cpp
-            src/service/cfgapi/cfg_source.cpp
+            src/service/cfgapi/cfg_archive.cpp
             tests/fuzz/service/cfg_tar_fuzzer.cpp)
     target_link_libraries(cfg_tar_fuzzer LibArchive::LibArchive nlohmann_json::nlohmann_json)
     smithproxy_fuzzer(cfg_tar_fuzzer)

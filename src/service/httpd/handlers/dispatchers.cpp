@@ -235,6 +235,19 @@ namespace sx::webserver::dispatchers {
             sx::privsep::files::max_config_payload;
         server.addController(std::shared_ptr<lmh::Controller>(cfg_archive_restore_handler));
 
+        auto* cfg_archive_resources_handler = new Http_Responder(
+            "GET", "/api/config/archive/resources",
+            authorized::token_protected<Http_JsonResponseParams>(&cfg_archive_resources));
+        server.addController(std::shared_ptr<lmh::Controller>(cfg_archive_resources_handler));
+
+        for(const auto* method : {"GET", "PUT", "DELETE"}) {
+            auto* handler = new Http_Responder(
+                method, "/api/config/archive/resource",
+                authorized::token_protected<Http_JsonResponseParams>(&cfg_archive_resource));
+            handler->Max_Request_Body_Size = sx::privsep::files::max_config_payload;
+            server.addController(std::shared_ptr<lmh::Controller>(handler));
+        }
+
         auto* cfg_save_handler = new Http_Responder(
             "POST",
             "/api/config/save",

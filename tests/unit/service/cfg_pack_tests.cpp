@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <service/cfgapi/cfg_pack.hpp>
-#include <service/cfgapi/cfg_source.hpp>
+#include <service/cfgapi/cfg_archive.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -138,6 +138,41 @@ TEST_F(PackTest, OptionalResourceDoesNotHideUnsafeOrUnreadableInput) {
     ASSERT_EQ(::symlink(target.c_str(), link.c_str()), 0);
     input_.files.push_back({"scripts/link", link, false, true});
 
+    EXPECT_THROW(CfgPack::build(input_), CfgTarError);
+}
+
+TEST_F(PackTest, RecursivelyPacksAClosedResourceDirectory) {
+    const auto root = directory_ + "/certs";
+    ASSERT_TRUE(std::filesystem::create_directories(root + "/sni/example.org"));
+    std::ofstream(root + "/ca-cert.pem") << "ca";
+    std::ofstream(root + "/sni/example.org/key.pem") << "key";
+    std::ofstream(root + "/sni/example.org/fullchain.pem") << "chain";
+    input_.directories.push_back({"pki/ca/default", root});
+
+    const auto archive = CfgPack::build(input_);
+    EXPECT_EQ(archive.at("pki/ca/default/ca-cert.pem").data, "ca");
+    EXPECT_EQ(archive.at("pki/ca/default/sni/example.org/key.pem").data, "key");
+    EXPECT_EQ(archive.at("pki/ca/default/sni/example.org/fullchain.pem").data, "chain");
+}
+
+TEST_F(PackTest, RejectsSymlinksInResourceDirectory) {
+    const auto root = directory_ + "/certs";
+    ASSERT_TRUE(std::filesystem::create_directories(root));
+    const auto target = write("outside-key", "secret");
+    ASSERT_EQ(::symlink(target.c_str(), (root + "/key.pem").c_str()), 0);
+    input_.directories.push_back({"pki/ca/default", root});
+
+    EXPECT_THROW(CfgPack::build(input_), CfgTarError);
+}
+
+TEST_F(PackTest, SkipsOnlyAnAbsentOptionalResourceDirectory) {
+    input_.directories.push_back({
+        "pki/ca/default", directory_ + "/missing-certs", true});
+    EXPECT_NO_THROW(CfgPack::build(input_));
+
+    const auto target = directory_ + "/linked-certs";
+    ASSERT_EQ(::symlink(directory_.c_str(), target.c_str()), 0);
+    input_.directories.back().source_path = target;
     EXPECT_THROW(CfgPack::build(input_), CfgTarError);
 }
 

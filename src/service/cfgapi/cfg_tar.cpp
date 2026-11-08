@@ -302,6 +302,25 @@ void CfgTar::replace(std::string_view path, std::string data, bool executable) {
     total_size_ += static_cast<std::uint64_t>(position->second.data.size());
 }
 
+void CfgTar::upsert(std::string path, std::string data, bool executable) {
+    const auto checked = checked_path(path, limits_);
+    if(entries_.find(checked) == entries_.end()) {
+        add(std::move(path), std::move(data), executable);
+        return;
+    }
+    replace(checked, std::move(data), executable);
+}
+
+bool CfgTar::remove(std::string_view path) {
+    const auto checked = checked_path(path, limits_);
+    const auto position = entries_.find(checked);
+    if(position == entries_.end()) return false;
+
+    total_size_ -= static_cast<std::uint64_t>(position->second.data.size());
+    entries_.erase(position);
+    return true;
+}
+
 bool CfgTar::contains(std::string_view path) const {
     return entries_.find(std::string(path)) != entries_.end();
 }

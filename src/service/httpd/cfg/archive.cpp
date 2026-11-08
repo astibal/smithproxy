@@ -9,6 +9,22 @@
 namespace sx::webserver {
 namespace {
 
+const char* header(MHD_Connection* connection, const char* name) {
+    return MHD_lookup_connection_value(connection, MHD_HEADER_KIND, name);
+}
+
+Http_JsonResponseParams resource_error(
+    std::string code, std::string detail, unsigned int status) {
+    Http_JsonResponseParams response;
+    response.response_code = status;
+    response.content_type = "application/json";
+    response.response = {
+        {"state", "error"},
+        {"error", {{"code", std::move(code)}, {"detail", std::move(detail)}}},
+    };
+    return response;
+}
+
 template<class Reader>
 Http_JsonResponseParams download(Reader&& reader, std::string filename) {
     Http_JsonResponseParams response;
@@ -59,7 +75,7 @@ Http_JsonResponseParams cfg_archive_validate(
     std::string const& request) {
     Http_JsonResponseParams response;
     try {
-        const auto info = sx::cfg::CfgSource::inspect_archive(request);
+        const auto info = sx::cfg::CfgArchive::inspect_archive(request);
         const auto hash = sx::crypto::sha256(request);
         if (!hash) throw sx::cfg::CfgTarError("cannot hash configuration archive");
 
@@ -171,6 +187,90 @@ Http_JsonResponseParams cfg_archive_restore(
         }},
     };
     return response;
+}
+
+Http_JsonResponseParams cfg_archive_resources(
+    [[maybe_unused]] MHD_Connection* connection,
+    [[maybe_unused]] std::string const& method,
+    [[maybe_unused]] std::string const& request) {
+    try {
+        const auto info = CfgFactory::get()->archive_info();
+        if(!info.native) throw sx::cfg::CfgTarError("native archive is unavailable");
+
+        nlohmann::json resources = nlohmann::json::array();
+        for(const auto& entry : info.entries) {
+            if(!sx::cfg::CfgManifest::is_resource_path(entry.path)) continue;
+            resources.push_back({
+                {"path", entry.path}, {"size", entry.size},
+                {"executable", entry.executable},
+            });
+        }
+        Http_JsonResponseParams response;
+        response.response = {
+            {"state", "ready"}, {"content_hash", info.content_hash},
+            {"resources", std::move(resources)},
+        };
+        return response;
+    }
+    catch(const std::exception& error) {
+        return resource_error("native_archive_unavailable", error.what(), MHD_HTTP_CONFLICT);
+    }
+}
+
+Http_JsonResponseParams cfg_archive_resource(
+    MHD_Connection* connection,
+    std::string const& method,
+    std::string const& request) {
+    const auto* path = MHD_lookup_connection_value(
+        connection, MHD_GET_ARGUMENT_KIND, "path");
+    if(!path || !*path) {
+        return resource_error("missing_resource_path", "resource path is required",
+                              MHD_HTTP_BAD_REQUEST);
+    }
+
+    if(method == "GET") {
+        try {
+            Http_JsonResponseParams response;
+            response.binary = CfgFactory::get()->archive_resource(path);
+            response.content_type = "application/octet-stream";
+            return response;
+        }
+        catch(const std::exception& error) {
+            return resource_error("resource_unavailable", error.what(), MHD_HTTP_NOT_FOUND);
+        }
+    }
+
+    const auto* revision = header(connection, "X-Smithproxy-Expected-Revision");
+    const auto* hash = header(connection, "X-Smithproxy-Archive-SHA256");
+    if(!revision || !*revision || !hash || !*hash) {
+        return resource_error("missing_resource_precondition",
+            "resource write requires expected revision and archive SHA-256 headers",
+            MHD_HTTP_BAD_REQUEST);
+    }
+    const bool executable = header(connection, "X-Smithproxy-Executable") &&
+                            std::string_view(header(connection, "X-Smithproxy-Executable")) == "true";
+    const auto result = CfgFactory::write_archive_resource(
+        revision, hash, path, method == "DELETE" ? std::nullopt
+                                                   : std::optional<std::string>(request),
+        executable);
+    if(result.ok()) {
+        Http_JsonResponseParams response;
+        response.response = {
+            {"state", "written"}, {"content_hash", result.archive_hash},
+            {"restart_required", true},
+        };
+        return response;
+    }
+
+    using Status = sx::cfg::ResourceWriteStatus;
+    const bool invalid = result.status == Status::invalid_resource;
+    const bool failed = result.status == Status::write_failed;
+    std::string code = "resource_write_conflict";
+    if(invalid) code = "invalid_resource";
+    else if(failed) code = "resource_write_failed";
+    return resource_error(std::move(code), result.detail,
+        invalid ? MHD_HTTP_UNPROCESSABLE_ENTITY
+                : failed ? MHD_HTTP_INTERNAL_SERVER_ERROR : MHD_HTTP_CONFLICT);
 }
 
 }  // namespace sx::webserver

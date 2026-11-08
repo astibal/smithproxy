@@ -58,6 +58,11 @@ public:
     // used when a transaction updates content such as the main configuration;
     // missing paths remain an error rather than being created accidentally.
     void replace(std::string_view path, std::string data, bool executable = false);
+
+    // Store one entry regardless of whether it already exists. remove() is
+    // explicit and reports absence, which keeps administrative edits honest.
+    void upsert(std::string path, std::string data, bool executable = false);
+    bool remove(std::string_view path);
     bool contains(std::string_view path) const;
     const Entry& at(std::string_view path) const;
     const Entries& entries() const noexcept;

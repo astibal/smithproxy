@@ -1,5 +1,5 @@
 /*
- * Selection and validation of Smithproxy's persistent configuration source.
+ * Selection, validation, and mutation of Smithproxy's configuration archive.
  */
 
 #pragma once
@@ -54,7 +54,7 @@ public:
     const std::string& legacy_path() const;
 
 private:
-    friend class CfgSource;
+    friend class CfgArchive;
     CfgResource(Kind kind, std::string logical_path, std::string value);
 
     Kind kind_;
@@ -70,7 +70,7 @@ struct CfgSaveData {
     std::optional<std::string> previous;
 };
 
-// Safe administrative view of the selected persistent source. Entry contents
+// Safe administrative view of the persistent archive. Entry contents
 // are intentionally absent so listing an archive can never disclose keys or
 // other configuration material.
 struct CfgArchiveInfo {
@@ -84,23 +84,22 @@ struct CfgArchiveInfo {
     std::string path;
     unsigned int format_version = 0;
     std::uint64_t payload_size = 0;
+    std::string content_hash;
     std::vector<Entry> entries;
 };
 
-// Resolves the persistent configuration source used for one process start.
-// It preserves an explicit legacy-file request, otherwise prefers CfgTar and
-// permits legacy fallback only when the archive is genuinely absent. A chosen
-// CfgTar is already parsed and validated, making later accessors safe to use.
-class CfgSource {
+// Owns Smithproxy's validated persistent configuration archive. During the
+// migration window it can also represent one explicit legacy input, but that
+// mode is an entrance ramp to CFtar rather than a parallel management model.
+class CfgArchive {
 public:
-    // Describes which storage format won source selection.
+    // Describes whether startup selected native storage or its legacy entrance.
     enum class Kind {
         legacy,
         cftar,
     };
 
-    // Supplies policy-free paths so callers can use production defaults or
-    // isolated test locations without changing source-selection semantics.
+    // Supplies policy-free paths for production defaults and isolated tests.
     struct Paths {
         std::string archive;
         std::string legacy;
@@ -109,28 +108,28 @@ public:
 
     // An explicit configuration file wins. Otherwise an existing CfgTar is
     // preferred and fully validated. Only an absent CfgTar permits fallback.
-    static CfgSource open(Paths paths);
+    static CfgArchive open(Paths paths);
 
-    // Construct a native source from bytes supplied by a privileged reader.
+    // Construct a native archive from bytes supplied by a privileged reader.
     // This is the reload path after Smithproxy has dropped filesystem rights.
-    static CfgSource read_archive(std::string path, std::string_view bytes);
+    static CfgArchive read_archive(std::string path, std::string_view bytes);
 
     // Parse and fully validate an uploaded archive without selecting or
-    // mutating the running configuration source.
+    // mutating the running configuration archive.
     static CfgArchiveInfo inspect_archive(std::string_view bytes);
 
-    // Describe the selected format and the exact source path. These accessors
-    // do not perform I/O; source selection is complete after open().
+    // Describe the selected format and persistent path. These accessors do not
+    // perform I/O; selection and validation are complete after open().
     Kind kind() const noexcept;
     const std::string& path() const noexcept;
     bool is_cftar() const noexcept;
 
-    // Describe the selected source without exposing entry contents. Legacy
-    // sources report only their path; native sources include archive metadata.
+    // Describe the archive without exposing entry contents. Legacy inputs
+    // report only their path; native archives include validated metadata.
     CfgArchiveInfo info() const;
 
-    // Available only for a CfgTar source. Legacy loading remains in the
-    // existing privileged file path until the runtime integration patch.
+    // Available only in native mode. Legacy loading remains isolated behind
+    // the privileged file reader until migration creates CFtar.
     const CfgTar& archive() const;
     std::string_view main_config() const;
     std::string_view startup_config() const;
@@ -150,18 +149,28 @@ public:
     // must not install replacement when that recovery write fails.
     CfgSaveData prepare_save(std::string main_config) const;
 
-    // Advance the in-memory native source after its save payload has been
-    // atomically installed. Legacy sources carry no cached file contents.
+    // Prepare one resource edit in a copied archive. nullopt removes an
+    // existing resource; content adds or replaces it. Control files cannot be
+    // changed through this interface.
+    CfgSaveData prepare_resource(std::string path,
+                                 std::optional<std::string> content,
+                                 bool executable = false) const;
+
+    // Advance the in-memory native archive after its save payload has been
+    // atomically installed. Legacy inputs carry no cached file contents.
     void accept_saved_main(std::string main_config);
+
+    // Adopt a fully written archive after durable publication succeeds.
+    void accept_saved_archive(std::string_view bytes);
 
     // Return the exact current archive for a pre-upgrade backup. Legacy callers
     // already hold their parsed configuration and use its serialized form.
     std::string archive_payload() const;
 
 private:
-    // Construction stays private to prevent unvalidated CfgTar sources from
+    // Construction stays private to prevent unvalidated CfgTar archives from
     // being assembled by callers.
-    CfgSource(Kind kind, std::string path, std::optional<CfgTar> archive);
+    CfgArchive(Kind kind, std::string path, std::optional<CfgTar> archive);
 
     // The optional archive is populated exactly when kind_ is cftar.
     Kind kind_;

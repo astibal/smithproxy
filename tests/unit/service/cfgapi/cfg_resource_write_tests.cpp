@@ -1,0 +1,111 @@
+#include <gtest/gtest.h>
+
+#include <service/cfgapi/cfg_resource_write.hpp>
+#include <utils/crypto.hpp>
+
+namespace {
+
+class TestResourceArchive final : public sx::cfg::CfgResourceArchive {
+public:
+    [[nodiscard]] bool available() const override { return source.has_value(); }
+
+    [[nodiscard]] std::string current() const override {
+        return source->archive_payload();
+    }
+
+    [[nodiscard]] sx::cfg::CfgSaveData prepare(
+        std::string path,
+        std::optional<std::string> content,
+        bool executable) const override {
+        return source->prepare_resource(
+            std::move(path), std::move(content), executable);
+    }
+
+    [[nodiscard]] bool install(const sx::cfg::CfgSaveData& data) const override {
+        ++installs;
+        installed = data.replacement;
+        return install_ok;
+    }
+
+    void accept(std::string_view bytes) override {
+        source->accept_saved_archive(bytes);
+    }
+
+    std::optional<sx::cfg::CfgArchive> source;
+    bool install_ok = true;
+    mutable int installs = 0;
+    mutable std::string installed;
+};
+
+class ResourceWriteTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        board.init_revision("snapshot", "startup");
+        sx::cfg::CfgTar tar;
+        tar.add(std::string(sx::cfg::CfgManifest::path),
+                sx::cfg::CfgManifest::canonical());
+        tar.add("smithproxy.cfg", "settings : {};\n");
+        tar.add("smithproxy.startup.cfg", "START=1\n");
+        archive.source = std::make_optional(
+            sx::cfg::CfgArchive::read_archive("smithproxy.cftar", tar.write()));
+    }
+
+    sx::cfg::ResourceWriteResult write(
+        std::string revision, std::string hash, std::string path,
+        std::optional<std::string> content) {
+        sx::cfg::CfgResourceWriter writer({board, gate, mutex, archive, restart_pending});
+        return writer.write(std::move(revision), std::move(hash), std::move(path),
+                            std::move(content), false);
+    }
+
+    std::string hash() const {
+        return "sha256:" + *sx::crypto::sha256(archive.source->archive_payload());
+    }
+
+    UpdateBoard board;
+    sx::cfg::CfgWriteGate gate;
+    std::recursive_mutex mutex;
+    TestResourceArchive archive;
+    bool restart_pending = false;
+};
+
+TEST_F(ResourceWriteTest, WritesAndAdoptsAResource) {
+    const auto result = write(board.revision_current(), hash(),
+                              "messages/en/page.html", std::string("page"));
+    EXPECT_TRUE(result.ok());
+    EXPECT_TRUE(restart_pending);
+    EXPECT_EQ(archive.installs, 1);
+    EXPECT_EQ(archive.source->resolve("messages/en/page.html", "legacy").content(), "page");
+}
+
+TEST_F(ResourceWriteTest, RejectsAStaleArchiveHash) {
+    const auto result = write(board.revision_current(), "sha256:stale",
+                              "messages/en/page.html", std::string("page"));
+    EXPECT_EQ(result.status, sx::cfg::ResourceWriteStatus::hash_mismatch);
+    EXPECT_EQ(archive.installs, 0);
+}
+
+TEST_F(ResourceWriteTest, RejectsUnsavedRunningConfiguration) {
+    board.upgrade("cli", "changed", "set value");
+    const auto result = write(board.revision_current(), hash(),
+                              "messages/en/page.html", std::string("page"));
+    EXPECT_EQ(result.status, sx::cfg::ResourceWriteStatus::unsaved_running);
+}
+
+TEST_F(ResourceWriteTest, DoesNotAdoptFailedStorageWrite) {
+    archive.install_ok = false;
+    const auto result = write(board.revision_current(), hash(),
+                              "messages/en/page.html", std::string("page"));
+    EXPECT_EQ(result.status, sx::cfg::ResourceWriteStatus::write_failed);
+    EXPECT_FALSE(restart_pending);
+    EXPECT_FALSE(archive.source->archive().contains("messages/en/page.html"));
+}
+
+TEST_F(ResourceWriteTest, RejectsControlFileMutation) {
+    const auto result = write(board.revision_current(), hash(),
+                              "manifest.json", std::string("bad"));
+    EXPECT_EQ(result.status, sx::cfg::ResourceWriteStatus::invalid_resource);
+    EXPECT_EQ(archive.installs, 0);
+}
+
+}  // namespace

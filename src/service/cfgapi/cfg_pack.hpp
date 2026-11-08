@@ -23,10 +23,20 @@ public:
         bool optional = false;
     };
 
+    struct Directory {
+        // Native prefix receiving every regular descendant of source_path.
+        std::string archive_prefix;
+        // Legacy root opened without following a final symlink.
+        std::string source_path;
+        // Only a genuinely absent root may be skipped; unsafe content fails.
+        bool optional = false;
+    };
+
     struct Input {
         std::string main_config;
         std::string startup_config;
         std::vector<File> files;
+        std::vector<Directory> directories;
     };
 
     struct Migration {

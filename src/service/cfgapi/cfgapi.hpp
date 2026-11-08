@@ -55,8 +55,10 @@
 #include <traflog/pcaplog.hpp>
 
 #include "cfg_update.hpp"
-#include "cfg_source.hpp"
+#include "cfg_archive.hpp"
 #include "cfg_archive_restore.hpp"
+#include "cfg_resource_write.hpp"
+#include "cfg_runtime_tree.hpp"
 #include "cfg_write_gate.hpp"
 #include "cfg_tx_validate.hpp"
 
@@ -113,18 +115,47 @@ private:
 
 class CfgFactory : public CfgFactoryBase {
 
+    // Adapts the factory-owned archive cache and persistence boundary to the
+    // narrow interface required by CfgResourceWriter. CfgFactory owns this
+    // collaborator; it is not itself a resource archive.
+    class ResourceArchive final : public sx::cfg::CfgResourceArchive {
+    public:
+        explicit ResourceArchive(CfgFactory& owner): owner_(owner) {}
+
+        // Report whether the factory currently owns a writable native archive.
+        [[nodiscard]] bool available() const override;
+        // Return the exact native archive bytes used as the write base.
+        [[nodiscard]] std::string current() const override;
+        // Apply one resource edit to an isolated archive copy.
+        [[nodiscard]] sx::cfg::CfgSaveData prepare(
+            std::string path,
+            std::optional<std::string> content,
+            bool executable) const override;
+        // Persist the recovery copy and atomically install the prepared archive.
+        [[nodiscard]] bool install(
+            const sx::cfg::CfgSaveData& prepared) const override;
+        // Adopt successfully installed bytes as the next resource-write base.
+        void accept(std::string_view bytes) override;
+
+    private:
+        CfgFactory& owner_;
+    };
+
     libconfig::Config cfgapi;
     // Describes the persistent bytes backing cfgapi. Keeping source policy
     // beside the parsed config prevents save and backup paths from guessing
     // whether config_file names a legacy text file or a native archive. It is
     // mutable because the historically const save_config() advances the cached
     // archive only after durable replacement succeeds.
-    mutable std::optional<sx::cfg::CfgSource> config_source_;
+    mutable std::optional<sx::cfg::CfgArchive> config_archive_;
     // A restored archive is the next startup configuration, while cfgapi still
     // describes the running process. Block ordinary saves until restart so the
     // explicitly restored bytes cannot be overwritten by that older state.
     mutable bool startup_archive_pending_ = false;
+    // Own the materialized runtime view of resources selected at startup.
+    std::optional<sx::cfg::CfgRuntimeTree> runtime_tree_;
     std::recursive_mutex lock_;
+    ResourceArchive resource_archive_;
 
     static inline std::shared_ptr<CfgFactory> self;
     static inline std::shared_ptr<UpdateBoard> update_board;
@@ -140,7 +171,7 @@ public:
         "Certificate Transparency is enabled by policy, but the CT log list is "
         "unavailable. CT validation remains FAIL-CLOSED.";
 
-    CfgFactory() = default;
+    CfgFactory(): resource_archive_(*this) {}
     CfgFactory(CfgFactory const &) = delete;
     void operator=(const CfgFactory&) = delete;
     ~CfgFactory() override { cleanup(); }
@@ -162,13 +193,22 @@ public:
 
     static std::recursive_mutex& lock() { return get()->lock_; }
     static std::shared_ptr<sx::cfg::CfgWriteGate> write_gate() { return write_gate_; }
+    // Persist the current running configuration into its native startup archive.
     static sx::cfg::SaveResult save_running(
         std::string const& expected_revision,
         std::string const& source);
+    // Validate and atomically install an uploaded archive for the next restart.
     static sx::cfg::ArchiveRestoreResult restore_startup_archive(
         std::string const& expected_revision,
         std::string const& expected_hash,
         std::string const& payload);
+    // Replace one native archive resource without changing the running process.
+    static sx::cfg::ResourceWriteResult write_archive_resource(
+        std::string expected_revision,
+        std::string expected_archive_hash,
+        std::string path,
+        std::optional<std::string> content,
+        bool executable = false);
     static sx::cfg::tx::Transaction::CreateResult make_transaction(std::string owner) {
         auto factory = get();
         return sx::cfg::tx::Transaction::create(
@@ -372,12 +412,14 @@ public:
 
     std::vector<AddressInfo> db_nameservers;
 
+    // Select and load a native archive or an explicit legacy configuration path.
     bool cfgapi_init(const char* fnm);
-    bool cfgapi_init(sx::cfg::CfgSource source);
+    // Load the parsed configuration from an already validated archive source.
+    bool cfgapi_init(sx::cfg::CfgArchive source);
 
     // Re-open the same logical source for reload. A native archive is parsed
     // and validated again; an explicit legacy path remains explicit.
-    sx::cfg::CfgSource reload_source();
+    sx::cfg::CfgArchive reload_source();
 
     // Resolve a persistent resource against the source selected for the
     // running configuration. The returned value owns native bytes or the
@@ -409,6 +451,12 @@ public:
     // Read and validate the recovery archive through the privileged file
     // capability. The returned bytes are suitable for an exact download.
     std::string previous_archive_payload();
+
+    // Read one validated resource from the active native archive.
+    std::string archive_resource(std::string const& path);
+
+    // Materialize the active archive resources into a protected runtime tree.
+    std::string materialize_runtime_archive();
 
     // True after a successful restore that deliberately requires a process
     // restart before its configuration and resources become active.
