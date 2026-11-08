@@ -103,11 +103,13 @@ public:
     struct Paths {
         std::string archive;
         std::string legacy;
-        std::optional<std::string> explicit_config;
+        std::optional<std::string> explicit_config = std::nullopt;
+        std::optional<std::string> explicit_archive = std::nullopt;
     };
 
-    // An explicit configuration file wins. Otherwise an existing CfgTar is
-    // preferred and fully validated. Only an absent CfgTar permits fallback.
+    // An explicit native archive or legacy configuration file wins. Otherwise
+    // an existing CfgTar is preferred and fully validated. Only an absent
+    // CfgTar permits fallback.
     static CfgArchive open(Paths paths);
 
     // Construct a native archive from bytes supplied by a privileged reader.

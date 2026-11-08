@@ -387,4 +387,25 @@ TEST_F(ArchiveTest, ExplicitConfigOverridesExistingArchive) {
     EXPECT_EQ(source.path(), *paths_.explicit_config);
 }
 
+TEST_F(ArchiveTest, ExplicitArchiveIsValidatedAndSelected) {
+    const auto manual_archive = directory_ + "/manual.cftar";
+    valid_archive().write_file(manual_archive);
+    paths_.explicit_archive = manual_archive;
+
+    const auto source = CfgArchive::open(paths_);
+
+    EXPECT_EQ(source.kind(), CfgArchive::Kind::cftar);
+    EXPECT_EQ(source.path(), manual_archive);
+    EXPECT_EQ(source.main_config(), "settings : {};\n");
+}
+
+TEST_F(ArchiveTest, InvalidExplicitArchiveNeverFallsBack) {
+    const auto manual_archive = directory_ + "/manual.cftar";
+    std::ofstream(manual_archive) << "broken archive";
+    std::ofstream(paths_.legacy) << "legacy";
+    paths_.explicit_archive = manual_archive;
+
+    EXPECT_THROW(CfgArchive::open(paths_), CfgTarError);
+}
+
 } // namespace

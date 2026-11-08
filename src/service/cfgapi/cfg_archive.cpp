@@ -171,6 +171,16 @@ CfgArchive::CfgArchive(Kind kind, std::string path, std::optional<CfgTar> archiv
     : kind_(kind), path_(std::move(path)), archive_(std::move(archive)) {}
 
 CfgArchive CfgArchive::open(Paths paths) {
+    // Explicit native input is useful for config checks, recovery tooling, and
+    // isolated test instances. It receives the same strict validation as the
+    // default archive and never falls back to a legacy file.
+    if(paths.explicit_archive) {
+        auto archive = CfgTar::read_file(*paths.explicit_archive);
+        CfgManifest::validate(archive);
+        return CfgArchive(
+            Kind::cftar, std::move(*paths.explicit_archive), std::move(archive));
+    }
+
     // Command-line intent is authoritative and keeps config-check workflows
     // independent of the system-wide CfgTar.
     if (paths.explicit_config) {

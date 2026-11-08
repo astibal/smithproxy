@@ -810,12 +810,23 @@ int main(int argc, char *argv[]) {
             std::nullopt,
         };
 
-        // A command-line or tenant-specific path is an explicit legacy source.
-        // Only the standalone default path participates in automatic CfgTar
-        // preference and absent-archive fallback.
+        // A command-line CfgTar remains native and receives full archive
+        // validation. Other command-line and tenant paths are explicit legacy
+        // sources. Only the standalone default path participates in automatic
+        // CfgTar preference and absent-archive fallback.
         if(is_custom_config_file ||
            CfgFactory::get()->config_file != "/etc/smithproxy/smithproxy.cfg") {
-            archive_paths.explicit_config = CfgFactory::get()->config_file;
+            const auto& configured_path = CfgFactory::get()->config_file;
+            constexpr std::string_view cftar_suffix = ".cftar";
+            if(configured_path.size() >= cftar_suffix.size() &&
+               configured_path.compare(
+                   configured_path.size() - cftar_suffix.size(),
+                   cftar_suffix.size(), cftar_suffix) == 0) {
+                archive_paths.explicit_archive = configured_path;
+            }
+            else {
+                archive_paths.explicit_config = configured_path;
+            }
         }
         auto source = sx::cfg::CfgArchive::open(std::move(archive_paths));
         migrate_default_legacy = !is_custom_config_file && !source.is_cftar();
