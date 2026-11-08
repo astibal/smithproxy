@@ -198,6 +198,12 @@ int main(int argc, char** argv) {
     // Dispatch a deliberately flat one-shot interface; the richer workflow is
     // isolated behind "interactive" and still operates on the same session.
     try {
+        if(argc == 2 &&
+           (std::string_view(argv[1]) == "--help" ||
+            std::string_view(argv[1]) == "-h")) {
+            usage(std::cout);
+            return 0;
+        }
         if (argc >= 2 && std::string_view(argv[1]) == "create") {
             return create(argc, argv);
         }

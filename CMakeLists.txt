@@ -500,6 +500,9 @@ target_link_libraries(smithproxy-webhook-broker pthread)
 option(SMITHPROXY_OPTIMIZED_TESTS "Build native tests outside Debug" OFF)
 if(BUILD_TESTING)
         find_program(PATCH_RUNNER_PYTHON NAMES python3 REQUIRED)
+        add_test(NAME unit.cftar_help COMMAND smithproxy-cftar --help)
+        set_tests_properties(unit.cftar_help
+                PROPERTIES LABELS "native;unit;config" TIMEOUT 10)
         add_test(NAME unit.sx_network_check
                 COMMAND ${PATCH_RUNNER_PYTHON}
                 ${PROJECT_SOURCE_DIR}/tests/network/sx_network_check_test.py)

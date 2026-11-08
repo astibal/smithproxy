@@ -47,7 +47,9 @@ function(install_secret_if_not_exists src dest)
                     \"Private-key destination is a directory: \$ENV{DESTDIR}${dest}/${src_name}\")
         elseif(NOT EXISTS \"\$ENV{DESTDIR}${dest}/${src_name}\")
             message(STATUS \"Installing: \$ENV{DESTDIR}${dest}/${src_name}\")
-            file(INSTALL DESTINATION \"\$ENV{DESTDIR}${dest}\" TYPE FILE
+            # file(INSTALL) applies DESTDIR itself. Passing the staged path
+            # here would prefix DESTDIR twice during package construction.
+            file(INSTALL DESTINATION \"${dest}\" TYPE FILE
                  FILES \"${src}\" PERMISSIONS OWNER_READ OWNER_WRITE)
         else()
             message(STATUS \"Restricting: \$ENV{DESTDIR}${dest}/${src_name}\")
@@ -65,8 +67,15 @@ endfunction(install_secret_if_not_exists)
 
 function (create_dir _dirpath)
     install(CODE "
-        message(STATUS \"Directory : ${_dirpath}\")
-        execute_process(COMMAND \"${CMAKE_COMMAND}\" -E make_directory ${_dirpath})
+        set(staged_dir \"\$ENV{DESTDIR}${_dirpath}\")
+        message(STATUS \"Directory : \${staged_dir}\")
+        execute_process(
+            COMMAND \"${CMAKE_COMMAND}\" -E make_directory \"\${staged_dir}\"
+            RESULT_VARIABLE create_result
+            ERROR_VARIABLE create_error)
+        if(create_result)
+            message(FATAL_ERROR \"Unable to create \${staged_dir}: \${create_error}\")
+        endif()
     ")
 endfunction (create_dir)
 

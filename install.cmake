@@ -2,6 +2,7 @@ if(UNIX)
     SET(CMAKE_INSTALL_PREFIX /usr)
     install(TARGETS smithproxy smithproxy-cftar DESTINATION bin)
     install(FILES man/smithproxy.1 DESTINATION share/man/man1)
+    install(FILES man/smithproxy-cftar.1 DESTINATION share/man/man1)
     install(FILES man/smithproxy.cfg.5 DESTINATION share/man/man5)
     install(FILES man/smithproxy-mitm.7 DESTINATION share/man/man7)
     install(FILES
@@ -104,7 +105,9 @@ if(UNIX)
     file(GLOB infra_py "src/infra/*.py")
     install(FILES ${infra_py} DESTINATION share/smithproxy/infra)
 
-    install(DIRECTORY src/infra/sslca DESTINATION share/smithproxy/infra)
+    install(DIRECTORY src/infra/sslca DESTINATION share/smithproxy/infra
+            PATTERN "__pycache__" EXCLUDE
+            PATTERN "*.pyc" EXCLUDE)
 
     file(GLOB sslca_makecerts "src/infra/sslca/make*.py")
     install(FILES ${sslca_makecerts} DESTINATION share/smithproxy/infra/sslca
