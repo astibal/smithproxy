@@ -70,6 +70,23 @@ at retirement instead of recomputing an `unknown-unknown` tuple. Native keys
 prefix both endpoints, for example `tcp_192.0.2.1:50000-tcp_198.51.100.1:443`;
 intercepted TLS uses the `ssli` endpoint prefix.
 
+## Synthetic TCP ordering
+
+For reconstructed TCP traffic, the file contains SYN, SYN/ACK and ACK before
+the flow's buffered metadata, followed by application payload. Early SXPP and
+SXTL records are retained by the individual flow logger, not the shared file
+sink. Their original event timestamps and sequence numbers are preserved;
+they describe proxy observations, not observed wire timestamps of the synthetic
+packets. Other connections may interleave in the shared output.
+
+If a session never produces payload, its metadata is flushed at teardown without
+inventing a successful TCP handshake. Native packet and datagram logging do not
+create synthetic TCP handshakes for metadata.
+
+The live metadata gate checks handshake/block ordering for the generated Linux
+cooked TCP captures. Native logger regression tests also check the no-payload
+case and exact TCP flag sequence.
+
 ## Namespaces
 
 ### SXME — connection metadata
@@ -82,6 +99,14 @@ Schema: `smithproxy.metadata.v1`.
 
 The payload includes connection start/end time, duration, policy index,
 connection label, detected application and JA4 client/server fingerprints.
+The fields are `ja4.client` (JA4) and `ja4.server` (JA4S), not SXPP event fields.
+`ja4.http` is an array of JA4H values from the HTTP inspector's current request
+and retained request history (HTTP/1 or HTTP/2). It is empty when HTTP
+fingerprinting is disabled or no HTTP fingerprint was collected. This is not
+an exhaustive per-request timeline; it uses the same bounded history as webhooks.
+The controlled HTTP-over-TLS live gate requires nonempty JA4, JA4S and a
+nonempty JA4H array; it does not yet independently recompute and compare the
+fingerprint hashes.
 
 ### SXST — statistics
 

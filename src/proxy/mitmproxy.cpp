@@ -686,7 +686,14 @@ void MitmProxy::write_capture_enrichment() {
         metadata["ja4"] = {
             {"client", ja4.ClientHello},
             {"server", ja4.ServerHello},
+            {"http", nlohmann::json::array()},
         };
+        if(auto const* left = first_left(); left) {
+            auto app = left->engine().application_data;
+            if(app && app->custom_list_name() == "ja4h") {
+                metadata["ja4"]["http"] = app->custom_list();
+            }
+        }
         capture_metadata_payload_ = std::move(metadata);
         write_capture_block({'S', 'X', 'M', 'E'}, *capture_metadata_payload_);
     }

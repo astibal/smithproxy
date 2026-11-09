@@ -9,15 +9,32 @@ from pathlib import Path
 import struct
 import ssl
 import sys
+import ipaddress
+import re
+
+
+def flow_key(source, source_port, destination, destination_port):
+    return tuple(sorted(((str(ipaddress.ip_address(source)), int(source_port)),
+                         (str(ipaddress.ip_address(destination)), int(destination_port)))))
+
+
+def metadata_tcp_key(key):
+    match = re.fullmatch(r'(?:tcp|ssli)_(.+):(\d+)-(?:tcp_|ssli_)?(.+):(\d+)', key)
+    if not match:
+        return None
+    source, sport, destination, dport = match.groups()
+    return flow_key(source.strip('[]'), sport, destination.strip('[]'), dport)
 
 
 def records(path):
     with path.open('rb') as source:
         endian = None
+        interfaces = []
         while header := source.read(12):
             if len(header) != 12:
                 raise ValueError('truncated block header')
             if header[:4] == b'\x0a\x0d\x0d\x0a':
+                interfaces = []
                 endian = {b'\x4d\x3c\x2b\x1a': '<', b'\x1a\x2b\x3c\x4d': '>'}.get(header[8:12])
             if endian is None:
                 raise ValueError('missing or invalid section header')
@@ -27,6 +44,28 @@ def records(path):
             block = header + source.read(length - 12)
             if len(block) != length or struct.unpack_from(endian + 'I', block, length - 4)[0] != length:
                 raise ValueError('truncated block or mismatched trailer')
+            if kind == 1:
+                interfaces.append(struct.unpack_from(endian + 'H', block, 8)[0])
+            if kind == 6:
+                interface, _, _, captured, _ = struct.unpack_from(endian + 'IIIII', block, 8)
+                if interface >= len(interfaces) or captured > length - 32:
+                    raise ValueError('invalid packet interface or captured length')
+                # Synthetic Smithproxy TCP uses Linux cooked v1 framing.
+                if interfaces[interface] == 113:
+                    packet = block[28:28 + captured][16:]
+                    if packet and packet[0] >> 4 == 4 and len(packet) >= 40 and packet[9] == 6:
+                        start = (packet[0] & 15) * 4
+                        src, dst = packet[12:16], packet[16:20]
+                    elif packet and packet[0] >> 4 == 6 and len(packet) >= 60 and packet[6] == 6:
+                        start = 40
+                        src, dst = packet[8:24], packet[24:40]
+                    else:
+                        continue
+                    if start < 20 or len(packet) < start + 20:
+                        raise ValueError('truncated TCP header')
+                    sport, dport = struct.unpack_from('!HH', packet, start)
+                    yield '_TCP', dict(key=flow_key(src, sport, dst, dport), flags=packet[start + 13])
+                continue
             if kind not in (0xBAD, 0x40000BAD):
                 continue
             if length < 16:
@@ -68,7 +107,29 @@ def validate(paths, origin_certificate=None):
     session_keys = {}
     sessions = collections.defaultdict(lambda: collections.defaultdict(list))
     for path in paths:
+        tcp_stages = {}
+        early_metadata = set()
         for namespace, payload in records(path):
+            if namespace == '_TCP':
+                key, flags = payload['key'], payload['flags']
+                stage = tcp_stages.get(key, 0)
+                if flags & 2 and not flags & 16:
+                    if key in early_metadata:
+                        raise ValueError('metadata precedes synthetic TCP handshake')
+                    tcp_stages[key] = 1
+                elif flags & 2 and flags & 16:
+                    if stage != 1:
+                        raise ValueError('SYN/ACK without preceding SYN')
+                    tcp_stages[key] = 2
+                elif flags & 16 and stage == 2:
+                    tcp_stages[key] = 3
+                continue
+            key = metadata_tcp_key(payload['proxy_session_key'])
+            if key is not None:
+                if key not in tcp_stages:
+                    early_metadata.add(key)
+                elif tcp_stages[key] != 3:
+                    raise ValueError('metadata interrupts synthetic TCP handshake')
             counts[namespace] += 1
             identity = payload['session_id'], payload['proxy_session_key']
             if session_keys.setdefault(identity[0], identity[1]) != identity[1]:
@@ -88,6 +149,8 @@ def validate(paths, origin_certificate=None):
         seq = [event['seq'] for event in blocks.get('SXPP', [])]
         if len(seq) != len(set(seq)):
             raise ValueError('duplicate event sequence')
+        if seq != sorted(seq):
+            raise ValueError('protocol events written out of sequence')
         for tls in blocks.get('SXTL', []):
             # Controlled TLS origin in harness/origin.py, not values inferred from SXME.
             if tls['R'].get('sni') != 'origin.runner.lab':
@@ -109,6 +172,10 @@ def validate(paths, origin_certificate=None):
             fingerprints = blocks['SXME'][0].get('ja4', {})
             if not fingerprints.get('client') or not fingerprints.get('server'):
                 raise ValueError('controlled TLS flow has missing JA4/JA4S')
+            http_fingerprints = fingerprints.get('http')
+            if not isinstance(http_fingerprints, list) or not http_fingerprints or not all(
+                    isinstance(value, str) and value for value in http_fingerprints):
+                raise ValueError('controlled HTTP-over-TLS flow has missing JA4H')
             if not blocks.get('SXPP'):
                 raise ValueError('controlled TLS flow has no protocol timeline')
             tls_verified += 1
