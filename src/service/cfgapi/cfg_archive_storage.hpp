@@ -24,10 +24,9 @@ public:
         std::string path,
         std::optional<std::string> content,
         bool executable) const = 0;
-    // Persist recovery bytes and atomically publish the prepared archive.
-    [[nodiscard]] virtual bool install(const CfgSaveData& prepared) const = 0;
-    // Adopt successfully published bytes as the next archive write base.
-    virtual void accept(std::string_view bytes) = 0;
+    // Persist recovery bytes, atomically publish the candidate and adopt it as
+    // the next write base. A failed publication leaves cached state unchanged.
+    [[nodiscard]] virtual bool publish(const CfgSaveData& prepared) = 0;
 };
 
 }  // namespace sx::cfg

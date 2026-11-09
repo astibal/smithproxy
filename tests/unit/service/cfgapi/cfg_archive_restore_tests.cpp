@@ -22,23 +22,24 @@ protected:
             std::string, std::optional<std::string>, bool) const override {
             throw std::logic_error("resource preparation is not used by restore tests");
         }
-        [[nodiscard]] bool install(const sx::cfg::CfgSaveData& prepared) const override {
+        [[nodiscard]] bool publish(const sx::cfg::CfgSaveData& prepared) override {
             if(behavior == InstallBehavior::throw_error) {
                 throw std::runtime_error("disk error");
             }
             current_seen = prepared.previous.value_or("");
             replacement_seen = prepared.replacement;
             ++writes;
-            return behavior == InstallBehavior::succeed;
+            if(behavior != InstallBehavior::succeed) return false;
+            accepted = prepared.replacement;
+            return true;
         }
-        void accept(std::string_view bytes) override { accepted = bytes; }
 
         bool native = true;
         InstallBehavior behavior = InstallBehavior::succeed;
         std::string current_archive = "current archive bytes";
-        mutable int writes = 0;
-        mutable std::string current_seen;
-        mutable std::string replacement_seen;
+        int writes = 0;
+        std::string current_seen;
+        std::string replacement_seen;
         std::string accepted;
     };
 

@@ -51,10 +51,9 @@ ResourceWriteResult CfgResourceWriter::write(
         // recovery copy and atomic active-file replacement both succeed.
         auto prepared = context_.archive.prepare(
             std::move(path), std::move(content), executable);
-        if(!context_.archive.install(prepared)) {
+        if(!context_.archive.publish(prepared)) {
             return {ResourceWriteStatus::write_failed, revision, current_hash, {}};
         }
-        context_.archive.accept(prepared.replacement);
         context_.restart_pending = true;
 
         const auto replacement_hash = sx::crypto::sha256(prepared.replacement);

@@ -24,22 +24,20 @@ public:
             std::move(path), std::move(content), executable);
     }
 
-    [[nodiscard]] bool install(const sx::cfg::CfgSaveData& data) const override {
+    [[nodiscard]] bool publish(const sx::cfg::CfgSaveData& data) override {
         ++installs;
         installed = data.replacement;
-        return install_ok;
-    }
-
-    void accept(std::string_view bytes) override {
-        source->accept_saved_archive(bytes);
+        if(!install_ok) return false;
+        source->accept_saved_archive(data.replacement);
+        return true;
     }
 
     std::optional<sx::cfg::CfgArchive> source;
     bool install_ok = true;
     bool available_override = true;
     bool throw_from_prepare = false;
-    mutable int installs = 0;
-    mutable std::string installed;
+    int installs = 0;
+    std::string installed;
 };
 
 class ResourceWriteTest : public ::testing::Test {

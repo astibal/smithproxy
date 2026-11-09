@@ -139,19 +139,20 @@ sx::cfg::CfgSaveData CfgFactory::ArchiveStorage::prepare(
         std::move(path), std::move(content), executable);
 }
 
-bool CfgFactory::ArchiveStorage::install(
-    const sx::cfg::CfgSaveData& prepared) const {
+bool CfgFactory::ArchiveStorage::publish(
+    const sx::cfg::CfgSaveData& prepared) {
     // One privileged operation binds the recovery and replacement writes to
     // the exact archive from which prepare() derived this candidate.
-    return prepared.previous &&
-           sx::privsep::files::config_install(
-               owner_.config_file, *prepared.previous, prepared.replacement) == 0;
-}
+    if(!prepared.previous ||
+       sx::privsep::files::config_install(
+           owner_.config_file, *prepared.previous, prepared.replacement) != 0) {
+        return false;
+    }
 
-void CfgFactory::ArchiveStorage::accept(std::string_view bytes) {
-    // Advance the in-memory startup view only after durable installation.
-    owner_.config_archive_->accept_saved_archive(bytes);
-    owner_.accept_archive_monitor(bytes);
+    // Advance cache and monitor only after durable installation succeeds.
+    owner_.config_archive_->accept_saved_archive(prepared.replacement);
+    owner_.accept_archive_monitor(prepared.replacement);
+    return true;
 }
 
 sx::cfg::ResourceWriteResult CfgFactory::write_archive_resource(

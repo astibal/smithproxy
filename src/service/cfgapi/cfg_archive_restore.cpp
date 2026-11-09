@@ -60,9 +60,8 @@ ArchiveRestoreResult CfgArchiveRestorer::restore(
     // The installer backs up the current archive before atomic publication.
     try {
         CfgSaveData prepared {payload, context_.archive.current()};
-        if(!context_.archive.install(prepared))
+        if(!context_.archive.publish(prepared))
             return {ArchiveRestoreStatus::write_failed, revision, hash, {}};
-        context_.archive.accept(payload);
     }
     catch(const std::exception& error) {
         return {ArchiveRestoreStatus::write_failed, revision, hash, error.what()};

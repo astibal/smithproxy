@@ -133,11 +133,9 @@ class CfgFactory : public CfgFactoryBase {
             std::string path,
             std::optional<std::string> content,
             bool executable) const override;
-        // Persist the recovery copy and atomically install the prepared archive.
-        [[nodiscard]] bool install(
-            const sx::cfg::CfgSaveData& prepared) const override;
-        // Adopt successfully installed bytes as the next resource-write base.
-        void accept(std::string_view bytes) override;
+        // Publish and adopt the candidate without exposing a partial state.
+        [[nodiscard]] bool publish(
+            const sx::cfg::CfgSaveData& prepared) override;
 
     private:
         CfgFactory& owner_;
