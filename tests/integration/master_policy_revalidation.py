@@ -175,8 +175,11 @@ try:
                         return plain.decode(errors='replace')
             prompt()
             connection.sendall(b'enable\r\n'); prompt()
-            connection.sendall(command.encode() + b'\r\n')
-            return prompt()
+            result = ''
+            for line in command.splitlines():
+                connection.sendall(line.encode() + b'\r\n')
+                result += prompt()
+            return result
     def route(family, dev, unknown=False):
         target, gateway = ('203.0.113.10/32', '192.0.2.2' if dev == 'rv-a' else '198.51.100.2') if family == 4 else (
             '2001:db8:ff::10/128', '2001:db8:1::2' if dev == 'rv-a' else '2001:db8:2::2')
@@ -213,6 +216,7 @@ try:
              ('http-connect-drop', False, False, 4),
              ('role-reload-drop', False, False, 4),
              ('policy-reload-drop', False, False, 4),
+             ('settings-fail-open-drop', False, False, 4),
              ('tls-policy-reload-drop', False, False, 4),
              ('udp-drop', False, False, 4),
              ('quic-policy-drop', False, False, 4)]
@@ -234,6 +238,11 @@ try:
         end = text.index('\n)', start) + len('\n)')
         rule = lambda name, role, action: '{ name = "' + name + '"; proto = "tcp"; src = ["any", "any6"]; sport = ["all"]; dst = ["any", "any6"]; dport = ["all"]; ingress_role = "Office"; egress_role = "' + role + '"; action = "' + action + '"; nat = "auto"; tls_profile = "default"; }'
         text = text[:start] + 'policy = (\n' + rule('outside', 'Outside', 'accept') + ',\n' + rule('other', 'Guest', 'accept' if allow_other else 'deny') + '\n);' + text[end:]
+        if label == 'settings-fail-open-drop':
+            begin = text.index('policy = (')
+            end = text.index('\n);', begin) + len('\n);')
+            text = text[:begin] + 'policy = ();' + text[end:]
+            text = text.replace('policy_fail_open = FALSE', 'policy_fail_open = TRUE', 1)
         if label.startswith(('udp', 'quic')):
             text = text.replace('proto = "tcp";', 'proto = "udp";')
         text = text.replace('settings = {', 'settings = {\n'
@@ -241,7 +250,7 @@ try:
             'tls_verify = false; sift = false; };', 1)
         if label.startswith('quic'):
             text = text.replace('quic_workers = -1', 'quic_workers = 1')
-            text = text.replace('ingress_role = "Office";', '')
+            text = text.replace('interfaces = (', 'interfaces = ( { match = { if_name = "rv-c"; }; role = "Office"; },', 1)
         with Hooks.lock:
             Hooks.events.clear()
         cfg = root / 'config/smithproxy.cfg'; cfg.write_text(text)
@@ -281,7 +290,10 @@ try:
             assert len(starts) == 1 + len(extra), starts
             started_ids = {e['id'] for e in starts}
             assert not [e for e in Hooks.snapshot() if e.get('action') == 'connection-stop']
-            if label in ('role-reload-drop', 'policy-reload-drop', 'tls-policy-reload-drop'):
+            if label == 'settings-fail-open-drop':
+                response = cli('configure terminal\nedit settings\nset policy_fail_open false\nend')
+                (root / 'settings-apply.txt').write_text(response)
+            elif label in ('role-reload-drop', 'policy-reload-drop', 'tls-policy-reload-drop'):
                 changed = text.replace('}; role = "Outside";', '}; role = "Blocked";') if label.startswith('role') else text.replace('action = "accept";', 'action = "deny";')
                 assert changed != text
                 cfg.write_text(changed)
@@ -340,7 +352,7 @@ try:
                     assert stop['id'] in started_ids
                     info = stop['details']['info']
                     assert info['bytes_up'] > 0 and info['bytes_down'] > 0, info
-                    assert info['session'] and info['policy'] == 0, info
+                    assert info['session'] and info['policy'] == (65500 if label == 'settings-fail-open-drop' else 0), info
                     if not udp:
                         lifecycle = [e for e in events if e.get('id') == stop['id']
                             and e.get('action') == 'server-lifecycle']
@@ -379,6 +391,7 @@ try:
         (root / 'results.json').write_text(json.dumps(results, indent=2))
 finally:
     if proxy:
+        (root / f'{label}-failure-webhooks.json').write_text(json.dumps(Hooks.snapshot(), indent=2))
         proxy.terminate()
         try: proxy.wait(timeout=10)
         except subprocess.TimeoutExpired: proxy.kill(); proxy.wait()

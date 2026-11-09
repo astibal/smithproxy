@@ -411,6 +411,7 @@ namespace sx::proxymaker {
                 };
             }
 
+            void ingress_ifindex(unsigned index) override { ingress_ifindex_ = index; }
             std::string connection_id() const override { return id_; }
             sx::proxy::QuicObserver* quic_observer() override { return observer_.get(); }
 
@@ -424,6 +425,7 @@ namespace sx::proxymaker {
                 auto const source_port = source["port"].get<std::string>();
                 baseHostCX left(new UDPCom, source_host.c_str(), source_port.c_str());
                 baseHostCX right(new UDPCom, host.c_str(), port.c_str());
+                left.com()->ingress_ifindex(ingress_ifindex_);
                 left.com()->l3_proto(source_host.find(':') == std::string::npos ? AF_INET : AF_INET6);
                 right.com()->l3_proto(host.find(':') == std::string::npos ? AF_INET : AF_INET6);
                 std::vector<baseHostCX*> sources {&left};
@@ -524,6 +526,7 @@ namespace sx::proxymaker {
             }
 
         private:
+            unsigned ingress_ifindex_ = 0;
             std::string id_;
             std::string host_;
             std::string port_;

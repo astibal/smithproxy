@@ -41,7 +41,11 @@ def run_case(root, proxy, hooks, config, eventually, run, sessions, cli):
         assert not [e for e in events if e.get('action') == 'connection-stop'], events
         assert not (root / 'quic-closed').exists()
         original = config.read_text()
-        revoked = original.replace('action = "accept"', 'action = "deny"')
+        if os.environ.get('QUIC_REVALIDATION_TRIGGER') == 'role':
+            # Change the interface map, not the policy's ingress_role criterion.
+            revoked = re.sub(r'(?<!_)role = "Office"', 'role = "Blocked"', original)
+        else:
+            revoked = original.replace('action = "accept"', 'action = "deny"')
         assert revoked != original, 'policy revocation did not change configuration'
         config.write_text(revoked)
         proxy.send_signal(signal.SIGUSR1)

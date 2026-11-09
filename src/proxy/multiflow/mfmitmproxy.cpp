@@ -222,6 +222,7 @@ private:
         right_com->defer_read_eof(true);
         left_com->master(scheduler);
         right_com->master(scheduler);
+        left_com->ingress_ifindex(context_.ingress_ifindex);
         left_com->l3_proto(context_.address_family);
         right_com->l3_proto(context_.address_family);
         scheduler->attach(left_com->token(), downstream_, left_handle);

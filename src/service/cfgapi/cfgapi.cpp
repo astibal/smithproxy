@@ -866,16 +866,20 @@ bool CfgFactory::load_settings () {
     load_if_exists(cfgapi.getRoot()["settings"],
                    "extended_local_destination_protection",
                    extended_local_destination_protection);
+    const bool previous_fail_open = policy_fail_open;
     bool configured_fail_open = false;
-    policy_fail_open = cfgapi_detail::fail_open_setting(
-        load_if_exists(cfgapi.getRoot()["settings"], "policy_fail_open",
-                       configured_fail_open),
-        configured_fail_open);
+    const bool loaded_fail_open = load_if_exists(
+        cfgapi.getRoot()["settings"], "policy_fail_open", configured_fail_open);
+    policy_fail_open = cfgapi_detail::fail_open_setting(loaded_fail_open, configured_fail_open);
+    // A settings-only apply does not rebuild policies. Revoking no-match
+    // admission must still wake existing sessions, including transaction rollback.
+    if(previous_fail_open != policy_fail_open)
+        sx::proxy::policy_state_t::generation.fetch_add(1, std::memory_order_release);
     configured_fail_open = false;
+    const bool loaded_access_fail_open = load_if_exists(
+        cfgapi.getRoot()["settings"], "policy_access_request_fail_open", configured_fail_open);
     policy_access_request_fail_open = cfgapi_detail::fail_open_setting(
-        load_if_exists(cfgapi.getRoot()["settings"],
-                       "policy_access_request_fail_open", configured_fail_open),
-        configured_fail_open);
+        loaded_access_fail_open, configured_fail_open);
     auto& settings = cfgapi.getRoot()["settings"];
     auto load_listener_port = [&](char const* name, std::string& base,
                                   std::string& effective) {

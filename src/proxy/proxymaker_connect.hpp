@@ -22,6 +22,7 @@ struct QuicTlsPolicy {
 class SessionSetup {
 public:
     virtual ~SessionSetup() = default;
+    virtual void ingress_ifindex(unsigned) {}
     virtual proxy::QuicObserver* quic_observer() { return nullptr; }
     virtual std::string connection_id() const { return {}; }
     virtual std::optional<QuicTlsPolicy> tls_policy(
