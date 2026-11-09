@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import re
 from pathlib import Path
 import signal
 import subprocess
@@ -10,7 +11,7 @@ import sys
 import time
 
 
-def run_case(root, proxy, hooks, config, eventually, run, sessions):
+def run_case(root, proxy, hooks, config, eventually, run, sessions, cli):
     """Keep two HTTP/3 responses open, revoke policy, observe all lifetimes."""
     for name in ('quic-ready', 'quic-closed'):
         (root / name).unlink(missing_ok=True)
@@ -57,6 +58,10 @@ def run_case(root, proxy, hooks, config, eventually, run, sessions):
             assert final['policy'] == 0 and final['session'], final
             if info['stream_id'] % 4 == 0:
                 assert final['bytes_up'] > 0 and final['bytes_down'] > 0, final
+        trail = cli('show event list')
+        (root / 'quic-policy-drop-event-trail.txt').write_text(trail)
+        terminated = re.findall(r'Policy revalidation checks: allowed=\d+ terminated=(\d+)', trail)
+        assert sum(map(int, terminated)) == len(streams), terminated
         peer.stdin.write('close\n'); peer.stdin.flush()
         assert peer.wait(timeout=10) == 0
         eventually(lambda: parents <= {e['id'] for e in hooks.snapshot()

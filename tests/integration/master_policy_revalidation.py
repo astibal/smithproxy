@@ -250,7 +250,7 @@ try:
             eventually(lambda: api('status/ping'))
             if label.startswith('quic'):
                 from quic_revalidation_peer import run_case
-                run_case(root, proxy, Hooks, cfg, eventually, run, sessions)
+                run_case(root, proxy, Hooks, cfg, eventually, run, sessions, cli)
                 proxy.terminate(); proxy.wait(timeout=15); proxy = None
                 results.append({'case': label, 'result': 'PASS'})
                 (root / 'results.json').write_text(json.dumps(results, indent=2))
@@ -315,6 +315,10 @@ try:
                 if allow_other:
                     assert current[0]['policy'] == rows[0]['policy']  # profiles are not reapplied
                 if label == 'unknown-keep':
+                    before = cli('show event list').count('Policy revalidation checks:')
+                    assert before > 0
+                    time.sleep(2.2)
+                    assert cli('show event list').count('Policy revalidation checks:') == before, 'unchanged retries flooded event trail'
                     route(family, 'rv-a')
                     time.sleep(2)
                 if udp:
@@ -359,6 +363,14 @@ try:
             else:
                 assert not [e for e in Hooks.snapshot() if e.get('action') == 'connection-stop']
             (root / f'{label}-webhooks.json').write_text(json.dumps(Hooks.snapshot(), indent=2))
+            trail = cli('show event list')
+            (root / f'{label}-event-trail.txt').write_text(trail)
+            summaries = re.findall(r'Policy revalidation checks: allowed=(\d+) terminated=(\d+) deferred=(\d+) superseded_passes=(\d+)', trail)
+            assert summaries, 'missing revalidation summary in event trail'
+            if killed:
+                assert sum(int(item[1]) for item in summaries) == len(started_ids), summaries
+            else:
+                assert all(int(item[1]) == 0 for item in summaries), summaries
             connection.close()
             if udp: udp.close()
             proxy.terminate(); proxy.wait(timeout=15); proxy = None

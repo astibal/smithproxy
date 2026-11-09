@@ -43,6 +43,7 @@
 #include <proxy/proxymaker.hpp>
 #include <proxy/proxymaker_policy.hpp>
 #include <proxy/network_policy.hpp>
+#include <proxy/revalidation_result.hpp>
 #include <proxy/quic_observer.hpp>
 #include <proxy/proxymaker_utils.hpp>
 #include <proxy/connection_start.hpp>
@@ -593,9 +594,9 @@ namespace sx::proxymaker {
 // Keep policy evaluation in proxymaker. The master owns traversal and teardown;
 // configuration is held only while selecting and checking a single decision.
 namespace sx::proxymaker {
-bool revalidate(MasterProxy& master, const sx::proxy::policy_state_t::generations_t& expected) {
+sx::proxy::revalidation_result_t revalidate(MasterProxy& master, const sx::proxy::policy_state_t::generations_t& expected) {
     using State = sx::proxy::policy_state_t;
-    bool complete = true;
+    sx::proxy::revalidation_result_t result;
     std::scoped_lock workers(master.proxy_lock());
     for(const auto& child : master.proxies()) {
         auto* proxy = dynamic_cast<MitmProxy*>(child.get());
@@ -605,31 +606,59 @@ bool revalidate(MasterProxy& master, const sx::proxy::policy_state_t::generation
         bool deny = false;
         {
             std::scoped_lock configuration(CfgFactory::lock());
-            if(!(State::current_generations() == expected)) return false;
+            if(!(State::current_generations() == expected)) {
+                ++result.superseded;
+                return result;
+            }
             const auto config = CfgFactory::get();
             const auto network = sx::net::NetworkCtx::instance().snapshot();
             auto input = proxy->policy_input->view();
             if(!sx::proxy::prepare_network_policy(config->db_policy_list, input.left, input.right, *network)) {
-                complete = false; // unavailable metadata: retry on the next tick
+                ++result.deferred; // unavailable metadata: retry on the next tick
                 continue;
             }
             const int selected = PolicyMatcher::select(config->db_policy_list,
                 input.left, input.right, network.get(), false);
             deny = config->policy_action(selected) != PolicyRule::POLICY_ACTION_PASS;
             // A decision made across a network change must not kill a session.
-            if(!(State::current_generations() == expected)) return false;
+            if(!(State::current_generations() == expected)) {
+                ++result.superseded;
+                return result;
+            }
         }
         if(deny) {
             proxy->state().dead(true);
             proxy->shutdown(); // close now; master retires the object normally
+            ++result.terminated;
+        } else {
+            ++result.allowed;
         }
     }
-    return complete && State::current_generations() == expected;
+    if(!(State::current_generations() == expected)) ++result.superseded;
+    return result;
 }
 } // namespace sx::proxymaker
 
 bool sx::proxy::policy_state_t::validate(MasterProxy& master) {
-    if(!validate() && sx::proxymaker::revalidate(master, observed))
-        revalidation_required = false;
+    const auto previous = observed;
+    const bool was_pending = revalidation_required;
+    revalidation_result_t report;
+    if(!validate()) {
+        const auto result = sx::proxymaker::revalidate(master, observed);
+        revalidation_required = !result.complete();
+        if(result.report(!was_pending || !(previous == observed))) report = result;
+    }
+
+    // One summary per master pass, outside the list and configuration locks.
+    // Counts are checks, not unique sessions: recovery can inspect them again.
+    if(!report.empty()) {
+        Log::get()->events().insert(INF,
+            "Policy revalidation checks: allowed=%llu terminated=%llu deferred=%llu superseded_passes=%llu master=%s",
+            static_cast<unsigned long long>(report.allowed),
+            static_cast<unsigned long long>(report.terminated),
+            static_cast<unsigned long long>(report.deferred),
+            static_cast<unsigned long long>(report.superseded),
+            master.to_string(iNOT).c_str());
+    }
     return !revalidation_required;
 }

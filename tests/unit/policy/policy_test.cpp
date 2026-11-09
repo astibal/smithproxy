@@ -630,3 +630,27 @@ TEST(PolicyRevalidation, RecheckingDoesNotCountAnotherConnection) {
         static_cast<const sx::net::InterfaceSnapshot*>(nullptr), false), 0);
     EXPECT_EQ(rule->cnt_matches, admitted);
 }
+
+#include <proxy/revalidation_result.hpp>
+
+TEST(PolicyRevalidationEvents, SuppressesUnchangedRetriesButReportsRecoveryAndDeaths) {
+    sx::proxy::revalidation_result_t result {2, 0, 1, 0};
+    EXPECT_TRUE(result.report(true));
+    EXPECT_FALSE(result.report(false));
+    EXPECT_FALSE(result.complete());
+    result.terminated = 1;
+    EXPECT_TRUE(result.report(false));
+    result.terminated = 0;
+    result.deferred = 0;
+    EXPECT_TRUE(result.report(false));
+    EXPECT_TRUE(result.complete());
+    EXPECT_FALSE(sx::proxy::revalidation_result_t{}.report(true));
+}
+
+TEST(PolicyRevalidationEvents, SupersededPartialPassRetainsActualTerminations) {
+    sx::proxy::revalidation_result_t result {2, 1, 0, 1};
+    EXPECT_FALSE(result.complete());
+    EXPECT_TRUE(result.report(false));
+    EXPECT_EQ(result.terminated, 1u);
+    EXPECT_EQ(result.superseded, 1u);
+}
