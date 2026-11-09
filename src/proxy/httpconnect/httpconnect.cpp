@@ -393,6 +393,12 @@ void MitmHttpConnectProxy::on_left_new(std::unique_ptr<baseHostCX> accepted_cx) 
     add_proxy(std::move(proxy));
 }
 
+bool MitmHttpConnectProxy::run_timers() {
+    const bool tick = MasterProxy::run_timers();
+    if(tick) policy_state.validate();
+    return tick;
+}
+
 int MitmHttpConnectProxy::handle_sockets_once(baseCom* c) {
 
     process_session_lists(*this);

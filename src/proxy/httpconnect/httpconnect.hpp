@@ -83,6 +83,7 @@ public:
     baseHostCX* new_cx(int s) override;
     void on_left_new(std::unique_ptr<baseHostCX> accepted_cx) override;
     int handle_sockets_once(baseCom* c) override;
+    bool run_timers() override;
 
     TYPENAME_OVERRIDE("MitmHttpConnectProxy")
 

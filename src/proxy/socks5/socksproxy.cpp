@@ -864,9 +864,21 @@ void MitmSocksUdpProxy::on_left_new(std::unique_ptr<baseHostCX> accepted_cx) {
     this->add_proxy(std::move(new_proxy));
     _deb("MitmSocksUdpProxy::on_left_new: finished");
 }
+bool MitmSocksProxy::run_timers() {
+    const bool tick = MasterProxy::run_timers();
+    if(tick) policy_state.validate();
+    return tick;
+}
+
 int MitmSocksProxy::handle_sockets_once(baseCom* c) {
     process_session_lists(*this);
     return ThreadedAcceptorProxy<SocksProxy>::handle_sockets_once(c);
+}
+
+bool MitmSocksUdpProxy::run_timers() {
+    const bool tick = MasterProxy::run_timers();
+    if(tick) policy_state.validate();
+    return tick;
 }
 
 int MitmSocksUdpProxy::handle_sockets_once(baseCom* c) {

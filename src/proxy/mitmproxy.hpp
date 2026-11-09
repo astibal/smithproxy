@@ -449,6 +449,7 @@ public:
     baseHostCX* new_cx(int s) override;
     void on_left_new(std::unique_ptr<baseHostCX> accepted_cx) override;
     int handle_sockets_once(baseCom* c) override;
+    bool run_timers() override;
     
     static inline bool ssl_autodetect = false;
     static inline bool ssl_autodetect_harder = true;
@@ -469,6 +470,7 @@ public:
     void on_left_new(std::unique_ptr<baseHostCX> accepted_cx) override;
     baseHostCX* new_cx(int s) override;
     int handle_sockets_once(baseCom* c) override;
+    bool run_timers() override;
 
 private:
     logan_lite log {"com.udp.acceptor"};

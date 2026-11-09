@@ -1,3 +1,4 @@
+#include <proxy/master_policy.hpp>
 #include <tcpcom.hpp>
 #include <udpcom.hpp>
 #include <sslcom.hpp>
@@ -564,4 +565,39 @@ TEST(PolicyInterfaces, MatchesBothRolesAndRejectsUnknownMetadata) {
     EXPECT_FALSE(sx::proxy::prepare_network_policy({rule}, {&left}, {&right}, network));
     rule->is_disabled = true;
     EXPECT_TRUE(sx::proxy::prepare_network_policy({rule}, {&left}, {&right}, network));
+}
+
+TEST(MasterPolicyState, UnchangedGenerationsDoNotRequireRevalidation) {
+    sx::proxy::policy_state_t state;
+    EXPECT_TRUE(state.validate(state.observed));
+    EXPECT_FALSE(state.revalidation_required);
+}
+
+TEST(MasterPolicyState, EachGenerationChangeRemainsPendingUntilRevalidated) {
+    using State = sx::proxy::policy_state_t;
+    for(auto member : {&State::generations_t::policy, &State::generations_t::route,
+                       &State::generations_t::role}) {
+        State state;
+        auto changed = state.observed;
+        ++(changed.*member);
+        EXPECT_FALSE(state.validate(changed));
+        EXPECT_TRUE(state.revalidation_required);
+        EXPECT_EQ(state.observed, changed);
+        EXPECT_FALSE(state.validate(changed)); // checking again is not completion
+        ++(changed.*member);
+        EXPECT_FALSE(state.validate(changed)); // another change is retained too
+        EXPECT_EQ(state.observed, changed);
+    }
+}
+
+TEST(MasterPolicyState, MastersObserveChangesIndependently) {
+    sx::proxy::policy_state_t first, second;
+    second.observed = first.observed;
+    auto changed = first.observed;
+    ++changed.policy;
+    EXPECT_FALSE(first.validate(changed));
+    EXPECT_TRUE(second.validate(second.observed));
+    EXPECT_FALSE(second.validate(changed));
+    EXPECT_TRUE(first.revalidation_required);
+    EXPECT_TRUE(second.revalidation_required);
 }

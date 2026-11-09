@@ -3,6 +3,7 @@
 #include "proxy/mitmhost.hpp"
 #include "proxy/mitmproxy.hpp"
 #include "proxy/proxymaker.hpp"
+#include "proxy/master_policy.hpp"
 
 #include <masterproxy.hpp>
 
@@ -68,6 +69,14 @@ private:
 /** One-child master keeps the stock lifecycle without cross-stream spraying. */
 class stream_master final : public MasterProxy {
 public:
+    sx::proxy::policy_state_t policy_state;
+
+    bool run_timers() override {
+        const bool tick = MasterProxy::run_timers();
+        if(tick) policy_state.validate();
+        return tick;
+    }
+
     stream_master() : MasterProxy(new scheduler_com) {}
     scheduler_com& scheduler() const { return *static_cast<scheduler_com*>(com()); }
     void pump() { handle_sockets_once(com()); }
