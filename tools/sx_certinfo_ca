@@ -3,19 +3,18 @@
 ARCHIVE="${SMITHPROXY_CFTAR:-/etc/smithproxy/smithproxy.cftar}"
 CFTAR="${SMITHPROXY_CFTAR_CMD:-smithproxy-cftar}"
 RESOURCE="pki/ca/default/ca-cert.pem"
-CERT_PATH="/etc/smithproxy/certs/default/ca-cert.pem"
-TEMP_FILE=""
+CERT_PATH="$(mktemp)" || exit 1
 
 cleanup() {
-    [ -z "${TEMP_FILE}" ] || rm -f "${TEMP_FILE}"
+    rm -f "${CERT_PATH}"
 }
 trap cleanup EXIT HUP INT TERM
 
-if [ -f "${ARCHIVE}" ]; then
-    TEMP_FILE="$(mktemp)" || exit 1
-    "${CFTAR}" get "${ARCHIVE}" "${RESOURCE}" >"${TEMP_FILE}" || exit 1
-    CERT_PATH="${TEMP_FILE}"
+if [ ! -f "${ARCHIVE}" ]; then
+    echo "Native Smithproxy configuration is unavailable: ${ARCHIVE}" >&2
+    exit 1
 fi
+"${CFTAR}" get "${ARCHIVE}" "${RESOURCE}" >"${CERT_PATH}" || exit 1
 
 echo "[+] Smithproxy CA certificate info: "
 echo

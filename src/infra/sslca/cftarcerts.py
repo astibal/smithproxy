@@ -54,9 +54,9 @@ class CertificateWorkspace:
         self._original = {}
 
     def open(self):
-        """Materialize native certificate resources when CFtar is active."""
+        """Materialize certificate resources from the required native archive."""
         if not ARCHIVE.is_file():
-            return self
+            raise RuntimeError(f"native Smithproxy configuration is unavailable: {ARCHIVE}")
 
         self.temporary = tempfile.TemporaryDirectory(prefix="smithproxy-certificates-")
         self.root = Path(self.temporary.name)
