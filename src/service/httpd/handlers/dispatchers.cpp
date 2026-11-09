@@ -11,6 +11,7 @@
 #include <service/httpd/cfg/add.hpp>
 #include <service/httpd/cfg/set.hpp>
 #include <service/httpd/cfg/get.hpp>
+#include <service/httpd/cfg/save.hpp>
 #include <service/httpd/cfg/state.hpp>
 #include <service/httpd/cfg/transaction.hpp>
 
@@ -214,6 +215,13 @@ namespace sx::webserver::dispatchers {
             authorized::token_protected<json>(&cfg_state));
         cfg_state_handler->Content_Type = "application/json";
         server.addController(std::shared_ptr<lmh::Controller>(cfg_state_handler));
+
+        auto* cfg_save_handler = new Http_Responder(
+            "POST",
+            "/api/config/save",
+            authorized::token_protected<Http_JsonResponseParams>(&cfg_save));
+        cfg_save_handler->Content_Type = "application/json";
+        server.addController(std::shared_ptr<lmh::Controller>(cfg_save_handler));
 
         const std::array transaction_handlers {
             std::pair {"/api/config/transaction/begin", &cfg_transaction_begin},
