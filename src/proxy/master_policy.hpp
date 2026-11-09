@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <service/network_context.hpp>
 
+class MasterProxy;
+
 namespace sx::proxy {
 struct policy_state_t {
     // Configuration publishes this counter; workers never consume/reset it.
@@ -25,6 +27,8 @@ struct policy_state_t {
     // Capture the baseline at master creation, before it accepts sessions.
     generations_t observed = current_generations();
     bool revalidation_required = false;
+
+    bool validate(MasterProxy& master);
 
     bool validate() { return validate(current_generations()); }
 

@@ -118,9 +118,9 @@ public:
 private:
     // Complete policy evaluation belongs exclusively to proxymaker.
     friend class sx::proxymaker::PolicyMatcher;
-    bool match(baseProxy*, const sx::net::InterfaceSnapshot* network = nullptr);
+    bool match(baseProxy*, const sx::net::InterfaceSnapshot* network = nullptr, bool count_match = true);
     bool match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r,
-               const sx::net::InterfaceSnapshot* network = nullptr);
+               const sx::net::InterfaceSnapshot* network = nullptr, bool count_match = true);
 
 
 public:

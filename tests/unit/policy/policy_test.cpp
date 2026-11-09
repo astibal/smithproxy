@@ -1,3 +1,4 @@
+#include <proxy/policy_input.hpp>
 #include <proxy/master_policy.hpp>
 #include <tcpcom.hpp>
 #include <udpcom.hpp>
@@ -600,4 +601,32 @@ TEST(MasterPolicyState, MastersObserveChangesIndependently) {
     EXPECT_FALSE(second.validate(changed));
     EXPECT_TRUE(first.revalidation_required);
     EXPECT_TRUE(second.revalidation_required);
+}
+
+TEST(PolicyRevalidation, OriginalInputsSurviveRoutingAndContextDestruction) {
+    auto left = std::make_unique<baseHostCX>(new TCPCom, "192.0.2.10", "12345");
+    auto right = std::make_unique<baseHostCX>(new TCPCom, "203.0.113.10", "443");
+    left->com()->ingress_ifindex(7);
+    left->com()->l4_proto(SOCK_DGRAM);
+    auto saved = sx::proxy::policy_input_t::capture({left.get()}, {right.get()});
+    right->host("127.0.0.1");
+    left.reset(); right.reset();
+    auto view = saved.view();
+    EXPECT_EQ(view.right.front()->host(), "203.0.113.10");
+    EXPECT_EQ(view.right.front()->port(), "443");
+    EXPECT_EQ(view.left.front()->com()->ingress_ifindex(), 7u);
+    EXPECT_EQ(view.left.front()->com()->policy_l4_proto(), SOCK_DGRAM);
+}
+
+TEST(PolicyRevalidation, RecheckingDoesNotCountAnotherConnection) {
+    auto rule = std::make_shared<PolicyRule>();
+    baseHostCX left(new TCPCom, "192.0.2.10", "12345");
+    baseHostCX right(new TCPCom, "203.0.113.10", "443");
+    auto input = sx::proxy::policy_input_t::capture({&left}, {&right});
+    auto view = input.view();
+    EXPECT_EQ(sx::proxymaker::PolicyMatcher::select({rule}, view.left, view.right), 0);
+    const auto admitted = rule->cnt_matches;
+    EXPECT_EQ(sx::proxymaker::PolicyMatcher::select({rule}, view.left, view.right,
+        static_cast<const sx::net::InterfaceSnapshot*>(nullptr), false), 0);
+    EXPECT_EQ(rule->cnt_matches, admitted);
 }

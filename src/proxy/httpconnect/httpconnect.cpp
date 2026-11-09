@@ -395,7 +395,7 @@ void MitmHttpConnectProxy::on_left_new(std::unique_ptr<baseHostCX> accepted_cx) 
 
 bool MitmHttpConnectProxy::run_timers() {
     const bool tick = MasterProxy::run_timers();
-    if(tick) policy_state.validate();
+    if(tick) policy_state.validate(*this);
     return tick;
 }
 

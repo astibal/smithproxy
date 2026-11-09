@@ -73,7 +73,7 @@ public:
 
     bool run_timers() override {
         const bool tick = MasterProxy::run_timers();
-        if(tick) policy_state.validate();
+        if(tick) policy_state.validate(*this);
         return tick;
     }
 

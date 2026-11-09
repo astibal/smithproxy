@@ -42,6 +42,7 @@
  #define MITMPROXY_HPP
 
 #include <proxy/master_policy.hpp>
+#include <proxy/policy_input.hpp>
 #include <atomic>
 #include <memory>
 #include <service/http/webhook_control.hpp>
@@ -118,6 +119,8 @@ class MitmProxy : public baseProxy, public IOController {
     std::time_t created_at_ = std::time(nullptr);
     std::uint64_t session_id_ = 0;
 public:
+    std::optional<sx::proxy::policy_input_t> policy_input;
+
     using whitelist_verify_entry_t = expiring<whitelist_verify_entry> ;
     using whitelist_map_t = ptr_cache<std::string,whitelist_verify_entry_t>;
 

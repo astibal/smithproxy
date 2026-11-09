@@ -2891,7 +2891,7 @@ void MitmMasterProxy::on_left_new(std::unique_ptr<baseHostCX> accepted_cx) {
 
 bool MitmMasterProxy::run_timers() {
     const bool tick = MasterProxy::run_timers();
-    if(tick) policy_state.validate();
+    if(tick) policy_state.validate(*this);
     return tick;
 }
 
@@ -2902,7 +2902,7 @@ int MitmMasterProxy::handle_sockets_once(baseCom* c) {
 
 bool MitmUdpProxy::run_timers() {
     const bool tick = MasterProxy::run_timers();
-    if(tick) policy_state.validate();
+    if(tick) policy_state.validate(*this);
     return tick;
 }
 

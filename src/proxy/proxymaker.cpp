@@ -66,16 +66,23 @@ namespace sx::proxymaker {
         auto left = proxy->ls(); left.insert(left.end(), proxy->lda().begin(), proxy->lda().end());
         auto right = proxy->rs(); right.insert(right.end(), proxy->rda().begin(), proxy->rda().end());
         const auto network = sx::net::NetworkCtx::instance().snapshot();
-        if(!sx::proxy::prepare_network_policy(config->db_policy_list, left, right, *network)) return -1;
-        return PolicyMatcher::select(config->db_policy_list, proxy, network.get());
+        const bool ready = sx::proxy::prepare_network_policy(config->db_policy_list, left, right, *network);
+        const int selected = ready ? PolicyMatcher::select(config->db_policy_list, proxy, network.get()) : -1;
+        if(auto* observer = dynamic_cast<MitmProxy*>(proxy); observer &&
+           (selected >= 0 || config->policy_fail_open))
+            observer->policy_input = sx::proxy::policy_input_t::capture(left, right);
+        return selected;
     }
 
-    int match_policy(std::vector<baseHostCX*>& left, std::vector<baseHostCX*>& right) {
+    int match_policy(std::vector<baseHostCX*>& left, std::vector<baseHostCX*>& right, MitmProxy* observer) {
         std::scoped_lock guard(CfgFactory::lock());
         const auto config = CfgFactory::get();
         const auto network = sx::net::NetworkCtx::instance().snapshot();
-        if(!sx::proxy::prepare_network_policy(config->db_policy_list, left, right, *network)) return -1;
-        return PolicyMatcher::select(config->db_policy_list, left, right, network.get());
+        const bool ready = sx::proxy::prepare_network_policy(config->db_policy_list, left, right, *network);
+        const int selected = ready ? PolicyMatcher::select(config->db_policy_list, left, right, network.get()) : -1;
+        if(observer && (selected >= 0 || config->policy_fail_open))
+            observer->policy_input = sx::proxy::policy_input_t::capture(left, right);
+        return selected;
     }
 
 
@@ -581,4 +588,48 @@ namespace sx::proxymaker {
     }
 
 
+}
+
+// Keep policy evaluation in proxymaker. The master owns traversal and teardown;
+// configuration is held only while selecting and checking a single decision.
+namespace sx::proxymaker {
+bool revalidate(MasterProxy& master, const sx::proxy::policy_state_t::generations_t& expected) {
+    using State = sx::proxy::policy_state_t;
+    bool complete = true;
+    std::scoped_lock workers(master.proxy_lock());
+    for(const auto& child : master.proxies()) {
+        auto* proxy = dynamic_cast<MitmProxy*>(child.get());
+        // Pending handshakes and intentional internal bypasses have no admitted
+        // ACL inputs. Their normal admission path still handles new traffic.
+        if(!proxy || proxy->state().dead() || proxy->matched_policy() < 0 || !proxy->policy_input) continue;
+        bool deny = false;
+        {
+            std::scoped_lock configuration(CfgFactory::lock());
+            if(!(State::current_generations() == expected)) return false;
+            const auto config = CfgFactory::get();
+            const auto network = sx::net::NetworkCtx::instance().snapshot();
+            auto input = proxy->policy_input->view();
+            if(!sx::proxy::prepare_network_policy(config->db_policy_list, input.left, input.right, *network)) {
+                complete = false; // unavailable metadata: retry on the next tick
+                continue;
+            }
+            const int selected = PolicyMatcher::select(config->db_policy_list,
+                input.left, input.right, network.get(), false);
+            deny = config->policy_action(selected) != PolicyRule::POLICY_ACTION_PASS;
+            // A decision made across a network change must not kill a session.
+            if(!(State::current_generations() == expected)) return false;
+        }
+        if(deny) {
+            proxy->state().dead(true);
+            proxy->shutdown(); // close now; master retires the object normally
+        }
+    }
+    return complete && State::current_generations() == expected;
+}
+} // namespace sx::proxymaker
+
+bool sx::proxy::policy_state_t::validate(MasterProxy& master) {
+    if(!validate() && sx::proxymaker::revalidate(master, observed))
+        revalidation_required = false;
+    return !revalidation_required;
 }
