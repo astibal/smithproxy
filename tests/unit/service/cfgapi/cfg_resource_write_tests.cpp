@@ -35,11 +35,16 @@ public:
         source->accept_saved_archive(data.replacement);
         return true;
     }
+    [[nodiscard]] bool restart_required() const override {
+        return restart_needed;
+    }
+    void require_restart() override { restart_needed = true; }
 
     mutable std::optional<sx::cfg::CfgArchive> source;
     bool install_ok = true;
     bool available_override = true;
     bool throw_from_prepare = false;
+    bool restart_needed = false;
     mutable int installs = 0;
     mutable std::string installed;
 };
@@ -61,7 +66,7 @@ protected:
         std::string revision, std::string hash, std::string path,
         std::optional<std::string> content) {
         sx::cfg::CfgResourceWriter writer(
-            {board, gate, mutex, archive, restart_pending, external_change});
+            {board, gate, mutex, archive});
         return writer.write(std::move(revision), std::move(hash), std::move(path),
                             std::move(content), false);
     }
@@ -74,15 +79,13 @@ protected:
     sx::cfg::CfgWriteGate gate;
     std::recursive_mutex mutex;
     TestResourceArchive archive;
-    bool restart_pending = false;
-    bool external_change = false;
 };
 
 TEST_F(ResourceWriteTest, WritesAndAdoptsAResource) {
     const auto result = write(board.revision_current(), hash(),
                               "templates/replacement/en/page.html", std::string("page"));
     EXPECT_TRUE(result.ok());
-    EXPECT_TRUE(restart_pending);
+    EXPECT_TRUE(archive.restart_needed);
     EXPECT_EQ(archive.installs, 1);
     EXPECT_EQ(archive.source->resolve("templates/replacement/en/page.html", "legacy").content(), "page");
 }
@@ -126,7 +129,7 @@ TEST_F(ResourceWriteTest, RejectsUnsavedRunningConfiguration) {
 }
 
 TEST_F(ResourceWriteTest, RejectsWriteAfterExternalArchiveReplacement) {
-    external_change = true;
+    archive.restart_needed = true;
     const auto result = write(board.revision_current(), hash(),
                               "templates/replacement/en/page.html", std::string("page"));
     EXPECT_EQ(result.status, sx::cfg::ResourceWriteStatus::write_failed);
@@ -139,7 +142,7 @@ TEST_F(ResourceWriteTest, DoesNotAdoptFailedStorageWrite) {
     const auto result = write(board.revision_current(), hash(),
                               "templates/replacement/en/page.html", std::string("page"));
     EXPECT_EQ(result.status, sx::cfg::ResourceWriteStatus::write_failed);
-    EXPECT_FALSE(restart_pending);
+    EXPECT_FALSE(archive.restart_needed);
     EXPECT_FALSE(archive.source->archive().contains("templates/replacement/en/page.html"));
 }
 

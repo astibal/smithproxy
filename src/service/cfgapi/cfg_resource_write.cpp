@@ -27,7 +27,7 @@ ResourceWriteResult CfgResourceWriter::write(
         return {ResourceWriteStatus::stale_revision, revision, {}, {}};
     if(revision.unsaved)
         return {ResourceWriteStatus::unsaved_running, revision, {}, {}};
-    if(context_.restart_pending || context_.external_change) {
+    if(context_.archive.restart_required()) {
         return {ResourceWriteStatus::write_failed, revision, {},
                 "startup archive changed and requires restart"};
     }
@@ -54,7 +54,7 @@ ResourceWriteResult CfgResourceWriter::write(
         if(!context_.archive.publish(prepared)) {
             return {ResourceWriteStatus::write_failed, revision, current_hash, {}};
         }
-        context_.restart_pending = true;
+        context_.archive.require_restart();
 
         const auto replacement_hash = sx::crypto::sha256(prepared.replacement);
         return {ResourceWriteStatus::written, revision,

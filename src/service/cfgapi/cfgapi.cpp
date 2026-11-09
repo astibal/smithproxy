@@ -114,8 +114,6 @@ sx::cfg::ArchiveRestoreResult CfgFactory::restore_startup_archive(
         *write_gate(),
         lock(),
         factory->archive_storage_,
-        factory->startup_archive_pending_,
-        factory->external_archive_change_locked(),
     });
 
     return restorer.restore(expected_revision, expected_hash, payload);
@@ -160,6 +158,15 @@ bool CfgFactory::ArchiveStorage::publish(
     return true;
 }
 
+bool CfgFactory::ArchiveStorage::restart_required() const {
+    return owner_.startup_archive_pending_ ||
+           owner_.external_archive_change_locked();
+}
+
+void CfgFactory::ArchiveStorage::require_restart() {
+    owner_.startup_archive_pending_ = true;
+}
+
 sx::cfg::ResourceWriteResult CfgFactory::write_archive_resource(
     std::string expected_revision,
     std::string expected_archive_hash,
@@ -169,8 +176,6 @@ sx::cfg::ResourceWriteResult CfgFactory::write_archive_resource(
     auto factory = get();
     sx::cfg::CfgResourceWriter writer({
         *board(), *write_gate(), lock(), factory->archive_storage_,
-        factory->startup_archive_pending_,
-        factory->external_archive_change_locked(),
     });
     return writer.write(std::move(expected_revision), std::move(expected_archive_hash),
                         std::move(path), std::move(content), executable);
@@ -420,7 +425,7 @@ void CfgFactory::apply_runtime_resource_paths() {
 
 bool CfgFactory::startup_archive_pending() const {
     std::scoped_lock<std::recursive_mutex> guard(CfgFactory::lock());
-    return startup_archive_pending_ || external_archive_change_locked();
+    return archive_storage_.restart_required();
 }
 
 void CfgFactory::configure_archive_monitor_locked() {
@@ -6560,7 +6565,7 @@ bool CfgFactory::save_config() const {
     // file already contains the next startup state. Serializing cfgapi now would
     // destroy the explicitly restored archive, so only restart can clear this
     // intentional split.
-    if(startup_archive_pending_ || external_archive_change_locked()) {
+    if(archive_storage_.restart_required()) {
         _err("configuration save refused: startup archive change awaits restart");
         log.event(ERR, "Configuration NOT saved: restart required after archive change");
         return false;

@@ -139,6 +139,10 @@ class CfgFactory : public CfgFactoryBase {
         // Publish and adopt the candidate without exposing a partial state.
         [[nodiscard]] bool publish(
             const sx::cfg::CfgSaveData& prepared) const override;
+        // Combine deliberate startup changes with externally detected writes.
+        [[nodiscard]] bool restart_required() const override;
+        // Record that published startup bytes are not active in runtime yet.
+        void require_restart() override;
 
     private:
         CfgFactory& owner_;

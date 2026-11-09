@@ -36,6 +36,10 @@ protected:
             accepted = prepared.replacement;
             return true;
         }
+        [[nodiscard]] bool restart_required() const override {
+            return restart_needed;
+        }
+        void require_restart() override { restart_needed = true; }
 
         bool native = true;
         InstallBehavior behavior = InstallBehavior::succeed;
@@ -44,6 +48,7 @@ protected:
         mutable std::string current_seen;
         mutable std::string replacement_seen;
         mutable std::string accepted;
+        bool restart_needed = false;
     };
 
     void SetUp() override {
@@ -66,8 +71,6 @@ protected:
             gate,
             config_mutex,
             storage,
-            restart_pending,
-            external_change,
         });
         return restorer.restore(revision, expected_hash, payload);
     }
@@ -75,8 +78,6 @@ protected:
     UpdateBoard board;
     sx::cfg::CfgWriteGate gate;
     std::recursive_mutex config_mutex;
-    bool restart_pending = false;
-    bool external_change = false;
     TestArchiveStorage storage;
     std::string payload;
     std::string hash;
@@ -88,7 +89,7 @@ TEST_F(ArchiveRestoreTest, RejectsAnInvalidArchiveBeforeEnteringTheWriter) {
 
     EXPECT_EQ(result.status, sx::cfg::ArchiveRestoreStatus::invalid_archive);
     EXPECT_EQ(storage.writes, 0);
-    EXPECT_FALSE(restart_pending);
+    EXPECT_FALSE(storage.restart_needed);
 }
 
 TEST_F(ArchiveRestoreTest, RejectsBytesDifferentFromTheValidatedHash) {
@@ -134,7 +135,7 @@ TEST_F(ArchiveRestoreTest, RejectsALegacyConfigurationSource) {
 }
 
 TEST_F(ArchiveRestoreTest, RejectsASecondRestoreBeforeRestart) {
-    restart_pending = true;
+    storage.restart_needed = true;
     const auto result = restore(board.revision_current(), hash);
 
     EXPECT_EQ(result.status, sx::cfg::ArchiveRestoreStatus::restart_pending);
@@ -142,7 +143,7 @@ TEST_F(ArchiveRestoreTest, RejectsASecondRestoreBeforeRestart) {
 }
 
 TEST_F(ArchiveRestoreTest, RejectsRestoreAfterExternalArchiveReplacement) {
-    external_change = true;
+    storage.restart_needed = true;
     const auto result = restore(board.revision_current(), hash);
 
     EXPECT_EQ(result.status, sx::cfg::ArchiveRestoreStatus::restart_pending);
@@ -155,7 +156,7 @@ TEST_F(ArchiveRestoreTest, PreservesRunningStateWhenInstallationFails) {
     const auto result = restore(before.current_id, hash);
 
     EXPECT_EQ(result.status, sx::cfg::ArchiveRestoreStatus::write_failed);
-    EXPECT_FALSE(restart_pending);
+    EXPECT_FALSE(storage.restart_needed);
     EXPECT_EQ(board.revision_state().current_id, before.current_id);
     EXPECT_EQ(board.revision_state().saved_id, before.saved_id);
 }
@@ -166,7 +167,7 @@ TEST_F(ArchiveRestoreTest, ConvertsWriterExceptionsIntoAControlledFailure) {
 
     EXPECT_EQ(result.status, sx::cfg::ArchiveRestoreStatus::write_failed);
     EXPECT_EQ(result.detail, "disk error");
-    EXPECT_FALSE(restart_pending);
+    EXPECT_FALSE(storage.restart_needed);
 }
 
 TEST_F(ArchiveRestoreTest, InstallsExactBytesAndLeavesRunningRevisionUntouched) {
@@ -180,7 +181,7 @@ TEST_F(ArchiveRestoreTest, InstallsExactBytesAndLeavesRunningRevisionUntouched) 
     EXPECT_EQ(storage.current_seen, storage.current_archive);
     EXPECT_EQ(storage.replacement_seen, payload);
     EXPECT_EQ(storage.accepted, payload);
-    EXPECT_TRUE(restart_pending);
+    EXPECT_TRUE(storage.restart_needed);
     EXPECT_EQ(board.revision_state().current_id, before.current_id);
     EXPECT_EQ(board.revision_state().saved_id, before.saved_id);
 }

@@ -30,6 +30,10 @@ public:
     // Persist recovery bytes, atomically publish the candidate and adopt it as
     // the next write base. A failed publication leaves cached state unchanged.
     [[nodiscard]] virtual bool publish(const CfgSaveData& prepared) const = 0;
+    // Report whether startup storage diverged from the running configuration.
+    [[nodiscard]] virtual bool restart_required() const = 0;
+    // Mark a deliberate startup-only publication as awaiting restart.
+    virtual void require_restart() = 0;
 };
 
 }  // namespace sx::cfg

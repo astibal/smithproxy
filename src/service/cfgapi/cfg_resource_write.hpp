@@ -32,9 +32,6 @@ public:
         CfgWriteGate& gate;
         std::recursive_mutex& config_mutex;
         CfgArchiveStorage& archive;
-        bool& restart_pending;
-        // Prevent writes on top of a generation changed outside Smithproxy.
-        bool external_change = false;
     };
 
     explicit CfgResourceWriter(Context context);

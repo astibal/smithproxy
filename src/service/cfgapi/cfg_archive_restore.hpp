@@ -35,11 +35,6 @@ public:
 
         // Storage owns native availability, publication and cached bytes.
         CfgArchiveStorage& archive;
-        // Two archives must not replace each other before either is activated.
-        bool& restart_pending;
-
-        // A separately detected on-disk generation blocks another restore.
-        bool external_change = false;
     };
 
     explicit CfgArchiveRestorer(Context context);
