@@ -600,6 +600,14 @@ int main(int argc, char *argv[]) {
 
     CfgFactory::init();
 
+    // Complete archive backup/restore is intentionally not authorized by keys
+    // stored inside that archive. Import the separate process credential before
+    // any helper is forked, then remove it from the inherited environment.
+    const bool archive_api_requested =
+        std::getenv("SMITHPROXY_ARCHIVE_API_KEY") != nullptr;
+    const bool archive_api_enabled =
+        sx::webserver::HttpSessions::load_archive_key_from_environment();
+
 #ifdef MEMPOOL_ALL
     if( CRYPTO_set_mem_functions(mempool_alloc, mempool_realloc, mempool_free) == 0) {
         std::cerr << "WARNING: openssl allocators not registered, defaulting" << std::endl;
@@ -923,6 +931,14 @@ int main(int argc, char *argv[]) {
                 _cri("upgraded config file FAILED to load");
             }
         }
+    }
+
+    if(archive_api_enabled) {
+        log.event(INF, "Privileged configuration archive API access enabled");
+    }
+    else if(archive_api_requested) {
+        log.event(ERR,
+            "Privileged configuration archive API key rejected: expected 32-256 bytes");
     }
 
     // Once the default native archive is authoritative, preserve the original

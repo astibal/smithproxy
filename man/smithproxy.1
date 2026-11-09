@@ -207,6 +207,13 @@ an
 .B ssh_profile .
 The initial implementation supports password-authenticated session channels;
 other SSH features may remain opaque or unsupported.
+.SH ENVIRONMENT
+.TP
+.B SMITHPROXY_ARCHIVE_API_KEY
+Separate high-impact credential for complete CFtar download, resource access and
+restore. It is removed from the process environment immediately after startup.
+PAM-authenticated members of the configured administrative group receive the
+same capability. Ordinary HTTP API keys deliberately do not.
 .SH FILES
 .TP
 .I /etc/smithproxy/smithproxy.cftar

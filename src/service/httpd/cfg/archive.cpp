@@ -3,6 +3,7 @@
 #include <microhttpd.h>
 
 #include <service/cfgapi/cfgapi.hpp>
+#include <service/httpd/handlers/handlers.hpp>
 #include <service/httpd/httpd.hpp>
 #include <utils/crypto.hpp>
 
@@ -52,21 +53,33 @@ Http_JsonResponseParams download(Reader&& reader, std::string filename) {
 }  // namespace
 
 Http_JsonResponseParams cfg_archive_download(
-    [[maybe_unused]] MHD_Connection* connection,
+    MHD_Connection* connection,
     [[maybe_unused]] std::string const& method,
     [[maybe_unused]] std::string const& request) {
-    return download(
+    auto response = download(
         [] { return CfgFactory::get()->archive_payload(); },
         "smithproxy.cftar");
+    if(response.response_code == MHD_HTTP_OK) {
+        Log::get()->events().insert(
+            NOT, "configuration archive downloaded by %s",
+            authorized::client_address(connection).c_str());
+    }
+    return response;
 }
 
 Http_JsonResponseParams cfg_archive_previous_download(
-    [[maybe_unused]] MHD_Connection* connection,
+    MHD_Connection* connection,
     [[maybe_unused]] std::string const& method,
     [[maybe_unused]] std::string const& request) {
-    return download(
+    auto response = download(
         [] { return CfgFactory::get()->previous_archive_payload(); },
         "smithproxy.previous.cftar");
+    if(response.response_code == MHD_HTTP_OK) {
+        Log::get()->events().insert(
+            NOT, "previous configuration archive downloaded by %s",
+            authorized::client_address(connection).c_str());
+    }
+    return response;
 }
 
 Http_JsonResponseParams cfg_archive_validate(
@@ -141,6 +154,9 @@ Http_JsonResponseParams cfg_archive_restore(
 
     // Success means durable startup replacement, not live reload.
     if(result.ok()) {
+        Log::get()->events().insert(
+            NOT, "configuration archive restored by %s",
+            authorized::client_address(connection).c_str());
         response.response_code = MHD_HTTP_OK;
         response.response = {
             {"state", "restored"},
@@ -233,6 +249,9 @@ Http_JsonResponseParams cfg_archive_resource(
             Http_JsonResponseParams response;
             response.binary = CfgFactory::get()->archive_resource(path);
             response.content_type = "application/octet-stream";
+            Log::get()->events().insert(
+                NOT, "configuration resource %s downloaded by %s", path,
+                authorized::client_address(connection).c_str());
             return response;
         }
         catch(const std::exception& error) {
@@ -254,6 +273,10 @@ Http_JsonResponseParams cfg_archive_resource(
                                                    : std::optional<std::string>(request),
         executable);
     if(result.ok()) {
+        Log::get()->events().insert(
+            NOT, "configuration resource %s %s by %s", path,
+            method == "DELETE" ? "removed" : "updated",
+            authorized::client_address(connection).c_str());
         Http_JsonResponseParams response;
         response.response = {
             {"state", "written"}, {"content_hash", result.archive_hash},

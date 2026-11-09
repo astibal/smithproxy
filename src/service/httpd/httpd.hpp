@@ -105,6 +105,9 @@ struct HttpSessions {
 
     static inline std::mutex lock;
     static inline std::set<std::string> api_keys;
+    // Archive keys are deliberately separate from ordinary configuration
+    // keys: a complete backup contains private keys and startup shell input.
+    static inline std::set<std::string> archive_keys;
     static inline sessions_t access_keys;
     static inline uint32_t session_ttl = 3600;
     static inline bool extend_on_access = true;
@@ -189,14 +192,34 @@ struct HttpSessions {
         return CRYPTO_memcmp(csrf_token.data(), db_csrf_token.data(), csrf_token.size()) == 0;
     }
 
+    // Validate the ordinary session pair before consulting the stronger
+    // capability. Invalid CSRF must not refresh archive authorization.
+    static bool validate_archive_tokens(
+        std::string const& auth_token, std::string const& csrf_token) {
+        return validate_tokens(auth_token, csrf_token) &&
+               table_value(auth_token, "archive_access") == "1";
+    }
+
     static bool has_api_key(std::string const& key) {
         auto lc_ = std::scoped_lock(lock);
         return api_keys.find(key) != api_keys.end();
     }
 
+    static bool has_archive_key(std::string const& key) {
+        auto lc_ = std::scoped_lock(lock);
+        return archive_keys.find(key) != archive_keys.end();
+    }
+
+    // Archive credentials are a strict superset of ordinary API access.
+    static bool has_access_key(std::string const& key) {
+        auto lc_ = std::scoped_lock(lock);
+        return api_keys.find(key) != api_keys.end() ||
+               archive_keys.find(key) != archive_keys.end();
+    }
+
     static bool has_api_keys() {
         auto lc_ = std::scoped_lock(lock);
-        return !api_keys.empty();
+        return !api_keys.empty() || !archive_keys.empty();
     }
 
     static bool api_header_allowed() {
@@ -214,9 +237,34 @@ struct HttpSessions {
         return api_keys;
     }
 
+    static std::set<std::string> archive_keys_snapshot() {
+        auto lc_ = std::scoped_lock(lock);
+        return archive_keys;
+    }
+
     static void replace_api_keys(std::set<std::string> keys) {
         auto lc_ = std::scoped_lock(lock);
         api_keys = std::move(keys);
+    }
+
+    static void replace_archive_keys(std::set<std::string> keys) {
+        auto lc_ = std::scoped_lock(lock);
+        archive_keys = std::move(keys);
+    }
+
+    // Load the high-impact backup capability outside the archive it protects.
+    // Removing the environment value avoids passing it to tools or child
+    // processes started later in the daemon lifetime.
+    static bool load_archive_key_from_environment() {
+        const char* value = std::getenv("SMITHPROXY_ARCHIVE_API_KEY");
+        if(!value || !*value) return false;
+        const std::string key(value);
+        ::unsetenv("SMITHPROXY_ARCHIVE_API_KEY");
+        // Match the entropy of generated API credentials and reject accidental
+        // short deployment values before they become a root-adjacent secret.
+        if(key.size() < 32 || key.size() > 256) return false;
+        replace_archive_keys({key});
+        return true;
     }
 
     static void cleanup() {

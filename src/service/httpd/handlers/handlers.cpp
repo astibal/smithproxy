@@ -58,7 +58,8 @@ namespace sx::webserver {
         return ss.str();
     };
 
-    static void authorize_response(Http_JsonResponseParams& response) {
+    static void authorize_response(
+        Http_JsonResponseParams& response, bool archive_access = false) {
 
         auto auth_token = HttpSessions::generate_auth_token();
         auto csrf_token = HttpSessions::generate_csrf_token();
@@ -78,6 +79,8 @@ namespace sx::webserver {
         response.headers.emplace_back("Set-Cookie", create_token_cookie_val(csrf_token, ttl));
         HttpSessions::access_keys[auth_token]["csrf_token"] = TimedOptional(csrf_token,
                                                                             ttl);
+        HttpSessions::access_keys[auth_token]["archive_access"] = TimedOptional(
+            std::string(archive_access ? "1" : "0"), ttl);
     }
 
 
@@ -98,6 +101,9 @@ namespace sx::webserver {
                     auto key = MHD_lookup_connection_value(conn, MHD_GET_ARGUMENT_KIND, "key");
                     bool found = false;
                     if (key) {
+                        // Query strings are routinely logged by proxies and
+                        // browsers. Never accept an archive key through this
+                        // legacy convenience endpoint.
                         found = HttpSessions::has_api_key(key);
                     }
 
@@ -127,10 +133,12 @@ namespace sx::webserver {
                         try {
                             json jreq = json::parse(req);
                             bool found = false;
-                            found = HttpSessions::has_api_key(
-                                    jreq["access_key"].get<std::string>());
+                            const auto access_key =
+                                jreq["access_key"].get<std::string>();
+                            found = HttpSessions::has_access_key(access_key);
                             if (found) {
-                                authorize_response(ret);
+                                authorize_response(
+                                    ret, HttpSessions::has_archive_key(access_key));
                             } else {
                                 Log::get()->events().insert(ERR, "unauthorized API access attempt from %s",
                                                             authorized::client_address(conn).c_str());
@@ -199,7 +207,9 @@ namespace sx::webserver {
                             if(false) {
 #endif
 
-                                authorize_response(ret);
+                                // Membership in the configured administrative
+                                // group grants explicit backup/restore access.
+                                authorize_response(ret, true);
                             }
                             else {
                                 Log::get()->events().insert(ERR, "unauthorized access attempt from %s as user %s (not '%s' group member)",
