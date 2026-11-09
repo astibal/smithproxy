@@ -14,6 +14,34 @@ constexpr unsigned char version[] {'S', 'P', 'Q', '1'};
 constexpr unsigned char header_end[] {'>', '>', '>'};
 constexpr std::uint64_t h3_data_frame = 0x00;
 
+// Synthetic plaintext belongs only to legacy remote/traffic export. Never
+// call PcapLog::write here: it would also persist SPQ1 in the local capture.
+bool needs_synthetic_output(socle::baseTrafficLogger* output) {
+    auto* pcap = dynamic_cast<socle::traflog::PcapLog*>(output);
+    if (!pcap) return output != nullptr;
+    auto& sink = pcap->single_only ? socle::traflog::PcapLog::single_instance() : *pcap;
+    return sink.ip_packet_hook != nullptr;
+}
+
+void write_synthetic(socle::baseTrafficLogger& output, socle::side_t side,
+                     buffer const& packet) {
+    auto* pcap = dynamic_cast<socle::traflog::PcapLog*>(&output);
+    if (!pcap) {
+        output.write(side, packet);
+        return;
+    }
+    auto& sink = pcap->single_only ? socle::traflog::PcapLog::single_instance() : *pcap;
+    if (!sink.ip_packet_hook) return;
+
+    // Build the legacy UDP envelope solely for its IP hook. The serialized
+    // EPB is discarded; native packets and DSB keep their independent route.
+    socle::pcapng::pcapng_epb frame;
+    frame.ip_packet_hook = sink.ip_packet_hook;
+    buffer unused;
+    frame.append_UDP(unused, reinterpret_cast<char const*>(packet.data()), packet.size(),
+                     side == socle::side_t::RIGHT, pcap->details);
+}
+
 std::optional<std::pair<std::uint64_t, std::size_t>> read_varint(
     unsigned char const* data, std::size_t size) {
     if(!data || size == 0) return std::nullopt;
@@ -216,6 +244,7 @@ stream_log::~stream_log() {
 }
 
 void stream_log::write(socle::side_t side, buffer const& data) {
+    if (!needs_synthetic_output(output_.get())) return;
     auto const* cursor = static_cast<unsigned char const*>(data.data());
     std::size_t remaining = data.size();
     while (remaining != 0) {
@@ -272,7 +301,7 @@ void stream_log::emit(socle::side_t side, unsigned char const* data,
     try {
         auto encoded = encode_stream_packet(context_, offsets_[index], data, size, fin);
         buffer packet(encoded.data(), encoded.size());
-        output_->write(side, packet);
+        write_synthetic(*output_, side, packet);
         offsets_[index] += size;
         observed_[index] = observed_[index] || size != 0;
     } catch (std::exception const&) {
@@ -286,7 +315,7 @@ void stream_log::emit(h3_headers_record const& record) {
     try {
         auto encoded = encode_h3_headers_packet(*context_.connection, record);
         buffer packet(encoded.data(), encoded.size());
-        output_->write(record.side, packet);
+        write_synthetic(*output_, record.side, packet);
     } catch (std::exception const&) {
         // As above, semantic capture is never allowed to affect proxy traffic.
     }

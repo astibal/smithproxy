@@ -79,10 +79,10 @@ std::vector<unsigned char> encode_h3_headers_packet(
 /**
  * Decorate an ordinary traffic logger with the SPQ1 plaintext representation.
  *
- * The wrapped PcapLog still owns PCAPNG writing and the optional GRE hook. This
- * class only supplies self-contained synthetic QUIC/STREAM UDP payloads and
- * tracks per-direction stream offsets. Large buffers are split so GRE export
- * does not depend on IP fragmentation.
+ * The wrapped PcapLog owns native PCAPNG packets and secrets. Synthetic
+ * QUIC/STREAM UDP payloads go only to its legacy remote/traffic IP hook,
+ * never to local files or the remote/pcapng record hook. Large buffers are
+ * split so legacy GRE export does not depend on IP fragmentation.
  */
 class stream_log final : public socle::baseTrafficLogger {
 public:
