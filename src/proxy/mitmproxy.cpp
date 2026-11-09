@@ -161,6 +161,10 @@ nlohmann::json tls_leg(SSLCom const& com, bool include_verify) {
 
     auto certificate = peer_certificate_from_ssl(ssl);
     if(!certificate.empty()) result["peer_certificate"] = std::move(certificate);
+    // The downstream peer is the client, not the certificate presented by the
+    // proxy. Keep our own certificate separate on both legs (including mTLS).
+    auto local_certificate = peer_certificate(SSL_get_certificate(ssl));
+    if(!local_certificate.empty()) result["local_certificate"] = std::move(local_certificate);
 
     if(include_verify) {
         auto const openssl_code = SSL_get_verify_result(ssl);

@@ -126,10 +126,21 @@ client --- L ---> Smithproxy --- R ---> origin
 ```
 
 Both `L` and `R` contain the negotiated TLS version, cipher, cipher strength,
-key-exchange group (OpenSSL 3), ALPN, SNI, session reuse state and peer
-certificate identity. Certificate identity is the SHA-256 digest of the DER
-certificate plus subject and issuer CN; the complete certificate is not copied
-into every capture.
+key-exchange group (OpenSSL 3), ALPN, SNI and session reuse state.
+`peer_certificate` describes the remote peer; `local_certificate` describes
+the certificate presented by this proxy leg. In particular, the downstream
+server certificate is `L.local_certificate`, not `L.peer_certificate` (which
+may instead describe an authenticated mTLS client).
+
+Certificate summaries contain SHA-256, subject/issuer CN and full RFC2253 names,
+`serial_hex`, UTC ISO-8601 `not_before`/`not_after`, public-key algorithm/bits,
+and `san.dns`/`san.ip` lists. SAN export is bounded to 256 names and reports
+`san_truncated` when limited. No private key or complete certificate DER/PEM
+is included. These are additive fields in `smithproxy.tls.v1`.
+
+The TCP lifecycle gate tracks each session and leg separately: STARTED must
+precede READY/FAILED, terminal events cannot repeat, and SXTL must follow READY
+on both legs. Native QUIC lifecycle is deliberately outside this TCP check.
 
 The `R.verify` object records whether Smithproxy verification ran, its combined
 result, OpenSSL result code/text, Smithproxy verification origin and extended
