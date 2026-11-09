@@ -6,6 +6,7 @@ import os
 import pathlib
 import runpy
 import sys
+from capture_tls_cases import cases
 
 
 corpus = pathlib.Path(sys.argv[1]).resolve()
@@ -30,5 +31,12 @@ for case in range(30):
             "sha256": hashlib.sha256(payload).hexdigest(),
         })
 
+for number, version, request, response in cases():
+    for direction, payload in (("client", request), ("server", response)):
+        entries.append({
+            "case": number, "name": "https-tls-" + version, "protocol": "tcp",
+            "direction": direction, "marker": f"CMX{number}{direction[0].upper()}",
+            "length": len(payload), "sha256": hashlib.sha256(payload).hexdigest(),
+        })
 output.write_text(json.dumps({"version": 1, "entries": entries}, indent=2, sort_keys=True) + "\n")
-print(f"capture manifest: cases=30 directional_streams={len(entries)} file={output}")
+print(f"capture manifest: cases=32 directional_streams={len(entries)} file={output}")

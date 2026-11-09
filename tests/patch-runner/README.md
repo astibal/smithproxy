@@ -43,6 +43,20 @@ as the operator guide and avoid duplicating it in a separate quick-start file.
 
 ## Operator quick start
 
+The capture release matrix runs through the normal scheduler and report path:
+
+```bash
+tests/patch-runner/test-patch.sh sanity --suite capture --remote root@rhino --jobs 4
+```
+
+It requires the prepared HTTP/3 curl and aioquic runtimes. Four mandatory legs
+(`capture-traffic`, `capture-pcapng`, `quic`, `quic-pcapng`) compare local PCAPNG
+with both GRE modes. The first two run 32 bidirectional cases over IPv4/IPv6,
+including real TLS 1.2/1.3, plus HTTP/2 observability. QUIC uses real HTTP/3 over
+IPv4. Run an individual leg with `--suite capture-pcapng`, for example.
+Each leg retains wire captures, reconstructed remote PCAPNG and JSON validation
+in its ordinary lab results. `traffic` and `full` include the same matrix.
+
 There is no implicit execution target. Every command must name `--local` or at
 least one `--remote [USER@]HOST` target. The runner tests the current working
 tree, including uncommitted changes; reports mark such builds as `+dirty`.
@@ -303,7 +317,8 @@ native (coordinator gate)
     ├── quic         (HTTP/3, CLI diagnostics, native PCAP and GRE)
     ├── tcp-churn
     ├── udp-churn
-    ├── capture      (basic capture, capture matrix and HTTP/2 observability)
+    ├── capture-traffic / capture-pcapng (TCP/UDP/TLS matrix and HTTP/2)
+    ├── quic-pcapng  (HTTP/3 with embedded secrets over GRE)
     ├── lifecycle    (ProxyNightmare plus per-proxy C++ CPU monitor)
     ├── corpus-regular.1 .. .4
     ├── corpus-edge.1 .. .4
@@ -338,7 +353,8 @@ tls  transfer  tls-throughput  starttls  policy  routing  rtt  session-list  qui
 Full-run sections can also be invoked directly:
 
 ```text
-smoke  tls-policy  routing  rtt  transfer  tls-throughput  quic  tcp-churn  udp-churn  capture  lifecycle
+smoke  tls-policy  routing  rtt  transfer  tls-throughput  quic  quic-pcapng
+tcp-churn  udp-churn  capture  capture-traffic  capture-pcapng  lifecycle
 corpus-regular[.1-.4]  corpus-edge[.1-.4]  corpus-insanity[.1-.4]
 fuzz.h1  fuzz.h2  fuzz.h2.insanity  fuzz.tls  fuzz.socks5  fuzz.dns  ...
 ```
