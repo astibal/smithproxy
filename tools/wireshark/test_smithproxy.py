@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import struct
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -90,6 +91,26 @@ class SmithproxyDissectorTest(unittest.TestCase):
                     fields = row.split("\t")
                     self.assertEqual(fields[1:4], ["", "", ""])
                     self.assertIn("99", fields[4])
+
+    def test_native_flow_key_prefixes_both_endpoints(self):
+        for protocol, source, destination in [('tcp', '192.0.2.1', '198.51.100.1'),
+                                              ('tcp', '2001:db8::1', '2001:db8::2'),
+                                              ('ssli', '192.0.2.1', '198.51.100.1'),
+                                              ('ssli', '2001:db8::1', '2001:db8::2')]:
+            with self.subTest(source=source), tempfile.TemporaryDirectory() as temporary:
+                payload = json.dumps({'schema': 'smithproxy.metadata.v1',
+                                      'session_id': 'native-key-test',
+                                      'proxy_session_key': f'{protocol}_{source}:50000-{protocol}_{destination}:443'}).encode()
+                body = struct.pack('<I4sHHI', 67005, b'SXME', 1, 1, len(payload)) + payload
+                body += b'\0' * (-len(body) % 4)
+                size = len(body) + 12
+                custom = struct.pack('<II', 0xBAD, size) + body + struct.pack('<I', size)
+                capture = Path(temporary) / 'native-key.pcapng'
+                capture.write_bytes(REFERENCE.read_bytes() + custom)
+                rows = self.run_tshark('smithproxy.session_id', 'smithproxy.flow.src',
+                                      'smithproxy.flow.dst', 'smithproxy.flow.src_port',
+                                      'smithproxy.flow.dst_port', capture=capture)
+                self.assertIn(f'native-key-test\t{source}\t{destination}\t50000\t443', rows)
 
 
 if __name__ == "__main__":

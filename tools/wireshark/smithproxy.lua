@@ -149,6 +149,14 @@ local function attach_flow(session_key, pinfo, tree)
     local protocol, src, src_port, dst, dst_port =
         session_key:match("^([^_]+)_(.-):(%d+)%-(.-):(%d+)$")
     if not protocol then return end
+    -- Native traflog keys prefix both endpoints (tcp_a:port-tcp_b:port),
+    -- while older fixtures used just one leading protocol prefix.
+    local prefix = protocol .. "_"
+    if dst:sub(1, #prefix) == prefix then dst = dst:sub(#prefix + 1) end
+    src = src:gsub("^%[(.*)%]$", "%1")
+    dst = dst:gsub("^%[(.*)%]$", "%1")
+    -- SSLMitmCom identifies its TCP endpoints as ssli, not tcp.
+    if protocol == "ssli" then protocol = "tcp" end
     local function address(value)
         if value:find(":", 1, true) then return Address.ipv6(value) end
         return Address.ip(value)
