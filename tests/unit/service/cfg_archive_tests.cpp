@@ -56,25 +56,25 @@ TEST_F(ArchiveTest, CanonicalManifestIsStable) {
 TEST_F(ArchiveTest, ValidatesKnownResourceNamespaces) {
     auto archive = valid_archive();
     archive.add("pki/ca/default/ca-cert.pem", "certificate");
-    archive.add("messages/en/tls-replacement.html", "message");
-    archive.add("scripts/disable-capture.macro", "set capture off");
-    archive.add("scripts/collect-debug.sh", "#!/bin/sh\n", true);
-    archive.add("ssh/host-key", "key");
+    archive.add("templates/replacement/en/tls-replacement.html", "message");
+    archive.add("commands/scripts/disable-capture.macro", "set capture off");
+    archive.add("commands/scripts/collect-debug.sh", "#!/bin/sh\n", true);
+    archive.add("pki/mitm/ssh/hostkeys/ed25519", "key");
 
     EXPECT_NO_THROW(CfgManifest::validate(archive));
 }
 
 TEST_F(ArchiveTest, RecognizesOnlyResourceNamespaces) {
     EXPECT_TRUE(CfgManifest::is_resource_path("pki/ca/default/cert.pem"));
-    EXPECT_TRUE(CfgManifest::is_resource_path("messages/en/page.html"));
-    EXPECT_TRUE(CfgManifest::is_resource_path("scripts/action.macro"));
-    EXPECT_TRUE(CfgManifest::is_resource_path("ssh/host-key"));
+    EXPECT_TRUE(CfgManifest::is_resource_path("templates/replacement/en/page.html"));
+    EXPECT_TRUE(CfgManifest::is_resource_path("commands/scripts/action.macro"));
+    EXPECT_TRUE(CfgManifest::is_resource_path("pki/mitm/ssh/hostkeys/ed25519"));
 
     EXPECT_FALSE(CfgManifest::is_resource_path("pki/"));
     EXPECT_FALSE(CfgManifest::is_resource_path("smithproxy.cfg"));
     EXPECT_FALSE(CfgManifest::is_resource_path("unknown/file"));
-    EXPECT_FALSE(CfgManifest::is_resource_path("ssh/../host-key"));
-    EXPECT_FALSE(CfgManifest::is_resource_path("messages//page.html"));
+    EXPECT_FALSE(CfgManifest::is_resource_path("pki/../host-key"));
+    EXPECT_FALSE(CfgManifest::is_resource_path("templates//page.html"));
 }
 
 TEST_F(ArchiveTest, RejectsMissingOrInvalidManifest) {
@@ -157,7 +157,7 @@ TEST_F(ArchiveTest, PrefersAndExposesValidArchive) {
 
 TEST_F(ArchiveTest, ReportsContentFreeNativeArchiveInventory) {
     auto archive = valid_archive();
-    archive.add("scripts/check.sh", "#!/bin/sh\n", true);
+    archive.add("commands/scripts/check.sh", "#!/bin/sh\n", true);
     write_archive(archive);
     const auto source = CfgArchive::open(paths_);
 
@@ -168,7 +168,7 @@ TEST_F(ArchiveTest, ReportsContentFreeNativeArchiveInventory) {
     EXPECT_EQ(info.format_version, CfgManifest::version);
     ASSERT_EQ(info.entries.size(), 4U);
     const auto script = std::find_if(info.entries.begin(), info.entries.end(),
-        [](const auto& entry) { return entry.path == "scripts/check.sh"; });
+        [](const auto& entry) { return entry.path == "commands/scripts/check.sh"; });
     ASSERT_NE(script, info.entries.end());
     EXPECT_EQ(script->size, 10U);
     EXPECT_TRUE(script->executable);
@@ -201,7 +201,7 @@ TEST_F(ArchiveTest, ReadsValidatedArchiveFromPrivilegedBytes) {
 
 TEST_F(ArchiveTest, InspectsUploadWithoutSelectingItAsAConfigurationSource) {
     auto archive = valid_archive();
-    archive.add("messages/en/page.html", "page");
+    archive.add("templates/replacement/en/page.html", "page");
     const auto bytes = archive.write();
 
     const auto info = CfgArchive::inspect_archive(bytes);
@@ -215,60 +215,56 @@ TEST_F(ArchiveTest, InspectsUploadWithoutSelectingItAsAConfigurationSource) {
 
 TEST_F(ArchiveTest, PreparesResourceEditsWithoutMutatingSelectedSource) {
     auto archive = valid_archive();
-    archive.add("messages/en/page.html", "old");
+    archive.add("templates/replacement/en/page.html", "old");
     write_archive(archive);
     auto source = CfgArchive::open(paths_);
 
     const auto replaced = source.prepare_resource(
-        "messages/en/page.html", std::string("new"));
-    EXPECT_EQ(source.resolve("messages/en/page.html", "legacy").content(), "old");
-    EXPECT_EQ(CfgTar::read(replaced.replacement).at("messages/en/page.html").data, "new");
+        "templates/replacement/en/page.html", std::string("new"));
+    EXPECT_EQ(source.resolve("templates/replacement/en/page.html", "legacy").content(), "old");
+    EXPECT_EQ(CfgTar::read(replaced.replacement).at("templates/replacement/en/page.html").data, "new");
     EXPECT_EQ(replaced.previous, source.archive_payload());
 
     source.accept_saved_archive(replaced.replacement);
-    EXPECT_EQ(source.resolve("messages/en/page.html", "legacy").content(), "new");
+    EXPECT_EQ(source.resolve("templates/replacement/en/page.html", "legacy").content(), "new");
 
-    const auto removed = source.prepare_resource("messages/en/page.html", std::nullopt);
-    EXPECT_FALSE(CfgTar::read(removed.replacement).contains("messages/en/page.html"));
+    const auto removed = source.prepare_resource("templates/replacement/en/page.html", std::nullopt);
+    EXPECT_FALSE(CfgTar::read(removed.replacement).contains("templates/replacement/en/page.html"));
     EXPECT_THROW(source.prepare_resource("manifest.json", std::string("bad")), CfgTarError);
-    EXPECT_THROW(source.prepare_resource("messages/en/missing", std::nullopt), CfgTarError);
+    EXPECT_THROW(source.prepare_resource("templates/replacement/en/missing", std::nullopt), CfgTarError);
 }
 
 TEST_F(ArchiveTest, ResolvesPresentNativeResourceWithoutLegacyFallback) {
     auto archive = valid_archive();
-    archive.add("messages/en/page.html", "native page");
-    archive.add("messages/en/empty.html", "");
+    archive.add("templates/replacement/en/page.html", "native page");
+    archive.add("templates/replacement/en/empty.html", "");
     write_archive(archive);
     const auto source = CfgArchive::open(paths_);
 
-    const auto page = source.resolve("messages/en/page.html", "/etc/legacy/page.html");
+    const auto page = source.resolve("templates/replacement/en/page.html", "/etc/legacy/page.html");
     EXPECT_EQ(page.kind(), CfgResource::Kind::native);
     EXPECT_TRUE(page.is_native());
-    EXPECT_EQ(page.logical_path(), "messages/en/page.html");
+    EXPECT_EQ(page.logical_path(), "templates/replacement/en/page.html");
     EXPECT_EQ(page.content(), "native page");
     EXPECT_THROW(page.legacy_path(), CfgTarError);
 
     // Empty is still an authoritative native value, not a fallback signal.
-    EXPECT_TRUE(source.resolve("messages/en/empty.html", "/etc/legacy/empty.html")
+    EXPECT_TRUE(source.resolve("templates/replacement/en/empty.html", "/etc/legacy/empty.html")
                     .is_native());
 }
 
-TEST_F(ArchiveTest, ResolvesAbsentNativeResourceToExplicitLegacyPath) {
+TEST_F(ArchiveTest, RejectsAbsentNativeResourceWithoutLegacyFallback) {
     write_archive(valid_archive());
     const auto source = CfgArchive::open(paths_);
 
-    const auto resource = source.resolve("pki/ca/default/cert.pem",
-                                         "/etc/smithproxy/certs/ca/default/cert.pem");
-    EXPECT_EQ(resource.kind(), CfgResource::Kind::legacy);
-    EXPECT_FALSE(resource.is_native());
-    EXPECT_EQ(resource.legacy_path(),
-              "/etc/smithproxy/certs/ca/default/cert.pem");
-    EXPECT_THROW(resource.content(), CfgTarError);
+    EXPECT_THROW(source.resolve(
+        "pki/ca/default/cert.pem",
+        "/etc/smithproxy/certs/ca/default/cert.pem"), CfgTarError);
 }
 
 TEST_F(ArchiveTest, LegacySourceAlwaysResolvesToExplicitLegacyPath) {
     const auto source = CfgArchive::open(paths_);
-    const auto resource = source.resolve("ssh/host-key", "/etc/smithproxy/ssh-key");
+    const auto resource = source.resolve("pki/mitm/ssh/hostkeys/ed25519", "/etc/smithproxy/ssh-key");
 
     EXPECT_FALSE(resource.is_native());
     EXPECT_EQ(resource.legacy_path(), "/etc/smithproxy/ssh-key");
@@ -284,16 +280,16 @@ TEST_F(ArchiveTest, RejectsInvalidResourceRequestInsteadOfGuessingFallback) {
 
 TEST_F(ArchiveTest, ListsStoredScriptsWithoutReadingOrExecutingThem) {
     auto archive = valid_archive();
-    archive.add("scripts/capture-off.macro", "set capture off");
-    archive.add("scripts/collect-debug.sh", "#!/bin/sh\n", true);
-    archive.add("messages/en/page.html", "page");
+    archive.add("commands/scripts/capture-off.macro", "set capture off");
+    archive.add("commands/scripts/collect-debug.sh", "#!/bin/sh\n", true);
+    archive.add("templates/replacement/en/page.html", "page");
     write_archive(archive);
     const auto source = CfgArchive::open(paths_);
 
-    EXPECT_EQ(source.resources("scripts/"),
-              (std::vector<std::string>{"scripts/capture-off.macro",
-                                        "scripts/collect-debug.sh"}));
-    EXPECT_TRUE(source.resources("ssh/").empty());
+    EXPECT_EQ(source.resources("commands/scripts/"),
+              (std::vector<std::string>{"commands/scripts/capture-off.macro",
+                                        "commands/scripts/collect-debug.sh"}));
+    EXPECT_TRUE(source.resources("pki/services/").empty());
     EXPECT_THROW(source.resources("scripts"), CfgTarError);
     EXPECT_THROW(source.resources("unknown/"), CfgTarError);
 }
@@ -301,13 +297,13 @@ TEST_F(ArchiveTest, ListsStoredScriptsWithoutReadingOrExecutingThem) {
 TEST_F(ArchiveTest, CompleteNativeBundleResolvesWithoutLegacyFiles) {
     auto archive = valid_archive();
     const std::vector<std::pair<std::string, std::string>> resources {
-        {"messages/en/test.txt", "native message"},
+        {"templates/replacement/en/test.txt", "native message"},
         {"pki/ca/default/ca-cert.pem", "native CA"},
         {"pki/ca/default/ca-key.pem", "native CA key"},
         {"pki/ca/default/srv-cert.pem", "native server"},
         {"pki/ca/default/srv-key.pem", "native server key"},
-        {"ssh/ssh_host_ed25519_key", "native SSH key"},
-        {"scripts/capture-off.macro", "native macro"},
+        {"pki/mitm/ssh/hostkeys/ed25519", "native SSH key"},
+        {"commands/scripts/capture-off.macro", "native macro"},
     };
     for (const auto& [path, content] : resources) archive.add(path, content);
     write_archive(archive);

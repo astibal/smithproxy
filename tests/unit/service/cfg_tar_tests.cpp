@@ -89,7 +89,7 @@ std::string read_file(const std::string& path) {
 TEST(CfgTar, RoundTripIsDeterministic) {
     CfgTar archive;
     archive.add("smithproxy.cfg", "settings : {};\n");
-    archive.add("scripts/health-check", "#!/bin/sh\n", true);
+    archive.add("commands/scripts/health-check", "#!/bin/sh\n", true);
     archive.add("pki/trust/ca-bundle.pem", "certificate\n");
 
     const auto first = archive.write();
@@ -97,7 +97,7 @@ TEST(CfgTar, RoundTripIsDeterministic) {
 
     EXPECT_EQ(loaded.write(), first);
     EXPECT_EQ(loaded.at("smithproxy.cfg").data, "settings : {};\n");
-    EXPECT_TRUE(loaded.at("scripts/health-check").executable);
+    EXPECT_TRUE(loaded.at("commands/scripts/health-check").executable);
 }
 
 TEST(CfgTar, ReadsAndWritesAFile) {
@@ -275,7 +275,7 @@ TEST(CfgTar, MaterializesPrivateFilesWithoutFollowingLinks) {
     const auto destination = temp.path() + "/generation";
     CfgTar archive;
     archive.add("smithproxy.cfg", "config");
-    archive.add("scripts/action", "script", true);
+    archive.add("commands/scripts/action", "script", true);
 
     archive.materialize(destination);
 
@@ -287,7 +287,7 @@ TEST(CfgTar, MaterializesPrivateFilesWithoutFollowingLinks) {
     struct stat config_stat {};
     struct stat script_stat {};
     ASSERT_EQ(::stat((destination + "/smithproxy.cfg").c_str(), &config_stat), 0);
-    ASSERT_EQ(::stat((destination + "/scripts/action").c_str(), &script_stat), 0);
+    ASSERT_EQ(::stat((destination + "/commands/scripts/action").c_str(), &script_stat), 0);
     EXPECT_EQ(config_stat.st_mode & 0777, 0600);
     EXPECT_EQ(script_stat.st_mode & 0777, 0700);
     EXPECT_THROW(archive.materialize(destination), CfgTarError);

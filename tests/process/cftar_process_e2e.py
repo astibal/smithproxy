@@ -51,37 +51,56 @@ def main() -> None:
         text_resource.write_text("editable message\n", encoding="utf-8")
 
         invoke(binary, ["create", "--config", str(config), "--startup", str(startup),
-                        "--file", f"messages/en/sample.bin={resource}",
-                        "--file", f"messages/en/editable.txt={text_resource}",
+                        "--file", f"templates/replacement/en/sample.bin={resource}",
+                        "--file", f"templates/replacement/en/editable.txt={text_resource}",
                         "--output", str(archive)], needle="Created")
         assert_private_regular(archive)
         invoke(binary, ["verify", str(archive)], needle="valid Smithproxy CfgTar")
-        invoke(binary, ["inspect", str(archive)], needle="entries: 5")
-        invoke(binary, ["list", str(archive), "messages/"], needle="messages/en/sample.bin")
+        invoke(binary, ["inspect", str(archive)], needle="entries: 6")
+        invoke(binary, ["list", str(archive), "templates/"], needle="templates/replacement/en/sample.bin")
         result = subprocess.run(
-            [str(binary), "get", str(archive), "messages/en/sample.bin"],
+            [str(binary), "get", str(archive), "templates/replacement/en/sample.bin"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
         if result.returncode != 0 or result.stdout != resource.read_bytes():
             raise AssertionError("get did not preserve binary resource bytes")
 
         imported = root / "imported.txt"
         imported.write_text("first generation\n", encoding="utf-8")
-        invoke(binary, ["resource", "import", str(archive), "scripts/check.macro",
+        invoke(binary, ["resource", "import", str(archive), "commands/scripts/check.macro",
                         str(imported), "executable"], needle="Imported")
         recovery = Path(str(archive) + ".previous.bak.cftar")
         assert_private_regular(recovery)
         invoke(binary, ["verify", str(recovery)])
 
         exported = root / "exported.txt"
-        invoke(binary, ["resource", "export", str(archive), "scripts/check.macro",
+        invoke(binary, ["resource", "export", str(archive), "commands/scripts/check.macro",
                         str(exported)], needle="Exported")
         assert_private_regular(exported)
         if exported.read_bytes() != imported.read_bytes():
             raise AssertionError("resource export changed bytes")
-        invoke(binary, ["resource", "remove", str(archive), "scripts/check.macro"],
+        invoke(binary, ["resource", "remove", str(archive), "commands/scripts/check.macro"],
                needle="Removed")
-        invoke(binary, ["get", str(archive), "scripts/check.macro"], expected=1,
+        invoke(binary, ["get", str(archive), "commands/scripts/check.macro"], expected=1,
                needle="CfgTar entry not found")
+
+        first_key = root / "ca-key.pem"
+        second_key = root / "portal-key.pem"
+        first_key.write_text("first private key\n", encoding="utf-8")
+        second_key.write_text("second private key\n", encoding="utf-8")
+        invoke(binary, ["resource", "import-set", str(archive),
+                        f"pki/ca/default/ca-key.pem={first_key}",
+                        f"pki/ca/default/portal-key.pem={second_key}"],
+               needle="Imported 2 resources")
+        invoke(binary, ["get", str(archive), "pki/ca/default/ca-key.pem"],
+               needle="first private key")
+        invoke(binary, ["get", str(archive), "pki/ca/default/portal-key.pem"],
+               needle="second private key")
+        invoke(binary, ["resource", "import-set", str(archive),
+                        f"pki/ca/default/ca-key.pem={first_key}",
+                        f"pki/ca/default/ca-key.pem={second_key}"],
+               expected=1, needle="duplicate import-set resource")
+        invoke(binary, ["get", str(archive), "pki/ca/default/ca-key.pem"],
+               needle="first private key")
 
         editor = root / "editor"
         editor.write_text("#!/bin/sh\nprintf 'edited message\\n' > \"$1\"\n", encoding="utf-8")
@@ -97,32 +116,32 @@ def main() -> None:
                 "help inspect\n"
                 "help absent\n"
                 "inspect\n"
-                "list messages/\n"
-                "show messages/en/editable.txt\n"
-                "show messages/en/sample.bin\n"
-                f"resource export messages/en/sample.bin {shell_export}\n"
-                f"resource import messages/en/staged.txt {imported}\n"
-                "resource remove messages/en/editable.txt\n"
+                "list templates/\n"
+                "show templates/replacement/en/editable.txt\n"
+                "show templates/replacement/en/sample.bin\n"
+                f"resource export templates/replacement/en/sample.bin {shell_export}\n"
+                f"resource import templates/replacement/en/staged.txt {imported}\n"
+                "resource remove templates/replacement/en/editable.txt\n"
                 "diff\n"
                 "discard\n"
-                "edit messages/en/editable.txt\n"
+                "edit templates/replacement/en/editable.txt\n"
                 "diff\n"
                 "validate\n"
                 "save\n"
                 "save\n"
                 "exposures\n"
-                "expose messages/en\n"
+                "expose templates/replacement/en\n"
                 "exposures\n"
                 "close exposure 1\n"
-                "expose messages/en/sample.bin\n"
+                "expose templates/replacement/en/sample.bin\n"
                 "close exposures all\n"
                 "close exposure invalid\n"
                 "unknown command\n"
                 "quit\n"),
             environment={"VISUAL": str(editor)})
         for expected_text in (
-                "working state: clean", "added  messages/en/staged.txt",
-                "removed  messages/en/editable.txt", "modified  messages/en/editable.txt",
+                "working state: clean", "added  templates/replacement/en/staged.txt",
+                "removed  templates/replacement/en/editable.txt", "modified  templates/replacement/en/editable.txt",
                 "working archive reset", "working archive is valid",
                 "archive saved atomically", "working archive is unchanged",
                 "binary resource cannot be shown", "resource exported",
@@ -135,7 +154,7 @@ def main() -> None:
 
         dirty_exit = invoke(
             binary, ["interactive", str(archive)], input_text=(
-                f"resource import messages/en/abandoned.txt {imported}\n"
+                f"resource import templates/replacement/en/abandoned.txt {imported}\n"
                 "quit\n"
                 "quit force\n"))
         if "unsaved changes" not in dirty_exit.stdout:
@@ -152,16 +171,16 @@ def main() -> None:
         stale.stdin.flush()
         time.sleep(0.1)
         invoke(binary, ["resource", "import", str(archive),
-                        "messages/en/external.txt", str(imported)])
+                        "templates/replacement/en/external.txt", str(imported)])
         stale.stdin.write(
-            f"resource import messages/en/stale.txt {imported}\nsave\nquit force\n")
+            f"resource import templates/replacement/en/stale.txt {imported}\nsave\nquit force\n")
         stale.stdin.flush()
         stale_output, _ = stale.communicate(timeout=30)
         if stale.returncode != 0 or "archive changed since this session opened" not in stale_output:
             raise AssertionError(f"stale interactive save was not rejected:\n{stale_output}")
-        invoke(binary, ["get", str(archive), "messages/en/external.txt"],
+        invoke(binary, ["get", str(archive), "templates/replacement/en/external.txt"],
                needle="first generation")
-        invoke(binary, ["get", str(archive), "messages/en/stale.txt"], expected=1,
+        invoke(binary, ["get", str(archive), "templates/replacement/en/stale.txt"], expected=1,
                needle="CfgTar entry not found")
 
         # Repeat the stale-session scenario with an uncooperative filesystem
@@ -169,15 +188,15 @@ def main() -> None:
         # administrator installing a hand-built archive with mv(1).
         manual_archive = root / "manual-replacement.cftar"
         invoke(binary, ["create", "--config", str(config), "--startup", str(startup),
-                        "--file", f"messages/en/manual.txt={imported}",
-                        "--file", f"messages/en/sample.bin={resource}",
+                        "--file", f"templates/replacement/en/manual.txt={imported}",
+                        "--file", f"templates/replacement/en/sample.bin={resource}",
                         "--output", str(manual_archive)], needle="Created")
         manual_stale = subprocess.Popen(
             [str(binary), "interactive", str(archive)], stdin=subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         assert manual_stale.stdin is not None
         manual_stale.stdin.write(
-            f"resource import messages/en/manual-stale.txt {imported}\n")
+            f"resource import templates/replacement/en/manual-stale.txt {imported}\n")
         manual_stale.stdin.flush()
         time.sleep(0.1)
         os.replace(manual_archive, archive)
@@ -188,16 +207,16 @@ def main() -> None:
                 "archive changed since this session opened" not in manual_output):
             raise AssertionError(
                 f"manual replacement was overwritten by a stale session:\n{manual_output}")
-        invoke(binary, ["get", str(archive), "messages/en/manual.txt"],
+        invoke(binary, ["get", str(archive), "templates/replacement/en/manual.txt"],
                needle="first generation")
-        invoke(binary, ["get", str(archive), "messages/en/manual-stale.txt"],
+        invoke(binary, ["get", str(archive), "templates/replacement/en/manual-stale.txt"],
                expected=1, needle="CfgTar entry not found")
 
         # A fresh session starts from the manually installed generation and
         # remains fully usable after rejecting the stale writer.
         invoke(binary, ["resource", "import", str(archive),
-                        "messages/en/manual-retry.txt", str(imported)], needle="Imported")
-        invoke(binary, ["get", str(archive), "messages/en/manual-retry.txt"],
+                        "templates/replacement/en/manual-retry.txt", str(imported)], needle="Imported")
+        invoke(binary, ["get", str(archive), "templates/replacement/en/manual-retry.txt"],
                needle="first generation")
 
         # Open several administrative sessions on exactly the same generation,
@@ -205,7 +224,7 @@ def main() -> None:
         # One session may publish; every stale peer must refuse to overwrite it.
         contenders: list[tuple[subprocess.Popen[str], str]] = []
         for index in range(6):
-            resource_path = f"messages/en/concurrent-{index}.txt"
+            resource_path = f"templates/replacement/en/concurrent-{index}.txt"
             process = subprocess.Popen(
                 [str(binary), "interactive", str(archive)],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -266,7 +285,7 @@ def main() -> None:
                expected=1, needle="main and startup input paths are required")
         invoke(binary, ["resource", "import", str(archive), "smithproxy.cfg", str(imported)],
                expected=1, needle="not a resource path")
-        invoke(binary, ["resource", "export", str(archive), "messages/en/sample.bin",
+        invoke(binary, ["resource", "export", str(archive), "templates/replacement/en/sample.bin",
                         str(exported)], expected=1, needle="cannot create export file")
         invoke(binary, ["unknown"], expected=2, needle="Usage:")
 

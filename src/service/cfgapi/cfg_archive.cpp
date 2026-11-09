@@ -52,12 +52,12 @@ bool allowed_path(std::string_view path) {
     }
 
     // These namespaces contain persistent configuration resources. Merely
-    // storing a file under scripts/ never causes it to be executed.
+    // storing a file under commands/ never causes it to be executed.
     return CfgManifest::is_resource_path(path);
 }
 
 // Distinguish an absent archive from every other inspection error. Only
-// ENOENT authorizes fallback; permission and filesystem errors remain fatal.
+// ENOENT opens the one-time migration entrance; all other errors remain fatal.
 bool path_exists(const std::string& path) {
     struct stat state {};
     if (::lstat(path.c_str(), &state) == 0) {
@@ -134,8 +134,8 @@ void CfgManifest::validate(const CfgTar& archive) {
 
 bool CfgManifest::is_resource_path(std::string_view path) {
     return safe_logical_path(path) &&
-           (has_prefix(path, "pki/") || has_prefix(path, "messages/") ||
-            has_prefix(path, "scripts/") || has_prefix(path, "ssh/"));
+           (has_prefix(path, "pki/") || has_prefix(path, "templates/") ||
+            has_prefix(path, "commands/"));
 }
 
 CfgResource::CfgResource(Kind kind, std::string logical_path, std::string value)
@@ -187,7 +187,7 @@ CfgArchive CfgArchive::open(Paths paths) {
         return CfgArchive(Kind::legacy, std::move(*paths.explicit_config), std::nullopt);
     }
 
-    // Existence, not successful parsing, controls fallback. A present but bad
+    // Existence, not successful parsing, controls migration. A present but bad
     // archive is an operator-visible startup error rather than permission to
     // resurrect a potentially stale legacy configuration.
     if (path_exists(paths.archive)) {
@@ -265,15 +265,18 @@ CfgResource CfgArchive::resolve(std::string logical_path, std::string legacy_pat
         fail("invalid CfgTar resource path: " + logical_path);
     }
 
-    // Presence is the only fallback decision. Content interpretation belongs
-    // to its consumer, so malformed or empty native data can never resurrect a
-    // stale legacy file behind the administrator's back.
-    if (is_cftar() && archive().contains(logical_path)) {
+    // A native archive is a closed configuration source. Missing content is a
+    // hard error and can never resurrect a stale legacy file behind the
+    // administrator's back.
+    if(is_cftar()) {
+        if(!archive().contains(logical_path)) {
+            fail("native CfgTar resource is missing: " + logical_path);
+        }
         auto content = archive().at(logical_path).data;
         return {CfgResource::Kind::native, std::move(logical_path), std::move(content)};
     }
     if (legacy_path.empty()) {
-        fail("legacy fallback path is empty for CfgTar resource: " + logical_path);
+        fail("explicit legacy path is empty for CfgTar resource: " + logical_path);
     }
     return {CfgResource::Kind::legacy, std::move(logical_path), std::move(legacy_path)};
 }

@@ -14,6 +14,7 @@ from askbot import ask_bot
 from askbot import ask_bot_filter_int
 
 import sxyca
+from cftarcerts import certificate_workspace
 
 
 def is_default_ca():
@@ -102,11 +103,11 @@ def load_sans_from_config(configfile):
     return [sans, ips]
 
 
-def generate_portal_cert(ca_key, ca_cert):
+def generate_portal_cert(ca_key, ca_cert, configfile="/etc/smithproxy/smithproxy.cfg"):
     print("     - generating server certificate == ")
 
     portal_cn = None
-    sans, ips = load_sans_from_config("/etc/smithproxy/smithproxy.cfg")
+    sans, ips = load_sans_from_config(configfile)
 
     portal_cn = socket.getfqdn()
     sans.append(portal_cn)
@@ -184,7 +185,8 @@ def ttl_filter(val):
         return 0 < int(val) <= 3650
 
 
-def check_certificates(etc_dir, assume_yes=True, dry_run=False, enforced=False):
+def check_certificates(etc_dir, assume_yes=True, dry_run=False, enforced=False,
+                       configfile="/etc/smithproxy/smithproxy.cfg"):
 
     print("== Checking installed certificates ==")
 
@@ -330,7 +332,7 @@ def check_certificates(etc_dir, assume_yes=True, dry_run=False, enforced=False):
 
         if gen_prt:
             print("\n   - Portal certificate:")
-            prt_key, prt_cert = generate_portal_cert(ca_key, ca_cert)
+            prt_key, prt_cert = generate_portal_cert(ca_key, ca_cert, configfile)
             if prt_key and prt_cert:
                 print("   - GENERATED")
             else:
@@ -360,32 +362,34 @@ if __name__ == "__main__":
     dry_run = False
 
     try:
-        while True:
+        with certificate_workspace(sx_path) as workspace:
+            while True:
 
-            action = ask_bot(['No', 'Yes', 'Dry', 'Enforce'],
-                 "Do you want to check and generate new certificates?\n"
-                 "   - Note: you can modify attribute values in file: /etc/smithproxy/certs/default/sslca.json\n"
-                 "   - ")
+                action = ask_bot(['No', 'Yes', 'Dry', 'Enforce'],
+                     "Do you want to check and generate new certificates?\n"
+                     "   - Certificate settings are stored as pki/ca/default/sslca.json\n"
+                     "   - ")
 
-            a_dry_run = False
-            a_enforce = False
+                a_dry_run = False
+                a_enforce = False
 
+                if action != 'No':
+                    if action == 'Dry':
+                        a_dry_run = True
 
-            if action != 'No':
+                    if action == 'Enforce':
+                        a_enforce = True
 
-                if action == 'Dry':
-                    a_dry_run = True
+                    check_certificates(
+                        str(workspace.root), assume_yes=False,
+                        dry_run=a_dry_run, enforced=a_enforce,
+                        configfile=str(workspace.config_file))
+                else:
+                    print("Ok, not touching CA at all.")
 
-                if action == 'Enforce':
-                    a_enforce = True
+                print("...")
 
-                check_certificates(sx_path, assume_yes=False, dry_run=a_dry_run, enforced=a_enforce)
-            else:
-                print("Ok, not touching CA at all.")
-
-            print("...")
-
-            if not a_dry_run:
-                break
+                if not a_dry_run:
+                    break
     except KeyboardInterrupt:
         print("\n\n\nCtrl-C: terminating")

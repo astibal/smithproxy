@@ -288,50 +288,46 @@ void prepare_queue_logger(loglevel const& lev) {
 }
 
 
-void prepare_html_renderer() {
+bool prepare_html_renderer() {
 
     auto const& log = DaemonFactory::instance()->get_log();
 
     auto& directory = CfgFactory::get()->dir_msg_templates;
     const auto native = CfgFactory::get()->native_resources(
-        "messages/en", directory,
-        {"test.txt", "html_page.txt", "html_img_warning.txt", "tls_replacement.txt"});
+        "templates/replacement/en", directory,
+        {"test.txt", "html_page.txt", "html_img_warning.txt",
+         "tls_replacement.txt", "tls_replacement_common.txt",
+         "tls_replacement_light.txt", "tls_replacement_dark.txt",
+         "tls_replacement_branded.txt"});
     if(!html()->load_files(directory, native)) {
         _err("Cannot load messages from '%s', replacements will not work correctly !!!", CfgFactory::get()->dir_msg_templates.c_str());
+        return false;
     } else {
         std::string test = "test";
         _dia("Message testing string: %s", html()->render_noargs(test).c_str());
     }
+    return true;
 }
 
 void prepare_native_pki() {
     auto& factory = SSLFactory::factory();
+    auto legacy_dir = CfgFactory::get()->configured_certs_path;
+    if(!legacy_dir.empty() && legacy_dir.back() != '/') legacy_dir += '/';
 
-    // Custom certificate matching still discovers sni/ip/cc-* directories by
-    // path. Give it a private runtime view while default keys stay in memory.
-    if(const auto runtime = CfgFactory::get()->materialize_runtime_archive();
-       !runtime.empty()) {
-        factory.certs_path() = runtime + "/pki/ca/default/";
-        const auto trust = CfgFactory::get()->resources("pki/trust/");
-        if(std::find(trust.begin(), trust.end(), "pki/trust/ca-bundle.pem") !=
-           trust.end()) {
-            factory.ca_file() = runtime + "/pki/trust/ca-bundle.pem";
-            factory.ca_path().clear();
-        }
-        else if(std::any_of(trust.begin(), trust.end(), [](const auto& path) {
-                    return path.rfind("pki/trust/directory/", 0) == 0;
-                })) {
-            factory.ca_file().clear();
-            factory.ca_path() = runtime + "/pki/trust/directory";
-        }
-    }
-    auto legacy_dir = factory.certs_path();
-    if (!legacy_dir.empty() && legacy_dir.back() != '/') legacy_dir += '/';
-
+    // load_settings() has already projected directory-backed resources into
+    // the private runtime tree. Default identities can stay in memory.
+    const auto native_pki = CfgFactory::get()->resources("pki/ca/default/");
     auto resolve = [&](std::optional<std::string>& target,
-                       const char* archive_name, const char* legacy_name) {
+                       const char* archive_name, const char* legacy_name,
+                       bool optional = false) {
+        const auto logical = std::string("pki/ca/default/") + archive_name;
+        if(optional && CfgFactory::get()->using_native_archive() &&
+           std::find(native_pki.begin(), native_pki.end(), logical) == native_pki.end()) {
+            target.reset();
+            return;
+        }
         auto resource = CfgFactory::get()->resolve_resource(
-            std::string("pki/ca/default/") + archive_name, legacy_dir + legacy_name);
+            logical, legacy_dir + legacy_name);
         if (resource.is_native()) target = resource.content();
         else target.reset();
     };
@@ -349,9 +345,9 @@ void prepare_native_pki() {
     resolve(factory.config.native_cl_key, SSLFactory::config_t::CL_KEYF,
             SSLFactory::config_t::CL_KEYF);
     resolve(factory.config.native_po_cert, SSLFactory::config_t::PO_CERTF,
-            SSLFactory::config_t::PO_CERTF);
+            SSLFactory::config_t::PO_CERTF, true);
     resolve(factory.config.native_po_key, SSLFactory::config_t::PO_KEYF,
-            SSLFactory::config_t::PO_KEYF);
+            SSLFactory::config_t::PO_KEYF, true);
 }
 
 std::vector<sx::cfg::CfgPack::File> legacy_cftar_resources() {
@@ -359,16 +355,16 @@ std::vector<sx::cfg::CfgPack::File> legacy_cftar_resources() {
     return {
         // The renderer consumes four base templates. Keep the established
         // variants as portable configuration data for later theme selection.
-        File{"messages/en/test.txt", "/etc/smithproxy/msg/en/test.txt", false, true},
-        File{"messages/en/html_page.txt", "/etc/smithproxy/msg/en/html_page.txt", false, true},
-        File{"messages/en/html_img_warning.txt", "/etc/smithproxy/msg/en/html_img_warning.txt", false, true},
-        File{"messages/en/tls_replacement.txt", "/etc/smithproxy/msg/en/tls_replacement.txt", false, true},
-        File{"messages/en/tls_replacement_common.txt", "/etc/smithproxy/msg/en/tls_replacement_common.txt", false, true},
-        File{"messages/en/tls_replacement_light.txt", "/etc/smithproxy/msg/en/tls_replacement_light.txt", false, true},
-        File{"messages/en/tls_replacement_dark.txt", "/etc/smithproxy/msg/en/tls_replacement_dark.txt", false, true},
-        File{"messages/en/tls_replacement_branded.txt", "/etc/smithproxy/msg/en/tls_replacement_branded.txt", false, true},
+        File{"templates/replacement/en/test.txt", "/etc/smithproxy/msg/en/test.txt"},
+        File{"templates/replacement/en/html_page.txt", "/etc/smithproxy/msg/en/html_page.txt"},
+        File{"templates/replacement/en/html_img_warning.txt", "/etc/smithproxy/msg/en/html_img_warning.txt"},
+        File{"templates/replacement/en/tls_replacement.txt", "/etc/smithproxy/msg/en/tls_replacement.txt"},
+        File{"templates/replacement/en/tls_replacement_common.txt", "/etc/smithproxy/msg/en/tls_replacement_common.txt"},
+        File{"templates/replacement/en/tls_replacement_light.txt", "/etc/smithproxy/msg/en/tls_replacement_light.txt"},
+        File{"templates/replacement/en/tls_replacement_dark.txt", "/etc/smithproxy/msg/en/tls_replacement_dark.txt"},
+        File{"templates/replacement/en/tls_replacement_branded.txt", "/etc/smithproxy/msg/en/tls_replacement_branded.txt"},
 
-        File{"ssh/ssh_host_ed25519_key", "/etc/smithproxy/ssh_host_ed25519_key", false, true},
+        File{"pki/mitm/ssh/hostkeys/ed25519", "/etc/smithproxy/ssh_host_ed25519_key", false, true},
     };
 }
 
@@ -813,7 +809,7 @@ int main(int argc, char *argv[]) {
         // A command-line CfgTar remains native and receives full archive
         // validation. Other command-line and tenant paths are explicit legacy
         // sources. Only the standalone default path participates in automatic
-        // CfgTar preference and absent-archive fallback.
+        // CfgTar preference and the one-time absent-archive migration entrance.
         if(is_custom_config_file ||
            CfgFactory::get()->config_file != "/etc/smithproxy/smithproxy.cfg") {
             const auto& configured_path = CfgFactory::get()->config_file;
@@ -859,20 +855,36 @@ int main(int argc, char *argv[]) {
                     },
                     "/etc/smithproxy/smithproxy.cftar",
                 };
-                // Preserve default and custom certificate subdirectories as
-                // one closed PKI tree. Descriptor-based traversal rejects
-                // symlinks and special files at every level.
-                migration.input.directories.push_back({
-                    "pki/ca/default", "/etc/smithproxy/certs/default", true});
+                // Default identities are explicit files. Custom TLS identity
+                // collections move into purpose-oriented server/client and
+                // SNI/IP namespaces instead of preserving legacy cc-* names.
+                for(const auto* name : {"ca-cert.pem", "ca-key.pem", "srv-cert.pem",
+                                        "srv-key.pem", "cl-cert.pem", "cl-key.pem",
+                                        "portal-cert.pem", "portal-key.pem",
+                                        "portal-gen.info", "sslca.json"}) {
+                    const bool optional = std::string_view(name).rfind("portal-", 0) == 0 ||
+                                          std::string_view(name) == "sslca.json";
+                    migration.input.files.push_back({
+                        std::string("pki/ca/default/") + name,
+                        std::string("/etc/smithproxy/certs/default/") + name,
+                        false, optional});
+                }
+                for(const auto& directory : std::initializer_list<sx::cfg::CfgPack::Directory>{
+                        {"pki/mitm/tls/server/sni", "/etc/smithproxy/certs/default/sni", true},
+                        {"pki/mitm/tls/server/ip", "/etc/smithproxy/certs/default/ip", true},
+                        {"pki/mitm/tls/client/sni", "/etc/smithproxy/certs/default/cc-sni", true},
+                        {"pki/mitm/tls/client/ip", "/etc/smithproxy/certs/default/cc-ip", true}}) {
+                    migration.input.directories.push_back(directory);
+                }
 
                 // Product-managed trust material is portable configuration.
                 // System trust stores remain external operating-system state.
-                const auto& trust_file = SSLFactory::factory().ca_file();
+                const auto& trust_file = CfgFactory::get()->configured_ca_bundle_file;
                 if(trust_file.rfind("/etc/smithproxy/", 0) == 0) {
                     migration.input.files.push_back({
                         "pki/trust/ca-bundle.pem", trust_file, false, false});
                 }
-                const auto& trust_path = SSLFactory::factory().ca_path();
+                const auto& trust_path = CfgFactory::get()->configured_ca_bundle_path;
                 if(trust_path.rfind("/etc/smithproxy/", 0) == 0) {
                     migration.input.directories.push_back({
                         "pki/trust/directory", trust_path, false});
@@ -911,6 +923,41 @@ int main(int argc, char *argv[]) {
                 _cri("upgraded config file FAILED to load");
             }
         }
+    }
+
+    // Once the default native archive is authoritative, preserve the original
+    // /etc layout exactly once and remove its individual files. A failed or
+    // interrupted cleanup is retried on the next start against the immutable
+    // memento; explicit tenant and custom configuration paths are untouched.
+    if(CONFIG_LOADED && !CfgFactory::get()->config_file_check_only &&
+       CfgFactory::get()->using_native_archive() &&
+       CfgFactory::get()->config_file == "/etc/smithproxy/smithproxy.cftar") {
+        try {
+            const auto retired = sx::cfg::CfgPack::retire_legacy_tree(
+                "/etc/smithproxy", "smithproxy.cftar",
+                "smithproxy.pre-cftar.tar");
+            if(retired.backup_created || retired.files_removed != 0) {
+                _not("legacy configuration retired: backup=%s files=%zu",
+                     retired.backup_created ? "created" : "existing",
+                     retired.files_removed);
+            }
+        }
+        catch(const std::exception& error) {
+            _err("legacy configuration retirement deferred: %s", error.what());
+            log.event(ERR, "Legacy configuration retirement deferred: %s",
+                      error.what());
+        }
+    }
+
+    // A native check also opens the resources required by the runtime. This
+    // proves that the archive is self-contained rather than merely parseable
+    // while legacy /etc files happen to exist on the build host.
+    if(CfgFactory::get()->config_file_check_only && CONFIG_LOADED &&
+       CfgFactory::get()->using_native_archive()) {
+        prepare_native_pki();
+        CONFIG_LOADED = prepare_html_renderer() &&
+                        SSLFactory::factory().load_from_files() &&
+                        SSLFactory::factory().load_trust_store();
     }
 
     // exit if that's only about config check - we should not proceed

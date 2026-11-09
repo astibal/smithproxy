@@ -5,6 +5,7 @@
 
 #include <iostream>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 
@@ -22,6 +23,7 @@ void usage(std::ostream& output) {
            << "  smithproxy-cftar inspect FILE\n"
            << "  smithproxy-cftar list FILE [PREFIX]\n"
            << "  smithproxy-cftar resource import FILE ARCHIVE_PATH SOURCE [executable]\n"
+           << "  smithproxy-cftar resource import-set FILE ARCHIVE_PATH=SOURCE [...]\n"
            << "  smithproxy-cftar resource export FILE ARCHIVE_PATH DESTINATION\n"
            << "  smithproxy-cftar resource remove FILE ARCHIVE_PATH\n"
            << "  smithproxy-cftar interactive FILE\n"
@@ -165,6 +167,26 @@ int resource(int argc, char** argv) {
         session.put(argv[4], sx::cfg::read_import_file(argv[5]), executable);
         session.save();
         std::cout << "Imported " << argv[4] << " into " << argv[3] << '\n';
+        return 0;
+    }
+    if(operation == "import-set") {
+        if(argc < 5) {
+            throw sx::cfg::CfgTarError(
+                "resource import-set expects FILE and one or more ARCHIVE_PATH=SOURCE mappings");
+        }
+        auto session = sx::cfg::CfgArchiveSession::open(argv[3]);
+        std::set<std::string> paths;
+        for(int index = 4; index < argc; ++index) {
+            const auto file = mapped_file(argv[index], false);
+            require_resource_path(file.archive_path);
+            if(!paths.insert(file.archive_path).second) {
+                throw sx::cfg::CfgTarError(
+                    "duplicate import-set resource: " + file.archive_path);
+            }
+            session.put(file.archive_path, sx::cfg::read_import_file(file.source_path));
+        }
+        session.save();
+        std::cout << "Imported " << argc - 4 << " resources into " << argv[3] << '\n';
         return 0;
     }
     if(operation == "export") {

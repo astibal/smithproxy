@@ -36,7 +36,7 @@ TEST(CfgRuntimeTree, MaterializesAndRemovesPrivateGeneration) {
 
 TEST(CfgRuntimeTree, MoveTransfersGenerationOwnership) {
     sx::cfg::CfgTar archive;
-    archive.add("messages/en/page.html", "page");
+    archive.add("templates/replacement/en/page.html", "page");
     std::string root;
     {
         auto first = sx::cfg::CfgRuntimeTree::create(archive);
@@ -50,9 +50,9 @@ TEST(CfgRuntimeTree, MoveTransfersGenerationOwnership) {
 
 TEST(CfgRuntimeTree, MoveAssignmentCleansPreviousGeneration) {
     sx::cfg::CfgTar first_archive;
-    first_archive.add("messages/en/first.html", "first");
+    first_archive.add("templates/replacement/en/first.html", "first");
     sx::cfg::CfgTar second_archive;
-    second_archive.add("messages/en/second.html", "second");
+    second_archive.add("templates/replacement/en/second.html", "second");
 
     auto first = sx::cfg::CfgRuntimeTree::create(first_archive);
     auto second = sx::cfg::CfgRuntimeTree::create(second_archive);
@@ -68,8 +68,8 @@ TEST(CfgRuntimeTree, MoveAssignmentCleansPreviousGeneration) {
 
 TEST(CfgRuntimeTree, FailedMaterializationCleansPartialGeneration) {
     sx::cfg::CfgTar archive;
-    archive.add("messages", "blocks the directory");
-    archive.add("messages/en/page.html", "page");
+    archive.add("templates", "blocks the directory");
+    archive.add("templates/replacement/en/page.html", "page");
 
     EXPECT_THROW(
         sx::cfg::CfgRuntimeTree::create(archive),

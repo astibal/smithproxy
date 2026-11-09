@@ -78,16 +78,16 @@ protected:
 
 TEST_F(ResourceWriteTest, WritesAndAdoptsAResource) {
     const auto result = write(board.revision_current(), hash(),
-                              "messages/en/page.html", std::string("page"));
+                              "templates/replacement/en/page.html", std::string("page"));
     EXPECT_TRUE(result.ok());
     EXPECT_TRUE(restart_pending);
     EXPECT_EQ(archive.installs, 1);
-    EXPECT_EQ(archive.source->resolve("messages/en/page.html", "legacy").content(), "page");
+    EXPECT_EQ(archive.source->resolve("templates/replacement/en/page.html", "legacy").content(), "page");
 }
 
 TEST_F(ResourceWriteTest, RejectsAStaleArchiveHash) {
     const auto result = write(board.revision_current(), "sha256:stale",
-                              "messages/en/page.html", std::string("page"));
+                              "templates/replacement/en/page.html", std::string("page"));
     EXPECT_EQ(result.status, sx::cfg::ResourceWriteStatus::hash_mismatch);
     EXPECT_EQ(archive.installs, 0);
 }
@@ -98,13 +98,13 @@ TEST_F(ResourceWriteTest, RejectsBusyLease) {
         [this] { return board.revision_current(); }));
 
     const auto result = write(board.revision_current(), hash(),
-                              "messages/en/page.html", std::string("page"));
+                              "templates/replacement/en/page.html", std::string("page"));
     EXPECT_EQ(result.status, sx::cfg::ResourceWriteStatus::lease_busy);
 }
 
 TEST_F(ResourceWriteTest, RejectsStaleRunningRevision) {
     const auto result = write("stale-revision", hash(),
-                              "messages/en/page.html", std::string("page"));
+                              "templates/replacement/en/page.html", std::string("page"));
     EXPECT_EQ(result.status, sx::cfg::ResourceWriteStatus::stale_revision);
 }
 
@@ -112,21 +112,21 @@ TEST_F(ResourceWriteTest, RejectsUnavailableNativeArchive) {
     archive.available_override = false;
 
     const auto result = write(board.revision_current(), hash(),
-                              "messages/en/page.html", std::string("page"));
+                              "templates/replacement/en/page.html", std::string("page"));
     EXPECT_EQ(result.status, sx::cfg::ResourceWriteStatus::native_unavailable);
 }
 
 TEST_F(ResourceWriteTest, RejectsUnsavedRunningConfiguration) {
     board.upgrade("cli", "changed", "set value");
     const auto result = write(board.revision_current(), hash(),
-                              "messages/en/page.html", std::string("page"));
+                              "templates/replacement/en/page.html", std::string("page"));
     EXPECT_EQ(result.status, sx::cfg::ResourceWriteStatus::unsaved_running);
 }
 
 TEST_F(ResourceWriteTest, RejectsWriteAfterExternalArchiveReplacement) {
     external_change = true;
     const auto result = write(board.revision_current(), hash(),
-                              "messages/en/page.html", std::string("page"));
+                              "templates/replacement/en/page.html", std::string("page"));
     EXPECT_EQ(result.status, sx::cfg::ResourceWriteStatus::write_failed);
     EXPECT_EQ(result.detail, "startup archive changed and requires restart");
     EXPECT_EQ(archive.installs, 0);
@@ -135,10 +135,10 @@ TEST_F(ResourceWriteTest, RejectsWriteAfterExternalArchiveReplacement) {
 TEST_F(ResourceWriteTest, DoesNotAdoptFailedStorageWrite) {
     archive.install_ok = false;
     const auto result = write(board.revision_current(), hash(),
-                              "messages/en/page.html", std::string("page"));
+                              "templates/replacement/en/page.html", std::string("page"));
     EXPECT_EQ(result.status, sx::cfg::ResourceWriteStatus::write_failed);
     EXPECT_FALSE(restart_pending);
-    EXPECT_FALSE(archive.source->archive().contains("messages/en/page.html"));
+    EXPECT_FALSE(archive.source->archive().contains("templates/replacement/en/page.html"));
 }
 
 TEST_F(ResourceWriteTest, RejectsControlFileMutation) {
@@ -152,7 +152,7 @@ TEST_F(ResourceWriteTest, ConvertsUnexpectedPrepareFailure) {
     archive.throw_from_prepare = true;
 
     const auto result = write(board.revision_current(), hash(),
-                              "messages/en/page.html", std::string("page"));
+                              "templates/replacement/en/page.html", std::string("page"));
     EXPECT_EQ(result.status, sx::cfg::ResourceWriteStatus::write_failed);
     EXPECT_EQ(result.detail, "injected prepare failure");
 }

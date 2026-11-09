@@ -40,6 +40,10 @@ Write one validated archive entry to standard output.
 .B resource import FILE ARCHIVE_PATH SOURCE [executable]
 Import one resource and atomically publish the new archive generation.
 .TP
+.B resource import-set FILE ARCHIVE_PATH=SOURCE [...]
+Import several resources and publish all changes as one archive generation.
+No resource is installed when any source or mapping is invalid.
+.TP
 .B resource export FILE ARCHIVE_PATH DESTINATION
 Export one resource into a newly created filesystem file.
 .TP

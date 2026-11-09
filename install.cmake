@@ -10,21 +10,10 @@ if(UNIX)
             man/smithproxy-capture.7
             man/smithproxy-topology.7
             DESTINATION share/man/man7)
-    install_if_not_exists(etc/smithproxy.cfg /etc/smithproxy)
-    install_if_not_exists(etc/users.cfg /etc/smithproxy)
-    install_if_not_exists(etc/users.key /etc/smithproxy)
-    install_if_not_exists(etc/smithproxy.startup.cfg /etc/smithproxy)
+    install_native_config_if_no_legacy(
+            ${SMITHPROXY_DEFAULT_CFTAR} /etc/smithproxy
+            smithproxy.cftar smithproxy.cfg)
     install_if_not_exists(etc/apparmor/usr.bin.smithproxy /etc/apparmor.d/)
-
-    install(DIRECTORY DESTINATION /etc/smithproxy/certs/)
-    install(DIRECTORY DESTINATION /etc/smithproxy/certs/default)
-    install_if_not_exists(etc/certs/default/ca-cert.pem /etc/smithproxy/certs/default)
-    install_secret_if_not_exists(etc/certs/default/ca-key.pem /etc/smithproxy/certs/default)
-    install_if_not_exists(etc/certs/default/srv-cert.pem /etc/smithproxy/certs/default)
-    install_secret_if_not_exists(etc/certs/default/srv-key.pem /etc/smithproxy/certs/default)
-    install_if_not_exists(etc/certs/default/cl-cert.pem /etc/smithproxy/certs/default)
-    install_secret_if_not_exists(etc/certs/default/cl-key.pem /etc/smithproxy/certs/default)
-    install_if_not_exists(etc/certs/default/portal-gen.info /etc/smithproxy/certs/default)
 
     install_if_not_exists(etc/logrotate.d/smithproxy /etc/logrotate.d)
 
@@ -140,7 +129,6 @@ if(UNIX)
 
 
 
-    install(DIRECTORY etc/msg DESTINATION /etc/smithproxy)
 
     create_dir("/var/log/smithproxy/")
     create_dir("/var/smithproxy/data/")

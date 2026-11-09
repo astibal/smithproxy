@@ -535,7 +535,7 @@ TEST(CfgPackFaults, ReportsOpenedDirectoryFileReadFailures) {
         const auto resources = temp.path() + "/resources";
         ASSERT_TRUE(std::filesystem::create_directories(resources));
         std::ofstream(resources + "/item") << "data";
-        input.directories.push_back({"messages/en", resources});
+        input.directories.push_back({"templates/replacement/en", resources});
         ScopedFault fault(scenario.fault, scenario.call);
 
         if(scenario.fault == Fault::read_eintr) {
@@ -557,7 +557,7 @@ TEST(CfgPackFaults, RejectsOversizedOpenedDirectoryFile) {
     ASSERT_GE(fd, 0);
     ASSERT_EQ(::ftruncate(fd, 64LL * 1024LL * 1024LL + 1), 0);
     ASSERT_EQ(::close(fd), 0);
-    input.directories.push_back({"messages/en", resources});
+    input.directories.push_back({"templates/replacement/en", resources});
 
     EXPECT_THROW(sx::cfg::CfgPack::build(input), sx::cfg::CfgTarError);
 }
@@ -567,7 +567,7 @@ TEST(CfgPackFaults, ReportsNestedDirectoryOpenFailure) {
     auto input = pack_input(temp);
     const auto resources = temp.path() + "/resources";
     ASSERT_TRUE(std::filesystem::create_directories(resources + "/nested"));
-    input.directories.push_back({"messages/en", resources});
+    input.directories.push_back({"templates/replacement/en", resources});
     ScopedFault fault(Fault::openat);
 
     EXPECT_THROW(sx::cfg::CfgPack::build(input), sx::cfg::CfgTarError);
@@ -588,7 +588,7 @@ TEST(CfgPackFaults, ReportsDirectoryTraversalFailures) {
         const auto resources = temp.path() + "/resources";
         ASSERT_TRUE(std::filesystem::create_directories(resources));
         std::ofstream(resources + "/item") << "data";
-        input.directories.push_back({"messages/en", resources});
+        input.directories.push_back({"templates/replacement/en", resources});
         ScopedFault fault(failure);
         EXPECT_THROW(sx::cfg::CfgPack::build(input), sx::cfg::CfgTarError);
     }
@@ -598,7 +598,7 @@ TEST(CfgPackFaults, ReportsOptionalInputInspectionFailures) {
     TempDir temp;
     auto input = pack_input(temp);
     input.files.push_back({
-        "messages/en/optional", temp.path() + "/optional", false, true});
+        "templates/replacement/en/optional", temp.path() + "/optional", false, true});
     {
         ScopedFault fault(Fault::lstat);
         EXPECT_THROW(sx::cfg::CfgPack::build(input), sx::cfg::CfgTarError);
@@ -606,7 +606,7 @@ TEST(CfgPackFaults, ReportsOptionalInputInspectionFailures) {
 
     input.files.clear();
     input.directories.push_back({
-        "messages/en", temp.path() + "/optional-directory", true});
+        "templates/replacement/en", temp.path() + "/optional-directory", true});
     {
         ScopedFault fault(Fault::lstat);
         EXPECT_THROW(sx::cfg::CfgPack::build(input), sx::cfg::CfgTarError);

@@ -107,9 +107,9 @@ public:
         std::optional<std::string> explicit_archive = std::nullopt;
     };
 
-    // An explicit native archive or legacy configuration file wins. Otherwise
-    // an existing CfgTar is preferred and fully validated. Only an absent
-    // CfgTar permits fallback.
+    // An explicit native archive or legacy migration input wins. Otherwise an
+    // existing CfgTar is authoritative and fully validated; its absence opens
+    // the one-time legacy entrance used to construct the first native archive.
     static CfgArchive open(Paths paths);
 
     // Construct a native archive from bytes supplied by a privileged reader.

@@ -295,6 +295,68 @@ target_link_libraries(smithproxy-cftar PRIVATE
         smithproxy_libcli pthread crypto LibArchive::LibArchive
         nlohmann_json::nlohmann_json ${LIBCONFIGPP_LIBRARIES})
 
+# Ship a native configuration from the first installation. The historical
+# files remain package inputs for upgrades and emergency fallback, but a new
+# instance starts from the same validated archive format used at runtime.
+set(SMITHPROXY_DEFAULT_CFTAR
+        ${CMAKE_CURRENT_BINARY_DIR}/defaults/smithproxy.cftar)
+add_custom_command(
+        OUTPUT ${SMITHPROXY_DEFAULT_CFTAR}
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+                ${CMAKE_CURRENT_BINARY_DIR}/defaults
+        COMMAND ${CMAKE_COMMAND} -E rm -f
+                ${SMITHPROXY_DEFAULT_CFTAR}.new
+        COMMAND $<TARGET_FILE:smithproxy-cftar> create
+                --config ${PROJECT_SOURCE_DIR}/etc/smithproxy.cfg
+                --startup ${PROJECT_SOURCE_DIR}/etc/smithproxy.startup.cfg
+                --output ${SMITHPROXY_DEFAULT_CFTAR}.new
+                --file pki/ca/default/ca-cert.pem=${PROJECT_SOURCE_DIR}/etc/certs/default/ca-cert.pem
+                --file pki/ca/default/ca-key.pem=${PROJECT_SOURCE_DIR}/etc/certs/default/ca-key.pem
+                --file pki/ca/default/srv-cert.pem=${PROJECT_SOURCE_DIR}/etc/certs/default/srv-cert.pem
+                --file pki/ca/default/srv-key.pem=${PROJECT_SOURCE_DIR}/etc/certs/default/srv-key.pem
+                --file pki/ca/default/cl-cert.pem=${PROJECT_SOURCE_DIR}/etc/certs/default/cl-cert.pem
+                --file pki/ca/default/cl-key.pem=${PROJECT_SOURCE_DIR}/etc/certs/default/cl-key.pem
+                --file pki/ca/default/portal-cert.pem=${PROJECT_SOURCE_DIR}/etc/certs/default/portal-cert.pem
+                --file pki/ca/default/portal-key.pem=${PROJECT_SOURCE_DIR}/etc/certs/default/portal-key.pem
+                --file pki/ca/default/portal-gen.info=${PROJECT_SOURCE_DIR}/etc/certs/default/portal-gen.info
+                --file pki/ca/default/sslca.json=${PROJECT_SOURCE_DIR}/etc/certs/default/sslca.json
+                --file templates/replacement/en/test.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/test.txt
+                --file templates/replacement/en/html_page.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/html_page.txt
+                --file templates/replacement/en/html_img_warning.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/html_img_warning.txt
+                --file templates/replacement/en/tls_replacement.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement.txt
+                --file templates/replacement/en/tls_replacement_common.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_common.txt
+                --file templates/replacement/en/tls_replacement_light.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_light.txt
+                --file templates/replacement/en/tls_replacement_dark.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_dark.txt
+                --file templates/replacement/en/tls_replacement_branded.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_branded.txt
+        COMMAND ${CMAKE_COMMAND} -E rename
+                ${SMITHPROXY_DEFAULT_CFTAR}.new
+                ${SMITHPROXY_DEFAULT_CFTAR}
+        DEPENDS smithproxy-cftar
+                ${PROJECT_SOURCE_DIR}/etc/smithproxy.cfg
+                ${PROJECT_SOURCE_DIR}/etc/smithproxy.startup.cfg
+                ${PROJECT_SOURCE_DIR}/etc/certs/default/ca-cert.pem
+                ${PROJECT_SOURCE_DIR}/etc/certs/default/ca-key.pem
+                ${PROJECT_SOURCE_DIR}/etc/certs/default/srv-cert.pem
+                ${PROJECT_SOURCE_DIR}/etc/certs/default/srv-key.pem
+                ${PROJECT_SOURCE_DIR}/etc/certs/default/cl-cert.pem
+                ${PROJECT_SOURCE_DIR}/etc/certs/default/cl-key.pem
+                ${PROJECT_SOURCE_DIR}/etc/certs/default/portal-cert.pem
+                ${PROJECT_SOURCE_DIR}/etc/certs/default/portal-key.pem
+                ${PROJECT_SOURCE_DIR}/etc/certs/default/portal-gen.info
+                ${PROJECT_SOURCE_DIR}/etc/certs/default/sslca.json
+                ${PROJECT_SOURCE_DIR}/etc/msg/en/test.txt
+                ${PROJECT_SOURCE_DIR}/etc/msg/en/html_page.txt
+                ${PROJECT_SOURCE_DIR}/etc/msg/en/html_img_warning.txt
+                ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement.txt
+                ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_common.txt
+                ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_light.txt
+                ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_dark.txt
+                ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_branded.txt
+        COMMENT "Building default Smithproxy CfgTar"
+        VERBATIM)
+add_custom_target(smithproxy-default-cftar ALL
+        DEPENDS ${SMITHPROXY_DEFAULT_CFTAR})
+
 add_executable(smithproxy
 
         src/main.cpp
@@ -310,6 +372,7 @@ add_executable(smithproxy
         src/service/cfgapi/cfg_archive_restore.cpp
         src/service/cfgapi/cfg_archive_monitor.cpp
         src/service/cfgapi/cfg_resource_write.cpp
+        src/service/cfgapi/cfg_io.cpp
         src/service/cfgapi/cfg_runtime_tree.cpp
         src/service/httpd/cfg/save.cpp
         src/service/httpd/cfg/archive.cpp
@@ -1156,7 +1219,9 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 add_test(NAME integration.main_process
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/tests/process/main_process_e2e.py
-                        $<TARGET_FILE:smithproxy> --source ${PROJECT_SOURCE_DIR})
+                        $<TARGET_FILE:smithproxy>
+                        --source ${PROJECT_SOURCE_DIR}
+                        --native-archive ${SMITHPROXY_DEFAULT_CFTAR})
                 add_test(NAME integration.redirect
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/tests/transparent/redirect_integration.py

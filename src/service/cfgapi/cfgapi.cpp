@@ -352,6 +352,11 @@ sx::cfg::CfgArchiveInfo CfgFactory::archive_info() {
     return config_archive_->info();
 }
 
+bool CfgFactory::using_native_archive() const {
+    std::scoped_lock<std::recursive_mutex> lock(CfgFactory::lock());
+    return config_archive_ && config_archive_->is_cftar();
+}
+
 std::string CfgFactory::archive_payload() {
     std::scoped_lock<std::recursive_mutex> lock(CfgFactory::lock());
     if (!config_archive_) {
@@ -395,6 +400,32 @@ std::string CfgFactory::materialize_runtime_archive() {
             sx::cfg::CfgRuntimeTree::create(config_archive_->archive()));
     }
     return runtime_tree_->root();
+}
+
+void CfgFactory::apply_runtime_resource_paths() {
+    auto& ssl = SSLFactory::factory();
+    ssl.certs_path() = configured_certs_path;
+    ssl.ca_file() = configured_ca_bundle_file;
+    ssl.ca_path() = configured_ca_bundle_path;
+
+    const auto runtime = materialize_runtime_archive();
+    if(runtime.empty()) return;
+
+    // Socle still discovers custom identities and OpenSSL trust directories
+    // through paths. Only this compatibility edge sees the private tree.
+    ssl.certs_path() = runtime + "/pki/mitm/tls/";
+    const auto trust = resources("pki/trust/");
+    if(std::find(trust.begin(), trust.end(), "pki/trust/ca-bundle.pem") !=
+       trust.end()) {
+        ssl.ca_file() = runtime + "/pki/trust/ca-bundle.pem";
+        ssl.ca_path().clear();
+    }
+    else if(std::any_of(trust.begin(), trust.end(), [](const auto& path) {
+                return path.rfind("pki/trust/directory/", 0) == 0;
+            })) {
+        ssl.ca_file().clear();
+        ssl.ca_path() = runtime + "/pki/trust/directory";
+    }
 }
 
 bool CfgFactory::startup_archive_pending() const {
@@ -925,6 +956,15 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "prepared configuration for native CfgTar storage");
         return true;
     }
+    else if(upgrade_to_num == 1050) {
+        // These paths described product-owned files before CFtar. Saving the
+        // upgraded configuration deliberately omits them: the resources now
+        // live in the archive and a native runtime must never rediscover stale
+        // files through an old path setting. Keep the loaded values in memory
+        // until the migration packer has copied their content into CFtar.
+        log.event(INF, "removed legacy product resource paths from configuration");
+        return true;
+    }
 
 
     return false;
@@ -1275,16 +1315,22 @@ bool CfgFactory::load_settings () {
         }
     }
 
-    load_if_exists(cfgapi.getRoot()["settings"], "certs_path",SSLFactory::factory().certs_path());
+    // Accepted only while importing an old configuration. Native archives
+    // address certificates and templates by logical resource name.
+    configured_certs_path.clear();
+    dir_msg_templates.clear();
+    load_if_exists(cfgapi.getRoot()["settings"], "certs_path", configured_certs_path);
+    SSLFactory::factory().certs_path() = configured_certs_path;
     load_if_exists(cfgapi.getRoot()["settings"], "certs_ca_key_password",SSLFactory::factory().certs_password());
 
     if(! load_if_exists(cfgapi.getRoot()["settings"], "certs_ctlog",SSLFactory::factory().ctlogfile())) {
-        SSLFactory::factory().ctlogfile() = "/etc/smithproxy/ct_log_list.cnf";
+        SSLFactory::factory().ctlogfile() = "/var/smithproxy/data/ct_log_list.cnf";
     }
 
 
-    load_if_exists(cfgapi.getRoot()["settings"], "ca_bundle_path",SSLFactory::factory().ca_path());
-    load_if_exists(cfgapi.getRoot()["settings"], "ca_bundle_file", SSLFactory::factory().ca_file());
+    load_if_exists(cfgapi.getRoot()["settings"], "ca_bundle_path", configured_ca_bundle_path);
+    load_if_exists(cfgapi.getRoot()["settings"], "ca_bundle_file", configured_ca_bundle_file);
+    apply_runtime_resource_paths();
 
     load_if_exists(cfgapi.getRoot()["settings"], "ssl_autodetect",MitmMasterProxy::ssl_autodetect);
     load_if_exists(cfgapi.getRoot()["settings"], "ssl_autodetect_harder",MitmMasterProxy::ssl_autodetect_harder);
@@ -3965,10 +4011,10 @@ int CfgFactory::policy_apply (baseHostCX *originator, MitmProxy *proxy, int matc
                 auto options = sx::ssh::transport_options{};
                 options.profile_name = rule->profile_ssh->element_name();
                 options.host_key = rule->profile_ssh->host_key;
-                constexpr std::string_view legacy_root = "/etc/smithproxy/";
-                if (options.host_key.rfind(legacy_root, 0) == 0) {
+                if(options.host_key == "pki/mitm/ssh/hostkeys/ed25519" ||
+                   options.host_key == "/etc/smithproxy/ssh_host_ed25519_key") {
                     auto resource = resolve_resource(
-                        "ssh/" + options.host_key.substr(legacy_root.size()),
+                        "pki/mitm/ssh/hostkeys/ed25519",
                         options.host_key);
                     if (resource.is_native()) {
                         options.host_key_pem = resource.content();
@@ -6097,7 +6143,8 @@ int CfgFactory::save_policy(Config& ex) const {
 bool CfgFactory::new_ssh_profile(Setting& section, std::string const& name) const {
     try {
         Setting& item = section.add(name, Setting::TypeGroup);
-        item.add("host_key", Setting::TypeString) = "/etc/smithproxy/ssh_host_ed25519_key";
+        item.add("host_key", Setting::TypeString) =
+            "pki/mitm/ssh/hostkeys/ed25519";
         item.add("hostkey_policy", Setting::TypeString) = "accept-new";
         for(auto const* feature : {"shell", "exec", "subsystem", "pty",
                                    "environment", "local_forward",
@@ -6280,11 +6327,16 @@ int save_settings(Config& ex) {
         it_ns.add(Setting::TypeString) = ns.str_host;
     }
 
-    objects.add("certs_path", Setting::TypeString) = SSLFactory::factory().certs_path();
     objects.add("certs_ca_key_password", Setting::TypeString) = SSLFactory::factory().certs_password();
     objects.add("certs_ctlog", Setting::TypeString) = SSLFactory::factory().ctlogfile();
-    objects.add("ca_bundle_path", Setting::TypeString) = SSLFactory::factory().ca_path();
-    objects.add("ca_bundle_file", Setting::TypeString) = SSLFactory::factory().ca_file();
+    // Preserve external operating-system trust locations. Product-managed
+    // trust below /etc/smithproxy is stored in CFtar and has no path setting.
+    const auto& ca_path = CfgFactory::get()->configured_ca_bundle_path;
+    const auto& ca_file = CfgFactory::get()->configured_ca_bundle_file;
+    objects.add("ca_bundle_path", Setting::TypeString) =
+        ca_path.rfind("/etc/smithproxy/", 0) == 0 ? "" : ca_path;
+    objects.add("ca_bundle_file", Setting::TypeString) =
+        ca_file.rfind("/etc/smithproxy/", 0) == 0 ? "" : ca_file;
 
     objects.add("plaintext_port", Setting::TypeString) = CfgFactory::get()->listen_tcp_port_base;
     objects.add("plaintext_workers", Setting::TypeInt) = CfgFactory::get()->num_workers_tcp;
@@ -6345,8 +6397,6 @@ int save_settings(Config& ex) {
     objects.add("syslog_family", Setting::TypeInt) = CfgFactory::get()->syslog_family;
 
     objects.add("sslkeylog_file", Setting::TypeString) = CfgFactory::get()->sslkeylog_file_base;
-    objects.add("messages_dir", Setting::TypeString) = CfgFactory::get()->dir_msg_templates;
-
     Setting& admin_objects = objects.add("admin", Setting::TypeGroup);
     admin_objects.add("group", Setting::TypeString) = CfgFactory::get()->admin_group;
 

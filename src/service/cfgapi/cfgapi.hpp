@@ -171,7 +171,7 @@ class CfgFactory : public CfgFactoryBase {
 public:
     // Each version bump implies a config upgrade - we start on 1000
     // see upgrade_schema() - control config upgrade
-    constexpr static inline const int SCHEMA_VERSION  = 1049;
+    constexpr static inline const int SCHEMA_VERSION  = 1050;
 
     static inline std::atomic_bool LOAD_ERRORS = false;
     static constexpr std::string_view CT_UNAVAILABLE_WARNING =
@@ -278,7 +278,12 @@ public:
     std::string listen_socks_port = "1080";
     std::string listen_http_connect_port = "3128";
 
-    std::string dir_msg_templates = "/etc/smithproxy/msg/en/";
+    // Preserve user-facing resource settings independently from temporary
+    // runtime materialization. Saving must never publish a /tmp archive view.
+    std::string configured_certs_path;
+    std::string configured_ca_bundle_path;
+    std::string configured_ca_bundle_file;
+    std::string dir_msg_templates;
 
     bool config_file_check_only = false;
 
@@ -437,21 +442,25 @@ public:
     sx::cfg::CfgResource resolve_resource(std::string logical_path,
                                           std::string legacy_path);
 
-    // Resolve a named directory as individual resources. The returned map
-    // contains native entries only; absent entries deliberately remain for the
-    // consumer's established legacy directory loader.
+    // Resolve a named directory as individual resources. Native archives must
+    // contain every requested entry; an explicit legacy source remains the
+    // only mode in which the directory path is consulted.
     std::map<std::string, std::string> native_resources(
         std::string logical_dir, std::string legacy_dir,
         const std::vector<std::string>& names);
 
     // List stored native resources without assigning them runtime semantics.
-    // In particular, scripts/ entries remain inert until an explicit caller
+    // In particular, commands/ entries remain inert until an explicit caller
     // requests and authorizes an action in a later feature.
     std::vector<std::string> resources(std::string_view logical_dir);
 
     // Return a content-free administrative inventory of the active persistent
     // configuration source.
     sx::cfg::CfgArchiveInfo archive_info();
+
+    // Report whether the active source is the native archive rather than an
+    // explicitly selected legacy source used during migration or tenant startup.
+    bool using_native_archive() const;
 
     // Serialize the active native archive exactly as it would be persisted.
     // Legacy sources fail explicitly because they are not complete CFtar
@@ -467,6 +476,10 @@ public:
 
     // Materialize the active archive resources into a protected runtime tree.
     std::string materialize_runtime_archive();
+
+    // Project native directory-backed resources into a private runtime tree;
+    // legacy sources retain their configured filesystem paths unchanged.
+    void apply_runtime_resource_paths();
 
     // True after a successful restore that deliberately requires a process
     // restart, or after an external CFtar replacement is observed.

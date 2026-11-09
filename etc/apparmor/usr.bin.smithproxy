@@ -32,10 +32,11 @@
   /etc/smithproxy/** r,
   /etc/smithproxy/*.cfg rw,
   /etc/smithproxy/*.cftar rw,
-  /etc/smithproxy/certs/**/ip/** rw,
-  /etc/smithproxy/certs/**/sni/** rw,
-  /etc/smithproxy/certs/**/cc-ip/** rw,
-  /etc/smithproxy/certs/**/cc-sni/** rw,
+
+  # Private filesystem view for libraries that still consume path-based
+  # certificate and template resources from the active CFtar generation.
+  /tmp/smithproxy-cftar-runtime-*/ rw,
+  /tmp/smithproxy-cftar-runtime-*/** rw,
 
   # rename own threads
   /proc/@{pid}/task/*/comm rw,

@@ -36,20 +36,26 @@ protected:
         return path;
     }
 
+    std::string write_native_archive() const {
+        const auto path = directory_ + "/smithproxy.cftar";
+        CfgPack::build(input_).write_file(path);
+        return path;
+    }
+
     std::string directory_;
     CfgPack::Input input_;
 };
 
 TEST_F(PackTest, BuildsCompleteValidatedArchive) {
-    input_.files.push_back({"messages/en/replacement.txt", write("message", "hello"), false});
-    input_.files.push_back({"scripts/collect.sh", write("script", "#!/bin/sh\n"), true});
+    input_.files.push_back({"templates/replacement/en/replacement.txt", write("message", "hello"), false});
+    input_.files.push_back({"commands/scripts/collect.sh", write("script", "#!/bin/sh\n"), true});
 
     const auto archive = CfgPack::build(input_);
 
     EXPECT_EQ(archive.at("smithproxy.cfg").data, "settings : {};\n");
     EXPECT_EQ(archive.at("smithproxy.startup.cfg").data, "SMITH_RUN_TRANSPARENT=1\n");
-    EXPECT_EQ(archive.at("messages/en/replacement.txt").data, "hello");
-    EXPECT_TRUE(archive.at("scripts/collect.sh").executable);
+    EXPECT_EQ(archive.at("templates/replacement/en/replacement.txt").data, "hello");
+    EXPECT_TRUE(archive.at("commands/scripts/collect.sh").executable);
 }
 
 TEST_F(PackTest, PreservesBinaryResourceData) {
@@ -66,7 +72,7 @@ TEST_F(PackTest, RejectsMissingRequiredInput) {
 }
 
 TEST_F(PackTest, RejectsIncompleteResourceAndDirectoryMappings) {
-    input_.files.push_back({"messages/en/missing", "", false});
+    input_.files.push_back({"templates/replacement/en/missing", "", false});
     EXPECT_THROW(CfgPack::build(input_), CfgTarError);
 
     input_.files.clear();
@@ -91,7 +97,7 @@ TEST_F(PackTest, RejectsSymlinkInput) {
 }
 
 TEST_F(PackTest, RejectsDirectoryInput) {
-    input_.files.push_back({"messages/en/file", directory_, false});
+    input_.files.push_back({"templates/replacement/en/file", directory_, false});
     EXPECT_THROW(CfgPack::build(input_), CfgTarError);
 }
 
@@ -153,20 +159,20 @@ TEST_F(PackTest, LeavesNoArchiveWhenMigrationInputIsIncomplete) {
 }
 
 TEST_F(PackTest, SkipsAbsentOptionalResourceButPacksItWhenPresent) {
-    input_.files.push_back({"ssh/host-key", directory_ + "/host-key", false, true});
+    input_.files.push_back({"pki/mitm/ssh/hostkeys/ed25519", directory_ + "/host-key", false, true});
     auto archive = CfgPack::build(input_);
-    EXPECT_FALSE(archive.contains("ssh/host-key"));
+    EXPECT_FALSE(archive.contains("pki/mitm/ssh/hostkeys/ed25519"));
 
     write("host-key", "private key");
     archive = CfgPack::build(input_);
-    EXPECT_EQ(archive.at("ssh/host-key").data, "private key");
+    EXPECT_EQ(archive.at("pki/mitm/ssh/hostkeys/ed25519").data, "private key");
 }
 
 TEST_F(PackTest, OptionalResourceDoesNotHideUnsafeOrUnreadableInput) {
     const auto target = write("target", "data");
     const auto link = directory_ + "/optional-link";
     ASSERT_EQ(::symlink(target.c_str(), link.c_str()), 0);
-    input_.files.push_back({"scripts/link", link, false, true});
+    input_.files.push_back({"commands/scripts/link", link, false, true});
 
     EXPECT_THROW(CfgPack::build(input_), CfgTarError);
 }
@@ -199,7 +205,7 @@ TEST_F(PackTest, RejectsSpecialFilesInResourceDirectory) {
     const auto root = directory_ + "/resources";
     ASSERT_TRUE(std::filesystem::create_directories(root));
     ASSERT_EQ(::mkfifo((root + "/stream").c_str(), 0600), 0);
-    input_.directories.push_back({"messages/en", root});
+    input_.directories.push_back({"templates/replacement/en", root});
 
     EXPECT_THROW(CfgPack::build(input_), CfgTarError);
 }
@@ -213,6 +219,77 @@ TEST_F(PackTest, SkipsOnlyAnAbsentOptionalResourceDirectory) {
     ASSERT_EQ(::symlink(directory_.c_str(), target.c_str()), 0);
     input_.directories.back().source_path = target;
     EXPECT_THROW(CfgPack::build(input_), CfgTarError);
+}
+
+TEST_F(PackTest, RetiresLegacyTreeOnlyAfterCreatingMemento) {
+    write_native_archive();
+    ASSERT_TRUE(std::filesystem::create_directories(directory_ + "/certs/default"));
+    std::ofstream(directory_ + "/certs/default/key.pem") << "private key";
+    write("smithproxy.cftar.lock", "publication lock");
+
+    const auto result = CfgPack::retire_legacy_tree(
+        directory_, "smithproxy.cftar", "smithproxy.pre-cftar.tar");
+
+    EXPECT_TRUE(result.backup_created);
+    EXPECT_EQ(result.files_removed, 3U);
+    EXPECT_TRUE(std::filesystem::exists(directory_ + "/smithproxy.cftar"));
+    EXPECT_TRUE(std::filesystem::exists(directory_ + "/smithproxy.cftar.lock"));
+    EXPECT_FALSE(std::filesystem::exists(input_.main_config));
+    EXPECT_FALSE(std::filesystem::exists(input_.startup_config));
+    EXPECT_FALSE(std::filesystem::exists(directory_ + "/certs"));
+
+    const auto backup = sx::cfg::CfgTar::read_file(
+        directory_ + "/smithproxy.pre-cftar.tar");
+    EXPECT_EQ(backup.at("etc/smithproxy/main.cfg").data, "settings : {};\n");
+    EXPECT_EQ(backup.at("etc/smithproxy/certs/default/key.pem").data,
+              "private key");
+}
+
+TEST_F(PackTest, ContinuesInterruptedRetirementAgainstImmutableMemento) {
+    write_native_archive();
+    CfgPack::retire_legacy_tree(
+        directory_, "smithproxy.cftar", "smithproxy.pre-cftar.tar");
+
+    // Recreate one byte-identical survivor as if the first cleanup stopped
+    // before unlinking it. The existing memento authorizes only this content.
+    input_.main_config = write("main.cfg", "settings : {};\n");
+    const auto result = CfgPack::retire_legacy_tree(
+        directory_, "smithproxy.cftar", "smithproxy.pre-cftar.tar");
+
+    EXPECT_FALSE(result.backup_created);
+    EXPECT_EQ(result.files_removed, 1U);
+    EXPECT_FALSE(std::filesystem::exists(input_.main_config));
+}
+
+TEST_F(PackTest, RejectsLegacyContentChangedAfterMementoCreation) {
+    write_native_archive();
+    CfgPack::retire_legacy_tree(
+        directory_, "smithproxy.cftar", "smithproxy.pre-cftar.tar");
+    input_.main_config = write("main.cfg", "settings : { changed = true; };\n");
+
+    EXPECT_THROW(CfgPack::retire_legacy_tree(
+        directory_, "smithproxy.cftar", "smithproxy.pre-cftar.tar"), CfgTarError);
+    EXPECT_TRUE(std::filesystem::exists(input_.main_config));
+}
+
+TEST_F(PackTest, RejectsUnsafeEntryBeforeCreatingRetirementMemento) {
+    write_native_archive();
+    ASSERT_EQ(::symlink(input_.main_config.c_str(),
+                        (directory_ + "/legacy-link").c_str()), 0);
+
+    EXPECT_THROW(CfgPack::retire_legacy_tree(
+        directory_, "smithproxy.cftar", "smithproxy.pre-cftar.tar"), CfgTarError);
+    EXPECT_FALSE(std::filesystem::exists(
+        directory_ + "/smithproxy.pre-cftar.tar"));
+    EXPECT_TRUE(std::filesystem::exists(input_.main_config));
+}
+
+TEST_F(PackTest, RejectsRetirementWithoutValidNativeArchive) {
+    write("smithproxy.cftar", "broken");
+
+    EXPECT_THROW(CfgPack::retire_legacy_tree(
+        directory_, "smithproxy.cftar", "smithproxy.pre-cftar.tar"), CfgTarError);
+    EXPECT_TRUE(std::filesystem::exists(input_.main_config));
 }
 
 } // namespace

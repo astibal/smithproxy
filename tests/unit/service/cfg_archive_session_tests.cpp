@@ -428,7 +428,7 @@ protected:
         archive.add(std::string(CfgManifest::path), CfgManifest::canonical());
         archive.add("smithproxy.cfg", "settings : {};\n");
         archive.add("smithproxy.startup.cfg", "SMITH_RUN_TRANSPARENT=1\n");
-        archive.add("messages/en/page.html", "original");
+        archive.add("templates/replacement/en/page.html", "original");
         return archive;
     }
 
@@ -444,7 +444,7 @@ TEST_F(ArchiveSessionTest, OpensValidatedArchiveAsCleanWorkingCopy) {
     const auto session = CfgArchiveSession::open(archive_path_);
 
     EXPECT_FALSE(session.dirty());
-    EXPECT_EQ(session.entry("messages/en/page.html").data, "original");
+    EXPECT_EQ(session.entry("templates/replacement/en/page.html").data, "original");
     EXPECT_EQ(session.base_hash().find("sha256:"), 0U);
 }
 
@@ -477,7 +477,7 @@ TEST_F(ArchiveSessionTest, RetriesInterruptedReads) {
         archive_path_, std::make_shared<FaultCfgIo>(FaultCfgIo::At::read_eintr));
 
     EXPECT_FALSE(session.dirty());
-    EXPECT_EQ(session.entry("messages/en/page.html").data, "original");
+    EXPECT_EQ(session.entry("templates/replacement/en/page.html").data, "original");
 }
 
 TEST_F(ArchiveSessionTest, SlowReadCompletesWithoutBecomingAnIoFailure) {
@@ -490,7 +490,7 @@ TEST_F(ArchiveSessionTest, SlowReadCompletesWithoutBecomingAnIoFailure) {
     const auto elapsed = std::chrono::steady_clock::now() - started;
     EXPECT_GE(elapsed, delay);
     EXPECT_FALSE(session.dirty());
-    EXPECT_EQ(session.entry("messages/en/page.html").data, "original");
+    EXPECT_EQ(session.entry("templates/replacement/en/page.html").data, "original");
 }
 
 TEST_F(ArchiveSessionTest, RejectsMissingIoProvider) {
@@ -500,15 +500,15 @@ TEST_F(ArchiveSessionTest, RejectsMissingIoProvider) {
 TEST_F(ArchiveSessionTest, StagesAndDiscardsResourceChanges) {
     auto session = CfgArchiveSession::open(archive_path_);
 
-    session.put("messages/en/page.html", "changed");
-    session.put("scripts/inspect.macro", "show config");
+    session.put("templates/replacement/en/page.html", "changed");
+    session.put("commands/scripts/inspect.macro", "show config");
     EXPECT_TRUE(session.dirty());
     ASSERT_EQ(session.changes().size(), 2U);
 
     session.discard();
     EXPECT_FALSE(session.dirty());
-    EXPECT_EQ(session.entry("messages/en/page.html").data, "original");
-    EXPECT_FALSE(session.archive().contains("scripts/inspect.macro"));
+    EXPECT_EQ(session.entry("templates/replacement/en/page.html").data, "original");
+    EXPECT_FALSE(session.archive().contains("commands/scripts/inspect.macro"));
 }
 
 TEST_F(ArchiveSessionTest, RejectsInvalidMainConfigurationBeforeStaging) {
@@ -538,28 +538,28 @@ TEST_F(ArchiveSessionTest, KeepsManifestUnderFormatControl) {
 
 TEST_F(ArchiveSessionTest, SavesRecoveryCopyBeforeAtomicReplacement) {
     auto session = CfgArchiveSession::open(archive_path_);
-    session.put("messages/en/page.html", "changed");
+    session.put("templates/replacement/en/page.html", "changed");
 
     session.save();
 
     EXPECT_FALSE(session.dirty());
-    EXPECT_EQ(CfgTar::read_file(archive_path_).at("messages/en/page.html").data,
+    EXPECT_EQ(CfgTar::read_file(archive_path_).at("templates/replacement/en/page.html").data,
               "changed");
     EXPECT_EQ(CfgTar::read_file(archive_path_ + ".previous.bak.cftar")
-                  .at("messages/en/page.html").data,
+                  .at("templates/replacement/en/page.html").data,
               "original");
 }
 
 TEST_F(ArchiveSessionTest, FailedRecoveryPublicationPreservesActiveArchive) {
     auto session = CfgArchiveSession::open(archive_path_);
-    session.put("messages/en/page.html", "changed");
+    session.put("templates/replacement/en/page.html", "changed");
     const auto recovery = archive_path_ + ".previous.bak.cftar";
     ASSERT_TRUE(std::filesystem::create_directory(recovery));
 
     EXPECT_THROW(session.save(), CfgTarError);
 
     EXPECT_TRUE(session.dirty());
-    EXPECT_EQ(CfgTar::read_file(archive_path_).at("messages/en/page.html").data,
+    EXPECT_EQ(CfgTar::read_file(archive_path_).at("templates/replacement/en/page.html").data,
               "original");
     EXPECT_TRUE(std::filesystem::is_directory(recovery));
 }
@@ -579,12 +579,12 @@ TEST_F(ArchiveSessionTest, InjectedRecoveryFailuresPreserveActiveArchive) {
         const auto call = failure == At::close ? 3U : 1U;
         auto session = CfgArchiveSession::open(
             archive_path_, std::make_shared<FaultCfgIo>(failure, call));
-        session.put("messages/en/page.html", "changed");
+        session.put("templates/replacement/en/page.html", "changed");
 
         EXPECT_THROW(session.save(), CfgTarError);
         EXPECT_TRUE(session.dirty());
         EXPECT_EQ(CfgTar::read_file(archive_path_)
-                      .at("messages/en/page.html").data,
+                      .at("templates/replacement/en/page.html").data,
                   "original");
     }
 }
@@ -600,12 +600,12 @@ TEST_F(ArchiveSessionTest, ReportsRecoveryDirectoryDurabilityFailures) {
         std::filesystem::remove(archive_path_ + ".previous.bak.cftar");
         auto session = CfgArchiveSession::open(
             archive_path_, std::make_shared<FaultCfgIo>(failure, call));
-        session.put("messages/en/page.html", "changed");
+        session.put("templates/replacement/en/page.html", "changed");
 
         EXPECT_THROW(session.save(), CfgTarError);
         EXPECT_TRUE(session.dirty());
         EXPECT_EQ(CfgTar::read_file(archive_path_)
-                      .at("messages/en/page.html").data,
+                      .at("templates/replacement/en/page.html").data,
                   "original");
     }
 }
@@ -614,11 +614,11 @@ TEST_F(ArchiveSessionTest, PreservesActiveArchiveWhenOwnerCopyFails) {
     auto session = CfgArchiveSession::open(
         archive_path_,
         std::make_shared<FaultCfgIo>(FaultCfgIo::At::set_owner));
-    session.put("messages/en/page.html", "changed");
+    session.put("templates/replacement/en/page.html", "changed");
 
     EXPECT_THROW(session.save(), CfgTarError);
     EXPECT_TRUE(session.dirty());
-    EXPECT_EQ(CfgTar::read_file(archive_path_).at("messages/en/page.html").data,
+    EXPECT_EQ(CfgTar::read_file(archive_path_).at("templates/replacement/en/page.html").data,
               "original");
 }
 
@@ -642,15 +642,15 @@ TEST_F(ArchiveSessionTest, ActivePreRenameFailuresLeaveOldGenerationSelected) {
         std::filesystem::remove(archive_path_ + ".previous.bak.cftar");
         auto session = CfgArchiveSession::open(
             archive_path_, std::make_shared<FaultCfgIo>(failure, call));
-        session.put("messages/en/page.html", "changed");
+        session.put("templates/replacement/en/page.html", "changed");
 
         EXPECT_THROW(session.save(), CfgTarError);
         EXPECT_TRUE(session.dirty());
         EXPECT_EQ(CfgTar::read_file(archive_path_)
-                      .at("messages/en/page.html").data,
+                      .at("templates/replacement/en/page.html").data,
                   "original");
         EXPECT_EQ(CfgTar::read_file(archive_path_ + ".previous.bak.cftar")
-                      .at("messages/en/page.html").data,
+                      .at("templates/replacement/en/page.html").data,
                   "original");
     }
 }
@@ -667,7 +667,7 @@ TEST_F(ArchiveSessionTest, ActivePostRenameFailuresReportAmbiguousCommit) {
         std::filesystem::remove(archive_path_ + ".previous.bak.cftar");
         auto session = CfgArchiveSession::open(
             archive_path_, std::make_shared<FaultCfgIo>(failure, call));
-        session.put("messages/en/page.html", "changed");
+        session.put("templates/replacement/en/page.html", "changed");
 
         EXPECT_THROW(session.save(), CfgTarError);
 
@@ -676,10 +676,10 @@ TEST_F(ArchiveSessionTest, ActivePostRenameFailuresReportAmbiguousCommit) {
         // durable commit, so the caller must reopen and inspect the archive.
         EXPECT_TRUE(session.dirty());
         EXPECT_EQ(CfgTar::read_file(archive_path_)
-                      .at("messages/en/page.html").data,
+                      .at("templates/replacement/en/page.html").data,
                   "changed");
         EXPECT_EQ(CfgTar::read_file(archive_path_ + ".previous.bak.cftar")
-                      .at("messages/en/page.html").data,
+                      .at("templates/replacement/en/page.html").data,
                   "original");
     }
 }
@@ -693,26 +693,26 @@ TEST_F(ArchiveSessionTest, RetriesInterruptedAndPartialWrites) {
         std::filesystem::remove(archive_path_ + ".previous.bak.cftar");
         auto session = CfgArchiveSession::open(
             archive_path_, std::make_shared<FaultCfgIo>(interruption));
-        session.put("messages/en/page.html", "changed");
+        session.put("templates/replacement/en/page.html", "changed");
 
         EXPECT_NO_THROW(session.save());
         EXPECT_EQ(CfgTar::read_file(archive_path_)
-                      .at("messages/en/page.html").data,
+                      .at("templates/replacement/en/page.html").data,
                   "changed");
     }
 }
 
 TEST_F(ArchiveSessionTest, RefusesToOverwriteAnExternallyChangedArchive) {
     auto session = CfgArchiveSession::open(archive_path_);
-    session.put("messages/en/page.html", "session change");
+    session.put("templates/replacement/en/page.html", "session change");
 
     auto external = valid_archive();
-    external.replace("messages/en/page.html", "external change");
+    external.replace("templates/replacement/en/page.html", "external change");
     ASSERT_EQ(::unlink(archive_path_.c_str()), 0);
     write_archive(external);
 
     EXPECT_THROW(session.save(), CfgTarError);
-    EXPECT_EQ(CfgTar::read_file(archive_path_).at("messages/en/page.html").data,
+    EXPECT_EQ(CfgTar::read_file(archive_path_).at("templates/replacement/en/page.html").data,
               "external change");
     EXPECT_FALSE(std::filesystem::exists(archive_path_ + ".previous.bak.cftar"));
 }
@@ -720,13 +720,13 @@ TEST_F(ArchiveSessionTest, RefusesToOverwriteAnExternallyChangedArchive) {
 TEST_F(ArchiveSessionTest, RemovesResourcesAndReportsTheirChanges) {
     auto session = CfgArchiveSession::open(archive_path_);
 
-    session.remove("messages/en/page.html");
+    session.remove("templates/replacement/en/page.html");
 
     ASSERT_EQ(session.changes().size(), 1U);
     EXPECT_EQ(session.changes().front().kind,
               sx::cfg::CfgArchiveChange::Kind::removed);
-    EXPECT_THROW(session.entry("messages/en/page.html"), CfgTarError);
-    EXPECT_THROW(session.remove("messages/en/page.html"), CfgTarError);
+    EXPECT_THROW(session.entry("templates/replacement/en/page.html"), CfgTarError);
+    EXPECT_THROW(session.remove("templates/replacement/en/page.html"), CfgTarError);
 }
 
 TEST_F(ArchiveSessionTest, StableSidecarLockSerializesIndependentWriters) {
@@ -903,7 +903,7 @@ TEST_F(ArchiveSessionTest, SlowPublicationMakesCompetingWriterTimeOutCleanly) {
         const auto io = std::make_shared<SlowCfgIo>(
             slow_operation, std::chrono::milliseconds(120));
         auto session = CfgArchiveSession::open(archive_path_, io);
-        session.put("messages/en/page.html", "slow but valid");
+        session.put("templates/replacement/en/page.html", "slow but valid");
         std::exception_ptr save_error;
         std::thread publisher([&] {
             try {
@@ -932,10 +932,10 @@ TEST_F(ArchiveSessionTest, SlowPublicationMakesCompetingWriterTimeOutCleanly) {
         if(save_error) std::rethrow_exception(save_error);
         EXPECT_FALSE(session.dirty());
         EXPECT_EQ(CfgTar::read_file(archive_path_)
-                      .at("messages/en/page.html").data,
+                      .at("templates/replacement/en/page.html").data,
                   "slow but valid");
         EXPECT_EQ(CfgTar::read_file(archive_path_ + ".previous.bak.cftar")
-                      .at("messages/en/page.html").data,
+                      .at("templates/replacement/en/page.html").data,
                   "original");
     }
 }
@@ -944,7 +944,7 @@ TEST_F(ArchiveSessionTest, PublicationLongerThanLockWaitDoesNotLoseOwnership) {
     const auto io = std::make_shared<SlowCfgIo>(
         SlowCfgIo::At::write, std::chrono::milliseconds(5200), 1);
     auto session = CfgArchiveSession::open(archive_path_, io);
-    session.put("messages/en/page.html", "slow generation");
+    session.put("templates/replacement/en/page.html", "slow generation");
     std::exception_ptr save_error;
     std::thread publisher([&] {
         try {
@@ -971,7 +971,7 @@ TEST_F(ArchiveSessionTest, PublicationLongerThanLockWaitDoesNotLoseOwnership) {
     publisher.join();
     if(save_error) std::rethrow_exception(save_error);
     EXPECT_EQ(CfgTar::read_file(archive_path_)
-                  .at("messages/en/page.html").data,
+                  .at("templates/replacement/en/page.html").data,
               "slow generation");
 }
 
@@ -979,7 +979,7 @@ TEST_F(ArchiveSessionTest, DetectsManualReplacementDuringSlowRecoveryWrite) {
     const auto io = std::make_shared<SlowCfgIo>(
         SlowCfgIo::At::write, std::chrono::milliseconds(250), 1);
     auto session = CfgArchiveSession::open(archive_path_, io);
-    session.put("messages/en/page.html", "session generation");
+    session.put("templates/replacement/en/page.html", "session generation");
     std::exception_ptr save_error;
     std::thread publisher([&] {
         try {
@@ -995,7 +995,7 @@ TEST_F(ArchiveSessionTest, DetectsManualReplacementDuringSlowRecoveryWrite) {
         FAIL() << "publisher did not enter the delayed recovery write";
     }
     auto external = valid_archive();
-    external.upsert("messages/en/page.html", "manual admin generation");
+    external.upsert("templates/replacement/en/page.html", "manual admin generation");
     const auto manual_path = archive_path_ + ".manual-replacement";
     external.write_file(manual_path);
     if(::rename(manual_path.c_str(), archive_path_.c_str()) != 0) {
@@ -1007,7 +1007,7 @@ TEST_F(ArchiveSessionTest, DetectsManualReplacementDuringSlowRecoveryWrite) {
     ASSERT_TRUE(save_error);
     EXPECT_THROW(std::rethrow_exception(save_error), CfgTarError);
     EXPECT_EQ(CfgTar::read_file(archive_path_)
-                  .at("messages/en/page.html").data,
+                  .at("templates/replacement/en/page.html").data,
               "manual admin generation");
     EXPECT_TRUE(session.dirty());
 }
@@ -1016,7 +1016,7 @@ TEST_F(ArchiveSessionTest, DetectsActiveArchiveRemovalDuringSlowRecoveryWrite) {
     const auto io = std::make_shared<SlowCfgIo>(
         SlowCfgIo::At::write, std::chrono::milliseconds(250), 1);
     auto session = CfgArchiveSession::open(archive_path_, io);
-    session.put("messages/en/page.html", "session generation");
+    session.put("templates/replacement/en/page.html", "session generation");
     std::exception_ptr save_error;
     std::thread publisher([&] {
         try {
@@ -1044,7 +1044,7 @@ TEST_F(ArchiveSessionTest, DetectsActiveArchiveSymlinkDuringSlowRecoveryWrite) {
     const auto io = std::make_shared<SlowCfgIo>(
         SlowCfgIo::At::write, std::chrono::milliseconds(250), 1);
     auto session = CfgArchiveSession::open(archive_path_, io);
-    session.put("messages/en/page.html", "session generation");
+    session.put("templates/replacement/en/page.html", "session generation");
     std::exception_ptr save_error;
     std::thread publisher([&] {
         try {
@@ -1074,12 +1074,12 @@ TEST_F(ArchiveSessionTest, RemovedRecoveryPreventsActivePublication) {
     const auto io = std::make_shared<MutatingCfgIo>(
         MutatingCfgIo::Action::remove_recovery_after_replace);
     auto session = CfgArchiveSession::open(archive_path_, io);
-    session.put("messages/en/page.html", "must not publish");
+    session.put("templates/replacement/en/page.html", "must not publish");
 
     EXPECT_THROW(session.save(), CfgTarError);
 
     EXPECT_EQ(CfgTar::read_file(archive_path_)
-                  .at("messages/en/page.html").data,
+                  .at("templates/replacement/en/page.html").data,
               "original");
     EXPECT_FALSE(std::filesystem::exists(
         archive_path_ + ".previous.bak.cftar"));
@@ -1090,12 +1090,12 @@ TEST_F(ArchiveSessionTest, ReplacedRecoveryPreventsActivePublication) {
     const auto io = std::make_shared<MutatingCfgIo>(
         MutatingCfgIo::Action::corrupt_recovery_after_replace);
     auto session = CfgArchiveSession::open(archive_path_, io);
-    session.put("messages/en/page.html", "must not publish");
+    session.put("templates/replacement/en/page.html", "must not publish");
 
     EXPECT_THROW(session.save(), CfgTarError);
 
     EXPECT_EQ(CfgTar::read_file(archive_path_)
-                  .at("messages/en/page.html").data,
+                  .at("templates/replacement/en/page.html").data,
               "original");
     EXPECT_TRUE(session.dirty());
 }
@@ -1104,12 +1104,12 @@ TEST_F(ArchiveSessionTest, RemovedTemporaryFileCannotPublish) {
     const auto io = std::make_shared<MutatingCfgIo>(
         MutatingCfgIo::Action::remove_temporary_during_write);
     auto session = CfgArchiveSession::open(archive_path_, io);
-    session.put("messages/en/page.html", "must not publish");
+    session.put("templates/replacement/en/page.html", "must not publish");
 
     EXPECT_THROW(session.save(), CfgTarError);
 
     EXPECT_EQ(CfgTar::read_file(archive_path_)
-                  .at("messages/en/page.html").data,
+                  .at("templates/replacement/en/page.html").data,
               "original");
     EXPECT_TRUE(session.dirty());
 }
@@ -1135,7 +1135,7 @@ TEST_F(ArchiveSessionTest, ProcessDeathLeavesAConsistentPublicationBoundary) {
                 const auto io = std::make_shared<KillPointCfgIo>(
                     kill_point, archive_path_, ready[1]);
                 auto session = CfgArchiveSession::open(archive_path_, io);
-                session.put("messages/en/page.html", "killed generation");
+                session.put("templates/replacement/en/page.html", "killed generation");
                 session.save();
                 _exit(91);
             }
@@ -1156,7 +1156,7 @@ TEST_F(ArchiveSessionTest, ProcessDeathLeavesAConsistentPublicationBoundary) {
         ASSERT_EQ(WTERMSIG(status), SIGKILL);
 
         const auto active = CfgTar::read_file(archive_path_);
-        const auto active_value = active.at("messages/en/page.html").data;
+        const auto active_value = active.at("templates/replacement/en/page.html").data;
         if(kill_point == After::active_replace) {
             EXPECT_EQ(active_value, "killed generation");
         }
@@ -1170,7 +1170,7 @@ TEST_F(ArchiveSessionTest, ProcessDeathLeavesAConsistentPublicationBoundary) {
         }
         else {
             EXPECT_EQ(CfgTar::read_file(recovery_path)
-                          .at("messages/en/page.html").data,
+                          .at("templates/replacement/en/page.html").data,
                       "original");
         }
 
@@ -1197,12 +1197,12 @@ TEST_F(ArchiveSessionTest, ResourceExhaustionPreservesActiveGeneration) {
         write_archive(valid_archive());
         const auto io = std::make_shared<ResourceFailureCfgIo>(operation, error);
         auto session = CfgArchiveSession::open(archive_path_, io);
-        session.put("messages/en/page.html", "must not publish");
+        session.put("templates/replacement/en/page.html", "must not publish");
 
         EXPECT_THROW(session.save(), CfgTarError);
 
         EXPECT_EQ(CfgTar::read_file(archive_path_)
-                      .at("messages/en/page.html").data,
+                      .at("templates/replacement/en/page.html").data,
                   "original");
         EXPECT_TRUE(session.dirty());
         EXPECT_NO_THROW(CfgFileLock::acquire(
@@ -1217,7 +1217,7 @@ TEST_F(ArchiveSessionTest, SlowFailingSyncKeepsCompetingWriterOut) {
         1,
         std::chrono::milliseconds(250));
     auto session = CfgArchiveSession::open(archive_path_, io);
-    session.put("messages/en/page.html", "must not publish");
+    session.put("templates/replacement/en/page.html", "must not publish");
     std::exception_ptr save_error;
     std::thread publisher([&] {
         try {
@@ -1241,7 +1241,7 @@ TEST_F(ArchiveSessionTest, SlowFailingSyncKeepsCompetingWriterOut) {
     ASSERT_TRUE(save_error);
     EXPECT_THROW(std::rethrow_exception(save_error), CfgTarError);
     EXPECT_EQ(CfgTar::read_file(archive_path_)
-                  .at("messages/en/page.html").data,
+                  .at("templates/replacement/en/page.html").data,
               "original");
     EXPECT_TRUE(session.dirty());
     EXPECT_NO_THROW(CfgFileLock::acquire(
@@ -1315,7 +1315,7 @@ TEST_F(ArchiveSessionTest, ExposureIsReadOnlyAndLivesOnlyInRegistry) {
     CfgExposureRegistry exposures;
 
     const auto exposure = exposures.expose(
-        session.archive(), "messages/en/page.html");
+        session.archive(), "templates/replacement/en/page.html");
     struct stat metadata {};
     ASSERT_EQ(::stat(exposure.filesystem_path.c_str(), &metadata), 0);
     EXPECT_EQ(metadata.st_mode & 0777, 0400);
@@ -1330,7 +1330,7 @@ TEST_F(ArchiveSessionTest, RegistryDestructionClosesAllExposures) {
     std::string path;
     {
         CfgExposureRegistry exposures;
-        path = exposures.expose(session.archive(), "messages").filesystem_path;
+        path = exposures.expose(session.archive(), "templates").filesystem_path;
         EXPECT_TRUE(std::filesystem::exists(path));
     }
     EXPECT_FALSE(std::filesystem::exists(path));
@@ -1340,8 +1340,8 @@ TEST_F(ArchiveSessionTest, ExposureRegistryListsAndClosesMultipleTrees) {
     const auto session = CfgArchiveSession::open(archive_path_);
     CfgExposureRegistry exposures;
 
-    const auto first = exposures.expose(session.archive(), "messages/en/page.html");
-    const auto second = exposures.expose(session.archive(), "messages");
+    const auto first = exposures.expose(session.archive(), "templates/replacement/en/page.html");
+    const auto second = exposures.expose(session.archive(), "templates");
     const auto entries = exposures.entries();
 
     EXPECT_EQ(entries.size(), 2U);
@@ -1356,7 +1356,7 @@ TEST_F(ArchiveSessionTest, ExposureRejectsMissingLogicalPath) {
     const auto session = CfgArchiveSession::open(archive_path_);
     CfgExposureRegistry exposures;
 
-    EXPECT_THROW(exposures.expose(session.archive(), "messages/missing"), CfgTarError);
+    EXPECT_THROW(exposures.expose(session.archive(), "templates/missing"), CfgTarError);
     EXPECT_TRUE(exposures.entries().empty());
 }
 

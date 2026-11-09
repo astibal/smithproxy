@@ -2,9 +2,12 @@
 
 #include <service/cfgapi/cfg_archive.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cstring>
 #include <dirent.h>
+#include <filesystem>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -215,6 +218,41 @@ bool absent_optional_directory(const CfgPack::Directory& directory) {
     fail_errno("cannot inspect optional CfgTar directory " + directory.source_path);
 }
 
+// Add short, non-authoritative descriptions only for collections that are
+// actually present. Runtime behavior continues to follow the logical path and
+// payload; resource.json exists for administrators and generic archive tools.
+void add_resource_descriptions(CfgTar& archive) {
+    struct Description {
+        std::string_view directory;
+        std::string_view text;
+    };
+    constexpr std::array descriptions {
+        Description{"pki/ca/default/", "Default Smithproxy certificate authority and service identities."},
+        Description{"pki/trust/", "Product-managed trust anchors used for upstream certificate verification."},
+        Description{"pki/mitm/ssh/hostkeys/", "SSH host keys presented by the interception service."},
+        Description{"pki/mitm/tls/server/sni/", "TLS server identities selected by the intercepted SNI value."},
+        Description{"pki/mitm/tls/server/ip/", "TLS server identities selected by the intercepted destination address."},
+        Description{"pki/mitm/tls/client/sni/", "TLS client identities selected by the upstream SNI value."},
+        Description{"pki/mitm/tls/client/ip/", "TLS client identities selected by the upstream destination address."},
+        Description{"templates/replacement/", "Localized response templates presented to intercepted clients."},
+        Description{"commands/macros/", "Administrative command macros stored as inert configuration resources."},
+        Description{"commands/scripts/", "Administrative scripts stored as inert configuration resources."},
+    };
+
+    for(const auto& description : descriptions) {
+        const bool present = std::any_of(
+            archive.entries().begin(), archive.entries().end(),
+            [&](const auto& item) {
+                return item.first.rfind(description.directory, 0) == 0;
+            });
+        const std::string path = std::string(description.directory) + "resource.json";
+        if(present && !archive.contains(path)) {
+            archive.add(path, "{\n  \"description\": \"" +
+                                  std::string(description.text) + "\"\n}\n");
+        }
+    }
+}
+
 } // namespace
 
 CfgTar CfgPack::build(const Input& input) {
@@ -253,6 +291,8 @@ CfgTar CfgPack::build(const Input& input) {
                       directory.archive_prefix);
     }
 
+    add_resource_descriptions(archive);
+
     CfgManifest::validate(archive);
     return archive;
 }
@@ -280,6 +320,140 @@ bool CfgPack::migrate(const Migration& migration) {
         }
         throw;
     }
+}
+
+CfgPack::LegacyRetireResult CfgPack::retire_legacy_tree(
+    const std::string& root,
+    const std::string& active_archive,
+    const std::string& backup_name) {
+    namespace fs = std::filesystem;
+
+    if(root.empty() || active_archive.empty() || backup_name.empty() ||
+       active_archive.find('/') != std::string::npos ||
+       backup_name.find('/') != std::string::npos) {
+        fail("invalid legacy retirement path");
+    }
+
+    // Never clean around an archive that has not passed the complete native
+    // format validation. The memento is a recovery aid, not a substitute for
+    // a working startup configuration.
+    const auto native_path = (fs::path(root) / active_archive).string();
+    CfgManifest::validate(CfgTar::read_file(native_path));
+
+    const auto backup_path = (fs::path(root) / backup_name).string();
+    const auto archive_prefix = fs::path("etc/smithproxy");
+    CfgTar current;
+    std::vector<fs::path> files;
+    std::vector<fs::path> directories;
+    std::error_code error;
+
+    // Snapshot every remaining product-owned file. Native generations,
+    // publication locks and recovery archives stay beside the active CFtar.
+    for(fs::recursive_directory_iterator iterator(
+            root, fs::directory_options::none, error), end;
+        !error && iterator != end; iterator.increment(error)) {
+        const auto relative = iterator->path().lexically_relative(root);
+        const auto first = *relative.begin();
+        const auto first_name = first.string();
+        const bool native_sidecar = first_name == active_archive ||
+            first_name == backup_name ||
+            first_name.rfind(active_archive + ".", 0) == 0;
+        if(native_sidecar) {
+            if(iterator->is_directory(error)) iterator.disable_recursion_pending();
+            error.clear();
+            continue;
+        }
+
+        const auto status = iterator->symlink_status(error);
+        if(error) break;
+        if(fs::is_directory(status)) {
+            directories.push_back(iterator->path());
+            continue;
+        }
+        if(!fs::is_regular_file(status)) {
+            fail("unsupported legacy configuration entry: " +
+                 iterator->path().string());
+        }
+
+        const auto payload = read_input(iterator->path().string());
+        const auto archived = (archive_prefix / relative).generic_string();
+        current.add(archived, payload,
+                    (status.permissions() & fs::perms::owner_exec) != fs::perms::none);
+        files.push_back(iterator->path());
+    }
+    if(error) {
+        fail("cannot scan legacy configuration tree " + root + ": " +
+             error.message());
+    }
+    if(files.empty()) return {};
+
+    LegacyRetireResult result;
+    CfgTar memento;
+    struct stat backup_state {};
+    if(::lstat(backup_path.c_str(), &backup_state) == 0) {
+        if(!S_ISREG(backup_state.st_mode)) {
+            fail("legacy configuration memento is not a regular file: " + backup_path);
+        }
+        memento = CfgTar::read_file(backup_path);
+        for(const auto& [path, entry] : current.entries()) {
+            if(!memento.contains(path) ||
+               memento.at(path).data != entry.data ||
+               memento.at(path).executable != entry.executable) {
+                fail("legacy configuration changed after memento creation: " + path);
+            }
+        }
+    }
+    else if(errno == ENOENT) {
+        current.write_file(backup_path);
+        memento = current;
+        result.backup_created = true;
+
+        Fd parent(::open(root.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+        if(parent.get() < 0 || ::fsync(parent.get()) != 0) {
+            fail_errno("cannot sync legacy configuration memento directory " + root);
+        }
+    }
+    else {
+        fail_errno("cannot inspect legacy configuration memento " + backup_path);
+    }
+
+    // Delete files before their directories. A partial cleanup is harmless:
+    // the next start verifies every survivor against the immutable memento and
+    // continues. A changed survivor stops cleanup rather than losing data.
+    for(const auto& file : files) {
+        const auto relative = file.lexically_relative(root).generic_string();
+        const auto archived = (archive_prefix / relative).generic_string();
+        struct stat state {};
+        if(::lstat(file.c_str(), &state) != 0 || !S_ISREG(state.st_mode)) {
+            fail("legacy configuration entry changed before removal: " +
+                 file.string());
+        }
+        const auto& saved = memento.at(archived);
+        if(read_input(file.string()) != saved.data ||
+           ((state.st_mode & S_IXUSR) != 0) != saved.executable) {
+            fail("legacy configuration changed before removal: " + file.string());
+        }
+        if(::unlink(file.c_str()) != 0) {
+            fail_errno("cannot remove migrated legacy file " + file.string());
+        }
+        ++result.files_removed;
+    }
+
+    std::sort(directories.begin(), directories.end(),
+              [](const auto& left, const auto& right) {
+                  return left.native().size() > right.native().size();
+              });
+    for(const auto& directory : directories) {
+        if(::rmdir(directory.c_str()) != 0 && errno != ENOTEMPTY) {
+            fail_errno("cannot remove migrated legacy directory " + directory.string());
+        }
+    }
+
+    Fd parent(::open(root.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+    if(parent.get() < 0 || ::fsync(parent.get()) != 0) {
+        fail_errno("cannot sync retired legacy configuration directory " + root);
+    }
+    return result;
 }
 
 } // namespace sx::cfg

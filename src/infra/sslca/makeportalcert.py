@@ -10,18 +10,21 @@ sys.path.append('/usr/share/smithproxy/infra/bend')
 
 import sxyca
 import makecerts as utils
+from cftarcerts import certificate_workspace
 
 
 def portal_autogen():
 
-    sxyca.init_directories("/etc/smithproxy")
-    sxyca.init_settings(cn=None, c=None)
-    sxyca.load_settings()
+    with certificate_workspace() as workspace:
+        sxyca.init_directories(str(workspace.root))
+        sxyca.init_settings(cn=None, c=None)
+        sxyca.load_settings()
 
-    ca_key = sxyca.load_key(os.path.join(sxyca.SETTINGS["path"], "ca-key.pem"))
-    ca_cert = sxyca.load_certificate(os.path.join(sxyca.SETTINGS["path"], "ca-cert.pem"))
+        ca_key = sxyca.load_key(os.path.join(sxyca.SETTINGS["path"], "ca-key.pem"))
+        ca_cert = sxyca.load_certificate(os.path.join(sxyca.SETTINGS["path"], "ca-cert.pem"))
 
-    prt_key, prt_cert = utils.generate_portal_cert(ca_key, ca_cert)
+        prt_key, prt_cert = utils.generate_portal_cert(
+            ca_key, ca_cert, str(workspace.config_file))
 
     print("portal certificate regenerated")
 

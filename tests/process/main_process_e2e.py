@@ -11,9 +11,9 @@ import tempfile
 
 
 def invoke(binary: Path, source: Path, runtime: Path, arguments: list[str],
-           expected: int, needle: str) -> None:
+           expected: int, needle: str, *, cwd: Path | None = None) -> None:
     result = subprocess.run(
-        [str(binary), *arguments], cwd=source,
+        [str(binary), *arguments], cwd=cwd or source,
         env={**os.environ, "SMITHPROXY_PID_FILE": str(runtime / "smithproxy.pid")},
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=30)
     if result.returncode != expected or needle not in result.stdout:
@@ -26,9 +26,11 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("binary", type=Path)
     parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--native-archive", type=Path, required=True)
     args = parser.parse_args()
     binary = args.binary.resolve()
     source = args.source.resolve()
+    native_archive = args.native_archive.resolve()
 
     with tempfile.TemporaryDirectory(prefix="smithproxy-main-e2e-") as temp:
         runtime = Path(temp)
@@ -52,6 +54,14 @@ def main() -> None:
         invoke(binary, source, runtime,
                ["--config-check-only", "--config-file", str(source / "etc/smithproxy.cfg")],
                0, "Config file check OK")
+
+        # The packaged archive must pass the deeper native resource check from
+        # an empty working directory. No legacy certificate or template tree
+        # is copied beside it, so success proves that runtime inputs came from
+        # CFtar (system trust remains operating-system state by design).
+        invoke(binary, source, runtime,
+               ["--config-check-only", "--config-file", str(native_archive)],
+               0, "Config file check OK", cwd=runtime)
         for verbosity in ("--debug", "--diagnose", "--dump", "--extreme"):
             invoke(binary, source, runtime,
                    [verbosity, "--tenant-name", "default", "--config-check-only",

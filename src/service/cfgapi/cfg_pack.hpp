@@ -44,6 +44,11 @@ public:
         std::string archive_path;
     };
 
+    struct LegacyRetireResult {
+        bool backup_created = false;
+        std::size_t files_removed = 0;
+    };
+
     // Read every input exactly once, assemble the canonical v1 namespace and
     // validate the result before returning it to a writer.
     static CfgTar build(const Input& input);
@@ -52,6 +57,14 @@ public:
     // concurrently. Returning false means another valid archive already owns
     // the destination; all other failures remain explicit exceptions.
     static bool migrate(const Migration& migration);
+
+    // Preserve the pre-CFtar /etc tree in one plain TAR and remove the
+    // individual files only after both native and legacy archives validate.
+    // Repeated calls finish an interrupted cleanup against the same memento.
+    static LegacyRetireResult retire_legacy_tree(
+        const std::string& root,
+        const std::string& active_archive,
+        const std::string& backup_name);
 };
 
 } // namespace sx::cfg
