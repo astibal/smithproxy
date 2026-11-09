@@ -538,8 +538,6 @@ public:
     size_t cleanup_db_prof_script ();
 
     std::shared_ptr<PolicyRule>policy_rule(int index);
-    int policy_match (baseProxy *proxy);
-    int policy_match (std::vector<baseHostCX *> &left, std::vector<baseHostCX *> &right);
     int policy_action (int index);
 
 

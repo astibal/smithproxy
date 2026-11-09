@@ -906,6 +906,23 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                         ${PROJECT_SOURCE_DIR}/tests/patch-runner/harness/test-capture-output.py)
                 set_tests_properties(unit.capture_output_gate PROPERTIES
                         LABELS "native;capture" TIMEOUT 30)
+                if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+                    add_test(NAME integration.policy_revalidation
+                            COMMAND ${Python3_EXECUTABLE}
+                            ${PROJECT_SOURCE_DIR}/tests/integration/revalidation_gate.py
+                            $<TARGET_FILE:smithproxy> ${CMAKE_BINARY_DIR}/revalidation-tests/standard)
+                    foreach(quic_case policy role)
+                        add_test(NAME integration.policy_revalidation_quic_${quic_case}
+                                COMMAND ${Python3_EXECUTABLE}
+                                ${PROJECT_SOURCE_DIR}/tests/integration/revalidation_gate.py
+                                $<TARGET_FILE:smithproxy> ${CMAKE_BINARY_DIR}/revalidation-tests/quic-${quic_case}
+                                --quic --trigger ${quic_case})
+                        set_tests_properties(integration.policy_revalidation_quic_${quic_case}
+                                PROPERTIES LABELS "native;integration;network;quic" TIMEOUT 120)
+                    endforeach()
+                    set_tests_properties(integration.policy_revalidation
+                            PROPERTIES LABELS "native;integration;network" TIMEOUT 240)
+                endif()
                 if(USE_LIBSSH)
                     execute_process(
                             COMMAND ${Python3_EXECUTABLE} -c "import paramiko"

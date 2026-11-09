@@ -295,6 +295,7 @@ public:
     /** Tuple of the datagram currently/most recently dispatched to OpenSSL. */
     datagram_endpoint current_peer() const;
     datagram_endpoint current_local() const;
+    unsigned current_ingress_ifindex() const;
     /** Identity of the CID family currently being dispatched to OpenSSL. */
     std::uint64_t current_association() const;
     bool local_address_enabled() const { return local_address_enabled_; }

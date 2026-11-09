@@ -48,6 +48,11 @@
 
 namespace sx::proxymaker {
 
+    int match_policy(baseProxy* proxy);
+    int match_policy(std::vector<baseHostCX*>& left, std::vector<baseHostCX*>& right,
+                     MitmProxy* observer = nullptr);
+
+
     std::unique_ptr<MitmProxy> make(std::unique_ptr<baseHostCX> left,
                                     std::unique_ptr<baseHostCX> right);
     bool policy (std::unique_ptr<MitmProxy> &proxy, bool implicit_allow);

@@ -220,6 +220,7 @@ private:
         std::uint64_t capture_association = 0; ///< Downstream dispatcher CID family.
         std::size_t keylog_cursor = 0; ///< Number of keylog records already published.
         std::unique_ptr<multiflow::flow_proxy> proxy;
+        unsigned ingress_ifindex = 0; ///< Interface captured at admission.
         datagram_endpoint client_endpoint;
         datagram_endpoint target_endpoint;
         std::uint64_t forwarded_bytes = 0;
@@ -260,6 +261,7 @@ private:
     std::map<std::uint64_t, pending_capture> pending_captures_; ///< CID family -> journal.
     std::map<std::uint64_t, std::weak_ptr<sx::session_traffic_log>> capture_routes_;
     struct dispatcher_binding {
+        unsigned ingress_ifindex = 0;
         datagram_endpoint client;
         datagram_endpoint destination;
         std::uint64_t association = 0;

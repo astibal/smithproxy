@@ -543,6 +543,7 @@ void listener_service::accept_connections() {
             incoming.target_endpoint = binding->second.destination;
             incoming.capture_association = binding->second.association;
             incoming.setup = binding->second.setup;
+            incoming.ingress_ifindex = binding->second.ingress_ifindex;
             if (capture_native_) {
                 if (auto pending = pending_captures_.find(incoming.capture_association);
                     pending != pending_captures_.end()) {
@@ -700,6 +701,7 @@ void listener_service::progress_handshake(
                     spq1::stream_context {capture, flow});
             },
         };
+        flow_context.ingress_ifindex = value.ingress_ifindex;
         if (value.setup) flow_context.parent_connection_id = value.setup->connection_id();
 
         value.proxy = proxy_factory_(
@@ -967,6 +969,7 @@ bool listener_service::prepare_tls_policy(SSL* downstream) {
     if(source_host.empty() || target_host.empty()) return false;
 
     auto setup = setup_factory_(source_host, source_port);
+    if(setup) setup->ingress_ifindex(binding.ingress_ifindex);
     auto policy = setup ? setup->tls_policy(target_host, target_port) : std::nullopt;
     if(!policy) return false;
 
@@ -1014,6 +1017,7 @@ int listener_service::bind_capture_session(SSL* downstream) {
     auto const generation = next_dispatcher_binding_generation_++;
     if (next_dispatcher_binding_generation_ == 0) ++next_dispatcher_binding_generation_;
     dispatcher_bindings_[downstream] = dispatcher_binding {
+        listener_->current_ingress_ifindex(),
         listener_->current_peer(), listener_->current_local(),
         association, generation, std::chrono::steady_clock::now(), {}};
     if (association == 0) {

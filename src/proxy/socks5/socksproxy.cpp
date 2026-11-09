@@ -186,7 +186,7 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
 
                 auto lc_ = std::scoped_lock(CfgFactory::lock());
 
-                matched_policy(CfgFactory::get()->policy_match(l, r));
+                matched_policy(sx::proxymaker::match_policy(l, r, this));
                 if(matched_policy() < 0 and CfgFactory::get()->policy_fail_open) {
                     matched_policy(PolicyRule::POLICY_IMPLICIT_PASS);
                 }
@@ -253,7 +253,7 @@ void ExplicitProxy::handle_explicit_connect(ExplicitProxyCX* cx) {
         bool verdict = false;
         {
             auto lock = std::scoped_lock(CfgFactory::lock());
-            matched_policy(CfgFactory::get()->policy_match(left, right));
+            matched_policy(sx::proxymaker::match_policy(left, right, this));
             if(matched_policy() < 0 and CfgFactory::get()->policy_fail_open) {
                 matched_policy(PolicyRule::POLICY_IMPLICIT_PASS);
             }
@@ -864,9 +864,21 @@ void MitmSocksUdpProxy::on_left_new(std::unique_ptr<baseHostCX> accepted_cx) {
     this->add_proxy(std::move(new_proxy));
     _deb("MitmSocksUdpProxy::on_left_new: finished");
 }
+bool MitmSocksProxy::run_timers() {
+    const bool tick = MasterProxy::run_timers();
+    if(tick) policy_state.validate(*this);
+    return tick;
+}
+
 int MitmSocksProxy::handle_sockets_once(baseCom* c) {
     process_session_lists(*this);
     return ThreadedAcceptorProxy<SocksProxy>::handle_sockets_once(c);
+}
+
+bool MitmSocksUdpProxy::run_timers() {
+    const bool tick = MasterProxy::run_timers();
+    if(tick) policy_state.validate(*this);
+    return tick;
 }
 
 int MitmSocksUdpProxy::handle_sockets_once(baseCom* c) {

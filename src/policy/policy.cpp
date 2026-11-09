@@ -355,7 +355,7 @@ bool PolicyRule::match_proto_vecx(int acl_proto, std::vector<baseHostCX*> const&
 
 
 
-bool PolicyRule::match(baseProxy* p, const sx::net::InterfaceSnapshot* network) {
+bool PolicyRule::match(baseProxy* p, const sx::net::InterfaceSnapshot* network, bool count_match) {
     
     bool lmatch = false;
     bool lpmatch = false;
@@ -430,7 +430,7 @@ bool PolicyRule::match(baseProxy* p, const sx::net::InterfaceSnapshot* network) 
 
         if (proto_match && lmatch && lpmatch && rmatch && rpmatch) {
             _inf("PolicyRule::match %s OK", p->to_string(iINF).c_str());
-            __atomic_fetch_add(&cnt_matches, 1U, __ATOMIC_RELAXED);
+            if(count_match) __atomic_fetch_add(&cnt_matches, 1U, __ATOMIC_RELAXED);
 
             return true;
 
@@ -444,7 +444,7 @@ bool PolicyRule::match(baseProxy* p, const sx::net::InterfaceSnapshot* network) 
 }
 
 bool PolicyRule::match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r,
-                       const sx::net::InterfaceSnapshot* network) {
+                       const sx::net::InterfaceSnapshot* network, bool count_match) {
     bool lmatch = false;
     bool lpmatch = false;
     bool rmatch = false;
@@ -520,7 +520,7 @@ bool PolicyRule::match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r,
 
     if (proto_match && lmatch && lpmatch && rmatch && rpmatch) {
         _inf("PolicyRule::match_lr %s <+> %s OK", ls.c_str(), rs.c_str());
-        __atomic_fetch_add(&cnt_matches, 1U, __ATOMIC_RELAXED);
+        if(count_match) __atomic_fetch_add(&cnt_matches, 1U, __ATOMIC_RELAXED);
         
         return true;
     } else {
