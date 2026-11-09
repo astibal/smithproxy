@@ -226,8 +226,14 @@ namespace sx::http::webhooks {
                           sx::http::AsyncRequest::reply_hook hook, bool content = false) {
             webhook_request_started(payload.size(), action, false, content);
             auto trace = std::make_shared<webhook_request_trace>();
-            const auto accepted = sx::http::AsyncRequest::emit(
-                payload, webhook_tracked_hook(std::move(hook), std::move(trace)));
+            auto tracked = webhook_tracked_hook(std::move(hook), std::move(trace));
+            if(action == "connection-stop") {
+                sx::http::AsyncRequest::emit_terminal(
+                    sx::http::AsyncRequest::settings_snapshot(), payload, tracked);
+                webhook_request_accepted(true);
+                return true;
+            }
+            const auto accepted = sx::http::AsyncRequest::emit(payload, tracked);
             webhook_request_accepted(accepted);
             return accepted;
         }
@@ -517,9 +523,16 @@ namespace sx::http::webhooks {
         };
         if(auto requirements = sift_requirements(); !requirements.empty())
             message["requirements"] = std::move(requirements);
-        auto encoded = to_string(message);
+        auto encoded = action == "connection-stop"
+            ? message.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace)
+            : to_string(message);
         sift_request_started(encoded.size(), false);
         const auto started = std::chrono::steady_clock::now();
+        if(action == "connection-stop") {
+            sx::http::AsyncRequest::emit_terminal(settings, encoded, sift_tracked_hook({}, started));
+            sift_request_accepted(true);
+            return true;
+        }
         const auto accepted = sx::http::AsyncRequest::enqueue(
             std::move(settings), std::move(encoded),
             sift_tracked_hook({}, started));
@@ -822,7 +835,11 @@ namespace sx::http::webhooks {
 
                 if(action_id) msg.push_back({"id", *action_id});
                 msg.push_back({"details", details});
-                msg_str = to_string(msg);
+                // Application metadata may contain non-UTF-8 bytes. Preserve the
+                // terminal event even if optional text requires replacement.
+                msg_str = action == "connection-stop"
+                    ? msg.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace)
+                    : to_string(msg);
             }
             catch(std::bad_array_new_length const& e) {
                 Log::get()->events().insert(ERR, "webhook::send_action failed (bad_array_new_length): action=%s, id=%s: %s", action.c_str(),
