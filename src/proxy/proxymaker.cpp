@@ -48,6 +48,7 @@
 #include <staticcontent.hpp>
 #include <service/http/webhooks.hpp>
 #include <proxy/filters/access_filter.hpp>
+#include <udpcom.hpp>
 
 
 #include <proxy/nbrhood.hpp>
@@ -149,6 +150,8 @@ namespace sx::proxymaker {
             }
         };
 
+        // CfgFactory prepares NetworkCtx ingress/egress metadata once for this
+        // selection; SOCKS and other vector callers use the same path.
         // apply policy and get result
         int policy_num = -1;
         std::unique_lock config_lock(CfgFactory::lock(), std::defer_lock);
@@ -381,6 +384,41 @@ namespace sx::proxymaker {
             std::string connection_id() const override { return id_; }
             sx::proxy::QuicObserver* quic_observer() override { return observer_.get(); }
 
+            std::optional<QuicTlsPolicy> tls_policy(
+                std::string const& host, std::string const& port) override {
+
+                // Reuse normal ordered UDP policy matching. These temporary
+                // contexts have no sockets and never perform transport I/O.
+                auto const& source = details_["info"]["source"];
+                auto const source_host = source["host"].get<std::string>();
+                auto const source_port = source["port"].get<std::string>();
+                baseHostCX left(new UDPCom, source_host.c_str(), source_port.c_str());
+                baseHostCX right(new UDPCom, host.c_str(), port.c_str());
+                left.com()->l3_proto(source_host.find(':') == std::string::npos ? AF_INET : AF_INET6);
+                right.com()->l3_proto(host.find(':') == std::string::npos ? AF_INET : AF_INET6);
+                std::vector<baseHostCX*> sources {&left};
+                std::vector<baseHostCX*> targets {&right};
+
+                // Copy values under one configuration generation. The normal
+                // connection-start webhook remains outside this operation.
+                std::scoped_lock lock(CfgFactory::lock());
+                auto config = CfgFactory::get();
+                const int index = config->policy_match(sources, targets);
+                auto rule = config->lookup_policy(index);
+                if(!rule || config->policy_action(index) != PolicyRule::POLICY_ACTION_PASS) {
+                    log::connect().war("QUIC TLS policy rejected target=%s:%s", host.c_str(), port.c_str());
+                    return std::nullopt;
+                }
+
+                QuicTlsPolicy result;
+                if(auto const& profile = rule->profile_tls) {
+                    result.use_pfs = profile->left_use_pfs && profile->right_use_pfs;
+                    result.alpn_block = profile->opt_alpn_block;
+                    result.disable_reuse = profile->left_disable_reuse;
+                }
+                return result;
+            }
+
             ~QuicSessionSetup() override {
                 if (!notified_) return;
 
@@ -435,7 +473,8 @@ namespace sx::proxymaker {
                             if(result.action == sx::proxy::setup_action::accept &&
                                control.value("quic_lifecycle", 0) == 1) {
                                 observer_ = std::make_unique<sx::proxy::QuicObserver>(
-                                    id_, control_->strict(), control.value("quic_start_server", 0) == 1);
+                                    id_, control_->strict(), control.value("quic_start_server", 0) == 1,
+                                    control.value("quic_schema", 0) == 2);
                             }
                             valid_reply = result.action != sx::proxy::setup_action::invalid;
                             denied = result.action == sx::proxy::setup_action::drop;

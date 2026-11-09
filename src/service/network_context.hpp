@@ -1,5 +1,7 @@
 #pragma once
 
+#include <service/route_cache.hpp>
+#include <functional>
 #include <array>
 #include <atomic>
 #include <condition_variable>
@@ -10,6 +12,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <set>
 #include <thread>
 #include <vector>
 
@@ -19,6 +22,7 @@ struct InterfaceInfo {
     std::uint32_t index = 0;
     std::string name;
     std::uint32_t flags = 0;
+    std::string role{};
 };
 
 struct InterfaceAddress {
@@ -34,18 +38,37 @@ struct InterfaceAddress {
     [[nodiscard]] std::string text() const;
 };
 
+struct InterfaceRoleRule {
+    std::string if_name;
+    std::string if_address;
+    std::string role{};
+    int family = 0;
+    int prefix = 0;
+    std::array<std::uint8_t, 16> network{};
+};
+
 struct InterfaceSnapshot {
     std::uint64_t generation = 0;
+    std::uint64_t route_generation = 0;
+    std::uint64_t role_generation = 0;
+    std::chrono::system_clock::time_point route_changed_at{};
+    std::chrono::system_clock::time_point role_changed_at{};
     bool valid = false;
+    bool roles_valid = false;
+    std::set<std::uint32_t> uplinks;
     std::vector<InterfaceInfo> interfaces;
     std::vector<InterfaceAddress> addresses;
 
+    [[nodiscard]] bool all_interfaces_have_roles() const noexcept;
+    void assign_roles(const std::vector<InterfaceRoleRule>& rules);
+    void assign_automatic_roles(const std::set<std::uint32_t>& uplinks);
+    [[nodiscard]] std::optional<std::string> interface_role(std::uint32_t index) const;
     [[nodiscard]] std::optional<std::string> interface_name(std::uint32_t index) const;
     [[nodiscard]] bool contains_address(int family, const void* address,
                                         std::size_t address_size) const noexcept;
 };
 
-struct InterfaceMonitorStats {
+struct NetworkCtxStats {
     bool running = false;
     std::uint64_t synchronization_attempts = 0;
     std::uint64_t synchronization_successes = 0;
@@ -95,33 +118,48 @@ private:
 
 } // namespace detail
 
-class InterfaceMonitor {
+class NetworkCtx {
 public:
-    InterfaceMonitor(const InterfaceMonitor&) = delete;
-    InterfaceMonitor& operator=(const InterfaceMonitor&) = delete;
+    NetworkCtx(const NetworkCtx&) = delete;
+    NetworkCtx& operator=(const NetworkCtx&) = delete;
 
-    static InterfaceMonitor& instance();
+    static NetworkCtx& instance();
 
     // Starts one reader thread and waits until its first dump succeeds or
     // fails. A failed initial attempt is retried in the background.
     [[nodiscard]] bool start();
     void stop() noexcept;
 
+    using EventSink = std::function<void(bool warning, const std::string& message)>;
+    void set_event_sink(EventSink sink);
+
+    void set_role_rules(std::vector<InterfaceRoleRule> rules);
+    [[nodiscard]] std::vector<InterfaceRoleRule> role_rules() const;
+
+    // Numeric destinations only. A failed lookup is unknown, never interface 0.
+    [[nodiscard]] std::optional<std::uint32_t> route_lookup(const std::string& destination,
+        std::optional<std::uint64_t> generation = std::nullopt) const;
+
     [[nodiscard]] bool running() const noexcept;
     [[nodiscard]] std::shared_ptr<const InterfaceSnapshot> snapshot() const noexcept;
-    [[nodiscard]] InterfaceMonitorStats stats() const noexcept;
+    [[nodiscard]] NetworkCtxStats stats() const noexcept;
     [[nodiscard]] std::string last_error() const;
 
 private:
-    InterfaceMonitor();
-    ~InterfaceMonitor();
+    NetworkCtx();
+    ~NetworkCtx();
 
+    void emit_event(bool warning, const std::string& message) const noexcept;
     void run() noexcept;
     void publish(bool valid);
     void publish_invalid(const std::string& error);
     void signal_initial_result(bool success);
     [[nodiscard]] bool stop_requested() const noexcept;
 
+    mutable std::mutex event_mutex_;
+    EventSink event_sink_;
+    mutable std::mutex roles_mutex_;
+    std::vector<InterfaceRoleRule> role_rules_;
     mutable std::mutex lifecycle_mutex_;
     mutable std::mutex error_mutex_;
     std::condition_variable initial_condition_;
@@ -139,6 +177,7 @@ private:
     std::shared_ptr<const InterfaceSnapshot> snapshot_;
     std::string last_error_;
     std::uint64_t generation_ = 0;
+    RouteCache route_cache_;
     detail::InterfaceTable table_;
 };
 

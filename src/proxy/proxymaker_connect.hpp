@@ -2,12 +2,20 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
 namespace sx::proxy { class QuicObserver; }
 
 namespace sx::proxymaker {
+
+// The handshake needs only these profile values, not a mutable policy object.
+struct QuicTlsPolicy {
+    bool use_pfs = true;
+    bool alpn_block = false;
+    bool disable_reuse = false;  // Downstream; upstream has no ticket cache.
+};
 
 // A multiplexed session exists before its individual MitmProxy streams. Keep
 // its setup alive across certificate verification and the forwarding connect.
@@ -16,6 +24,8 @@ public:
     virtual ~SessionSetup() = default;
     virtual proxy::QuicObserver* quic_observer() { return nullptr; }
     virtual std::string connection_id() const { return {}; }
+    virtual std::optional<QuicTlsPolicy> tls_policy(
+        std::string const&, std::string const&) { return QuicTlsPolicy {}; }
     virtual bool start(std::string const& host, std::string const& port) = 0;
 };
 

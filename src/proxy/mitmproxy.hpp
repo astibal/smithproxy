@@ -354,7 +354,9 @@ public:
     bool webhook_rewrite_allowed_ = false;
     bool webhook_server_lifecycle_ = false;
     bool webhook_tls_lifecycle_ = false;
+    bool webhook_tls_meta_ = false;
     bool webhook_tls_clienthello_ = false;
+    bool webhook_tls_clienthello_meta_ = false;
     bool webhook_tls_start_server_ = false;
     bool webhook_tls_start_client_ = false;
     // Synchronous setup gate, before application content is analyzed/forwarded.

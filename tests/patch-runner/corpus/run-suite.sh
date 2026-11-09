@@ -2,6 +2,7 @@
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
+source "$HERE/log-diagnostics.sh"
 PPLAY_PY=${PPLAY_PY:-}
 CATEGORY=${1:-all}
 MODE=${MODE:-loopback}
@@ -377,7 +378,7 @@ for fixture in "${CASES[@]}"; do
         # Accept only that asymmetric outcome: the client must fail promptly,
         # and the origin log must prove that it received no payload at all.
         if grep -Eq 'Broken pipe|connection closed by peer' "$client_log" \
-            && ! grep -Eqi 'DIE.AFTER|TIMEOUT|Traceback|AssertionError' "$client_log" \
+            && ! pplay_has_failure_diagnostic "$client_log" \
             && ! grep -Eqi 'received [0-9]+B|has been received|DIFFERENT DATA' "$server_log"; then
             tls_early_reset=true
         fi

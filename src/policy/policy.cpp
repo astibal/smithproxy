@@ -71,6 +71,8 @@ std::string PolicyRule::to_string(int verbosity) const {
 
     std::stringstream from;
     from << "PolicyRule: ";
+    if(!ingress_role.empty()) from << " ingress_role=" << ingress_role;
+    if(!egress_role.empty()) from << " egress_role=" << egress_role;
 
     if(is_disabled) {
         from << " -- DISABLED -- ";
@@ -353,7 +355,7 @@ bool PolicyRule::match_proto_vecx(int acl_proto, std::vector<baseHostCX*> const&
 
 
 
-bool PolicyRule::match(baseProxy* p) {
+bool PolicyRule::match(baseProxy* p, const sx::net::InterfaceSnapshot* network) {
     
     bool lmatch = false;
     bool lpmatch = false;
@@ -373,6 +375,14 @@ bool PolicyRule::match(baseProxy* p) {
     // Its intended scope cannot be reconstructed safely.  Stop selection at
     // this rule; policy_action() forces configuration errors to deny.
     if(cfg_err_is_disabled) return true;
+    if(!ingress_role.empty() || !egress_role.empty()) {
+        const auto owned = network ? std::shared_ptr<const sx::net::InterfaceSnapshot>{}
+                                   : sx::net::NetworkCtx::instance().snapshot();
+        auto left = p->ls(); left.insert(left.end(), p->lda().begin(), p->lda().end());
+        auto right = p->rs(); right.insert(right.end(), p->rda().begin(), p->rda().end());
+        if(!match_roles(left, right, network ? *network : *owned)) return false;
+    }
+
 
     if((p->ls().empty() && p->lda().empty()) ||
        (p->rs().empty() && p->rda().empty()) ||
@@ -433,7 +443,8 @@ bool PolicyRule::match(baseProxy* p) {
     return false;
 }
 
-bool PolicyRule::match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r) {
+bool PolicyRule::match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r,
+                       const sx::net::InterfaceSnapshot* network) {
     bool lmatch = false;
     bool lpmatch = false;
     bool rmatch = false;
@@ -463,6 +474,12 @@ bool PolicyRule::match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r)
     }
 
     if(cfg_err_is_disabled) return true;
+    if(!ingress_role.empty() || !egress_role.empty()) {
+        const auto owned = network ? std::shared_ptr<const sx::net::InterfaceSnapshot>{}
+                                   : sx::net::NetworkCtx::instance().snapshot();
+        if(!match_roles(l, r, network ? *network : *owned)) return false;
+    }
+
 
     // compare if policy has proto match
     bool proto_match = false;
@@ -511,4 +528,21 @@ bool PolicyRule::match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r)
     }
 
     return false;
+}
+
+bool PolicyRule::match_roles(const std::vector<baseHostCX*>& left,
+                             const std::vector<baseHostCX*>& right,
+                             const sx::net::InterfaceSnapshot& network) const {
+    if(cfg_err_is_disabled) return true;
+    auto matches = [&](const auto& endpoints, const std::string& role, bool ingress) {
+        if(role.empty()) return true;
+        if(endpoints.empty()) return false;
+        for(auto* cx : endpoints) {
+            if(!cx || !cx->com()) return false;
+            const auto actual = network.interface_role(ingress ? cx->com()->ingress_ifindex() : cx->com()->egress_ifindex());
+            if(!actual || *actual != role) return false;
+        }
+        return true;
+    };
+    return matches(left, ingress_role, true) && matches(right, egress_role, false);
 }

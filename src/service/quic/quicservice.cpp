@@ -478,6 +478,41 @@ void listener_service::attach_staged_upstream(session& value) {
     if (!value.target_endpoint.valid()) value.target_endpoint = value.upstream->peer_endpoint();
 }
 
+bool listener_service::prepare_resumed_upstream(session& value) {
+
+    auto const server_name = value.downstream->server_name();
+    auto const [target_host, target_port] = endpoint_parts(value.target_endpoint);
+    if(server_name.empty() || !value.client_endpoint.valid()
+       || (transparent_ && (target_host.empty() || target_port != std::to_string(bound_port_)))) {
+        ++upstream_failures_;
+        log().war("resumed session %llu has no valid SNI or original tuple",
+                  static_cast<unsigned long long>(value.id));
+        return false;
+    }
+
+    // The ticket authenticates the downstream handshake only. The new upstream
+    // still uses peer/hostname verification and the usual policy and hook path.
+    if(!value.setup && setup_factory_) {
+        auto const [host, port] = endpoint_parts(value.client_endpoint);
+        value.setup = setup_factory_(host, port);
+    }
+
+    value.upstream = transparent_
+        ? connect_upstream(value.target_endpoint, server_name, value.setup.get())
+        : connect_upstream(server_name, value.setup.get());
+    dispatcher_bindings_.erase(value.downstream->native_handle());
+
+    if(!value.upstream) {
+        ++upstream_failures_;
+        log().war("resumed session %llu cannot create upstream connection",
+                  static_cast<unsigned long long>(value.id));
+        return false;
+    }
+
+    if(!value.target_endpoint.valid()) value.target_endpoint = value.upstream->peer_endpoint();
+    return true;
+}
+
 void listener_service::accept_connections() {
     while (auto accepted = listener_->accept()) {
         auto connection = std::shared_ptr<openssl_connection>(std::move(accepted));
@@ -504,7 +539,10 @@ void listener_service::accept_connections() {
         auto* ssl = incoming.downstream->native_handle();
         if (auto binding = dispatcher_bindings_.find(ssl);
             binding != dispatcher_bindings_.end()) {
+            if(binding->second.client.valid()) incoming.client_endpoint = binding->second.client;
+            incoming.target_endpoint = binding->second.destination;
             incoming.capture_association = binding->second.association;
+            incoming.setup = binding->second.setup;
             if (capture_native_) {
                 if (auto pending = pending_captures_.find(incoming.capture_association);
                     pending != pending_captures_.end()) {
@@ -556,6 +594,17 @@ void listener_service::progress_handshake(
     // session's tuple. progress_transport() deliberately does not dequeue
     // flow_open, so early application streams remain available to the bridge.
     value.downstream->progress_transport();
+
+    // A resumed handshake does not enter OpenSSL's certificate callback.
+    // Prepare its normal verified forwarding leg before publishing outcomes.
+    if(verify_upstream_ && !value.upstream && value.downstream->handshake_complete()
+       && SSL_session_reused(value.downstream->native_handle())) {
+        if(!prepare_resumed_upstream(value)) {
+            start_draining(value, now);
+            return;
+        }
+    }
+
     if(!hook_outcome(value.setup.get(), value.downstream->native_handle(), true)) {
         start_draining(value, now);
         return;
@@ -892,12 +941,56 @@ bool detail::same_dispatcher_callback_association(
 }
 
 #if SMITHPROXY_OPENSSL_QUIC
-int listener_service::client_hello_callback(SSL* ssl, int*, void* argument) {
+int listener_service::client_hello_callback(SSL* ssl, int* alert, void* argument) {
     auto* service = static_cast<listener_service*>(argument);
-    if (service) service->bind_capture_session(ssl);
-    // Association metadata is observational: inability to retain it must
-    // never reject an otherwise valid client handshake.
-    return SSL_CLIENT_HELLO_SUCCESS;
+    try {
+        if(service && service->prepare_tls_policy(ssl)) return SSL_CLIENT_HELLO_SUCCESS;
+    } catch (...) {
+        // No C++ exception may cross OpenSSL's callback boundary.
+        log().err("QUIC TLS policy preparation raised an exception");
+    }
+    if(alert) *alert = SSL_AD_ACCESS_DENIED;
+    return SSL_CLIENT_HELLO_ERROR;
+}
+
+bool listener_service::prepare_tls_policy(SSL* downstream) {
+
+    const bool associated = bind_capture_session(downstream) != 0;
+    if(!setup_factory_) return true; // Standalone transport fixtures have no policy provider.
+    if(!associated) return !transparent_; // Direct socket fixtures have no dispatcher tuple.
+
+    auto& binding = dispatcher_bindings_.at(downstream);
+    if(binding.setup) return true; // Callback re-entry must retain the same policy snapshot.
+
+    auto const [source_host, source_port] = endpoint_parts(binding.client);
+    auto const [target_host, target_port] = endpoint_parts(binding.destination);
+    if(source_host.empty() || target_host.empty()) return false;
+
+    auto setup = setup_factory_(source_host, source_port);
+    auto policy = setup ? setup->tls_policy(target_host, target_port) : std::nullopt;
+    if(!policy) return false;
+
+    // QUIC requires TLS 1.3 key exchange and an application protocol. Refuse
+    // incompatible profiles rather than silently relaxing either restriction.
+    if(!policy->use_pfs || policy->alpn_block) {
+        log().war("QUIC TLS profile rejects target=%s:%s: pfs=%d alpn-block=%d",
+                  target_host.c_str(), target_port.c_str(), policy->use_pfs, policy->alpn_block);
+        return false;
+    }
+
+    if(policy->disable_reuse) {
+        // Stop new tickets and isolate this handshake from tickets previously
+        // issued under a permissive profile in the shared listener context.
+        static constexpr unsigned char no_reuse[] = "smithproxy-quic-no-reuse";
+        if(SSL_set_num_tickets(downstream, 0) != 1 ||
+           SSL_set_session_id_context(downstream, no_reuse, sizeof(no_reuse) - 1) != 1) {
+            log().war("QUIC TLS profile cannot disable downstream session reuse");
+            return false;
+        }
+    }
+
+    binding.setup = std::move(setup);
+    return true;
 }
 
 int listener_service::bind_capture_session(SSL* downstream) {
@@ -921,7 +1014,8 @@ int listener_service::bind_capture_session(SSL* downstream) {
     auto const generation = next_dispatcher_binding_generation_++;
     if (next_dispatcher_binding_generation_ == 0) ++next_dispatcher_binding_generation_;
     dispatcher_bindings_[downstream] = dispatcher_binding {
-        association, generation, std::chrono::steady_clock::now()};
+        listener_->current_peer(), listener_->current_local(),
+        association, generation, std::chrono::steady_clock::now(), {}};
     if (association == 0) {
         log().war("downstream ClientHello has no QUIC dispatcher association");
         return 0;
@@ -1055,8 +1149,8 @@ int listener_service::prepare_verified_certificate(SSL* downstream) {
     log().deb("starting certificate job sni='%s' peer=%s target=%s",
               server_name.c_str(), endpoint_text(peer_endpoint).c_str(),
               endpoint_text(destination).c_str());
-    std::shared_ptr<proxymaker::SessionSetup> setup;
-    if (setup_factory_) {
+    auto setup = binding == dispatcher_bindings_.end() ? nullptr : binding->second.setup;
+    if(!setup && setup_factory_) {
         auto const [host, port] = endpoint_parts(peer_endpoint);
         setup = setup_factory_(host, port);
     }

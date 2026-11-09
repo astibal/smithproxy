@@ -146,6 +146,8 @@ private:
     /** Bind a newly parsed ClientHello to the dispatcher's stable CID family. */
     static int client_hello_callback(SSL* ssl, int* alert, void* argument);
     int bind_capture_session(SSL* downstream);
+    /** Apply the selected profile before OpenSSL can accept a session ticket. */
+    bool prepare_tls_policy(SSL* downstream);
     /** Start or collect one origin-verification job for a downstream handshake. */
     int prepare_verified_certificate(SSL* downstream);
     struct verified_certificate;
@@ -258,15 +260,20 @@ private:
     std::map<std::uint64_t, pending_capture> pending_captures_; ///< CID family -> journal.
     std::map<std::uint64_t, std::weak_ptr<sx::session_traffic_log>> capture_routes_;
     struct dispatcher_binding {
+        datagram_endpoint client;
+        datagram_endpoint destination;
         std::uint64_t association = 0;
         std::uint64_t generation = 0;
         std::chrono::steady_clock::time_point updated = std::chrono::steady_clock::now();
+        std::shared_ptr<proxymaker::SessionSetup> setup;
     };
     std::map<SSL*, dispatcher_binding> dispatcher_bindings_; ///< ClientHello until accept.
     std::uint64_t next_dispatcher_binding_generation_ = 1;
 
     /** Transfer certificate-worker results to the matching accepted session. */
     void attach_staged_upstream(session& value);
+    /** Restore the forwarding leg when resumption skips certificate selection. */
+    bool prepare_resumed_upstream(session& value);
     /** Record one downstream datagram without exposing QUIC to the logger API. */
     void observe_datagram(datagram_view const& datagram);
     /** Publish keylog records added since the previous session-loop pass. */

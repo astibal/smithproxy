@@ -363,7 +363,7 @@ add_executable(smithproxy
         src/service/stream/tcp_relay.cpp
         src/service/webhook/webhook_broker.cpp
         src/service/netservice.cpp
-        src/service/interface_monitor.cpp
+        src/service/network_context.cpp
         src/service/dnsupd/smithdnsupd.cpp
         src/service/core/smithproxy.hpp
         src/service/core/smithproxy.cpp
@@ -525,7 +525,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 src/service/gre_broker.cpp
                 src/service/cli/cli_broker.cpp
                 src/service/netservice.cpp
-                src/service/interface_monitor.cpp
+                src/service/network_context.cpp
                 src/service/core/authpam.cpp
 
                 tests/unit/utils/str_test.cpp
@@ -703,9 +703,9 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/service/reload/reloadable_resource_test.cpp
         )
 
-        add_executable(sx_gtests_interface_monitor
-                src/service/interface_monitor.cpp
-                tests/unit/service/interface_monitor_tests.cpp
+        add_executable(sx_gtests_network_context
+                src/service/network_context.cpp
+                tests/unit/service/network_context_tests.cpp
         )
 
         add_executable(webhook_control_test tests/webhook_control_test.cpp)
@@ -781,7 +781,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 pthread crypto ssl)
         target_link_libraries(sx_gtests_httpconnect gtest gtest_main)
         target_link_libraries(sx_gtests_reloadable gtest gtest_main pthread)
-        target_link_libraries(sx_gtests_interface_monitor gtest gtest_main pthread)
+        target_link_libraries(sx_gtests_network_context gtest gtest_main pthread
+                nlohmann_json::nlohmann_json ${LIBCONFIGPP_LIBRARIES})
         target_link_libraries(sx_gtests_privsep gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(sx_gtests_file_privsep gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(sx_gtests_gre_broker gtest gtest_main socle_lib pthread crypto ssl)
@@ -851,7 +852,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
             add_test(NAME unit.startstoptls COMMAND sx_gtests_startstoptls)
             add_test(NAME unit.httpconnect COMMAND sx_gtests_httpconnect)
             add_test(NAME unit.reloadable COMMAND sx_gtests_reloadable)
-            add_test(NAME unit.interface_monitor COMMAND sx_gtests_interface_monitor)
+            add_test(NAME unit.network_context COMMAND sx_gtests_network_context)
             add_test(NAME unit.privsep COMMAND sx_gtests_privsep)
             add_test(NAME unit.file_privsep COMMAND sx_gtests_file_privsep)
             add_test(NAME unit.gre_broker COMMAND sx_gtests_gre_broker)
@@ -884,7 +885,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                     COMMAND ${PROJECT_SOURCE_DIR}/tools/test-linux-distros.sh)
             set_tests_properties(
                     unit.core unit.listener_lifecycle unit.http1 unit.startstoptls unit.httpconnect unit.reloadable
-                    unit.interface_monitor
+                    unit.network_context
                     PROPERTIES LABELS "native;unit")
             set_tests_properties(unit.listener_lifecycle
                     PROPERTIES WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}")
@@ -924,7 +925,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
             set_tests_properties(external.inet external.pcap_experiments external.dns
                     PROPERTIES TIMEOUT 180)
             set_tests_properties(unit.reloadable PROPERTIES LABELS "native;unit;reload")
-            set_tests_properties(unit.interface_monitor PROPERTIES LABELS "native;unit;network")
+            set_tests_properties(unit.network_context PROPERTIES LABELS "native;unit;network")
             set_tests_properties(integration.tls_testbed PROPERTIES LABELS "native;integration;tls")
             set_tests_properties(integration.quic_testbed PROPERTIES LABELS "native;integration;quic")
 

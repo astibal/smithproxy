@@ -9,7 +9,7 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 
-#include <service/interface_monitor.hpp>
+#include <service/network_context.hpp>
 
 namespace sx::proxy::local_destination {
 
@@ -140,7 +140,7 @@ inline inspection_result inspect(
     }
 
     const auto interfaces = include_interface_addresses
-        ? sx::net::InterfaceMonitor::instance().snapshot()
+        ? sx::net::NetworkCtx::instance().snapshot()
         : std::shared_ptr<const sx::net::InterfaceSnapshot>{};
     return inspect(reinterpret_cast<const sockaddr*>(&address), address_size,
                    include_interface_addresses, interfaces.get());
@@ -156,7 +156,7 @@ inline inspection_result inspect_connected_peer(
     }
 
     const auto interfaces = include_interface_addresses
-        ? sx::net::InterfaceMonitor::instance().snapshot()
+        ? sx::net::NetworkCtx::instance().snapshot()
         : std::shared_ptr<const sx::net::InterfaceSnapshot>{};
     return inspect(reinterpret_cast<const sockaddr*>(&peer), peer_size,
                    include_interface_addresses, interfaces.get());
