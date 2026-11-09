@@ -112,6 +112,8 @@ class MitmProxy : public baseProxy, public IOController {
     void write_capture_block(std::array<uint8_t, 4> name_space,
                              nlohmann::json const& payload);
     [[nodiscard]] nlohmann::json capture_identity() const;
+    mutable std::optional<nlohmann::json> capture_identity_;
+    std::string capture_connection_label_;
     [[nodiscard]] std::optional<nlohmann::json>
     capture_protocol_profile();
     std::optional<nlohmann::json> capture_tls_left_;

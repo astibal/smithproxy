@@ -59,9 +59,16 @@ regenerated with `tools/wireshark/generate_sample.py`.
 
 The JSON snapshots (`SXME`, `SXST`, `SXTL`) contain both correlation keys:
 
-- `session_id`: process-local Smithproxy connection identifier.
+- `session_id`: process-local capture-session identifier. A monotonic `CAP`
+  suffix distinguishes sessions even when the allocator reuses a proxy address.
 - `proxy_session_key`: stable traffic-log key derived from the protocol and
   client/origin tuple.
+
+The correlation identity is frozen when protocol profiling is enabled, while
+both connection contexts still exist. Final SXME/SXST records reuse that identity
+after teardown instead of recomputing an `unknown-unknown` tuple. Native keys
+prefix both endpoints, for example `tcp_192.0.2.1:50000-tcp_198.51.100.1:443`;
+intercepted TLS uses the `ssli` endpoint prefix.
 
 ## Namespaces
 

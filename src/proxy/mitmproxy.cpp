@@ -410,6 +410,8 @@ void MitmProxy::attach_protocol_tracer() noexcept {
 
 void MitmProxy::enable_protocol_profiling() {
     if(active_protocol_tracer_) return;
+    auto const identity = capture_identity();
+    capture_connection_label_ = to_connection_label(false);
     if(traffic_log_adapter_) traffic_log_adapter_->protocol_tracing(true);
     auto const subject = traffic_log_adapter_
         ? traffic_log_adapter_->protocol_trace_subject() : std::nullopt;
@@ -426,7 +428,8 @@ void MitmProxy::enable_protocol_profiling() {
     if(auto* capture_tracer = dynamic_cast<CaptureProtocolTracer*>(
            active_protocol_tracer_)) {
         capture_tracer->set_identity(
-            to_connection_ID(), socle::traflog::traflog_file_key(this, 'L'),
+            identity.at("session_id").get<std::string>(),
+            identity.at("proxy_session_key").get<std::string>(),
             protocol_trace_subject_);
     }
     attach_protocol_tracer();
@@ -478,11 +481,17 @@ void MitmProxy::write_protocol_profile(std::string_view csv_row) {
 }
 
 nlohmann::json MitmProxy::capture_identity() const {
-    return {
-        {"session_id", to_connection_ID()},
+    // Contexts may already be gone during teardown; pointer addresses can also
+    // be reused by subsequent connections. Freeze identity while contexts exist.
+    if(capture_identity_) return *capture_identity_;
+    static std::atomic_uint64_t next_capture_id{0};
+    capture_identity_ = nlohmann::json {
+        {"session_id", to_connection_ID() + "-CAP-" +
+                       std::to_string(next_capture_id.fetch_add(1, std::memory_order_relaxed))},
         {"proxy_session_key", socle::traflog::traflog_file_key(
             const_cast<MitmProxy*>(this), 'L')},
     };
+    return *capture_identity_;
 }
 
 std::optional<nlohmann::json> MitmProxy::capture_protocol_profile() {
@@ -643,7 +652,8 @@ void MitmProxy::write_capture_enrichment() {
         metadata["ended_at"] = std::time(nullptr);
         metadata["duration_seconds"] = age();
         metadata["policy_index"] = matched_policy();
-        metadata["connection"] = to_connection_label(false);
+        metadata["connection"] = capture_connection_label_.empty()
+            ? to_connection_label(false) : capture_connection_label_;
         metadata["application"] = get_application().value_or("");
         metadata["ja4"] = {
             {"client", ja4.ClientHello},
