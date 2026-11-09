@@ -26,6 +26,34 @@ def metadata_tcp_key(key):
     return flow_key(source.strip('[]'), sport, destination.strip('[]'), dport)
 
 
+def observe_tls(namespace, payload, states):
+    """Check each proxy leg independently; L/R callbacks may interleave.
+
+    A complete SXTL snapshot is meaningful only after both TLS legs are ready.
+    Failed/incomplete handshakes may have diagnostics without an SXTL snapshot.
+    """
+    identity = payload['session_id'], payload['proxy_session_key']
+    if namespace == 'SXTL':
+        if payload.get('transport') != 'tcp':
+            return  # Native QUIC has its own lifecycle contract.
+        if any(states.get((identity, side)) != 'HANDSHAKE_READY' for side in ('L', 'R')):
+            raise ValueError('TLS profile precedes both ready events')
+        return
+    if namespace != 'SXPP' or payload.get('component') != 'tls':
+        return
+    event = payload['event']
+    if event not in ('HANDSHAKE_STARTED', 'HANDSHAKE_READY', 'HANDSHAKE_FAILED'):
+        return
+    key = identity, payload['side']
+    previous = states.get(key)
+    if event == 'HANDSHAKE_STARTED':
+        if previous is not None:
+            raise ValueError('duplicate TLS handshake start')
+    elif previous != 'HANDSHAKE_STARTED':
+        raise ValueError('TLS terminal event without an active handshake')
+    states[key] = event
+
+
 def records(path):
     with path.open('rb') as source:
         endian = None
@@ -89,7 +117,7 @@ def records(path):
                     raise ValueError('invalid SXPP row')
                 row = rows[0]
                 payload = dict(session_id=row[3], proxy_session_key=row[4], seq=int(row[5]),
-                               side=row[6], event=row[10], delta_us=int(row[2]))
+                               side=row[6], component=row[7], event=row[10], delta_us=int(row[2]))
                 if payload['side'] not in ('L', 'R', 'P') or payload['delta_us'] < 0:
                     raise ValueError('invalid event side or delta')
             else:
@@ -102,10 +130,11 @@ def records(path):
             yield namespace, payload
 
 
-def validate(paths, origin_certificate=None):
+def validate(paths, origin_certificate=None, require_tls_failure=False):
     counts = collections.Counter()
     session_keys = {}
     sessions = collections.defaultdict(lambda: collections.defaultdict(list))
+    tls_states = {}
     for path in paths:
         tcp_stages = {}
         early_metadata = set()
@@ -131,6 +160,7 @@ def validate(paths, origin_certificate=None):
                 elif tcp_stages[key] != 3:
                     raise ValueError('metadata interrupts synthetic TCP handshake')
             counts[namespace] += 1
+            observe_tls(namespace, payload, tls_states)
             identity = payload['session_id'], payload['proxy_session_key']
             if session_keys.setdefault(identity[0], identity[1]) != identity[1]:
                 raise ValueError('session identity reused for a different flow tuple')
@@ -161,6 +191,17 @@ def validate(paths, origin_certificate=None):
                 actual_digest = tls['R'].get('peer_certificate', {}).get('sha256', '')
                 if actual_digest.lower().replace(':', '').replace(' ', '') != expected_digest:
                     raise ValueError('origin certificate fingerprint mismatch')
+                # These are different certificate roles in a MITM session:
+                # L.local is presented to the client; R.peer is the origin.
+                for certificate in (tls['L'].get('local_certificate', {}),
+                                    tls['R'].get('peer_certificate', {})):
+                    for field in ('sha256', 'subject', 'issuer', 'serial_hex', 'not_before', 'not_after'):
+                        if not certificate.get(field):
+                            raise ValueError('missing certificate detail: ' + field)
+                    if certificate.get('public_key', {}).get('bits', 0) <= 0:
+                        raise ValueError('missing certificate public key details')
+                if 'origin.runner.lab' not in tls['R']['peer_certificate'].get('san', {}).get('dns', []):
+                    raise ValueError('missing origin certificate SAN')
                 if tls['R'].get('alpn') != 'http/1.1':
                     raise ValueError('unexpected controlled origin ALPN')
                 for side, role in (('L', 'server'), ('R', 'client')):
@@ -181,14 +222,20 @@ def validate(paths, origin_certificate=None):
             tls_verified += 1
     if not tls_verified:
         raise ValueError('no controlled origin TLS metadata verified')
+    failed_sessions = {identity for (identity, _side), state in tls_states.items()
+                       if state == 'HANDSHAKE_FAILED'}
+    if require_tls_failure and len(failed_sessions) < 2:
+        raise ValueError('missing failed TLS sessions from IPv4/IPv6 probes')
     return dict(status='PASS', files=len(paths), blocks=dict(counts),
-                sessions=len(sessions), controlled_tls_sessions=tls_verified)
+                sessions=len(sessions), controlled_tls_sessions=tls_verified,
+                failed_tls_sessions=len(failed_sessions))
 
 
 if __name__ == '__main__':
     try:
         paths = sorted(Path(sys.argv[1]).glob(sys.argv[2] + '*.pcapng'))
-        report = validate(paths, Path(sys.argv[3]) if len(sys.argv) > 3 else None)
+        report = validate(paths, Path(sys.argv[3]) if len(sys.argv) > 3 else None,
+                          '--require-tls-failure' in sys.argv[4:])
     except (ValueError, KeyError, TypeError, OSError, csv.Error, struct.error) as exc:
         print(json.dumps(dict(status='FAIL', error=str(exc))))
         sys.exit(1)

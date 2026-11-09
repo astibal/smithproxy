@@ -493,6 +493,27 @@ ip netns exec "$CLIENT" curl --noproxy '*' -g --fail-with-body -sS --max-time 20
     https://origin.runner.lab/ > "$ROOT/results/https6.txt"
 grep -q 'runner-origin-ok peer=fd00:20::1' "$ROOT/results/https6.txt"
 echo 'PASS6 TLS: client trusts proxy CA only, origin uses a different CA'
+if [[ ${CAPTURE_METADATA_TEST:-0} == 1 ]]; then
+    # Reject the proxy's certificate deliberately. This exercises a real failed
+    # downstream TLS leg, not just a fabricated validator fixture.
+    # Python/OpenSSL rejects during the handshake. curl can defer verification
+    # until after SSL_connect succeeds, which is not a failed-handshake probe.
+    ip netns exec "$CLIENT" python3 - "$ROOT/config/certs/origin-ca.pem" <<'PY' > "$ROOT/results/tls-rejected.txt"
+import socket
+import ssl
+import sys
+
+context = ssl.create_default_context(cafile=sys.argv[1])
+for address in ('198.18.20.2', 'fd00:20::2'):
+    try:
+        with socket.create_connection((address, 443), timeout=20) as raw:
+            with context.wrap_socket(raw, server_hostname='origin.runner.lab'):
+                raise SystemExit('FAIL: unexpectedly trusted proxy certificate')
+    except ssl.SSLCertVerificationError:
+        print('PASS: rejected proxy certificate during handshake:', address)
+PY
+    echo 'PASS TLS failure probes: downstream clients rejected the proxy certificate'
+fi
 ip netns exec "$CLIENT" python3 - <<'PY' > "$ROOT/results/udp.txt"
 import socket
 for family, host, expected_peer in ((socket.AF_INET, '198.18.20.2', '198.18.20.1'),
@@ -1188,7 +1209,7 @@ if [[ $CAPTURE_TEST == 1 ]]; then
     python3 "$ROOT/runner/tests/verify-pcap.py" "$ROOT/data" "$CAPTURE_PREFIX" "$CAPTURE_MARKER" "$CAPTURE_MARKER6" \
         > "$ROOT/results/pcap-validation.json"
     if [[ ${CAPTURE_METADATA_TEST:-0} == 1 ]]; then
-        python3 "$ROOT/runner/tests/verify-capture-metadata.py" "$ROOT/data" "$CAPTURE_PREFIX" "$ROOT/config/certs/origin-cert.pem" \
+        python3 "$ROOT/runner/tests/verify-capture-metadata.py" "$ROOT/data" "$CAPTURE_PREFIX" "$ROOT/config/certs/origin-cert.pem" --require-tls-failure \
             > "$ROOT/results/capture-metadata-validation.json"
         echo 'PASS capture metadata: correlated SXME/SXST/SXTL/SXPP and TLS fingerprints'
     fi

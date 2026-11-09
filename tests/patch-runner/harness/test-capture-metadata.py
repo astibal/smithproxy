@@ -20,12 +20,16 @@ def block(kind, body, endian):
 def capture(endian='<', http_fingerprints=('test-ja4h',)):
     data = block(0x0a0d0d0a, struct.pack(endian + 'IHHq', 0x1a2b3c4d, 1, 0, -1), endian)
     identity = dict(session_id='session-test', proxy_session_key='tcp_192.0.2.1:50000-198.51.100.1:443')
+    for seq, (side, event) in enumerate((('R', 'HANDSHAKE_STARTED'), ('R', 'HANDSHAKE_READY'),
+                                        ('L', 'HANDSHAKE_STARTED'), ('L', 'HANDSHAKE_READY')), 1):
+        payload = (f'2026-01-01T00:00:00Z,1,0,session-test,{identity["proxy_session_key"]},'
+                   f'{seq},{side},tls,connection,,{event},ok,').encode()
+        data += block(0xBAD, struct.pack(endian + 'I4sHHI', 67005, b'SXPP', 1, 2, len(payload)) + payload, endian)
     for ns, schema, extra in [('SXME', 'metadata', {'ja4': {'client': 'test-ja4', 'server': 'test-ja4s', 'http': http_fingerprints}}),
-                              ('SXST', 'statistics', {}), ('SXTL', 'tls', {'R': {'sni': 'origin.runner.lab'}})]:
+                              ('SXST', 'statistics', {}), ('SXTL', 'tls', {'transport': 'tcp', 'R': {'sni': 'origin.runner.lab'}})]:
         payload = json.dumps(dict(identity, schema='smithproxy.' + schema + '.v1', **extra)).encode()
         data += block(0xBAD, struct.pack(endian + 'I4sHHI', 67005, ns.encode(), 1, 1, len(payload)) + payload, endian)
-    payload = ('2026-01-01T00:00:00Z,1,0,session-test,' + identity['proxy_session_key'] + ',1,R,tls,connection,,HANDSHAKE_READY,ok,').encode()
-    return data + block(0xBAD, struct.pack(endian + 'I4sHHI', 67005, b'SXPP', 1, 2, len(payload)) + payload, endian)
+    return data
 
 
 def tcp_packets(flags=(2, 18, 16)):
@@ -44,6 +48,42 @@ def tcp_packets(flags=(2, 18, 16)):
 
 
 class MetadataGateTest(unittest.TestCase):
+    def tls_event(self, side, event, session='tls-test'):
+        return dict(session_id=session, proxy_session_key='tcp_192.0.2.1:50000-198.51.100.1:443',
+                    component='tls', side=side, event=event)
+
+    def test_tls_profile_requires_both_ready_legs(self):
+        states = {}
+        profile = dict(self.tls_event('P', ''), transport='tcp')
+        for side in ('R', 'L'):
+            validator.observe_tls('SXPP', self.tls_event(side, 'HANDSHAKE_STARTED'), states)
+            with self.assertRaisesRegex(ValueError, 'both ready'):
+                validator.observe_tls('SXTL', profile, states)
+            validator.observe_tls('SXPP', self.tls_event(side, 'HANDSHAKE_READY'), states)
+        validator.observe_tls('SXTL', profile, states)
+
+    def test_tls_terminal_without_start_fails(self):
+        for event in ('HANDSHAKE_READY', 'HANDSHAKE_FAILED'):
+            with self.subTest(event=event), self.assertRaisesRegex(ValueError, 'active handshake'):
+                validator.observe_tls('SXPP', self.tls_event('R', event), {})
+
+    def test_failed_tls_cannot_become_ready(self):
+        states = {}
+        for event in ('HANDSHAKE_STARTED', 'HANDSHAKE_FAILED'):
+            validator.observe_tls('SXPP', self.tls_event('R', event), states)
+        with self.assertRaisesRegex(ValueError, 'active handshake'):
+            validator.observe_tls('SXPP', self.tls_event('R', 'HANDSHAKE_READY'), states)
+
+    def test_reused_tuple_has_independent_tls_sessions(self):
+        states = {}
+        for session in ('first', 'second'):
+            for side in ('L', 'R'):
+                validator.observe_tls('SXPP', self.tls_event(side, 'HANDSHAKE_STARTED', session), states)
+        for session in ('second', 'first'):
+            for side in ('R', 'L'):
+                validator.observe_tls('SXPP', self.tls_event(side, 'HANDSHAKE_READY', session), states)
+            validator.observe_tls('SXTL', dict(self.tls_event('P', '', session), transport='tcp'), states)
+
     def run_capture(self, data):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / 'test.pcapng'
@@ -110,13 +150,10 @@ class MetadataGateTest(unittest.TestCase):
 
     def test_reordered_protocol_events_fail(self):
         data = capture()
-        offset = 0
-        while offset < len(data):
-            last = offset
-            offset += struct.unpack_from('<I', data, offset + 4)[0]
-        # Existing seq=1 followed by seq=0, with distinct sequence numbers.
+        # Existing seq=1..4 followed by seq=0, with distinct sequence numbers.
+        payload = b'2026-01-01,1,0,session-test,tcp_192.0.2.1:50000-198.51.100.1:443,0,R,tcp,connection,,CONNECTED,ok,'
         with self.assertRaisesRegex(ValueError, 'out of sequence'):
-            self.run_capture(data + data[last:].replace(b',1,R,tls,', b',0,R,tls,'))
+            self.run_capture(data + block(0xBAD, struct.pack('<I4sHHI', 67005, b'SXPP', 1, 2, len(payload)) + payload, '<'))
 
     def test_orphan_identity_fails(self):
         with self.assertRaises(ValueError):
