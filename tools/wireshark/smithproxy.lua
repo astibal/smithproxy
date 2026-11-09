@@ -91,14 +91,25 @@ local function json_string(payload, key)
 end
 
 local function add_json(payload_tvb, payload, pinfo, tree)
-    tree:add(f_json, payload_tvb, payload)
+    -- Preserve the existing display filter without duplicating the complete
+    -- document as an unreadable single-line item above the JSON tree.
+    tree:add(f_json, payload_tvb, payload):set_hidden()
     local schema = json_string(payload, "schema")
     local session_id = json_string(payload, "session_id")
     local session_key = json_string(payload, "proxy_session_key")
+    local connection = tree:add(sx, payload_tvb, "Connection identity")
     if schema then tree:add(f_schema, schema) end
-    if session_id then tree:add(f_session_id, session_id) end
-    if session_key then tree:add(f_session_key, session_key) end
-    if json_dissector then json_dissector:call(payload_tvb:tvb(), pinfo, tree) end
+    if session_id then connection:add(f_session_id, session_id) end
+    if session_key then connection:add(f_session_key, session_key) end
+    local document = tree:add(sx, payload_tvb, "Metadata — JSON tree")
+    if json_dissector then
+        -- Use Wireshark's parser for nested objects, arrays, escaped strings
+        -- and future fields, rather than maintaining a lossy JSON projection.
+        json_dissector:call(payload_tvb:tvb(), pinfo, document)
+    else
+        document:add(f_payload, payload_tvb)
+        document:add_proto_expert_info(unsupported, "JSON dissector unavailable")
+    end
     return schema or "JSON", session_key
 end
 

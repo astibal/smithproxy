@@ -20,7 +20,7 @@ REFERENCE = Path(__file__).with_name("samples") / "smithproxy-reference.pcapng"
 @unittest.skipIf(os.geteuid() == 0, "tshark disables user Lua as root")
 @unittest.skipUnless(shutil.which("tshark"), "tshark is not installed")
 class SmithproxyDissectorTest(unittest.TestCase):
-    def run_tshark(self, *fields, capture=REFERENCE):
+    def run_tshark(self, *fields, capture=REFERENCE, verbose=False):
         with tempfile.TemporaryDirectory(prefix="smithproxy-tshark-") as temporary:
             directory = Path(temporary)
             readable_capture = directory / "reference.pcapng"
@@ -28,7 +28,7 @@ class SmithproxyDissectorTest(unittest.TestCase):
             shutil.copy2(capture, readable_capture)
             shutil.copy2(DISSECTOR, dissector)
             command = ["tshark", "-r", str(readable_capture), "-X", f"lua_script:{dissector}",
-                       "-T", "fields"]
+                       *(["-V"] if verbose else ["-T", "fields"])]
             for field in fields:
                 command.extend(["-e", field])
             environment = os.environ.copy()
@@ -62,6 +62,17 @@ class SmithproxyDissectorTest(unittest.TestCase):
         self.assertIn("smithproxy-left\tGET\texample.test\t\t\t", rows)
         self.assertIn("smithproxy-right\t\t\t1\texample.test\th2,http/1.1", rows)
         self.assertIn("smithproxy-right\t\t\t2\t\t", rows)
+
+    def test_json_is_a_tree_without_a_duplicate_raw_line(self):
+        detail = "\n".join(self.run_tshark(verbose=True))
+        self.assertIn("Connection identity", detail)
+        self.assertIn("Metadata — JSON tree", detail)
+        self.assertIn("JavaScript Object Notation", detail)
+        self.assertNotIn("JSON payload:", detail)
+        # Existing raw-JSON filters/exports remain compatible even though the
+        # giant string is no longer shown in the packet detail tree.
+        rows = self.run_tshark("smithproxy.json")
+        self.assertTrue(any("smithproxy.tls.v1" in row for row in rows))
 
     def test_reference_capture_is_reproducible(self):
         with tempfile.TemporaryDirectory(prefix="smithproxy-sample-") as temporary:
