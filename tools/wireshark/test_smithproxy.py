@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+import struct
 import tempfile
 import unittest
 from pathlib import Path
@@ -29,8 +30,11 @@ class SmithproxyDissectorTest(unittest.TestCase):
                        "-T", "fields"]
             for field in fields:
                 command.extend(["-e", field])
+            environment = os.environ.copy()
+            environment["XDG_CONFIG_HOME"] = str(directory / "config")
+            environment["WIRESHARK_CONFIG_DIR"] = str(directory / "config" / "wireshark")
             return subprocess.run(command, check=True, capture_output=True,
-                                  text=True).stdout.splitlines()
+                                  text=True, env=environment).stdout.splitlines()
 
     def test_decodes_custom_namespaces_and_protocol_trace(self):
         rows = self.run_tshark("smithproxy.namespace", "smithproxy.schema",
@@ -64,6 +68,28 @@ class SmithproxyDissectorTest(unittest.TestCase):
             subprocess.run([sys.executable, str(GENERATOR), "--output", str(generated)],
                            check=True, stdout=subprocess.DEVNULL)
             self.assertEqual(REFERENCE.read_bytes(), generated.read_bytes())
+
+    def test_unknown_types_and_versions_remain_opaque(self):
+        for field_offset in (16, 18):
+            with self.subTest(field_offset=field_offset), tempfile.TemporaryDirectory() as temporary:
+                data = bytearray(REFERENCE.read_bytes())
+                offset = 0
+                while offset < len(data):
+                    kind, length = struct.unpack_from("<II", data, offset)
+                    if kind in (0xBAD, 0x40000BAD):
+                        struct.pack_into("<H", data, offset + field_offset, 99)
+                    offset += length
+                capture = Path(temporary) / "unknown.pcapng"
+                capture.write_bytes(data)
+                rows = self.run_tshark("smithproxy.namespace", "smithproxy.schema",
+                                      "smithproxy.pp.event", "smithproxy.session_id",
+                                      "_ws.expert.message", capture=capture)
+                custom = [row for row in rows if row.startswith("SX")]
+                self.assertTrue(custom)
+                for row in custom:
+                    fields = row.split("\t")
+                    self.assertEqual(fields[1:4], ["", "", ""])
+                    self.assertIn("99", fields[4])
 
 
 if __name__ == "__main__":

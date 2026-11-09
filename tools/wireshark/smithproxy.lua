@@ -157,6 +157,8 @@ local function attach_flow(session_key, pinfo, tree)
     local ok_dst, dst_address = pcall(address, dst)
     if not ok_src or not ok_dst then return end
     src_port, dst_port = tonumber(src_port), tonumber(dst_port)
+    if not src_port or not dst_port or src_port > 65535 or dst_port > 65535 then return end
+    if protocol ~= "tcp" and protocol ~= "udp" and protocol ~= "quic" then return end
     tree:add(f_flow_protocol, protocol)
     tree:add(f_flow_src, src)
     tree:add(f_flow_dst, dst)
@@ -210,6 +212,11 @@ function sx.dissector(tvb, pinfo, tree)
     if entry_type ~= 1 or not supported_version then
         root:add_proto_expert_info(unsupported,
             string.format("entry_type=%d version=%d", entry_type, version))
+        root:add(f_payload, tvb(12, payload_length))
+        pinfo.cols.protocol = "Smithproxy"
+        pinfo.cols.info = string.format("Smithproxy %s: unsupported type=%d version=%d",
+                                       namespace, entry_type, version)
+        return tvb:len()
     end
 
     local payload_tvb = tvb(12, payload_length)
