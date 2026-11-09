@@ -136,6 +136,49 @@ TEST_F(PackTest, MigratesLegacyFilesWithoutReplacingTheDestination) {
               "settings : {};\n");
 }
 
+TEST_F(PackTest, CompletesTheLegacyReleaseTransitionEndToEnd) {
+    const auto certificates = directory_ + "/certs/default";
+    const auto messages = directory_ + "/msg/en";
+    ASSERT_TRUE(std::filesystem::create_directories(certificates));
+    ASSERT_TRUE(std::filesystem::create_directories(messages));
+    std::ofstream(certificates + "/ca-cert.pem") << "certificate";
+    std::ofstream(messages + "/replacement.txt") << "replacement page";
+
+    input_.directories.push_back({"pki/ca/default", certificates});
+    input_.directories.push_back({"templates/replacement/en", messages});
+    const auto archive_path = directory_ + "/smithproxy.cftar";
+
+    // A release upgrade first publishes and validates the complete native
+    // archive while every legacy input is still available for recovery.
+    ASSERT_TRUE(CfgPack::migrate({input_, archive_path}));
+    const auto archive = sx::cfg::CfgTar::read_file(archive_path);
+    EXPECT_EQ(archive.at("smithproxy.cfg").data, "settings : {};\n");
+    EXPECT_EQ(archive.at("pki/ca/default/ca-cert.pem").data, "certificate");
+    EXPECT_EQ(archive.at("templates/replacement/en/replacement.txt").data,
+              "replacement page");
+
+    // Retirement preserves the original tree as one memento before removing
+    // its loose files. Repeating the startup sequence must be a no-op.
+    const auto retired = CfgPack::retire_legacy_tree(
+        directory_, "smithproxy.cftar", "smithproxy.pre-cftar.tar");
+    EXPECT_TRUE(retired.backup_created);
+    EXPECT_EQ(retired.files_removed, 4U);
+    EXPECT_TRUE(std::filesystem::exists(archive_path));
+    EXPECT_TRUE(std::filesystem::exists(
+        directory_ + "/smithproxy.pre-cftar.tar"));
+    EXPECT_FALSE(std::filesystem::exists(input_.main_config));
+    EXPECT_FALSE(std::filesystem::exists(input_.startup_config));
+    EXPECT_FALSE(std::filesystem::exists(directory_ + "/certs"));
+    EXPECT_FALSE(std::filesystem::exists(directory_ + "/msg"));
+
+    const auto repeated = CfgPack::retire_legacy_tree(
+        directory_, "smithproxy.cftar", "smithproxy.pre-cftar.tar");
+    EXPECT_FALSE(repeated.backup_created);
+    EXPECT_EQ(repeated.files_removed, 0U);
+    EXPECT_NO_THROW(sx::cfg::CfgManifest::validate(
+        sx::cfg::CfgTar::read_file(archive_path)));
+}
+
 TEST_F(PackTest, RejectsInvalidExistingMigrationDestination) {
     const auto output = write("smithproxy.cftar", "not a tar archive");
     EXPECT_THROW(CfgPack::migrate({input_, output}), CfgTarError);
