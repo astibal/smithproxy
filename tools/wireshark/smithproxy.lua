@@ -19,6 +19,11 @@ local f_json = ProtoField.string("smithproxy.json", "JSON payload")
 local f_schema = ProtoField.string("smithproxy.schema", "Schema")
 local f_session_id = ProtoField.string("smithproxy.session_id", "Session ID")
 local f_session_key = ProtoField.string("smithproxy.proxy_session_key", "Proxy session key")
+local f_flow_protocol = ProtoField.string("smithproxy.flow.protocol", "Flow protocol")
+local f_flow_src = ProtoField.string("smithproxy.flow.src", "Flow source")
+local f_flow_dst = ProtoField.string("smithproxy.flow.dst", "Flow destination")
+local f_flow_src_port = ProtoField.uint16("smithproxy.flow.src_port", "Flow source port", base.DEC)
+local f_flow_dst_port = ProtoField.uint16("smithproxy.flow.dst_port", "Flow destination port", base.DEC)
 
 local f_pp_seq = ProtoField.uint64("smithproxy.pp.seq", "Sequence", base.DEC)
 local f_pp_timestamp = ProtoField.string("smithproxy.pp.timestamp", "Timestamp")
@@ -41,7 +46,8 @@ local unsupported = ProtoExpert.new(
 
 sx.fields = {
     f_namespace, f_entry_type, f_version, f_payload_length, f_payload,
-    f_json, f_schema, f_session_id, f_session_key,
+    f_json, f_schema, f_session_id, f_session_key, f_flow_protocol,
+    f_flow_src, f_flow_dst, f_flow_src_port, f_flow_dst_port,
     f_pp_seq, f_pp_timestamp, f_pp_unix_us, f_pp_delta_us, f_pp_side,
     f_pp_component, f_pp_scope, f_pp_stream_id, f_pp_event, f_pp_status,
     f_pp_detail,
@@ -93,33 +99,77 @@ local function add_json(payload_tvb, payload, pinfo, tree)
     if session_id then tree:add(f_session_id, session_id) end
     if session_key then tree:add(f_session_key, session_key) end
     if json_dissector then json_dissector:call(payload_tvb:tvb(), pinfo, tree) end
-    return schema or "JSON"
+    return schema or "JSON", session_key
 end
 
 local function add_uint64(tree, field, value)
     if value and value ~= "" then tree:add(field, UInt64(value)) end
 end
 
-local function add_protocol_profile(payload_tvb, payload, tree)
+local function add_protocol_profile(payload_tvb, payload, version, tree)
     local values, complete = csv_fields(payload)
-    if not complete or #values ~= 11 then
-        tree:add_proto_expert_info(malformed, "SXPP requires exactly 11 RFC 4180 CSV fields")
+    local expected = version == 2 and 13 or 11
+    if not complete or #values ~= expected then
+        tree:add_proto_expert_info(malformed,
+            string.format("SXPP v%d requires exactly %d RFC 4180 CSV fields", version, expected))
         tree:add(f_payload, payload_tvb)
-        return "malformed SXPP"
+        return "malformed SXPP", nil
     end
-    add_uint64(tree, f_pp_seq, values[1])
-    tree:add(f_pp_timestamp, values[2])
-    add_uint64(tree, f_pp_unix_us, values[3])
-    add_uint64(tree, f_pp_delta_us, values[4])
-    tree:add(f_pp_side, values[5])
-    tree:add(f_pp_component, values[6])
-    tree:add(f_pp_scope, values[7])
-    add_uint64(tree, f_pp_stream_id, values[8])
-    tree:add(f_pp_event, values[9])
-    tree:add(f_pp_status, values[10])
-    tree:add(f_pp_detail, values[11])
+    local sequence, timestamp, unix_us, delta_us, side, component, scope
+    local stream_id, event, status, detail, session_key
+    if version == 2 then
+        timestamp, unix_us, delta_us = values[1], values[2], values[3]
+        tree:add(f_session_id, values[4])
+        tree:add(f_session_key, values[5])
+        session_key = values[5]
+        sequence, side, component, scope = values[6], values[7], values[8], values[9]
+        stream_id, event, status, detail = values[10], values[11], values[12], values[13]
+    else
+        sequence, timestamp, unix_us, delta_us = values[1], values[2], values[3], values[4]
+        side, component, scope = values[5], values[6], values[7]
+        stream_id, event, status, detail = values[8], values[9], values[10], values[11]
+    end
+    add_uint64(tree, f_pp_seq, sequence)
+    tree:add(f_pp_timestamp, timestamp)
+    add_uint64(tree, f_pp_unix_us, unix_us)
+    add_uint64(tree, f_pp_delta_us, delta_us)
+    tree:add(f_pp_side, side)
+    tree:add(f_pp_component, component)
+    tree:add(f_pp_scope, scope)
+    add_uint64(tree, f_pp_stream_id, stream_id)
+    tree:add(f_pp_event, event)
+    tree:add(f_pp_status, status)
+    tree:add(f_pp_detail, detail)
     return string.format("#%s %s %s/%s %s",
-        values[1], values[5], values[6], values[7], values[9])
+        sequence, side, component, scope, event), session_key
+end
+
+local function attach_flow(session_key, pinfo, tree)
+    if not session_key then return end
+    local protocol, src, src_port, dst, dst_port =
+        session_key:match("^([^_]+)_(.-):(%d+)%-(.-):(%d+)$")
+    if not protocol then return end
+    local function address(value)
+        if value:find(":", 1, true) then return Address.ipv6(value) end
+        return Address.ip(value)
+    end
+    local ok_src, src_address = pcall(address, src)
+    local ok_dst, dst_address = pcall(address, dst)
+    if not ok_src or not ok_dst then return end
+    src_port, dst_port = tonumber(src_port), tonumber(dst_port)
+    tree:add(f_flow_protocol, protocol)
+    tree:add(f_flow_src, src)
+    tree:add(f_flow_dst, dst)
+    tree:add(f_flow_src_port, src_port)
+    tree:add(f_flow_dst_port, dst_port)
+    pinfo.src, pinfo.net_src, pinfo.src_port = src_address, src_address, src_port
+    pinfo.dst, pinfo.net_dst, pinfo.dst_port = dst_address, dst_address, dst_port
+    -- Wireshark's port_type enum is PT_NONE=0, PT_SCTP=1, PT_TCP=2,
+    -- PT_UDP=3. WSLua exposes pinfo.port_type but not symbolic constants.
+    pinfo.port_type = (protocol == "udp" or protocol == "quic") and 3 or 2
+    local ctype = (protocol == "udp" or protocol == "quic") and convtypes.UDP or convtypes.TCP
+    Conversation.find(pinfo.number, ctype, src_address, dst_address,
+                      src_port, dst_port, true)
 end
 
 function sx.dissector(tvb, pinfo, tree)
@@ -156,22 +206,24 @@ function sx.dissector(tvb, pinfo, tree)
         root:add_proto_expert_info(malformed, "Payload length exceeds custom block data")
         return tvb:len()
     end
-    if entry_type ~= 1 or version ~= 1 then
+    local supported_version = version == 1 or (namespace == "SXPP" and version == 2)
+    if entry_type ~= 1 or not supported_version then
         root:add_proto_expert_info(unsupported,
             string.format("entry_type=%d version=%d", entry_type, version))
     end
 
     local payload_tvb = tvb(12, payload_length)
     local payload = payload_tvb:string()
-    local summary
+    local summary, session_key
     if namespace == "SXPP" then
-        summary = add_protocol_profile(payload_tvb, payload, root)
+        summary, session_key = add_protocol_profile(payload_tvb, payload, version, root)
     elseif namespace == "SXME" or namespace == "SXST" or namespace == "SXTL" then
-        summary = add_json(payload_tvb, payload, pinfo, root)
+        summary, session_key = add_json(payload_tvb, payload, pinfo, root)
     else
         root:add(f_payload, payload_tvb)
         summary = "unknown namespace"
     end
+    attach_flow(session_key, pinfo, root)
 
     pinfo.cols.protocol = namespace
     pinfo.cols.info = string.format("Smithproxy %s v%d: %s", namespace, version, summary)

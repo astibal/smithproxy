@@ -2,8 +2,8 @@
 
 ## Capture metadata (`smithproxy.lua`)
 
-This plugin decodes PCAPNG non-copyable Custom Blocks with Smithproxy PEN
-`67005`: `SXME`, `SXST`, `SXTL` and `SXPP` version 1.
+This plugin decodes PCAPNG copyable Custom Blocks with Smithproxy PEN
+`67005`: `SXME`, `SXST`, `SXTL` version 1 and `SXPP` versions 1–2.
 
 ```sh
 wireshark -X lua_script:tools/wireshark/smithproxy.lua capture.pcapng
@@ -24,15 +24,18 @@ smithproxy.pp.delta_us > 1000
 ```
 
 JSON namespaces are also passed to Wireshark's built-in JSON dissector. SXPP
-columns are exposed as typed `smithproxy.pp.*` fields.
+columns are exposed as typed `smithproxy.pp.*` fields. For records carrying a
+`proxy_session_key`, the plugin restores source/destination addresses and ports
+and registers the tuple in Wireshark's conversation database.
 
-The sample capture includes one conceptual proxy session with a plain HTTP leg,
-a TLS 1.3 leg and all custom namespaces:
+The deterministic reference capture contains one complete proxy session: two
+sequence-correct TCP legs including handshakes and teardown, a plain HTTP
+request/response, a TLS 1.3 handshake and all custom namespaces:
 
 ```sh
 python3 tools/wireshark/generate_sample.py
 wireshark -X lua_script:tools/wireshark/smithproxy.lua \
-  artifacts/synthetic-smithproxy-extensions.pcapng
+  tools/wireshark/samples/smithproxy-reference.pcapng
 python3 tools/wireshark/test_smithproxy.py
 ```
 
