@@ -567,6 +567,13 @@ if(BUILD_TESTING)
         add_test(NAME unit.cftar_help COMMAND smithproxy-cftar --help)
         set_tests_properties(unit.cftar_help
                 PROPERTIES LABELS "native;unit;config" TIMEOUT 10)
+        add_test(NAME integration.cftar_install
+                COMMAND ${PATCH_RUNNER_PYTHON}
+                ${PROJECT_SOURCE_DIR}/tests/install/cftar_install.py
+                --build ${CMAKE_CURRENT_BINARY_DIR}
+                --cftar $<TARGET_FILE:smithproxy-cftar>)
+        set_tests_properties(integration.cftar_install
+                PROPERTIES LABELS "native;integration;config;security" TIMEOUT 60)
         add_test(NAME integration.cftar_process
                 COMMAND ${PATCH_RUNNER_PYTHON}
                 ${PROJECT_SOURCE_DIR}/tests/process/cftar_process_e2e.py
