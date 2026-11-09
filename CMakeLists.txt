@@ -1068,7 +1068,6 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                     COMMAND ${PROJECT_SOURCE_DIR}/tools/test-linux-distros.sh)
             set_tests_properties(
                     unit.core unit.listener_lifecycle unit.http1 unit.startstoptls unit.httpconnect unit.reloadable
-                    unit.cfg_archive_monitor unit.interface_monitor
                     unit.cfg_archive_monitor unit.network_context
                     PROPERTIES LABELS "native;unit")
             set_tests_properties(unit.listener_lifecycle
