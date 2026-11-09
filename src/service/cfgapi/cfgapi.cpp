@@ -992,60 +992,37 @@ bool CfgFactory::upgrade_to_0_9_23 () {
     return true;
 }
 
+bool CfgFactory::backup_before_upgrade(
+    std::string const& previous_version) const {
+    try {
+        std::string content;
+        if(archive_storage_.available()) {
+            // Preserve every native resource, not only smithproxy.cfg.
+            content = archive_storage_.current();
+        }
+        else if(sx::privsep::files::config_read(config_file, content) != 0) {
+            throw FileIOException();
+        }
+
+        if(sx::privsep::files::config_backup(
+               config_file, previous_version, content) != 0) {
+            throw FileIOException();
+        }
+        return true;
+    }
+    catch(std::exception const& error) {
+        _err("error writing config file backup %s", error.what());
+        return false;
+    }
+}
+
+bool CfgFactory::save_upgrade() const {
+    if(save_config()) return true;
+    _err("cannot save upgraded configuration");
+    return false;
+}
+
 bool CfgFactory::upgrade_and_save() {
-
-    auto serialize = [](const Config& config, std::string& output) -> bool {
-        char* data = nullptr;
-        std::size_t size = 0;
-        FILE* stream = ::open_memstream(&data, &size);
-        if(stream == nullptr) return false;
-        config.write(stream);
-        const bool ok = ::fclose(stream) == 0;
-        if(ok) output.assign(data, size);
-        ::free(data);
-        return ok;
-    };
-
-
-    auto backup = [this, &serialize](std::string const& prev_ver) {
-        try {
-            #if ( LIBCONFIGXX_VER_MAJOR >= 1 && LIBCONFIGXX_VER_MINOR < 7 )
-            cfgapi.setOptions(Setting::OptionOpenBraceOnSeparateLine);
-            #else
-            cfgapi.setOptions(Config::OptionOpenBraceOnSeparateLine);
-            #endif
-
-            cfgapi.setTabWidth(4);
-            std::string content;
-            if(!serialize(cfgapi, content)) {
-                throw FileIOException();
-            }
-
-            // A native backup must contain the whole pre-upgrade archive, not
-            // merely the main libconfig member extracted from it.
-            if(config_archive_ && config_archive_->is_cftar()) {
-                content = config_archive_->archive_payload();
-            }
-            if(sx::privsep::files::config_backup(CfgFactory::get()->config_file,
-                                                 prev_ver, content) != 0) {
-                throw FileIOException();
-            }
-        }
-        catch(std::exception const& e) {
-            _err("error writing config file backup %s", e.what());
-            return false;
-        }
-
-        return true;
-    };
-
-    auto save_status = [this]() -> bool {
-        if(not save_config()) {
-            _err("cannot upgrade_version config file");
-            return false;
-        }
-        return true;
-    };
 
     bool do_save = false;
 
@@ -1080,7 +1057,7 @@ bool CfgFactory::upgrade_and_save() {
         auto& v = internal.add("version", Setting::TypeString);
         v = SMITH_VERSION;
 
-        return save_status();
+        return save_upgrade();
 
     }
 
@@ -1095,7 +1072,7 @@ bool CfgFactory::upgrade_and_save() {
         internal.add("schema", libconfig::Setting::TypeInt) = 1000;
     }
 
-    [&]{
+    {
         int num_touches = 0;
 
         if(our_schema > cfg_schema) {
@@ -1114,13 +1091,13 @@ bool CfgFactory::upgrade_and_save() {
                 do_save = true;
             }
         }
-    }();
+    }
 
 
     if(std::string v1; load_if_exists(internal, "version", v1)) {
 
         if (v1 != SMITH_VERSION) {
-            backup(v1);
+            if(!backup_before_upgrade(v1)) return false;
             upgrade_by_version(v1);
 
             internal["version"] = SMITH_VERSION;
@@ -1135,7 +1112,7 @@ bool CfgFactory::upgrade_and_save() {
     }
 
     if(do_save) {
-        return save_status();
+        return save_upgrade();
     }
 
     return false;

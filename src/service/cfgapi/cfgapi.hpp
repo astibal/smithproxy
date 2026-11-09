@@ -629,6 +629,11 @@ public:
                                        std::string description) const;
 
 private:
+    // Preserve the exact persistent source before a version upgrade mutates it.
+    [[nodiscard]] bool backup_before_upgrade(
+        std::string const& previous_version) const;
+    // Persist an upgraded configuration and report a version-specific error.
+    [[nodiscard]] bool save_upgrade() const;
     // Replace the monitored generation after a configuration source is loaded.
     void configure_archive_monitor_locked();
     // Advance the monitor after Smithproxy successfully publishes known bytes.
