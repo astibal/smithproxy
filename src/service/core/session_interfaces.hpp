@@ -1,7 +1,7 @@
 #pragma once
 
 #include <nlohmann/json.hpp>
-#include <service/network_context.hpp>
+#include <service/network_diagnostics.hpp>
 
 namespace sx::net {
 

@@ -1,3 +1,4 @@
+#include <service/network_events.hpp>
 #include <service/core/session_interfaces.hpp>
 #include <service/httpd/diag/diag_network.hpp>
 #include <service/network_context.hpp>
@@ -350,4 +351,132 @@ TEST(NetworkDiagnostics, SessionInterfacesHandleUnknownAndInvalidRoles) {
     EXPECT_TRUE(sx::net::session_interface_json(2, &snapshot)["name"].is_null());
     EXPECT_EQ(sx::net::session_interface_text(2, &snapshot), "ifindex 2 (unknown)");
     EXPECT_TRUE(sx::net::session_interface_json(99, nullptr)["role"].is_null());
+}
+
+TEST(RouteCache, ReusesEntriesAndEvictsLeastRecentlyUsed) {
+    sx::net::RouteCache cache(2);
+    int calls = 0;
+    auto resolve = [&]() -> std::optional<std::uint32_t> { ++calls; return 2; };
+    EXPECT_EQ(cache.lookup("a", resolve), 2);
+    EXPECT_EQ(cache.lookup("b", resolve), 2);
+    EXPECT_EQ(cache.lookup("a", resolve), 2);
+    EXPECT_EQ(calls, 2);
+    cache.lookup("c", resolve);
+    cache.lookup("a", resolve);
+    EXPECT_EQ(calls, 3);
+    cache.lookup("b", resolve);
+    EXPECT_EQ(calls, 4);
+}
+
+TEST(RouteCache, InvalidationRejectsInflightAndWrongGenerationResults) {
+    sx::net::RouteCache cache;
+    auto index = cache.lookup("a", [&]() -> std::optional<std::uint32_t> {
+        cache.invalidate();
+        return 2;
+    });
+    EXPECT_FALSE(index);
+    int calls = 0;
+    auto resolve = [&]() -> std::optional<std::uint32_t> { ++calls; return 3; };
+    EXPECT_FALSE(cache.lookup("a", resolve, 0));
+    EXPECT_EQ(calls, 0);
+    EXPECT_EQ(cache.lookup("a", resolve, 1), 3);
+    EXPECT_EQ(calls, 1);
+}
+
+TEST(RouteCache, CachesUnknownRoutes) {
+    sx::net::RouteCache cache;
+    int calls = 0;
+    auto resolve = [&]() -> std::optional<std::uint32_t> { ++calls; return std::nullopt; };
+    EXPECT_FALSE(cache.lookup("a", resolve));
+    EXPECT_FALSE(cache.lookup("a", resolve));
+    EXPECT_EQ(calls, 1);
+    cache.invalidate();
+    EXPECT_FALSE(cache.lookup("a", resolve));
+    EXPECT_EQ(calls, 2);
+}
+
+TEST(NetworkDiagnostics, GenerationTimesAreUtcAndUnknownIsNull) {
+    sx::net::InterfaceSnapshot snapshot;
+    auto result = sx::net::network_generations_json(snapshot);
+    EXPECT_TRUE(result["route_changed_at"].is_null());
+    EXPECT_TRUE(result["role_changed_at"].is_null());
+
+    snapshot.route_generation = 7;
+    snapshot.role_generation = 3;
+    snapshot.route_changed_at = std::chrono::system_clock::from_time_t(1704067200);
+    snapshot.role_changed_at = std::chrono::system_clock::from_time_t(1704067201);
+    result = sx::net::network_generations_json(snapshot);
+    EXPECT_EQ(result["route_generation"], 7);
+    EXPECT_EQ(result["role_generation"], 3);
+    EXPECT_EQ(result["route_changed_at"], "2024-01-01T00:00:00Z");
+    EXPECT_EQ(result["role_changed_at"], "2024-01-01T00:00:01Z");
+    EXPECT_NE(sx::net::network_generations_text(snapshot).find("current"), std::string::npos);
+    EXPECT_NE(sx::net::network_generations_text(snapshot).find("2024-01-01T00:00:01Z"), std::string::npos);
+}
+
+TEST(NetworkEvents, RecordsChangesButNotIdenticalSnapshots) {
+    sx::net::InterfaceSnapshot before;
+    before.valid = before.roles_valid = true;
+    before.interfaces.push_back({2, "lan0", 1, "Inside"});
+    auto after = before;
+    EXPECT_TRUE(sx::net::network_snapshot_events(before, after).empty());
+    after.interfaces[0].role = "Office";
+    after.role_generation = 1;
+    auto events = sx::net::network_snapshot_events(before, after);
+    ASSERT_EQ(events.size(), 1);
+    EXPECT_NE(events[0].message.find("Inside->Office"), std::string::npos);
+    after.valid = after.roles_valid = false;
+    events = sx::net::network_snapshot_events(before, after);
+    EXPECT_TRUE(events[0].warning);
+    EXPECT_TRUE(events[1].warning);
+    auto recovered = before;
+    events = sx::net::network_snapshot_events(after, recovered);
+    EXPECT_FALSE(events[0].warning);
+    EXPECT_NE(events[0].message.find("synchronized"), std::string::npos);
+}
+
+TEST(NetworkEvents, RecordsInterfaceAndAddressRemoval) {
+    sx::net::InterfaceSnapshot before;
+    before.interfaces.push_back({2, "lan0", 1, "Inside"});
+    sx::net::InterfaceAddress address;
+    address.interface_index = 2;
+    address.family = AF_INET;
+    address.address_size = 4;
+    address.prefix_length = 24;
+    ASSERT_EQ(::inet_pton(AF_INET, "192.0.2.1", address.address.data()), 1);
+    before.addresses.push_back(address);
+    const auto events = sx::net::network_snapshot_events(before, {});
+    ASSERT_EQ(events.size(), 2);
+    EXPECT_NE(events[0].message.find("interface removed"), std::string::npos);
+    EXPECT_NE(events[1].message.find("192.0.2.1/24"), std::string::npos);
+}
+
+TEST(NetworkEvents, RoleConfigurationSinkCanReadStateAndFailuresAreContained) {
+    auto& context = sx::net::NetworkCtx::instance();
+    const auto original = context.role_rules();
+    int events = 0;
+    context.set_event_sink([&](bool, const std::string&) {
+        ++events;
+        // This takes the publication lock: the callback must run outside it.
+        EXPECT_EQ(context.role_rules().size(), 1);
+        throw std::runtime_error("test event sink failure");
+    });
+    sx::net::InterfaceRoleRule rule;
+    rule.if_name = "event-test-interface";
+    rule.role = "Test";
+    EXPECT_NO_THROW(context.set_role_rules({rule}));
+    EXPECT_EQ(events, 1);
+    EXPECT_NO_THROW(context.set_role_rules({rule}));
+    EXPECT_EQ(events, 1);
+    context.set_event_sink({});
+    context.set_role_rules(original);
+}
+
+TEST(RouteCache, ZeroCapacityDoesNotRetainEntries) {
+    sx::net::RouteCache cache(0);
+    int calls = 0;
+    auto resolve = [&]() -> std::optional<std::uint32_t> { ++calls; return 2; };
+    EXPECT_EQ(cache.lookup("a", resolve), 2);
+    EXPECT_EQ(cache.lookup("a", resolve), 2);
+    EXPECT_EQ(calls, 2);
 }

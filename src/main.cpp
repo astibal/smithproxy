@@ -903,6 +903,9 @@ int main(int argc, char *argv[]) {
     Log::get()->events().insert(INF, "Smithproxy %s%s starting", SMITH_VERSION, SMITH_DEVEL > 0 ? "-dev" : "");
 
     auto& network_context = sx::net::NetworkCtx::instance();
+    network_context.set_event_sink([](bool warning, const std::string& message) {
+        Log::get()->events().insert(warning ? WAR : INF, "NetworkCtx: %s", message.c_str());
+    });
     if(network_context.start()) {
         const auto interfaces = network_context.snapshot();
         Log::get()->events().insert(

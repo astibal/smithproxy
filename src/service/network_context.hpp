@@ -1,5 +1,7 @@
 #pragma once
 
+#include <service/route_cache.hpp>
+#include <functional>
 #include <array>
 #include <atomic>
 #include <condition_variable>
@@ -47,6 +49,10 @@ struct InterfaceRoleRule {
 
 struct InterfaceSnapshot {
     std::uint64_t generation = 0;
+    std::uint64_t route_generation = 0;
+    std::uint64_t role_generation = 0;
+    std::chrono::system_clock::time_point route_changed_at{};
+    std::chrono::system_clock::time_point role_changed_at{};
     bool valid = false;
     bool roles_valid = false;
     std::set<std::uint32_t> uplinks;
@@ -124,11 +130,15 @@ public:
     [[nodiscard]] bool start();
     void stop() noexcept;
 
+    using EventSink = std::function<void(bool warning, const std::string& message)>;
+    void set_event_sink(EventSink sink);
+
     void set_role_rules(std::vector<InterfaceRoleRule> rules);
     [[nodiscard]] std::vector<InterfaceRoleRule> role_rules() const;
 
     // Numeric destinations only. A failed lookup is unknown, never interface 0.
-    [[nodiscard]] std::optional<std::uint32_t> route_lookup(const std::string& destination) const;
+    [[nodiscard]] std::optional<std::uint32_t> route_lookup(const std::string& destination,
+        std::optional<std::uint64_t> generation = std::nullopt) const;
 
     [[nodiscard]] bool running() const noexcept;
     [[nodiscard]] std::shared_ptr<const InterfaceSnapshot> snapshot() const noexcept;
@@ -139,12 +149,15 @@ private:
     NetworkCtx();
     ~NetworkCtx();
 
+    void emit_event(bool warning, const std::string& message) const noexcept;
     void run() noexcept;
     void publish(bool valid);
     void publish_invalid(const std::string& error);
     void signal_initial_result(bool success);
     [[nodiscard]] bool stop_requested() const noexcept;
 
+    mutable std::mutex event_mutex_;
+    EventSink event_sink_;
     mutable std::mutex roles_mutex_;
     std::vector<InterfaceRoleRule> role_rules_;
     mutable std::mutex lifecycle_mutex_;
@@ -164,6 +177,7 @@ private:
     std::shared_ptr<const InterfaceSnapshot> snapshot_;
     std::string last_error_;
     std::uint64_t generation_ = 0;
+    RouteCache route_cache_;
     detail::InterfaceTable table_;
 };
 

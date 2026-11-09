@@ -853,6 +853,7 @@ bool CfgFactory::load_settings () {
     } catch(const std::exception& error) {
         LOAD_ERRORS = true;
         _err("invalid settings.interfaces: %s", error.what());
+        Log::get()->events().insert(ERR, "NetworkCtx: interface role configuration rejected: %s", error.what());
         return false;
     }
 

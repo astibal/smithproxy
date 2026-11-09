@@ -1,7 +1,7 @@
 #pragma once
 
 #include <nlohmann/json.hpp>
-#include <service/network_context.hpp>
+#include <service/network_diagnostics.hpp>
 #include <sys/socket.h>
 
 namespace sx::net {
@@ -33,12 +33,15 @@ inline nlohmann::json interface_snapshot_json(const InterfaceSnapshot& snapshot)
             {"addresses", std::move(addresses)},
         });
     }
-    return {
+    auto result = network_generations_json(snapshot);
+    result.update({
         {"snapshot_valid", snapshot.valid},
         {"roles_valid", snapshot.roles_valid},
         {"generation", snapshot.generation},
+
         {"interfaces", std::move(interfaces)},
-    };
+    });
+    return result;
 }
 
 inline nlohmann::json network_interfaces_json() {
@@ -47,7 +50,9 @@ inline nlohmann::json network_interfaces_json() {
     // An invalid snapshot remains useful for diagnosis, but is explicitly marked.
     auto result = snapshot ? interface_snapshot_json(*snapshot) : nlohmann::json{
         {"snapshot_valid", false}, {"roles_valid", false},
-        {"generation", 0}, {"interfaces", nlohmann::json::array()},
+        {"generation", 0}, {"route_generation", 0}, {"role_generation", 0},
+        {"route_changed_at", nullptr}, {"role_changed_at", nullptr},
+        {"interfaces", nlohmann::json::array()},
     };
     result["running"] = context.stats().running;
     result["last_error"] = context.last_error();

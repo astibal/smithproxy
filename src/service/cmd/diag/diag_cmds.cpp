@@ -1165,6 +1165,7 @@ int cli_diag_sys_netlink_info(DiagCli* cli, const char* command,
     output << "Netlink interface monitor:\n"
            << "  running: " << (stats.running ? "yes" : "no") << '\n'
            << "  snapshot valid: " << (snapshot->valid ? "yes" : "no") << '\n'
+           << sx::net::network_generations_text(*snapshot) << '\n'
            << "  generation: " << snapshot->generation << '\n'
            << "  synchronization attempts: " << stats.synchronization_attempts << '\n'
            << "  synchronization successes: " << stats.synchronization_successes << '\n'
@@ -2432,6 +2433,10 @@ int cli_diag_proxy_session_list_extra (DiagCli *cli, const char *command, std::v
     // QUIC workers already publish owned snapshots; never inspect their live
     // sessions from the CLI thread or add another dataplane snapshot request.
     print_quic_sessions(cli, sl_flags, false);
+
+    if(const auto network = sx::net::NetworkCtx::instance().snapshot()) {
+        cli_print(cli, "\n%s", sx::net::network_generations_text(*network).c_str());
+    }
 
     if( sl_flags == SL_NONE ) {
         unsigned long l = MitmProxy::total_mtr_up().get();

@@ -17,17 +17,29 @@ inline bool prepare_network_policy(const std::vector<std::shared_ptr<PolicyRule>
             egress |= !rule->egress_role.empty();
         }
     }
-    if(!ingress && !egress) return true;
-    if(!snapshot.valid || !snapshot.roles_valid) return false;
-    if(ingress) for(auto* cx : left) {
-        if(!cx || !cx->com() || !snapshot.interface_role(cx->com()->ingress_ifindex())) return false;
-    }
-    if(egress) for(auto* cx : right) {
-        if(!cx || !cx->com()) return false;
-        const auto index = sx::net::NetworkCtx::instance().route_lookup(cx->host());
+    bool routes_known = true;
+    for(auto* cx : right) {
+        if(!cx || !cx->com()) {
+            routes_known = false;
+            continue;
+        }
+        const auto index = sx::net::NetworkCtx::instance().route_lookup(cx->host(), snapshot.route_generation);
         cx->com()->egress_ifindex(index.value_or(0));
-        if(!index || !snapshot.interface_role(*index)) return false;
+        routes_known &= index.has_value() && snapshot.interface_role(*index).has_value();
     }
-    return true;
+    if(!ingress && !egress) {
+        return true;
+    }
+    if(!snapshot.valid || !snapshot.roles_valid) {
+        return false;
+    }
+    if(ingress) {
+        for(auto* cx : left) {
+            if(!cx || !cx->com() || !snapshot.interface_role(cx->com()->ingress_ifindex())) {
+                return false;
+            }
+        }
+    }
+    return !egress || routes_known;
 }
 }

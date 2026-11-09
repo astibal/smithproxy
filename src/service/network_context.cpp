@@ -1,4 +1,5 @@
 #include <service/network_context.hpp>
+#include <service/network_events.hpp>
 #include <service/network_route.hpp>
 #include <net/if.h>
 #include <stdexcept>
@@ -588,6 +589,27 @@ NetworkCtx& NetworkCtx::instance() {
     return monitor;
 }
 
+void NetworkCtx::set_event_sink(EventSink sink) {
+    std::lock_guard lock(event_mutex_);
+    event_sink_ = std::move(sink);
+}
+
+void NetworkCtx::emit_event(bool warning, const std::string& message) const noexcept {
+    // Logging failures must never interrupt network-state publication.
+    try {
+        EventSink sink;
+        {
+            std::lock_guard lock(event_mutex_);
+            sink = event_sink_;
+        }
+        if(sink) {
+            sink(warning, message);
+        }
+    }
+    catch(...) {
+    }
+}
+
 bool NetworkCtx::start() {
     std::unique_lock lock(lifecycle_mutex_);
     if(worker_.joinable()) {
@@ -627,6 +649,7 @@ void NetworkCtx::stop() noexcept {
         (void)::eventfd_write(stop_fd, signal);
     }
     if(worker.joinable()) worker.join();
+    emit_event(false, "monitor stopped");
 
     {
         std::lock_guard lock(lifecycle_mutex_);
@@ -659,10 +682,35 @@ std::string NetworkCtx::last_error() const {
     return last_error_;
 }
 
-void NetworkCtx::publish(bool valid) {
-    std::lock_guard lock(roles_mutex_);
+namespace {
 
+bool same_interface_roles(const InterfaceSnapshot& left, const InterfaceSnapshot& right) {
+    if(left.roles_valid != right.roles_valid || left.interfaces.size() != right.interfaces.size()) {
+        return false;
+    }
+    std::map<std::uint32_t, std::string> roles;
+    for(const auto& interface : left.interfaces) {
+        roles.emplace(interface.index, interface.role);
+    }
+    for(const auto& interface : right.interfaces) {
+        const auto found = roles.find(interface.index);
+        if(found == roles.end() || found->second != interface.role) {
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
+void NetworkCtx::publish(bool valid) {
+    std::unique_lock lock(roles_mutex_);
+
+    const auto previous = snapshot();
+    const auto route_generation = route_cache_.invalidate();
     auto next = std::make_shared<InterfaceSnapshot>(*table_.snapshot(++generation_, valid));
+    next->route_generation = route_generation;
+    next->route_changed_at = std::chrono::system_clock::now();
 
     // Custom rules override automatic roles, using the same interface snapshot.
     const auto defaults = valid ? detail::query_routes(nullptr) : std::nullopt;
@@ -672,17 +720,31 @@ void NetworkCtx::publish(bool valid) {
     // Unknown default routes must not turn an uplink into an authoritative Inside role.
     next->roles_valid = valid && defaults.has_value() && next->all_interfaces_have_roles();
 
+    next->role_generation = previous->role_generation + !same_interface_roles(*previous, *next);
+    next->role_changed_at = next->role_generation != previous->role_generation
+        ? std::chrono::system_clock::now() : previous->role_changed_at;
+
     // Readers see the complete immutable snapshot in a single publication.
+    const auto events = network_snapshot_events(*previous, *next);
     std::shared_ptr<const InterfaceSnapshot> published = std::move(next);
     std::atomic_store_explicit(&snapshot_, std::move(published), std::memory_order_release);
+    lock.unlock();
+    for(const auto& event : events) {
+        emit_event(event.warning, event.message);
+    }
 }
 
 void NetworkCtx::publish_invalid(const std::string& error) {
+    bool changed;
     {
         std::lock_guard lock(error_mutex_);
+        changed = last_error_ != error;
         last_error_ = error;
     }
     publish(false);
+    if(changed) {
+        emit_event(true, "synchronization failed; retrying: " + error);
+    }
 }
 
 void NetworkCtx::signal_initial_result(bool success) {
@@ -785,10 +847,36 @@ void NetworkCtx::run() noexcept {
 } // namespace sx::net
 
 #include <service/network_route.hpp>
-std::optional<std::uint32_t> sx::net::NetworkCtx::route_lookup(const std::string& destination) const {
-    const auto result = detail::query_routes(&destination);
-    if(!result || result->size() != 1) return std::nullopt;
-    return *result->begin();
+std::optional<std::uint32_t> sx::net::NetworkCtx::route_lookup(const std::string& destination,
+    std::optional<std::uint64_t> generation) const {
+    // A cache key denotes one numeric destination, never an entire subnet. Reuse
+    // request encoding so IPv4-mapped IPv6 normalization exactly matches the
+    // kernel query; inet_ntop also unifies alternate IPv6 spellings. No DNS here.
+    detail::RouteRequest request{};
+    request.header.nlmsg_len = NLMSG_LENGTH(sizeof(rtmsg));
+    if(!detail::set_route_destination(request, destination)) {
+        return std::nullopt;
+    }
+    const auto* attribute = reinterpret_cast<const rtattr*>(
+        reinterpret_cast<const unsigned char*>(&request) + NLMSG_ALIGN(NLMSG_LENGTH(sizeof(rtmsg))));
+    char text[INET6_ADDRSTRLEN]{};
+    if(!::inet_ntop(request.route.rtm_family, RTA_DATA(attribute), text, sizeof text)) {
+        return std::nullopt;
+    }
+    const std::string key(text);
+    // The optional generation binds this lookup to the caller's policy snapshot.
+    // A mismatch (including invalidation while querying) returns unknown instead
+    // of attaching a new route to old role metadata. The cache releases its lock
+    // before invoking this resolver, so the netlink wait cannot stall cache hits.
+    return route_cache_.lookup(key, [&]() -> std::optional<std::uint32_t> {
+        const auto result = detail::query_routes(&key);
+        // Policy needs one output interface. Failed or ambiguous replies must
+        // remain unknown; selecting an arbitrary nexthop could authorize traffic.
+        if(!result || result->size() != 1) {
+            return std::nullopt;
+        }
+        return *result->begin();
+    }, generation);
 }
 
 void sx::net::InterfaceSnapshot::assign_automatic_roles(const std::set<std::uint32_t>& defaults) {
@@ -836,16 +924,51 @@ void sx::net::InterfaceSnapshot::assign_roles(const std::vector<InterfaceRoleRul
     }
 }
 
+// Apply an already parsed ordered rule map as one snapshot publication. This is
+// used for both configuration apply and rollback; readers never see half a map.
 void sx::net::NetworkCtx::set_role_rules(std::vector<InterfaceRoleRule> rules) {
-    std::lock_guard lock(roles_mutex_);
-    auto next = std::make_shared<InterfaceSnapshot>(*snapshot());
+    std::unique_lock lock(roles_mutex_);
+    const auto previous = snapshot();
+    auto next = std::make_shared<InterfaceSnapshot>(*previous);
+
+    // Start from automatic roles, not previously overridden roles: deleting a
+    // custom rule must restore its fallback. First matching custom rule wins.
     next->assign_automatic_roles(next->uplinks);
     next->assign_roles(rules);
-    if(!next->all_interfaces_have_roles()) throw std::invalid_argument("incomplete interface roles");
+    if(!next->all_interfaces_have_roles()) {
+        throw std::invalid_argument("incomplete interface roles");
+    }
+
+    // Only effective role/validity changes advance this generation and its time.
+    // A config edit may change rules without changing any current interface role.
+    // Route generation and cached ifindices are unaffected by a role-only edit.
+    next->role_generation = previous->role_generation + !same_interface_roles(*previous, *next);
+    next->role_changed_at = next->role_generation != previous->role_generation
+        ? std::chrono::system_clock::now() : previous->role_changed_at;
+
+    const bool rules_changed = role_rules_.size() != rules.size() ||
+        !std::equal(role_rules_.begin(), role_rules_.end(), rules.begin(),
+            [](const auto& left, const auto& right) {
+                return left.if_name == right.if_name && left.if_address == right.if_address &&
+                       left.role == right.role;
+            });
+
+    // Commit the rule map and immutable snapshot under the same publication lock.
+    const auto rule_count = rules.size();
     role_rules_ = std::move(rules);
     next->generation = ++generation_;
+    const auto events = network_snapshot_events(*previous, *next);
     std::shared_ptr<const InterfaceSnapshot> immutable = std::move(next);
     std::atomic_store_explicit(&snapshot_, std::move(immutable), std::memory_order_release);
+    lock.unlock();
+
+    // Event sinks can inspect NetworkCtx themselves; invoke them without our lock.
+    if(rules_changed) {
+        emit_event(false, "interface role rules updated: count=" + std::to_string(rule_count));
+    }
+    for(const auto& event : events) {
+        emit_event(event.warning, event.message);
+    }
 }
 
 std::vector<sx::net::InterfaceRoleRule> sx::net::NetworkCtx::role_rules() const {

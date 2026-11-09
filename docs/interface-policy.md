@@ -80,3 +80,39 @@ unshare -Urn python3 tests/integration/interface_ingress.py /tmp/network-context
 The script checks TCP/UDP IPv4/IPv6, IPv4 accepted by IPv6, local and TPROXY
 traffic, route lookup, automatic roles with/without default routes and custom-role
 reset. It needs iproute2, nftables and enabled unprivileged user namespaces.
+
+### Route cache and generations
+
+Every policy selection resolves each destination interface, even when no policy
+uses interface roles. A failed lookup clears the stored egress index; it blocks
+selection only when interface metadata is required by the active policies.
+
+NetworkCtx caches numeric destination lookups in a shared 16,384-entry LRU.
+IPv4-mapped IPv6 addresses share an entry with their IPv4 equivalent. Positive
+entries expire after 30 seconds and unknown routes after one second. Link,
+address, route and rule updates, as well as resynchronization, invalidate the
+cache and advance `route_generation`. A lookup invalidated while in flight is
+not cached or returned as a current result. Kernel queries run outside the cache
+lock.
+
+`role_generation` advances only when the effective index-to-role mapping or its
+validity changes. Reloading an equivalent role map leaves it unchanged and does
+not flush the route cache. Both generations are exposed by network diagnostics.
+These counters do not automatically revalidate or terminate existing sessions.
+
+Network diagnostics and the text session-list footer show UTC timestamps
+`route_changed_at` and `role_changed_at` in ISO 8601 form. An unobserved change
+has a null timestamp. Generations describe the current NetworkCtx snapshot,
+not the historical policy decision. The footer is printed once per list.
+Session API entries contain only their interface metadata; shared generations
+and timestamps are available from `/api/diag/network/interfaces`.
+Equivalent role reloads preserve both the role generation and its timestamp.
+
+NetworkCtx reports important transitions to the event trail: synchronization
+loss/recovery, role validity, interface additions/removals/renames/flags,
+address changes, effective role changes, role-rule configuration updates,
+routing-state refresh/cache invalidation, and monitor shutdown. Rejected role
+configuration is also recorded. Identical synchronization failures are logged
+only once until recovery or a different error. Individual cache hits, misses
+and per-session lookups are not events. Events describe published state;
+logging callbacks run after releasing the role-publication lock.
