@@ -147,7 +147,10 @@ bool SmithProxy::create_tproxy_listeners() {
                 certs_path + SSLFactory::config_t::SR_KEYF,
                 true, 443, true, sx::quic::lifecycle_options {}, sx::quic::resource_limits {},
                 std::string {}, sx::multiflow::make_mitm_flow_proxy,
-                CfgFactory::get()->capture_local.enabled || CfgFactory::get()->capture_remote.enabled,
+                // Capture can be enabled after this listener starts. Keep the
+                // bounded pre-policy wire journal ready; only an approved
+                // stream logger may attach it to local or remote output.
+                true,
                 sx::proxymaker::make_quic_session_setup);
             if (!service->prepare()) {
                 _err("Failed to setup QUIC listener: %s", service->last_error().c_str());
@@ -449,8 +452,11 @@ bool SmithProxy::create_listeners() {
                         true, 443, true, sx::quic::lifecycle_options {},
                         sx::quic::resource_limits {}, std::string {},
                         sx::multiflow::make_mitm_flow_proxy,
-                        CfgFactory::get()->capture_local.enabled
-                            || CfgFactory::get()->capture_remote.enabled,
+                        // Do not freeze the capture switch at listener creation:
+                        // later activation still needs handshake packets/secrets.
+                        // The bounded journal remains private until policy attaches
+                        // a logger (MitmProxy::toggle_tlog enforces the switch).
+                        true,
                         sx::proxymaker::make_quic_session_setup);
                     if (!service->prepare()) {
                         _fat("Failed to setup QUIC listener: %s", service->last_error().c_str());

@@ -738,13 +738,19 @@ TEST_F(OpenSslQuic, LoopbackStreamProducesSelfDecryptingPcapng) {
     ASSERT_EQ(SSL_set_alpn_protos(client.get(), alpn, sizeof(alpn)), 0);
 
     std::unique_ptr<quic::openssl_connection> server;
+    std::shared_ptr<quic::keylog_store> early_keylog;
     auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
     while (std::chrono::steady_clock::now() < deadline
            && (!SSL_is_init_finished(client.get())
                || !server || !SSL_is_init_finished(server->native_handle()))) {
         SSL_connect(client.get());
         listener->handle_events();
-        if (!server) server = listener->accept();
+        if (!server) {
+            server = listener->accept();
+            // Production keeps this handle at accept time, before handshake
+            // completion. It must receive the same secrets as a later lookup.
+            if (server) early_keylog = server->keylog();
+        }
         if (server) SSL_do_handshake(server->native_handle());
         SSL_handle_events(client.get());
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -757,6 +763,7 @@ TEST_F(OpenSslQuic, LoopbackStreamProducesSelfDecryptingPcapng) {
     // Internal retention must not depend on the optional SSLKEYLOGFILE lab aid.
     auto const keylog = server->keylog();
     ASSERT_NE(keylog, nullptr);
+    ASSERT_EQ(early_keylog, keylog);
     auto const secrets = keylog->snapshot();
     EXPECT_FALSE(secrets.empty());
     EXPECT_TRUE(std::any_of(secrets.begin(), secrets.end(), [](auto const& line) {
