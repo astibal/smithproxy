@@ -49,7 +49,7 @@ class EchoOrigin:
     def __init__(self, family=socket.AF_INET, address=None):
         self.family = family
         self.address = address or ("::1" if family == socket.AF_INET6 else "127.0.0.1")
-        self.port = free_port(family, self.address)
+        self.port = 0
         self.ready = threading.Event()
         self.finished = threading.Event()
         self.error = None
@@ -60,12 +60,17 @@ class EchoOrigin:
         self.thread.start()
         if not self.ready.wait(5):
             raise RuntimeError("origin did not start")
+        if self.error:
+            raise self.error
 
     def run(self):
         try:
             with socket.socket(self.family) as listener:
                 listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                listener.bind((self.address, self.port))
+                # Reserve and publish the port in one operation. Probing a
+                # free port before binding races concurrent test origins.
+                listener.bind((self.address, 0))
+                self.port = listener.getsockname()[1]
                 listener.listen(1)
                 listener.settimeout(15)
                 self.ready.set()
@@ -76,6 +81,7 @@ class EchoOrigin:
                     connection.sendall(b"PONG\r\n")
         except Exception as exc:
             self.error = exc
+            self.ready.set()
         finally:
             self.finished.set()
 
@@ -128,6 +134,8 @@ def make_config(source, destination, worktree, runtime, listener_port, cli_port,
         "accept_redirect = TRUE;": "accept_redirect = FALSE;",
         "accept_socks = TRUE;": "accept_socks = FALSE;",
         "accept_http_connect = FALSE;": "accept_http_connect = TRUE;",
+        "extended_local_destination_protection = TRUE;":
+            "extended_local_destination_protection = FALSE;",
         'nameservers = [ "8.8.8.8", "8.8.4.4" ];':
             f'nameservers = [ "{system_nameserver()}" ];',
         'http_connect_port = "3128";': f'http_connect_port = "{listener_port}";',
@@ -378,6 +386,43 @@ def run(args):
                 output, _ = process.communicate(timeout=5)
             if sys.exc_info()[0] is not None:
                 print(output, file=sys.stderr)
+
+        protected_config = runtime / "smithproxy-protected.cfg"
+        protected_listener_port = free_port()
+        make_config(worktree / "etc/smithproxy.cfg", protected_config,
+                    worktree, runtime, protected_listener_port, free_port())
+        protected_config.write_text(protected_config.read_text().replace(
+            "extended_local_destination_protection = FALSE;",
+            "extended_local_destination_protection = TRUE;", 1))
+        protected_process = subprocess.Popen(
+            [str(executable), "--config-file", str(protected_config), "--debug"],
+            cwd=worktree,
+            env=process_env(runtime, "smithproxy-protected.pid"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        try:
+            wait_for_listener(protected_process, protected_listener_port)
+            with socket.create_connection(
+                    ("127.0.0.1", protected_listener_port), timeout=10) as client:
+                client.settimeout(15)
+                client.sendall(
+                    b"CONNECT 127.0.0.1:443 HTTP/1.1\r\n"
+                    b"Host: 127.0.0.1:443\r\n\r\n")
+                response = recv_until(client, b"\r\n\r\n")
+                if not response.startswith(b"HTTP/1.1 403 Forbidden\r\n"):
+                    raise RuntimeError(
+                        f"local destination protection did not return 403: {response!r}")
+        finally:
+            protected_process.terminate()
+            try:
+                protected_output, _ = protected_process.communicate(timeout=60)
+            except subprocess.TimeoutExpired:
+                protected_process.kill()
+                protected_output, _ = protected_process.communicate(timeout=5)
+            if sys.exc_info()[0] is not None:
+                print(protected_output, file=sys.stderr)
 
         reject_config = runtime / "smithproxy-reject.cfg"
         reject_listener_port = free_port()

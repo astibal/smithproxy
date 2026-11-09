@@ -27,6 +27,7 @@ public:
         : send_high_watermark_(send_high_watermark), transport_(transport) {}
 
     flow_handle open_flow(direction flow_direction) override {
+        if (block_open_) return {};
         flow_handle handle { next_flow_id_, next_generation_++ };
         next_flow_id_ += 4;
 
@@ -183,6 +184,9 @@ public:
         if (auto* flow = find(handle)) flow->finish_blocked = blocked;
     }
 
+    /** Force open_flow() to model temporary/exhausted stream capacity. */
+    void block_open(bool blocked) { block_open_ = blocked; }
+
     /** Return the application error recorded by reset(), if any. */
     std::optional<std::uint64_t> reset_code(flow_handle handle) const {
         auto const* flow = find(handle);
@@ -243,6 +247,7 @@ private:
     flow_id next_flow_id_ = 0;
     generation_id next_generation_ = 1;
     bool closed_ = false;                       ///< Connection-wide terminal state.
+    bool block_open_ = false;                   ///< Refuse creation of another flow.
     std::uint64_t connection_error_ = 0;        ///< Last close application error.
 };
 

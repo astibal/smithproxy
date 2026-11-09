@@ -50,6 +50,31 @@ text, lab_ct_count = re.subn(
 )
 if lab_ocsp_count != 1 or lab_ct_count != 1:
     raise RuntimeError('cannot isolate base lab TLS profile from CT/OCSP checks')
+quic_profile = os.environ.get('QUIC_TLS_PROFILE_TEST')
+if quic_profile:
+    # Keep config generation independent of the optional aioquic dependency.
+    options = {
+        'baseline': {},
+        'old_ticket': {},
+        'no_reuse': {'left_disable_reuse': True, 'right_disable_reuse': True},
+        'no_pfs': {'use_pfs': False, 'left_use_pfs': False, 'right_use_pfs': False},
+        'no_alpn': {'alpn_block': True},
+    }[quic_profile]
+    start = text.index('    default = {', text.index('tls_profiles = {'))
+    end = text.index('\n    }', start)
+    profile = text[start:end]
+    for name, value in options.items():
+        profile, count = re.subn(r'(\b' + name + r'\s*=\s*)[^;]+;',
+                                lambda match: match[1] + str(value).lower() + ';', profile)
+        if not count:
+            profile += f'\n        {name} = {str(value).lower()};'
+    text = text[:start] + profile + text[end:]
+
+if os.environ.get('TLS_PROFILE_TEST') == '1':
+    from suites.tls.profile_matrix import configure, prepare_certificates
+    prepare_certificates(certs)
+    text = configure(text)
+
 tls_write_chunk = os.environ.get('TLS_WRITE_CHUNK')
 if tls_write_chunk is not None:
     if not tls_write_chunk.isdigit() or not 1024 <= int(tls_write_chunk) <= 1048576:
@@ -122,6 +147,9 @@ if os.environ.get('POLICY_TEST') == '1':
     text, count = re.subn(r'(policy\s*=\s*\()', r'\1\n' + policy_cases, text, count=1)
     if address_count != 1 or port_count != 1 or count != 1: raise RuntimeError('cannot inject policy suite objects/rules')
 if quic_test:
+    text = text.replace('settings = {', 'settings = {\n'
+                        '    webhook = { enabled = TRUE; tls_verify = FALSE; '
+                        'url = "http://127.0.0.1:59090/"; };', 1)
     if os.environ.get('QUIC_LAB') != '1':
         raise RuntimeError('QUIC_TEST requires QUIC_LAB=1')
     text, port_count = re.subn(
@@ -131,6 +159,8 @@ if quic_test:
     )
     profile = '''
     quic_runner = {
+        webhook_enable = TRUE;
+        webhook_lock_traffic = FALSE;
         write_payload = TRUE;
         write_format = "pcap_single";
         write_limit_client = 0;
@@ -157,6 +187,21 @@ if quic_test:
         routing = "none";
     },
 '''
+    if quic_profile == 'old_ticket':
+        # One live listener: issue a ticket under the permissive rule, then
+        # offer it from a source port selected by the restrictive rule.
+        text = text.replace('port_objects = {', 'port_objects = {\n'
+                            '    quic_restricted_source = { start = 23451; end = 23451; };', 1)
+        text = text.replace('tls_profiles = {', 'tls_profiles = {\n'
+                            '    quic_restricted = { inspect = TRUE; left_disable_reuse = TRUE; '
+                            'ct_enable = FALSE; ocsp_stapling = FALSE; }', 1)
+        restricted = rule.replace('runner-quic-udp-capture', 'runner-quic-restricted')
+        restricted = restricted.replace('sport = [ "all" ]',
+                                        'sport = [ "quic_restricted_source" ]')
+        restricted = restricted.replace('tls_profile = "default"',
+                                        'tls_profile = "quic_restricted"')
+        rule = restricted + rule
+
     text, policy_count = re.subn(
         r'(policy\s*=\s*\()', r'\1\n' + rule,
         text, count=1,

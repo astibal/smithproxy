@@ -7,6 +7,11 @@ smithproxy \- policy-driven TCP, UDP and TLS inspection proxy
 .RB [ \-D ]
 .RB [ \-c " file" ]
 .RB [ \-o ]
+.RB [ \-\-run-as " user" ]
+.RB [ \-\-comm-gre " path" ]
+.RB [ \-\-comm-cli " path" ]
+.RB [ \-\-comm-api " path" ]
+.RB [ \-\-comm-webhook " path" ]
 .RB [ \-\-debug | \-\-diagnose | \-\-dump | \-\-extreme ]
 .PP
 .B smithproxy
@@ -38,6 +43,23 @@ starting proxy listeners.
 .BR \-D ", " \-\-daemonize
 Fork into the background. File logging must be configured. A service manager
 is preferred for normal deployments.
+.TP
+.BI \-\-run-as " user"
+Start restricted helpers, then run the Smithproxy core with the user's UID,
+GID and supplementary groups. Overrides
+.BR SMITHPROXY_RUN_AS .
+.TP
+.BI \-\-comm-gre " path"
+Use an external GRE export broker at the Unix socket path.
+.TP
+.BI \-\-comm-cli " path"
+Receive CLI connections through an external broker at the Unix socket path.
+.TP
+.BI \-\-comm-api " path"
+Receive API connections through an external broker at the Unix socket path.
+.TP
+.BI \-\-comm-webhook " path"
+Relay webhook streams through an external broker at the Unix socket path.
 .TP
 .B \-\-debug
 Enable debug-level startup logging.
@@ -204,7 +226,13 @@ Default local capture directory.
 Installed helper modules, tools, documentation and integration files.
 .SH SECURITY
 Transparent interception normally requires root privileges or equivalent Linux
-capabilities and routing configuration. A Smithproxy CA private key permits TLS
+capabilities and routing configuration. Use
+.B --run-as
+to retain narrowly scoped socket and config/PID helpers while running the core
+under an unprivileged identity. See
+.BR smithproxy-privsep (7).
+.PP
+A Smithproxy CA private key permits TLS
 impersonation for clients which trust that CA; protect the key and restrict
 access to the CLI, API, captures and TLS key logs.
 .SH LIMITATIONS

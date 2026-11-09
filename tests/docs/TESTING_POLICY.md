@@ -32,6 +32,11 @@ host. One remote scheduler process then starts the target-local workers; a
 full run must not create one SSH/SCP connection per section. Each phase returns
 one result archive per target. This keeps high parallelism from testing
 `sshd`'s `MaxSessions`/`MaxStartups` limits instead of Smithproxy.
+Result archives contain the section logs and report metadata needed for the
+aggregate verdict. Per-case `lab-results/` remain on the execution target for
+diagnosis, avoiding thousands of unnecessary coordinator files. The
+coordinator must check free inodes before extracting an archive and fail with
+a bounded diagnostic when capacity is insufficient.
 The bundle includes the pinned QUIC Python runtime and HTTP/3 curl runtime;
 fresh targets must not depend on a host-installed `aioquic` package.
 
@@ -56,10 +61,14 @@ all runner-owned namespaces, interfaces and listeners remain mandatory gates.
 - `coverage` runs the default native selection and a local dataplane `sanity`
   pass under GCC/gcov, then emits combined line coverage in text, JSON and
   browsable HTML forms. The dataplane pass requires local root privileges.
-- `sanity` is a bounded functional and dataplane validation.
-- `full` is the mandatory comprehensive gate. It contains the functional,
-  native, performance, churn, capture, corpus and deterministic `fuzz.*`
-  sections. The native gate completes before remote lab sections begin.
+- `sanity` is the bounded isolated smoke gate.
+- `traffic` owns synthetic protocol, routing, transfer, churn and capture tests.
+- `lifecycle` owns ProxyNightmare socket/TLS state tests. Its C++ monitor samples
+  every proxy thread every 50 ms and reports functional and CPU verdicts separately.
+- `corpus` owns regular, edge and insanity replay of native traffic samples.
+- `full` is the ordered union of `native sanity traffic lifecycle corpus fuzz`.
+  It consumes those profile definitions directly instead of maintaining a
+  separate full-only suite.
 - `benchmark` records latency without enforcing latency gates.
 - `fuzz` runs only the mandatory deterministic fuzz sections.
 - `fuzz-dyn` is optional exploration with one newly generated seed.
@@ -67,6 +76,8 @@ all runner-owned namespaces, interfaces and listeners remain mandatory gates.
 
 A section failure fails its parent run. `FLAKY_PASS` is successful for process
 control but remains visibly distinct from `PASS` in reports and history.
+The native gate must fail when CTest finds no tests, including when label
+filters exclude every registered test. An empty selection is not a successful run.
 The coordinator must always wait for every scheduled worker and aggregate every
 section result, including when the final worker makes the active-worker count
 zero. Missing section results or an incomplete aggregate report fail the run.
@@ -171,9 +182,12 @@ diagnostics; committed history must not publish internal hostnames.
 Internal section workers do not append rows; their results are aggregated into
 the parent entry.
 
-The runner never commits or pushes these files. Changes to
-`tests/docs/covered-seeds` and `tests/docs/patch-run-history` stay in the working tree and
-are included in the next normal commit to the current branch.
+Direct runner invocations never commit or push these files. A publishable
+validation must instead use `tests/patch-runner/publish-report.sh`. That wrapper
+requires a clean named branch, verifies that the branch and HEAD remain the
+tested ones, writes a concise timestamped report below `docs/test-reports/`,
+commits only report metadata and pushes explicitly to the same branch name.
+Raw logs, complete inventories and lab artifacts remain outside Git.
 
 Failed runs are retained in their ordinary report directories with a
 reproduction command and are not written to the successful-run history.
@@ -197,6 +211,15 @@ This initial stage does not yet prove exact fingerprint values, packet-to-flow
 association, annotations, failed handshakes or metadata parity over PCAPNG GRE.
 It must not be represented as the complete release gate until those checks
 are implemented. Existing packet/payload GRE checks remain independently active.
+
+The retired protocol-checkpoint/flow-journal experiment (2026-10-26) is preserved
+with its tests as reversible patches under `docs/design-history/`. It is not a
+runtime feature or a native gate. Endpoint rewrite/hold/HPACK/SETTINGS scenarios
+remain in `unit.protocol_views`, now using the supported setup-selected Rewrite
+mode. Forward-fork ownership and ordinary flow append/pop tests run in
+`unit.http1`; historical checkpoint pass counts must not be reported as current
+coverage. The old speculative-fork benchmark is archived, not silently measured
+under its former labels.
 
 - [ ] Add an isolated, explicitly non-production split-engine TLS lab in which
   one running Smithproxy can use a pinned older OpenSSL release on a selected
@@ -228,3 +251,94 @@ Legacy availability-first behavior is opt-in through
 `settings.policy_fail_open` and
 `settings.policy_access_request_fail_open`; tests of those switches must also
 prove that explicit deny/reject decisions remain authoritative.
+
+## External proxy authentication
+
+Proxy authentication registers `unit.pap` and `integration.auth_client` with
+CTest under the `native` and `auth` labels. Both also run in standalone auth
+client builds. `integration.proxy_auth` additionally requires the production
+Smithproxy executable and explicit paths to the separately built Keyway daemon
+and its test-only PAM module (`SMITHPROXY_KEYWAY_EXECUTABLE` and
+`SMITHPROXY_KEYWAY_TEST_PAM_MODULE`).
+
+The proxy integration uses a temporary PAM service without modifying system
+authentication. It starts isolated local listeners and verifies CONNECT/SOCKS5
+authentication before target access, including fragmentation, pipelining,
+rejection and broker failure. Keyway's own backend and management API tests
+remain in its separate repository.
+
+## CPU monitor groundwork
+
+The native layer includes `unit.patch_runner_cpu_monitor`, a controlled-process
+self-test for the standalone [CPU monitor](../patch-runner/CPU_MONITOR.md). It
+checks a 500 ms CPU pulse, sleeping targets, concurrent monitor isolation and
+control failures. This does not yet enable CPU gates on Smithproxy traffic.
+CPU evidence and functional outcomes remain separate. Missing or incomplete
+required CPU measurements must never be treated as a passing CPU gate.
+
+CPU accounting has a deterministic native regression suite
+(`unit.patch_runner_cpu_accounting`). Long real-process accuracy, concurrency
+and soak diagnostics are registered separately as
+`extended.patch_runner_cpu_diagnostics`; use the extended label to select them.
+The CPU monitor must invalidate measurement after ATTACH with sampling gaps
+above two configured intervals (100 ms by default) instead of certifying a time series too sparse for its
+short-pulse detector. Per-thread interval attribution is explicitly a lower
+bound; the process aggregate is the primary CPU accounting reference.
+
+Continuous suspicious-window detection spans phase/test boundaries; CPU limits
+remain local to each phase. Fault-path checks (`unit.patch_runner_cpu_faults`)
+cover malformed control traffic, filesystem collisions and write failures.
+
+The CPU monitor server is now `smithproxy-cpu-monitor` (C++17). Native CTest
+process/protocol suites select that binary via `CPU_MONITOR_BINARY`; Python
+remains the independent reference and client. `unit.patch_runner_cpu_proc`
+checks native `/proc` races and access failures, and
+`unit.patch_runner_cpu_native_accounting` compares the compiled accounting core
+against deterministic Python results. The standalone CMake project under
+`tests/patch-runner/cpu-monitor` permits validation without building Smithproxy.
+Every sample still includes every live thread. Events describe temporal overlap,
+not proven causal ownership by a test; windows crossing phases have no single
+phase owner.
+
+`integration.patch_runner_cpu_real_proxy` is an opt-in `privileged;extended`
+local integration test with a disposable user/network namespace. It records
+functional and CPU verdicts separately and fails if either is unsuccessful.
+It covers explicit CONNECT traffic, TLS transport, half-close, resets and idle
+recovery. This does not replace transparent-proxy/ProxyNightmare coverage.
+
+### Execution privilege preflight
+
+The patch runner validates its execution backend before configuration, build or
+remote staging. SSH and sudo must be non-interactive. Privileged dataplane
+profiles accept an existing root login or passwordless `sudo -n`; lifecycle and
+privileged native integration tests validate the rootless user/mount/network
+namespace path. The probe performs a private tmpfs mount, creates and removes a
+nested network namespace, brings up loopback and reads its nftables ruleset.
+This is an execution prerequisite check, not a product test. A failed probe is
+a setup failure and must not be reported as a Smithproxy regression.
+
+### ProxyNightmare acquisition
+
+The lifecycle profile obtains ProxyNightmare from the repository and exact
+40-character commit recorded in `proxy-nightmare.lock`. The coordinator caches
+the detached checkout below the work root, builds `pn`, and runs its
+deterministic `pn_tests` unit test before staging the binary. Timing-sensitive
+upstream network integration tests are exercised against Smithproxy by the
+`lifecycle` profile instead. Workers need no Git or internet access.
+Smithproxy owns all `.pn` lifecycle scenarios that it executes. A developer may
+use `--proxy-nightmare-root` for an explicit prepared checkout; reports record
+that override, the available commit metadata, and the binary SHA-256.
+
+Lifecycle expected failures must name one scenario and an exact required log
+substring in `proxy-nightmare/expected-failures.json`. The scenario is `XFAIL`
+only when both its command fails and that signature is present; a different
+failure remains `FAIL`. A successful expected scenario is `XPASS` and fails the
+gate until the stale expectation is reviewed and removed.
+
+### Local operational notes
+
+Use repeatable `--note TEXT` arguments for ad hoc setup, build workarounds or
+environment changes needed by a run. The runner writes these notes, non-default
+compiler flags, dirty-tree state, `FLAKY_PASS`, `XFAIL` and `XPASS` lines to
+`report-notes.md`. This diagnostic companion remains with local run artifacts;
+`publish-report.sh` does not copy or commit it.

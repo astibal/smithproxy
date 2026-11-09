@@ -2,6 +2,7 @@
 #define SMITHPROXY_QUICSERVICE_HPP
 
 #include "proxy/quic/openssl.hpp"
+#include "proxy/proxymaker_connect.hpp"
 #include "proxy/multiflow/mfmitmproxy.hpp"
 
 #include <atomic>
@@ -18,6 +19,17 @@
 class CaptureProtocolTracer;
 
 namespace sx::quic {
+
+namespace detail {
+/** Internal guard against allocator reuse of a borrowed OpenSSL handle. */
+bool same_certificate_callback_identity(std::string const& staged_server_name,
+                                        std::uint64_t staged_generation,
+                                        std::string const& current_server_name,
+                                        std::uint64_t current_generation);
+/** True only when callback re-entry still belongs to the same live QUIC tuple. */
+bool same_dispatcher_callback_association(std::uint64_t staged_association,
+                                          std::uint64_t current_association);
+}
 
 using flow_proxy_factory = std::function<std::unique_ptr<multiflow::flow_proxy>(
     std::shared_ptr<multiflow::connection>, std::shared_ptr<multiflow::connection>,
@@ -95,7 +107,8 @@ public:
                      resource_limits limits = {},
                      std::string upstream_host = {},
                      flow_proxy_factory proxy_factory = {},
-                     bool capture_native = false);
+                     bool capture_native = false,
+                     proxymaker::SessionSetupFactory setup_factory = {});
     ~listener_service();
 
     listener_service(listener_service const&) = delete;
@@ -107,6 +120,8 @@ public:
     void run();
     /** Request loop termination; cleanup occurs in run() before it returns. */
     void stop();
+    /** Refuse new sessions and return after all active sessions finish. */
+    void drain();
 
     bool ready() const { return ready_; }
     std::uint16_t bound_port() const { return bound_port_; }
@@ -122,21 +137,26 @@ private:
     bool open_socket();
 #if SMITHPROXY_OPENSSL_QUIC
     /** Test/non-transparent connector which resolves SNI as a host name. */
-    std::shared_ptr<openssl_connection> connect_upstream(std::string const& host);
+    std::shared_ptr<openssl_connection> connect_upstream(
+        std::string const& host, proxymaker::SessionSetup* setup, bool probe = false);
     /** Production connector to the captured original destination. */
     std::shared_ptr<openssl_connection> connect_upstream(
-        datagram_endpoint const& target, std::string const& server_name);
+        datagram_endpoint const& target, std::string const& server_name,
+        proxymaker::SessionSetup* setup, bool probe = false);
     /** OpenSSL trampoline; return -1 while asynchronous preparation is pending. */
     static int certificate_callback(SSL* ssl, void* argument);
     /** Bind a newly parsed ClientHello to the dispatcher's stable CID family. */
     static int client_hello_callback(SSL* ssl, int* alert, void* argument);
     int bind_capture_session(SSL* downstream);
+    /** Apply the selected profile before OpenSSL can accept a session ticket. */
+    bool prepare_tls_policy(SSL* downstream);
     /** Start or collect one origin-verification job for a downstream handshake. */
     int prepare_verified_certificate(SSL* downstream);
     struct verified_certificate;
     /** Worker-thread operation: connect, verify identity, and derive a certificate. */
-    verified_certificate verify_and_spoof(datagram_endpoint destination,
-                                           std::string server_name);
+    verified_certificate verify_and_spoof(
+        datagram_endpoint destination, std::string server_name,
+        std::shared_ptr<proxymaker::SessionSetup> setup);
     /** Install already-owned key material back on the listener thread. */
     bool install_verified_certificate(SSL* downstream,
                                       verified_certificate const& verified);
@@ -154,6 +174,7 @@ private:
     bool verify_upstream_;                       ///< Require origin-backed certificate creation.
     lifecycle_options lifecycle_;                ///< Session timing policy.
     resource_limits limits_;                     ///< Resource-exhaustion policy.
+    proxymaker::SessionSetupFactory setup_factory_;
     flow_proxy_factory proxy_factory_;           ///< Production per-stream proxy strategy.
     bool capture_native_;                        ///< Buffer downstream wire records for policy.
     int udp_fd_ = -1;                            ///< Socket owned by this service.
@@ -168,6 +189,7 @@ private:
     // for certificate results, while readers may sample from management code.
     std::atomic_uint64_t accepted_sessions_ = 0;
     std::atomic_uint64_t completed_sessions_ = 0;
+    std::atomic_bool draining_ = false;
     std::atomic_uint64_t handshake_timeouts_ = 0;
     std::atomic_uint64_t handshake_failures_ = 0;
     std::atomic_uint64_t idle_timeouts_ = 0;
@@ -187,6 +209,7 @@ private:
     enum class session_state { handshake, active, draining };
     /** All state owned by one downstream/upstream connection pair. */
     struct session {
+        std::shared_ptr<proxymaker::SessionSetup> setup;
         std::uint64_t id = 0;
         session_state state = session_state::handshake;
         std::chrono::steady_clock::time_point created = std::chrono::steady_clock::now();
@@ -209,9 +232,11 @@ private:
     std::vector<session> sessions_;              ///< Worker-owned live/draining sessions.
     /** Verified route waiting for OpenSSL to expose its downstream connection. */
     struct staged_upstream {
+        std::shared_ptr<proxymaker::SessionSetup> setup;
         datagram_endpoint client;
         datagram_endpoint destination;
         std::string server_name;
+        std::uint64_t callback_generation = 0;
         std::chrono::steady_clock::time_point created = std::chrono::steady_clock::now();
     };
     std::map<SSL*, staged_upstream> staged_upstreams_; ///< Key is borrowed downstream SSL.
@@ -222,9 +247,12 @@ private:
     };
     /** Future and creation time for one suspended OpenSSL certificate callback. */
     struct certificate_job {
+        std::shared_ptr<proxymaker::SessionSetup> setup;
         std::future<verified_certificate> result;
         datagram_endpoint client;
         datagram_endpoint destination;
+        std::string server_name;
+        std::uint64_t callback_generation = 0;
         std::chrono::steady_clock::time_point created = std::chrono::steady_clock::now();
     };
     std::map<SSL*, certificate_job> certificate_jobs_; ///< Bounded pending verifications.
@@ -236,13 +264,20 @@ private:
     std::map<std::uint64_t, pending_capture> pending_captures_; ///< CID family -> journal.
     std::map<std::uint64_t, std::weak_ptr<sx::session_traffic_log>> capture_routes_;
     struct dispatcher_binding {
+        datagram_endpoint client;
+        datagram_endpoint destination;
         std::uint64_t association = 0;
+        std::uint64_t generation = 0;
         std::chrono::steady_clock::time_point updated = std::chrono::steady_clock::now();
+        std::shared_ptr<proxymaker::SessionSetup> setup;
     };
     std::map<SSL*, dispatcher_binding> dispatcher_bindings_; ///< ClientHello until accept.
+    std::uint64_t next_dispatcher_binding_generation_ = 1;
 
     /** Transfer certificate-worker results to the matching accepted session. */
     void attach_staged_upstream(session& value);
+    /** Restore the forwarding leg when resumption skips certificate selection. */
+    bool prepare_resumed_upstream(session& value);
     /** Record one downstream datagram without exposing QUIC to the logger API. */
     void observe_datagram(datagram_view const& datagram);
     /** Publish keylog records added since the previous session-loop pass. */

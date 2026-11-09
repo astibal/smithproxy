@@ -110,6 +110,8 @@ public:
     [[nodiscard]] identification const& client_identification() const noexcept;
     [[nodiscard]] std::uint64_t bytes_up() const noexcept;
     [[nodiscard]] std::uint64_t bytes_down() const noexcept;
+    [[nodiscard]] bool upstream_write_pending() const noexcept;
+    [[nodiscard]] bool downstream_write_pending() const noexcept;
     [[nodiscard]] std::string diagnostics() const;
 
 private:

@@ -37,15 +37,13 @@ libcli2::Command& debug_command(libcli2::Cli& cli, std::string_view name, std::s
 
 void print_log_levels(libcli2::Context& context) {
     std::ostringstream output;
-    const auto profile = Log::get()->target_profiles().find(static_cast<std::uint64_t>(context.io_handle));
-    if (profile != Log::get()->target_profiles().end() && profile->second)
-        output << "THIS cli logging level set to: " << profile->second->level_.level() << '\n';
+    const auto profile = Log::get()->remote_target_profile(context.io_handle);
+    if (profile) output << "THIS cli logging level set to: " << profile->level_.level() << '\n';
     output << "Internal logging level set to: " << Log::get()->level().level() << '\n';
-    for (const auto& [target, mutex] : Log::get()->remote_targets()) {
-        const auto found = Log::get()->target_profiles().find(static_cast<std::uint64_t>(target));
-        if (found != Log::get()->target_profiles().end() && found->second)
-            output << "Logging level for remote: " << Log::get()->target_name(target) << ": "
-                   << found->second->level_.level() << '\n';
+    for (const auto& target : *Log::get()->remote_targets_snapshot()) {
+        if (target->profile)
+            output << "Logging level for remote: " << target->name << ": "
+                   << target->profile->level_.level() << '\n';
     }
     context.print(output.str());
 }
@@ -97,18 +95,18 @@ void register_smithproxy_cli2_debug(libcli2::Cli& cli) {
 #endif
     debug_command(cli, "term", "Set logging level for this terminal")
         .handler([](libcli2::Context& context, const libcli2::Invocation& invocation) {
-            auto found = Log::get()->target_profiles().find(static_cast<std::uint64_t>(context.io_handle));
-            if (found == Log::get()->target_profiles().end() || !found->second) return -1;
+            auto found = Log::get()->remote_target_profile(context.io_handle);
+            if (!found) return -1;
             if (invocation.arguments.empty()) { print_log_levels(context); return 0; }
-            if (invocation.arguments.front() == "reset") found->second->level_ = NON;
+            if (invocation.arguments.front() == "reset") found->level_ = NON;
             else {
                 int value = -1;
                 if (!level(invocation.arguments.front(), value)) return -1;
-                found->second->level_.level(value);
+                found->level_.level(value);
             }
             const auto d = context.decor();
             context.print(d.success("this terminal logging level changed to ") +
-                          d.value(std::to_string(found->second->level_.level())));
+                          d.value(std::to_string(found->level_.level())));
             return 0;
         });
 

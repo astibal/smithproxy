@@ -16,6 +16,20 @@ DEMO_GENERATOR = TOOLS / "generate-spquic-demo.py"
 
 
 class Spq1DissectorTest(unittest.TestCase):
+    def tshark_environment(self, temporary_path: Path) -> dict[str, str]:
+        """Load the tested Lua file, not a user's installed copy or preferences."""
+        config = temporary_path / "config"
+        plugins = temporary_path / "plugins"
+        config.mkdir()
+        plugins.mkdir()
+
+        # Keep the caller's environment intact. Both locations matter: Lua
+        # plugins can also live in the personal configuration directory.
+        environment = os.environ.copy()
+        environment["WIRESHARK_CONFIG_DIR"] = str(config)
+        environment["WIRESHARK_PLUGIN_DIR"] = str(plugins)
+        return environment
+
     @unittest.skipIf(
         os.geteuid() == 0,
         "tshark disables user Lua dissectors when running as superuser",
@@ -44,10 +58,11 @@ class Spq1DissectorTest(unittest.TestCase):
                     "-e", "sphttp3.method",
                     "-e", "sphttp3.url",
                 ],
-                check=True,
+                env=self.tshark_environment(temporary_path),
                 capture_output=True,
                 text=True,
             )
+            self.assertEqual(result.returncode, 0, result.stderr)
 
         self.assertEqual(
             ["GET\thttps://origin.runner.lab/demo"],
@@ -82,10 +97,11 @@ class Spq1DissectorTest(unittest.TestCase):
                     "-T", "fields",
                     "-e", "sphttp3.url",
                 ],
-                check=True,
+                env=self.tshark_environment(temporary_path),
                 capture_output=True,
                 text=True,
             )
+            self.assertEqual(result.returncode, 0, result.stderr)
 
         self.assertEqual(
             ["https://origin.runner.lab/demo"],

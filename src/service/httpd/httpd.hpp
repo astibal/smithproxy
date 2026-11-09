@@ -52,6 +52,7 @@
 #include <common/display.hpp>
 
 #include <openssl/rand.h>
+#include <openssl/crypto.h>
 
 namespace sx::webserver {
 
@@ -167,13 +168,13 @@ struct HttpSessions {
 
     static std::string generate_auth_token() {
         unsigned char rand_pool[16];
-        RAND_bytes(rand_pool, 16);
+        if(RAND_priv_bytes(rand_pool, sizeof(rand_pool)) != 1) return {};
         return hex_print(rand_pool, 16);
     }
 
     static std::string generate_csrf_token() {
         unsigned char rand_pool[16];
-        RAND_bytes(rand_pool, 16);
+        if(RAND_priv_bytes(rand_pool, sizeof(rand_pool)) != 1) return {};
         return hex_print(rand_pool, 16);
     }
 
@@ -183,15 +184,8 @@ struct HttpSessions {
         if(auth_token.empty() or csrf_token.empty()) return false;
 
         auto db_csrf_token = table_value(auth_token, "csrf_token");
-        bool ret = ( csrf_token == db_csrf_token );
-
-        if(not ret) {
-            auto lc_ = std::scoped_lock(lock);
-            //eventually erase this auth_token
-            access_keys.erase(auth_token);
-        }
-
-        return ret;
+        if(db_csrf_token.empty() or db_csrf_token.size() != csrf_token.size()) return false;
+        return CRYPTO_memcmp(csrf_token.data(), db_csrf_token.data(), csrf_token.size()) == 0;
     }
 
     static bool has_api_key(std::string const& key) {
@@ -202,6 +196,16 @@ struct HttpSessions {
     static bool has_api_keys() {
         auto lc_ = std::scoped_lock(lock);
         return !api_keys.empty();
+    }
+
+    static bool api_header_allowed() {
+        auto lc_ = std::scoped_lock(lock);
+        return allow_api_header;
+    }
+
+    static bool pam_login_enabled() {
+        auto lc_ = std::scoped_lock(lock);
+        return pam_login;
     }
 
     static std::set<std::string> api_keys_snapshot() {
@@ -240,7 +244,7 @@ struct HttpSessions {
     }
 };
 
-std::thread* create_httpd_thread(unsigned short port);
+std::thread* create_httpd_thread(unsigned short port, int listener_fd = -1);
 
 struct Http_JsonResponseParams : public lmh::ResponseParams {
     nlohmann::json response;
@@ -252,6 +256,7 @@ class Http_Responder : public lmh::DynamicController {
     std::string path;
 
     Callable responder;
+    static constexpr std::size_t max_request_body_size = 8U * 1024U * 1024U;
 
     static inline const std::vector<std::pair<std::string, std::string>> Http_Response_Headers  = {
             { "X-Vendor", "smithproxy " SMITH_VERSION },
@@ -295,15 +300,26 @@ public:
             }
         }
         else if(*upload_data_size > 0) {
-            std::string inc(upload_data, *upload_data_size);
-            body->request_data += inc.c_str();
+            if(*upload_data_size > max_request_body_size ||
+               body->request_data.size() > max_request_body_size - *upload_data_size) {
+                // Keep a bounded marker until libmicrohttpd's final callback.
+                body->request_data.clear();
+                body->request_data.resize(max_request_body_size + 1);
+            } else {
+                body->request_data.append(upload_data, *upload_data_size);
+            }
             *upload_data_size = 0;
-
-            request_data = body->request_data;
+            return {};
         }
 
-
-        auto ret = responder(connection, meth, request_data);
+        Http_JsonResponseParams ret;
+        if(body && body->request_data.size() > max_request_body_size) {
+            ret.response_code = 413;
+            ret.response = {{"error", "request body too large"}};
+        } else {
+            if(body) request_data = body->request_data;
+            ret = responder(connection, meth, request_data);
+        }
 
         // MHD_YES is used above to request another upload callback.  Every
         // real HTTP response, including an error, must carry the responder's

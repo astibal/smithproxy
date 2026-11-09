@@ -174,6 +174,11 @@ namespace sx::http {
             }
         }
 
+        bool set_unix_socket_path(std::string const& path) {
+            return curl && !path.empty()
+                && curl_easy_setopt(curl, CURLOPT_UNIX_SOCKET_PATH, path.c_str()) == CURLE_OK;
+        }
+
 
         static int curl_debug_callback(CURL *handle, curl_infotype type, char *data, size_t size, void *userptr) {
             // userptr points to your string or any other type of container
@@ -297,11 +302,15 @@ namespace sx::http {
         Reply emit(std::string const& url, std::string const& payload) {
             CURLcode res = CURLE_FAILED_INIT;
 
-            curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-            curl_easy_setopt(curl, CURLOPT_POST, 1L);
-            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload.c_str());
-            curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE,
-                             static_cast<curl_off_t>(payload.size()));
+            auto setup = curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+            if(setup == CURLE_OK) setup = curl_easy_setopt(curl, CURLOPT_POST, 1L);
+            if(setup == CURLE_OK)
+                setup = curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload.data());
+            if(setup == CURLE_OK)
+                setup = curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE,
+                                         static_cast<curl_off_t>(payload.size()));
+            if(setup != CURLE_OK)
+                return make_reply(url, 600, curl_easy_strerror(setup));
 
             attempts = 0;
             const auto deadline = std::chrono::steady_clock::now()
@@ -351,8 +360,10 @@ namespace sx::http {
                 return make_reply(url, 600, curl_easy_strerror(res));
             }
 
-            long responseCode;
-            curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCode);
+            long responseCode = 0;
+            res = curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCode);
+            if(res != CURLE_OK)
+                return make_reply(url, 600, curl_easy_strerror(res));
 
             return make_reply(url, responseCode, responseData);
         }

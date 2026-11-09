@@ -62,6 +62,7 @@ void all_session_workers(bool wake, Callback&& callback) {
     for_each_worker(instance.dtls_proxies, "dtls receiver", wake, callback);
     for_each_worker(instance.socks_proxies, "socks acceptor", wake, callback);
     for_each_worker(instance.socks_udp_proxies, "socks receiver", wake, callback);
+    for_each_worker(instance.http_connect_proxies, "http-connect acceptor", wake, callback);
     for_each_worker(instance.redir_plain_proxies, "plain redirect acceptor", wake, callback);
     for_each_worker(instance.redir_udp_proxies, "dns redirect receiver", wake, callback);
     for_each_worker(instance.redir_ssl_proxies, "tls redirect acceptor", wake, callback);

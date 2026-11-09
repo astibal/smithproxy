@@ -42,8 +42,11 @@
 
 
 #include <any>
+#include <functional>
+#include <stdexcept>
 
 #include <inspect/sxsignature.hpp>
+#include <inspect/payload_analysis.hpp>
 
 class MitmHostCX;
 
@@ -138,6 +141,18 @@ namespace sx::engine {
 
     struct EngineCtx {
 
+        // Independent protocol/app state for an endpoint view. The adapter
+        // detaches mutable state; immutable tables may remain shared. This is
+        // a forward-only fork, never a rollback of the input history.
+        [[nodiscard]] std::unique_ptr<EngineCtx> protocol_fork() const;
+
+        // Output observation must not repeat external inspector effects.
+        bool protocol_only = false;
+
+        // Borrowed only during a synchronous observation, restored by its
+        // scope guard. Never a persistent cache or shared protocol state.
+        PayloadAnalysis* payload_analysis = nullptr;
+
         struct {
             struct {
                 bool ja4h = false;
@@ -146,6 +161,11 @@ namespace sx::engine {
 
         MitmHostCX* origin = nullptr;
         std::shared_ptr<duplexFlowMatch> signature;
+
+        // Transport metadata captured before an application engine runs.
+        // This is the protocol selected by TLS ALPN, not the ClientHello
+        // offer list. An empty value means that ALPN was unavailable.
+        std::string negotiated_alpn;
 
         struct FlowPos {
             std::size_t blocks_seen = 0; // flow size seen

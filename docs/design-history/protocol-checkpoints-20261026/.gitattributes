@@ -1,0 +1,3 @@
+# A blank context line in a unified diff is a single space. Preserve the patch
+# verbatim; this exception applies only to archived diffs, never live source.
+*.patch whitespace=-blank-at-eol

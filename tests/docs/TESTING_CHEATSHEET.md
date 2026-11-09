@@ -36,7 +36,7 @@ Useful additions:
 
 ```text
 --unique=NAME       do not collide with another run
---dir /tmp/NAME     predictable work and report path
+--dir /var/tmp/NAME predictable work and report path
 --quiet             verdicts and report path only
 --parallel N        concurrent isolated sections per target
 --include-external  public-network and privileged native tests
@@ -49,8 +49,8 @@ PATCH_TEST_BUILD_TYPE=Debug build with detailed trace logging retained
 Find results:
 
 ```bash
-cat  /tmp/patch-runner/*/results/*/summary.txt
-tail -f /tmp/patch-runner/*/results/*/test.log
+cat  /var/tmp/smithproxy-patch-runner/*/results/*/summary.txt
+tail -f /var/tmp/smithproxy-patch-runner/*/results/*/test.log
 ```
 
 For semantics, pass criteria and seed lifecycle, see

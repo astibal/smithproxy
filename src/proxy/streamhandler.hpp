@@ -49,6 +49,11 @@ public:
     [[nodiscard]] virtual std::string_view session_protocol() const noexcept = 0;
     [[nodiscard]] virtual std::uint64_t bytes_up() const noexcept { return 0; }
     [[nodiscard]] virtual std::uint64_t bytes_down() const noexcept { return 0; }
+    // Non-blocking protocol libraries may need socket writability even when
+    // the proxy's ordinary application buffers are empty.
+    [[nodiscard]] virtual bool write_event_pending(stream_direction) const noexcept {
+        return false;
+    }
     [[nodiscard]] virtual std::string state() const = 0;
     [[nodiscard]] virtual std::string error() const = 0;
     // Protocol-specific, human-readable session details for diagnostics.

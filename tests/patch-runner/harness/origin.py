@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 import http.server, socket, socketserver, ssl, threading, pathlib, sys, os, time
 certs = pathlib.Path(sys.argv[1])
+if os.environ.get('TLS_PROFILE_TEST') == '1':
+    from suites.tls.profile_matrix import start_origins
+    start_origins(certs)
+
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/delayed-half-close':

@@ -43,14 +43,24 @@
 
 #include <atomic>
 #include <array>
-#include <ctime>
 #include <optional>
 #include <nlohmann/json.hpp>
+#include <memory>
+#include <service/http/webhook_control.hpp>
+#include <proxy/connection_readiness.hpp>
+#include <proxy/proxy_hooks.hpp>
+#include <ctime>
+#include <mutex>
+#include <set>
+#include <string>
+#include <string_view>
+#include <vector>
 
 #include <basecom.hpp>
 #include <hostcx.hpp>
 
 #include <proxy/socks5/sockshostcx.hpp>
+#include <proxy/flowctx.hpp>
 #include <proxy/trafficcapture.hpp>
 #include <proxy/startstoptls.hpp>
 
@@ -76,6 +86,8 @@ struct whitelist_verify_entry {
 
 class FilterProxy;
 class CaptureProtocolTracer;
+namespace sx::proxy { class TlsObserver; }
+
 namespace sx {
 class StreamHandler;
 enum class stream_direction;
@@ -108,6 +120,8 @@ class MitmProxy : public baseProxy, public IOController {
     static inline long half_timeout_ = 5;
     std::time_t created_at_ = std::time(nullptr);
     void write_capture_enrichment();
+    void prepare_capture_stop();
+    bool capture_stopped_ = false;
     void observe_tls_ready();
     void write_capture_block(std::array<uint8_t, 4> name_space,
                              nlohmann::json const& payload);
@@ -126,6 +140,7 @@ class MitmProxy : public baseProxy, public IOController {
     socle::ProtocolTracer* active_protocol_tracer_ = nullptr;
     std::optional<std::uint64_t> protocol_trace_subject_;
     void attach_protocol_tracer() noexcept;
+    std::uint64_t session_id_ = 0;
 public:
     struct CaptureDiagnostics {
         uint64_t sxme_written = 0;
@@ -237,6 +252,12 @@ public:
     explicit MitmProxy(baseCom* c);
     ~MitmProxy() override;
 
+    void attach_flow(MitmHostCX& host, char leg);
+
+    // Change only on the owning thread, before the TLS start boundary.
+    void tls_observer_enabled(bool enabled);
+    bool tls_observer_enabled() const { return tls_observer_enabled_; }
+
     StartStopTls& start_stop_tls() noexcept { return start_stop_tls_; }
     StartStopTls const& start_stop_tls() const noexcept { return start_stop_tls_; }
 
@@ -246,11 +267,19 @@ public:
     void write_stream_event(sx::stream_direction direction, std::string_view event);
     void proxy_dump_packet(side_t sid, buffer const& buf);
     void proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected,
-               bool consume_source = true);
+               bool consume_source = true, FlowCtx::Tx const* tx = nullptr);
+
+    // Queue local output to this side; call on the proxy's I/O thread only.
+    // The caller owns protocol framing and ordering relative to the current
+    // callback. Success means queued, not delivered. Input bytes are not consumed.
+    void inject(buffer& data, side_t side);
 
     // makes a synchronous API call letting webhook modify the content
-    bool content_webhook(baseHostCX* cx, side_t side, buffer& buffer);
-    bool handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t side);
+    bool content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
+                         std::string_view payload_layer,
+                         bool regular_webhook, bool sift, ::buffer& reverse_output);
+    bool handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t side,
+                                buffer& reverse_output);
 
     // this virtual method is called whenever there are new bytes in any LEFT host context!
     void on_left_bytes(baseHostCX* cx) override;
@@ -296,12 +325,104 @@ public:
     std::string to_connection_ID() const;
     [[nodiscard]] std::string_view session_protocol() const noexcept;
     std::optional<std::string> get_application() const;
+    bool add_sift_classification(std::string classification);
+    bool add_lored_classification(std::string classification);
+    [[nodiscard]] std::vector<std::string> sift_classifications() const;
+    [[nodiscard]] std::vector<std::string> lored_classifications() const;
+    [[nodiscard]] std::string lored_status() const;
+    bool apply_sift_reply(nlohmann::json const& reply);
+    void publish_sift_classifications() const;
+    void submit_flow_observation(
+        sx::traffic_log_adapter::flow_observation fields,
+        std::string_view payload_layer);
 
-    mutable bool wh_start = false;
-    void webhook_session_start() const;
+    bool handle_cx_read_once(unsigned char side, baseCom* com, baseHostCX* cx) override;
+    bool handle_cx_write_once(unsigned char side, baseCom* com, baseHostCX* cx) override;
+    bool handle_cx_events(unsigned char side, baseHostCX* cx) override;
+    void on_left_pc_error(baseHostCX* cx) override;
+    void on_right_pc_error(baseHostCX* cx) override;
+    // Ordered observations for actual TCP attempts, independently of TLS.
+    bool hook_server_connect(baseHostCX* cx);
+    void hook_server_connected(baseHostCX* cx);
+    void hook_server_end(baseHostCX* cx, std::string_view error = {},
+                         bool session_ending = false);
+
+    void observe_readiness(unsigned char side, baseHostCX* cx);
+    void readiness_webhook(unsigned char side, baseHostCX* cx,
+                           const char* event, std::uint64_t attempt);
+
+private:
+    void finish_server_hooks();
+    enum class ObserverStatus {
+        Continue,
+        Terminate
+    };
+
+    // Report hook decisions; the caller owns proxy termination.
+    ObserverStatus observe_tls(bool retiring = false);
+    ObserverStatus observe_tls_side(baseHostCX* cx, bool client);
+
+    struct TlsLifecycle {
+        const baseCom* communication = nullptr;
+        int descriptor = 0;
+        std::uint64_t attempt = 0;
+        bool finished = false;
+        bool history_gap = false;
+    };
+    using TlsLifecycleMap = sx::proxy::CxMap<baseHostCX*, TlsLifecycle>;
+
+    TlsLifecycle& tls_lifecycle(baseHostCX& cx);
+
+    TlsLifecycleMap tls_;
+    std::uint64_t tls_sequence_ = 0;
+
+    struct ServerLifecycle {
+        std::uint64_t attempt = 0;
+        bool connected = false;
+        bool finished = false;
+    };
+    using ServerLifecycleMap = sx::proxy::CxMap<baseHostCX*, ServerLifecycle>;
+
+    ServerLifecycleMap servers_;
+    std::uint64_t server_sequence_ = 0;
+
+    sx::proxy::ConnectionReadinessMap readiness_;
+    std::uint64_t readiness_sequence_ = 0;
+
+public:
+    friend class sx::proxy::ProxyHooks;
+    friend class sx::proxy::TlsObserver;
+
+    bool wh_start = false;
+    bool webhook_rewrite_allowed_ = false;
+    bool webhook_server_lifecycle_ = false;
+    bool webhook_tls_lifecycle_ = false;
+    bool webhook_tls_meta_ = false;
+    bool webhook_tls_clienthello_ = false;
+    bool webhook_tls_clienthello_meta_ = false;
+    bool webhook_tls_start_server_ = false;
+    bool webhook_tls_start_client_ = false;
+    // Synchronous setup gate, before application content is analyzed/forwarded.
+    // False means the connection must not proceed.
+    bool webhook_session_start();
+    nlohmann::json connection_start_details() const;
+
+    // Logical streams retain their own inspection lifetime. Their parent ID
+    // identifies the shared transport without masquerading as another socket.
+    struct WebhookStream {
+        std::string parent_id;
+        std::uint64_t stream_id;
+    };
+    std::optional<WebhookStream> webhook_stream;
+    void add_webhook_stream_details(nlohmann::json& info) const;
 
     mutable bool wh_stop = false;
-    void webhook_session_stop() const;
+    std::unique_ptr<sx::proxy::ProxyHooks::Epitaph> epitaph_;
+    void prepare_session_stop();
+    void finalize() noexcept override;
+    void shutdown() override;
+
+    bool wh_sni = false;
 
     int handle_sockets_once(baseCom*) override;
     
@@ -322,6 +443,7 @@ public:
 
     static std::atomic_uint64_t& current_sessions() { static std::atomic_uint64_t current; return current; };
     static std::atomic_uint64_t& total_sessions() { static std::atomic_uint64_t total; return total; };
+    static std::atomic_uint64_t& sift_payload_limit_per_direction();
     static socle::meter& total_mtr_up()  { static socle::meter t_up(12); return t_up; };
     static socle::meter& total_mtr_down() {static socle::meter t_down(12); return t_down; };
 
@@ -337,7 +459,28 @@ private:
     static std::atomic_uint64_t& capture_tls_left_ready();
     static std::atomic_uint64_t& capture_tls_right_ready();
 
+    // A content webhook may permanently decline the rest of this connection.
+    // SIFT has its own path and is deliberately unaffected.
+    bool webhook_content_wanted_ = true;
+    std::shared_ptr<sx::http::webhooks::webhook_control_t> webhook_control_ =
+        std::make_shared<sx::http::webhooks::webhook_control_t>();
+
+    struct sift_ctl_t {
+        std::uint64_t payload_left_bytes = 0;
+        std::uint64_t payload_right_bytes = 0;
+        static std::atomic_uint64_t& payload_limit_per_direction() {
+            static std::atomic_uint64_t value {256 * 1024};
+            return value;
+        }
+    } sift_ctl_;
+
+    mutable std::mutex sift_classifications_lock_;
+    std::set<std::string> sift_classifications_;
+    std::set<std::string> lored_classifications_;
+    std::string lored_status_;
+    std::shared_ptr<FlowCtx> flow_ctx_;
     StartStopTls start_stop_tls_;
+    bool tls_observer_enabled_ = false;
     logan_lite log {"proxy"};
     logan_lite log_dump {"proxy.payload"};
     logan_lite log_content {"proxy.content"};

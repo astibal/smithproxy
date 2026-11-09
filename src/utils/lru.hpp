@@ -1,3 +1,7 @@
+#pragma once
+
+#include <sstream>
+#include <string>
 #include <iostream>
 #include <unordered_map>
 #include <list>

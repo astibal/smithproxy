@@ -81,6 +81,14 @@ public:
         : downstream_(std::move(downstream)), upstream_(std::move(upstream)),
           limits_(limits), context_(std::move(context)) {}
 
+    void shutdown() override {
+        for(auto& [id, current] : pairs_) {
+            current.master->shutdown();
+        }
+        pairs_.clear();
+        closed_ = true;
+    }
+
     std::size_t pump_once(std::size_t chunk_size) override {
         if (!downstream_ || !upstream_ || chunk_size == 0 || closed_) return 0;
         process_events(true, downstream_->drain_events());
@@ -220,20 +228,44 @@ private:
         right->opening(false);
 
         auto proxy = proxymaker::make(std::move(left), std::move(right));
+        if (proxy && !context_.parent_connection_id.empty()) {
+            const auto stream_id = downstream_->wire_flow_id(left_handle).value_or(left_handle.id);
+            proxy->webhook_stream = MitmProxy::WebhookStream {
+                context_.parent_connection_id, stream_id
+            };
+        }
         if (proxy && context_.make_traffic_log_adapter) {
             // The downstream ID is the stable identity visible to capture
             // consumers; the paired upstream flow may use a different ID.
             auto const flow_id = downstream_->wire_flow_id(left_handle)
                 .value_or(left_handle.id);
-            proxy->traffic_log_adapter(
-                context_.make_traffic_log_adapter(flow_id));
+            auto adapter = context_.make_traffic_log_adapter(flow_id);
+
+            adapter->on_flow_observation(
+                [proxy = proxy.get()](sx::traffic_log_adapter::flow_observation fields) {
+                    proxy->submit_flow_observation(std::move(fields), "http3.headers");
+                });
+
+            proxy->traffic_log_adapter(std::move(adapter));
         }
+
         if (!proxy || !proxymaker::policy(proxy, false)) {
             source_connection->reset(source, 0x10c);
             return;
         }
+
         if (!proxymaker::setup_snat(proxy, context_.source_host, context_.source_port)) {
             source_connection->reset(source, 0x102);
+            return;
+        }
+
+        // The parent QUIC session has already passed admission. Each logical
+        // stream still applies its own policy before inspecting stream data.
+        if (!proxymaker::connection_start(*proxy)) {
+            proxy->shutdown();
+            proxy->finalize();
+            source_connection->reset(source, 0x10c);
+            destination_connection->reset(destination, 0x10c);
             return;
         }
 
@@ -298,7 +330,13 @@ private:
             // child only after those bytes have been handled.
             if (current.master->proxies().empty()) retired_.insert(id);
         }
-        for (auto const id : retired_) pairs_.erase(id);
+        for(auto const id : retired_) {
+            const auto found = pairs_.find(id);
+            if(found == pairs_.end()) continue;
+
+            found->second.master->shutdown();
+            pairs_.erase(found);
+        }
         retired_.clear();
     }
 

@@ -40,15 +40,113 @@
 #include <tcpcom.hpp>
 
 #include <proxy/proxymaker.hpp>
+#include <proxy/explicitproxy_io_detail.hpp>
 #include <proxy/explicitproxyport.hpp>
+#include <proxy/socks5/socks5_protocol.hpp>
 #include <proxy/socks5/sockshostcx.hpp>
 #include <proxy/socks5/socksproxy.hpp>
 #include <proxy/mitmhost.hpp>
 #include <service/cfgapi/cfgapi.hpp>
 
+#include <algorithm>
 #include <vector>
 #include <cerrno>
 #include <sys/socket.h>
+
+namespace {
+
+class SocksFramingTCPCom final : public TCPCom {
+public:
+    explicit SocksFramingTCPCom(bool require_authorization)
+        : proxy_authorization_required_(require_authorization) {}
+
+    baseCom* replicate() override { return new TCPCom(); }
+
+    ssize_t read(int fd, void* destination, std::size_t capacity,
+                 int flags) override {
+        if(stage_ == stage::done) {
+            // Do not let baseHostCX's drain loop consume tunnel payload with
+            // the SOCKS parser after the CONNECT request boundary.
+            errno = EAGAIN;
+            return -1;
+        }
+        if(capacity == 0 || (flags & MSG_PEEK) != 0)
+            return TCPCom::read(fd, destination, capacity, flags);
+
+        std::vector<std::uint8_t> preview(capacity);
+        const auto available = TCPCom::peek(fd, preview.data(), preview.size(), flags);
+        if(available <= 0)
+            return available;
+        preview.resize(static_cast<std::size_t>(available));
+
+        std::vector<std::uint8_t> candidate;
+        candidate.reserve(frame_.size() + preview.size());
+        candidate.insert(candidate.end(), frame_.begin(), frame_.end());
+        candidate.insert(candidate.end(), preview.begin(), preview.end());
+
+        const auto frame_size = complete_frame_size(candidate);
+        auto consume = preview.size();
+        if(frame_size > frame_.size())
+            consume = std::min(consume, frame_size - frame_.size());
+
+        const auto received = TCPCom::read(fd, destination, consume, flags);
+        if(received <= 0)
+            return received;
+
+        auto const* bytes = static_cast<std::uint8_t const*>(destination);
+        frame_.insert(frame_.end(), bytes, bytes + received);
+        const auto completed = complete_frame_size(frame_);
+        if(completed != 0 && frame_.size() >= completed) {
+            if(stage_ == stage::greeting && !frame_.empty() && frame_[0] == 5) {
+                stage_ = proxy_authorization_required_ ? stage::authentication : stage::request;
+                frame_.clear();
+            } else if(stage_ == stage::authentication) {
+                stage_ = stage::request;
+                frame_.clear();
+            } else {
+                stage_ = stage::done;
+            }
+        }
+        return received;
+    }
+
+private:
+    enum class stage { greeting, authentication, request, done };
+
+    std::size_t complete_frame_size(
+            std::vector<std::uint8_t> const& bytes) const noexcept {
+        if(bytes.empty()) return 0;
+        if(stage_ == stage::authentication) {
+            return sx::socks5::authentication_size_if_complete(bytes.data(), bytes.size());
+        }
+        if(stage_ == stage::greeting && bytes[0] != 4)
+            return sx::socks5::initial_frame_size_if_complete(
+                bytes.data(), bytes.size());
+        // SOCKS4 is selectable only by the first frame.  Once a SOCKS5
+        // greeting completed, the request stage cannot renegotiate versions.
+        if(stage_ == stage::greeting && bytes[0] == 4) {
+            const auto size = sx::socks5::socks4_request_size_if_complete(
+                bytes.data(), bytes.size());
+            // Stop retaining an unterminated or oversized SOCKS4 identity as
+            // soon as the parser has enough bytes to reject it. A complete
+            // maximum-sized request remains valid and trailing tunnel bytes
+            // are not mistaken for part of the request.
+            if(size > sx::socks5::maximum_socks4_request_size)
+                return sx::socks5::maximum_socks4_request_size;
+            if(size == 0 &&
+               bytes.size() >= sx::socks5::maximum_socks4_request_size)
+                return sx::socks5::maximum_socks4_request_size;
+            return size;
+        }
+        return sx::socks5::request_size_if_complete(bytes.data(), bytes.size());
+    }
+
+    const bool proxy_authorization_required_;
+    stage stage_ = stage::greeting;
+    std::vector<std::uint8_t> frame_;
+};
+
+} // namespace
 
 
 void SocksProxy::on_left_message(baseHostCX* basecx) {
@@ -92,14 +190,11 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
                 if(matched_policy() < 0 and CfgFactory::get()->policy_fail_open) {
                     matched_policy(PolicyRule::POLICY_IMPLICIT_PASS);
                 }
+                authorized_policy_ = matched_policy() == PolicyRule::POLICY_IMPLICIT_PASS
+                    ? std::shared_ptr<PolicyRule>{}
+                    : CfgFactory::get()->policy_rule(matched_policy());
                 verdict = matched_policy() == PolicyRule::POLICY_IMPLICIT_PASS or
                           CfgFactory::get()->policy_action(matched_policy());
-
-                std::shared_ptr<PolicyRule> p;
-                if (matched_policy() >= 0 and
-                    matched_policy() < static_cast<int>(CfgFactory::get()->db_policy_list.size())) {
-                    p = CfgFactory::get()->db_policy_list.at(matched_policy());
-                }
 
                 update_neighbors();
 
@@ -125,12 +220,13 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
         }
         else if(cx->state_ == socks5_state::HANDOFF) {
             _dia("SocksProxy::on_left_message: socksHostCX handoff msg received");
-            cx->state(socks5_state::ZOMBIE);
-
             // UDP_ASSOCIATE keeps its TCP control connection only as the
             // lifetime/authorization anchor; there is no stream to hand off.
-            if(cx->request_command() != socks5_cmd::UDP_ASSOCIATE &&
-               cx->com()->l4_proto() != SOCK_DGRAM) {
+            if(cx->request_command() == socks5_cmd::UDP_ASSOCIATE) {
+                cx->read_waiting_for_peercom(false);
+                cx->com()->set_monitor(cx->socket());
+            } else if(cx->com()->l4_proto() != SOCK_DGRAM) {
+                cx->state(socks5_state::ZOMBIE);
                 explicit_handoff(cx);
             }
         } else {
@@ -161,6 +257,9 @@ void ExplicitProxy::handle_explicit_connect(ExplicitProxyCX* cx) {
             if(matched_policy() < 0 and CfgFactory::get()->policy_fail_open) {
                 matched_policy(PolicyRule::POLICY_IMPLICIT_PASS);
             }
+            authorized_policy_ = matched_policy() == PolicyRule::POLICY_IMPLICIT_PASS
+                ? std::shared_ptr<PolicyRule>{}
+                : CfgFactory::get()->policy_rule(matched_policy());
             verdict = matched_policy() == PolicyRule::POLICY_IMPLICIT_PASS or
                       CfgFactory::get()->policy_action(matched_policy());
         }
@@ -198,22 +297,17 @@ void ExplicitProxy::explicit_handoff(ExplicitProxyCX* cx) {
         state().dead(true);
         return;
     } 
-    else if(not implicit_pass and
-            matched_policy() >= (signed int)CfgFactory::get()->db_policy_list.size()) {
-        _dia("SocksProxy::sock5_handoff: matching policy out of policy index table: %d/%d: dropping.",
-                                         matched_policy(),
-                                         CfgFactory::get()->db_policy_list.size());
-        state().dead(true);
-        return;
-    }
-    
     ////// we matched the policy
     
     int s = cx->socket();
     pending_connect_response_ = cx->upstream_success_response();
     upstream_failure_response_ = cx->upstream_failure_response();
+    upstream_policy_failure_response_ = cx->upstream_policy_failure_response();
     pending_connect_response_offset_ = 0;
+    connect_response_ready_ = false;
+    connect_response_observed_ = false;
     close_after_connect_response_ = false;
+    extended_local_destination_protection_ = cx->local_destination_protection();
     bool ssl = false;
 
     baseCom* new_com = nullptr;
@@ -240,8 +334,6 @@ void ExplicitProxy::explicit_handoff(ExplicitProxyCX* cx) {
     n_cx->com()->nonlocal_dst_port() = cx->com()->nonlocal_dst_port();
     n_cx->com()->nonlocal_dst_resolved(true);
 
-    // Preserve data received immediately after the frontend handshake (for
-    // example a pipelined TLS ClientHello following an HTTP CONNECT request).
     // get rid of it
     cx->remove_socket();
     if(cx->left) {
@@ -267,13 +359,24 @@ void ExplicitProxy::explicit_handoff(ExplicitProxyCX* cx) {
         return;
     }
 
-    bool preserve_source = false;
-    {
-        auto lock = std::scoped_lock(CfgFactory::lock());
-        preserve_source = not implicit_pass and
-                          CfgFactory::get()->db_policy_list.at(matched_policy())->nat
-                              == PolicyRule::POLICY_NAT_NONE;
+    std::unique_lock config_lock(CfgFactory::lock());
+    auto selected_policy = implicit_pass ? std::shared_ptr<PolicyRule>{}
+                                         : CfgFactory::get()->policy_rule(matched_policy());
+    if(not sx::policy::implicit_pass_is_current(
+            implicit_pass, CfgFactory::get()->policy_fail_open)) {
+        _err("ExplicitProxy::explicit_handoff: fail-open authorization was retired");
+        state().dead(true);
+        return;
     }
+    if(not implicit_pass and
+       not sx::policy::authorized_snapshot_is_current(authorized_policy_, selected_policy)) {
+        _err("ExplicitProxy::explicit_handoff: authorized policy changed before handoff");
+        state().dead(true);
+        return;
+    }
+
+    const bool preserve_source = selected_policy &&
+                                 selected_policy->nat == PolicyRule::POLICY_NAT_NONE;
 
     std::optional<unsigned short> source_port;
     if(preserve_source) {
@@ -310,39 +413,99 @@ void ExplicitProxy::explicit_handoff(ExplicitProxyCX* cx) {
     
     radd(target_cx);
 
-    if( auto policy = CfgFactory::get()->lookup_policy(matched_policy()); policy) {
-
-        if(policy->profile_routing and not sx::proxymaker::route_existing(this, policy->profile_routing)) {
+    if(selected_policy) {
+        if(selected_policy->profile_routing and
+           not sx::proxymaker::route_existing(this, selected_policy->profile_routing)) {
             _err("SocksProxy::socks5_handoff: routing failed");
             state().dead(true);
             return;
         }
     }
 
+    // Check the final routed address before opening the socket. The connected
+    // peer is checked again below because this text is not the security
+    // boundary and a future transport may transform it.
+    const auto destination = extended_local_destination_protection_
+        ? sx::proxy::local_destination::inspect(target_cx->host(), true)
+        : sx::proxy::local_destination::inspection_result::allowed;
+    if(destination != sx::proxy::local_destination::inspection_result::allowed) {
+        _war("ExplicitProxy::explicit_handoff: refusing %s destination %s:%s",
+             destination == sx::proxy::local_destination::inspection_result::blocked
+                 ? "local" : "unverifiable",
+             target_cx->host().c_str(), target_cx->port().c_str());
+        config_lock.unlock();
+        pending_connect_response_ = upstream_policy_failure_response_;
+        close_after_connect_response_ = true;
+        connect_response_ready_ = true;
+        send_pending_connect_response();
+        return;
+    }
+
     // policy_apply() configures the client-side inspector and applies the TLS
     // profile to the originator plus every target context.  Applying it again
     // to target_cx would duplicate filters/webhooks and incorrectly enable the
     // client-side detection engine on the server side.
-    if (not implicit_pass and
-        CfgFactory::get()->policy_apply(n_cx, this, matched_policy()) < 0) {
+    const bool policy_applied = implicit_pass ||
+        CfgFactory::get()->policy_apply(n_cx, this, matched_policy()) >= 0;
+    config_lock.unlock();
+
+    if (not policy_applied) {
 
         _inf("SocksProxy::socks5_handoff: session failed policy application on contexts");
         state().dead(true);
     } else {
 
         // connect with applied properties
-        int real_socket = target_cx->connect();
-        com()->set_monitor(real_socket);
+        int real_socket = sx::proxymaker::connect(*this, *target_cx);
+        if(!target_cx->com()->descriptor_valid(real_socket)) {
+            _err("SocksProxy::socks5_handoff: upstream connect returned invalid descriptor %d",
+                 real_socket);
+            if(!state().dead() && !pending_connect_response_.empty()) {
+                on_right_error(target_cx);
+            } else {
+                state().dead(true);
+            }
+            return;
+        }
         com()->set_poll_handler(real_socket,this);
+        // Non-blocking connect completion is reported as write readiness.
+        com()->set_write_monitor(real_socket);
 
     }
 
     _dia("SocksProxy::socks5_handoff: finished");
 }
 
+void ExplicitProxy::on_right_error(baseHostCX* cx) {
+
+    if(pending_connect_response_.empty()) {
+        MitmProxy::on_right_error(cx);
+        return;
+    }
+
+    // Connect errors and opening timeouts must complete the frontend exchange.
+    // Keep the client alive while a partial error response drains; the event
+    // dispatcher still closes the failed upstream descriptor after this call.
+    if(!connect_response_ready_) {
+        hook_server_end(cx, "Upstream connection failed or timed out");
+        pending_connect_response_ = upstream_failure_response_;
+        close_after_connect_response_ = true;
+        connect_response_ready_ = true;
+        send_pending_connect_response();
+    }
+}
+
 bool ExplicitProxy::send_pending_connect_response() {
     if(pending_connect_response_.empty()) {
         return true;
+    }
+
+    if(!connect_response_observed_) {
+        connect_response_observed_ = true;
+        connect_response(pending_connect_response_, !close_after_connect_response_);
+
+        if(state().dead())
+            return false;
     }
 
     auto* client = first_left();
@@ -353,9 +516,10 @@ bool ExplicitProxy::send_pending_connect_response() {
 
     auto const* data = pending_connect_response_.data() + pending_connect_response_offset_;
     auto const remaining = pending_connect_response_.size() - pending_connect_response_offset_;
-    auto const written = ::send(client->socket(), data, remaining, MSG_NOSIGNAL);
+    auto const written = sx::explicit_proxy::io_detail::retry_on_eintr(
+        [&] { return ::send(client->socket(), data, remaining, MSG_NOSIGNAL); });
     if(written < 0) {
-        if(errno == EAGAIN || errno == EWOULDBLOCK) {
+        if(sx::explicit_proxy::io_detail::send_would_block(errno)) {
             client->com()->set_write_monitor(client->socket());
             return true;
         }
@@ -387,21 +551,67 @@ bool ExplicitProxy::send_pending_connect_response() {
     return true;
 }
 
+bool ExplicitProxy::handle_cx_read(unsigned char side, baseHostCX* cx,
+                                   bool cross_direction_retry) {
+
+    if(!pending_connect_response_.empty()) {
+        // TCP readiness can release peer waiting before the CONNECT response
+        // has been observed and flushed. Keep both directions out of content
+        // inspection until the explicit protocol has admitted the tunnel.
+        // Preserve an already delivered write event: it completes connect.
+        if(!cx->com()->in_writeset(cx->socket()))
+            cx->defer_read_readiness();
+
+        return true;
+    }
+
+    return MitmProxy::handle_cx_read(side, cx, cross_direction_retry);
+}
+
 bool ExplicitProxy::handle_cx_write(unsigned char side, baseHostCX* cx,
                                     bool cross_direction_retry) {
     if(not pending_connect_response_.empty()) {
-        if((side == 'r' || side == 'R') && cx->opening()) {
+        if((side == 'r' || side == 'R') && !connect_response_ready_) {
+            // CONNECT completion belongs to the explicit protocol. Delayed
+            // TLS accept may already have cleared the transport's opening
+            // flag while the client still waits for this reply before sending
+            // ClientHello. Validate once; later events preserve partial replies.
             // This callback is driven by the upstream socket's write event.
             // Do not call is_connected() here: it performs another zero-time
             // epoll probe which can miss the event that brought us here and
             // turn an in-progress connect into a spurious proxy failure.
             int connect_error = 0;
             socklen_t connect_error_size = sizeof(connect_error);
-            auto const status = ::getsockopt(cx->socket(), SOL_SOCKET, SO_ERROR,
-                                             &connect_error, &connect_error_size);
+            auto const* tcp = dynamic_cast<TCPCom const*>(cx->com());
+            int status = 0;
+            if(tcp != nullptr && tcp->connect_failed()) {
+                connect_error = tcp->connect_error();
+            } else {
+                status = static_cast<int>(
+                    sx::explicit_proxy::io_detail::retry_on_eintr([&] {
+                        return ::getsockopt(cx->socket(), SOL_SOCKET, SO_ERROR,
+                                            &connect_error, &connect_error_size);
+                    }));
+            }
 
             if(status == 0 && connect_error == 0) {
-                cx->opening(false);
+                hook_server_connected(cx);
+
+                const auto peer = extended_local_destination_protection_
+                    ? sx::proxy::local_destination::inspect_connected_peer(
+                          cx->socket(), true)
+                    : sx::proxy::local_destination::inspection_result::allowed;
+                if(peer != sx::proxy::local_destination::inspection_result::allowed) {
+                    _war("ExplicitProxy::handle_cx_write: refusing %s upstream peer",
+                         peer == sx::proxy::local_destination::inspection_result::blocked
+                             ? "local" : "unverifiable");
+                    cx->shutdown();
+                    pending_connect_response_ = upstream_policy_failure_response_;
+                    pending_connect_response_offset_ = 0;
+                    close_after_connect_response_ = true;
+                } else {
+                    cx->opening(false);
+                }
             } else if(status == 0 &&
                       (connect_error == EINPROGRESS || connect_error == EALREADY ||
                        connect_error == EWOULDBLOCK)) {
@@ -415,13 +625,30 @@ bool ExplicitProxy::handle_cx_write(unsigned char side, baseHostCX* cx,
                 pending_connect_response_offset_ = 0;
                 close_after_connect_response_ = true;
             }
+            if(close_after_connect_response_) {
+                hook_server_end(cx, "Upstream connect failed");
+            }
+            connect_response_ready_ = true;
             return send_pending_connect_response();
         }
-        if(side == 'l' || side == 'L') {
+        if((side == 'l' || side == 'L') && connect_response_ready_) {
             return send_pending_connect_response();
         }
     }
     return MitmProxy::handle_cx_write(side, cx, cross_direction_retry);
+}
+
+int ExplicitProxy::handle_sockets_once(baseCom* xcom) {
+    if(!pending_connect_response_.empty()) {
+        // Let the ordinary event dispatcher resolve the nonblocking connect
+        // and flush the explicit-proxy reply before a staged exclusive stream
+        // handler (notably SSH MITM) takes ownership of both descriptors.
+        // Activating libssh first makes each peer wait for a different banner:
+        // the client still waits for SOCKS success while the origin waits for
+        // the client's SSH identification.
+        return baseProxy::handle_sockets_once(xcom);
+    }
+    return MitmProxy::handle_sockets_once(xcom);
 }
 
 bool ExplicitProxy::handle_cx_write_once(unsigned char side, baseCom* xcom, baseHostCX* basecx) {
@@ -448,21 +675,20 @@ void SocksProxy::socks5_handoff_udp(socksServerCX* cx) {
 
     _deb("SocksProxy::socks5_handoff_udp: start");
 
+    // A failed or interrupted target setup must not turn a missing shadow
+    // endpoint into a null dereference during the asynchronous handoff.
+    if(!sx::socks5::detail::udp_handoff_endpoints_ready(cx)) {
+        _err("SocksProxy::socks5_handoff_udp: incomplete UDP handoff endpoints");
+        state().dead(true);
+        return;
+    }
+
     auto const implicit_pass = matched_policy() == PolicyRule::POLICY_IMPLICIT_PASS;
     if(matched_policy() < 0) {
         _dia("SocksProxy::socks5_handoff_udp: matching policy: %d: dropping.",matched_policy());
         state().dead(true);
         return;
     }
-    else if(not implicit_pass and
-            matched_policy() >= (signed int)CfgFactory::get()->db_policy_list.size()) {
-        _dia("SocksProxy::socks5_handoff_udp: matching policy out of policy index table: %d/%d: dropping.",
-             matched_policy(),
-             CfgFactory::get()->db_policy_list.size());
-        state().dead(true);
-        return;
-    }
-
     ////// we matched the policy
 
     auto *target_cx = cx->right.release();
@@ -471,39 +697,59 @@ void SocksProxy::socks5_handoff_udp(socksServerCX* cx) {
     target_cx->peer(cx);
     target_cx->writebuf()->append(cx->left->readbuf()->data(), cx->left->readbuf()->size());
 
-
     auto const& n_cx = cx->left;
 
-    if(not n_cx) {
-        _err("SocksProxy::socks5_handoff_udp: left shadow cx is null");
+    std::unique_lock config_lock(CfgFactory::lock());
+    auto selected_policy = implicit_pass ? std::shared_ptr<PolicyRule>{}
+                                         : CfgFactory::get()->policy_rule(matched_policy());
+    if(not sx::policy::implicit_pass_is_current(
+            implicit_pass, CfgFactory::get()->policy_fail_open)) {
+        _err("SocksProxy::socks5_handoff_udp: fail-open authorization was retired");
+        state().dead(true);
+        return;
+    }
+    if(not implicit_pass and
+       not sx::policy::authorized_snapshot_is_current(authorized_policy_, selected_policy)) {
+        _err("SocksProxy::socks5_handoff_udp: authorized policy changed before handoff");
         state().dead(true);
         return;
     }
 
-    {
-        auto lc_ = std::scoped_lock(CfgFactory::lock());
-        if (not implicit_pass and
-            CfgFactory::get()->db_policy_list.at(matched_policy())->nat == PolicyRule::POLICY_NAT_NONE) {
-            target_cx->com()->nonlocal_src(true);
-        }
-    }
+    if(selected_policy && selected_policy->nat == PolicyRule::POLICY_NAT_NONE)
+        target_cx->com()->nonlocal_src(true);
 
     n_cx->matched_policy(matched_policy());
     target_cx->matched_policy(matched_policy());
 
     radd(target_cx);
 
-    if( auto policy = CfgFactory::get()->lookup_policy(matched_policy()); policy) {
-
-        if(policy->profile_routing and not sx::proxymaker::route_existing(this, policy->profile_routing)) {
+    if(selected_policy) {
+        if(selected_policy->profile_routing and
+           not sx::proxymaker::route_existing(this, selected_policy->profile_routing)) {
             _err("SocksProxy::socks5_handoff_udp: routing failed");
             state().dead(true);
             return;
         }
     }
 
-    if (not implicit_pass and
-        CfgFactory::get()->policy_apply(n_cx.get(), this, matched_policy()) < 0) {
+    const auto destination = cx->local_destination_protection()
+        ? sx::proxy::local_destination::inspect(target_cx->host(), true)
+        : sx::proxy::local_destination::inspection_result::allowed;
+    if(destination != sx::proxy::local_destination::inspection_result::allowed) {
+        _war("SocksProxy::socks5_handoff_udp: refusing %s destination %s:%s",
+             destination == sx::proxy::local_destination::inspection_result::blocked
+                 ? "local" : "unverifiable",
+             target_cx->host().c_str(), target_cx->port().c_str());
+        config_lock.unlock();
+        state().dead(true);
+        return;
+    }
+
+    const bool policy_applied = implicit_pass ||
+        CfgFactory::get()->policy_apply(n_cx.get(), this, matched_policy()) >= 0;
+    config_lock.unlock();
+
+    if (not policy_applied) {
         // strange, but it can happen if the sockets is closed between policy match and this profile application
         // mark dead.
         _inf("SocksProxy::socks5_handoff_udp: session failed policy application");
@@ -511,9 +757,17 @@ void SocksProxy::socks5_handoff_udp(socksServerCX* cx) {
     } else {
 
         // connect with applied properties
-        int real_socket = target_cx->connect();
-        com()->set_monitor(real_socket);
+        int real_socket = sx::proxymaker::connect(*this, *target_cx);
+        if(!target_cx->com()->descriptor_valid(real_socket)) {
+            _err("SocksProxy::socks5_handoff_udp: upstream connect returned invalid descriptor %d",
+                 real_socket);
+            state().dead(true);
+            return;
+        }
         com()->set_poll_handler(real_socket,this);
+        // The connected UDP/TCP target must get one writable dispatch to
+        // leave the opening state and flush its initial request/datagram.
+        com()->set_write_monitor(real_socket);
 
         // apply policy and get result
 
@@ -524,7 +778,26 @@ void SocksProxy::socks5_handoff_udp(socksServerCX* cx) {
     _dia("SocksProxy::socks5_handoff_udp: finished");
 }
 
+void SocksProxy::on_left_error(baseHostCX* cx) {
+    // baseProxy reports protocol errors through this hook as well. Only a
+    // terminal transport condition ends RFC 1928's TCP control channel.
+    if(auto* control = dynamic_cast<socksServerCX*>(cx);
+       control && (control->read_eof() || control->error()))
+        control->retire_udp_association();
+    ExplicitProxy::on_left_error(cx);
+}
 
+void SocksProxy::on_left_bytes(baseHostCX* cx) {
+    auto* socks = dynamic_cast<socksServerCX*>(cx);
+    if(socks != nullptr && socks->com()->l4_proto() == SOCK_DGRAM &&
+       !socks->udp_association_available()) {
+        socks->error(true);
+        return;
+    }
+    if(socks != nullptr && !socks->prepare_udp_handoff_datagram())
+        return;
+    ExplicitProxy::on_left_bytes(cx);
+}
 
 void ExplicitProxy::on_left_bytes(baseHostCX* cx) {
 
@@ -541,8 +814,11 @@ void ExplicitProxy::on_left_bytes(baseHostCX* cx) {
 
 
 baseHostCX* MitmSocksProxy::new_cx(int s) {
-    auto r = new socksServerCX(com()->slave(),s);
-    return r; 
+    // Framing and negotiation must use the same configuration snapshot.
+    const bool require_authorization = socksServerCX::proxy_authorization.load();
+    auto* transport = new SocksFramingTCPCom(require_authorization);
+    transport->master(com()->master());
+    return new socksServerCX(transport, s, require_authorization);
 }
 
 void MitmSocksProxy::on_left_new(std::unique_ptr<baseHostCX> accepted_cx) {
@@ -563,8 +839,13 @@ void MitmSocksProxy::on_left_new(std::unique_ptr<baseHostCX> accepted_cx) {
 }
 
 baseHostCX* MitmSocksUdpProxy::new_cx(int s) {
-    auto r = new socksServerCX(com()->slave(),s);
-    return r;
+    // SOCKS UDP datagrams are framed plaintext, not DTLS.  Cloning the
+    // listener's SSL-capable transport tried to build a second connected UDP
+    // socket before policy could select bypass; that unmonitored socket then
+    // captured every packet after the embryonic datagram.
+    auto* transport = new UDPCom();
+    transport->master(com()->master());
+    return new socksServerCX(transport, s);
 }
 
 void MitmSocksUdpProxy::on_left_new(std::unique_ptr<baseHostCX> accepted_cx) {

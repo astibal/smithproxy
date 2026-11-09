@@ -36,6 +36,7 @@ H3_ORIGIN_PID=
 QUIC_CLIENT_PID=
 QUIC_GRE_PID=
 QUIC_NATIVE_PID=
+QUIC_WEBHOOK_PID=
 SESSION_LIST_LOAD_PID=
 PPLAY_SUITE4_PID=
 PPLAY_SUITE6_PID=
@@ -48,6 +49,7 @@ CAPTURE_TEST=${CAPTURE_TEST:-0}
 CAPTURE_MATRIX_TEST=${CAPTURE_MATRIX_TEST:-0}
 RTT_TEST=${RTT_TEST:-0}
 TLS_SUITE_TEST=${TLS_SUITE_TEST:-0}
+export TLS_PROFILE_TEST=${TLS_PROFILE_TEST:-$TLS_SUITE_TEST}
 TLS_TRANSFER_TEST=${TLS_TRANSFER_TEST:-0}
 TLS_THROUGHPUT_TEST=${TLS_THROUGHPUT_TEST:-0}
 KTLS_PROBE_TEST=${KTLS_PROBE_TEST:-0}
@@ -90,6 +92,8 @@ cleanup() {
     [[ -z $QUIC_GRE_PID ]] || wait "$QUIC_GRE_PID" 2>/dev/null || true
     [[ -z $QUIC_NATIVE_PID ]] || kill -INT "$QUIC_NATIVE_PID" 2>/dev/null || true
     [[ -z $QUIC_NATIVE_PID ]] || wait "$QUIC_NATIVE_PID" 2>/dev/null || true
+    [[ -z $QUIC_WEBHOOK_PID ]] || kill "$QUIC_WEBHOOK_PID" 2>/dev/null || true
+    [[ -z $QUIC_WEBHOOK_PID ]] || wait "$QUIC_WEBHOOK_PID" 2>/dev/null || true
     [[ -z $H3_ORIGIN_PID ]] || kill "$H3_ORIGIN_PID" 2>/dev/null || true
     [[ -z $H3_ORIGIN_PID ]] || wait "$H3_ORIGIN_PID" 2>/dev/null || true
     [[ -z $SESSION_LIST_LOAD_PID ]] || kill "$SESSION_LIST_LOAD_PID" 2>/dev/null || true
@@ -290,6 +294,18 @@ if [[ ${SKIP_API_READY:-0} != 1 ]]; then
     python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["status"] == "ok"' "$ROOT/results/api.json"
     echo 'PASS API: authenticated HTTPS request from host namespace'
 fi
+if [[ $QUIC_TEST == 1 ]]; then
+    ip netns exec "$NS" python3 "$ROOT/runner/tests/quic-webhook-contract.py" serve \
+        "$ROOT/results/quic-webhooks.jsonl" > "$ROOT/results/quic-webhooks.log" 2>&1 &
+    QUIC_WEBHOOK_PID=$!
+    for attempt in $(seq 1 50); do
+        [[ ! -f "$ROOT/results/quic-webhooks.ready" ]] || break
+        kill -0 "$QUIC_WEBHOOK_PID"
+        sleep 0.1
+    done
+    [[ -f "$ROOT/results/quic-webhooks.ready" ]]
+fi
+
 if [[ $RUN_MODE == 1 ]]; then
     setsid socat "TCP4-LISTEN:$CLI_RELAY_PORT,bind=127.0.0.1,reuseaddr,fork" \
         "EXEC:ip netns exec $NS socat STDIO TCP4\:127.0.0.1\:50000" \
@@ -338,14 +354,52 @@ if [[ $PRIVSEP_TEST == 1 ]]; then
         sleep 0.1
     done
     read -ra helpers <<<"$helper_pids"
-    [[ ${#helpers[@]} == 2 ]]
-    core_uid=$(awk '/^Uid:/ { print $2 }' "/proc/$proxy_pid/status")
+    # File and socket privilege helpers plus the internal CLI broker are
+    # mandatory. API and GRE brokers add children when enabled by the profile.
+    [[ ${#helpers[@]} -ge 3 ]]
+    core_uid=
+    for attempt in $(seq 1 100); do
+        core_uid=$(awk '/^Uid:/ { print $2 }' "/proc/$proxy_pid/status")
+        [[ $core_uid == "$nobody_uid" ]] && break
+        kill -0 "$proxy_pid"
+        sleep 0.05
+    done
     [[ $core_uid == "$nobody_uid" ]]
+    core_netns=$(readlink "/proc/$proxy_pid/ns/net")
+    core_netns_id=$(stat -Lc '%d:%i' "/proc/$proxy_pid/ns/net")
+    named_netns_id=$(stat -Lc '%d:%i' "/run/netns/$NS")
+    host_netns_id=$(stat -Lc '%d:%i' /proc/self/ns/net)
+    [[ $core_netns_id == "$named_netns_id" ]]
+    [[ $core_netns_id != "$host_netns_id" ]]
+
+    mapfile -t namespace_interfaces < <(
+        ip -n "$NS" -o link show | awk -F': ' '{ print $2 }' | cut -d@ -f1 | sort
+    )
+    mapfile -t expected_interfaces < <(printf '%s\n' lo "$IN_IF" "$OUT_IF" | sort)
+    [[ ${namespace_interfaces[*]} == "${expected_interfaces[*]}" ]]
+
+    mapfile -t core_capabilities < <(
+        awk '/^Cap(Inh|Prm|Eff|Amb):/ { print $1, $2 }' "/proc/$proxy_pid/status"
+    )
+    [[ ${#core_capabilities[@]} -eq 4 ]]
+    for capability_record in "${core_capabilities[@]}"; do
+        read -r capability value <<<"$capability_record"
+        [[ $value == 0000000000000000 ]]
+    done
+
     for helper_pid in "${helpers[@]}"; do
         helper_uid=$(awk '/^Uid:/ { print $2 }' "/proc/$helper_pid/status")
         [[ $helper_uid == 0 ]]
+        [[ $(stat -Lc '%d:%i' "/proc/$helper_pid/ns/net") == "$core_netns_id" ]]
     done
-    echo "PASS privsep identity: core uid=$core_uid, two root helpers=${helpers[*]}"
+    echo "PASS privsep identity: core uid=$core_uid, root helpers/brokers=${helpers[*]}"
+    echo "PASS privsep capabilities: unprivileged core has no inheritable, permitted, effective or ambient capabilities"
+
+    if timeout 1 ip netns exec "$NS" nc -z 127.0.0.1 "$API_RELAY_PORT" >/dev/null 2>&1; then
+        echo 'FAIL: closed Smithproxy namespace reached the host-side API relay' >&2
+        exit 1
+    fi
+    echo "PASS privsep closed namespace: netns=$core_netns interfaces=${namespace_interfaces[*]}; host loopback is unreachable"
 
     internal_pid="$ROOT/data/run/smithproxy.default.pid"
     [[ -s $internal_pid ]]
@@ -353,13 +407,16 @@ if [[ $PRIVSEP_TEST == 1 ]]; then
     [[ $(stat -c %a "$internal_pid") == 644 ]]
     echo 'PASS privsep PID: root helper created the private PID file'
 
-    { printf 'enable\r\ndiag priv stats\r\nsave config\r\nexecute reload\r\n'; sleep 1; printf 'quit\r\n'; } | \
+    { printf 'enable\r\ndiag sys priv stats\r\ndiag sys cli stats\r\nsave config\r\nexecute reload\r\n'; sleep 1; printf 'quit\r\n'; } | \
         timeout 8 ip netns exec "$NS" nc 127.0.0.1 50000 > "$ROOT/results/privsep-stats.txt" 2>&1
     grep -q 'user: nobody' "$ROOT/results/privsep-stats.txt"
     grep -q "uid: $nobody_uid" "$ROOT/results/privsep-stats.txt"
     grep -q 'Privileged helper stats:' "$ROOT/results/privsep-stats.txt"
     grep -Eq 'setsockopt: [1-9][0-9]*' "$ROOT/results/privsep-stats.txt"
     grep -Eq 'max_ops_per_drain: [1-9][0-9]*' "$ROOT/results/privsep-stats.txt"
+    grep -q 'CLI communication worker:' "$ROOT/results/privsep-stats.txt"
+    grep -q 'mode: internal' "$ROOT/results/privsep-stats.txt"
+    grep -Eq 'accepted: [1-9][0-9]*' "$ROOT/results/privsep-stats.txt"
     grep -q 'config saved successfully' "$ROOT/results/privsep-stats.txt"
     grep -q 'Configuration file reloaded' "$ROOT/results/privsep-stats.txt"
     [[ $(stat -c %u "$ROOT/config/smithproxy.cfg") == 0 ]]
@@ -375,6 +432,16 @@ if [[ $PRIVSEP_TEST == 1 ]]; then
         'http://[fd00:20::2]:8080/' > "$ROOT/results/privsep-http6.txt"
     grep -q 'runner-origin-ok peer=fd00:20::1' "$ROOT/results/privsep-http6.txt"
     echo 'PASS6 privsep TCP/HTTP: unprivileged core uses transparent listener'
+fi
+if [[ -n ${QUIC_TLS_PROFILE_TEST:-} ]]; then
+    # This is a separate admission probe: a rejecting profile must not first
+    # pass the normal H3 traffic/observability positive-control suite.
+    ip netns exec "$NS" python3 "$ROOT/runner/tests/suites/tls/quic_profile.py" --enable-diagnostics
+    ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/suites/tls/quic_profile.py" \
+        --profile "$QUIC_TLS_PROFILE_TEST" --ca-file "$ROOT/config/certs/ca-cert.pem" \
+        --proxy-log "$ROOT/data/messages.default.log" \
+        --output "$ROOT/results/quic-tls-profile.json"
+    exit 0
 fi
 if [[ $BASE_TRAFFIC_TEST == 1 ]]; then
 ip netns exec "$CLIENT" curl --noproxy '*' -fsS --max-time 15 http://198.18.20.2:8080/ > "$ROOT/results/http4.txt"
@@ -477,8 +544,14 @@ if [[ $QUIC_TEST == 1 ]]; then
     done
     (( $(grep -c '^REQUEST stream=' "$ROOT/results/h3-origin.log" || true) >= 4 ))
 
-    { printf 'enable\r\ndiag proxy quic list\r\n'; sleep 1; printf 'quit\r\n'; } | \
+    # Exercise the unified list while HTTP/3 streams are live, then retain
+    # compatibility coverage for the dedicated transport view and SSH filter.
+    { printf 'enable\r\ndiag proxy session list\r\n'; sleep 1; printf 'quit\r\n'; } | \
         timeout 8 ip netns exec "$NS" nc 127.0.0.1 50000 > "$QUIC_CLI" 2>&1
+    { printf 'enable\r\ndiag proxy quic list\r\n'; sleep 1; printf 'quit\r\n'; } | \
+        timeout 8 ip netns exec "$NS" nc 127.0.0.1 50000 > "$QUIC_RESULT/cli-quic.txt" 2>&1
+    { printf 'enable\r\ndiag proxy session list ssh\r\n'; sleep 1; printf 'quit\r\n'; } | \
+        timeout 8 ip netns exec "$NS" nc 127.0.0.1 50000 > "$QUIC_RESULT/cli-ssh.txt" 2>&1
     wait "$QUIC_CLIENT_PID"
     QUIC_CLIENT_PID=
     kill -INT "$QUIC_GRE_PID" "$QUIC_NATIVE_PID" 2>/dev/null || true
@@ -495,6 +568,19 @@ if [[ $QUIC_TEST == 1 ]]; then
     grep -q 'ALPN: downstream=h3 upstream=h3' "$QUIC_CLI"
     echo 'PASS4 QUIC/H3 traffic: verified certificate, SNI, ALPN and four multiplexed requests'
     echo 'PASS4 QUIC diagnostics: active session and streams visible in dedicated CLI'
+    # Let normal peer close and the bounded QUIC drain finish while webhook
+    # workers are still running; process shutdown does not flush their queue.
+    for attempt in $(seq 1 100); do
+        if python3 "$ROOT/runner/tests/quic-webhook-contract.py" verify \
+            "$ROOT/results/quic-webhooks.jsonl" > "$ROOT/results/quic-webhook-verdict.log" 2>&1; then
+            break
+        fi
+        sleep 0.1
+    done
+    cat "$ROOT/results/quic-webhook-verdict.log"
+    python3 "$ROOT/runner/tests/quic-webhook-contract.py" verify \
+        "$ROOT/results/quic-webhooks.jsonl"
+
 fi
 fi
 if [[ $SESSION_LIST_STRESS_TEST == 1 ]]; then
@@ -524,6 +610,17 @@ if [[ $SESSION_LIST_STRESS_TEST == 1 ]]; then
     python3 "$ROOT/runner/tests/suites/session-list/report.py" \
         "$ROOT/results/session-list.json"
     echo 'PASS session list: detailed snapshots remained complete and responsive under load'
+fi
+if [[ ${TLS_PROFILE_TEST:-0} == 1 ]]; then
+    TLS_PROFILE_RESULT=0
+    for family in 4 6; do
+        profile_host=198.18.20.2
+        [[ $family == 4 ]] || profile_host=fd00:20::2
+        ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/suites/tls/profile_matrix.py" \
+            --host "$profile_host" --ca-file "$ROOT/config/certs/ca-cert.pem" \
+            --output "$ROOT/results/tls-profile${family}.json" || TLS_PROFILE_RESULT=1
+    done
+    [[ $TLS_PROFILE_RESULT == 0 ]] || exit 1
 fi
 if [[ $TLS_SUITE_TEST == 1 ]]; then
     run_tls_autodetect_test() {
@@ -1023,6 +1120,8 @@ if [[ -n ${PPLAY_SUITE:-} && ${PPLAY_SUITE_SKIP_RUN:-0} != 1 ]]; then
         EXCLUDE="$PPLAY_CORPUS_EXCLUDE" \
         FUZZ_LEVEL="${FUZZ_LEVEL:-}" FUZZ_SEEDS="${FUZZ_SEEDS:-}" \
         FUZZ_AREA="${PPLAY_FUZZ_AREA:-}" \
+        SHARD_COUNT="${PPLAY_SUITE_SHARD_COUNT:-1}" \
+        SHARD_INDEX="${PPLAY_SUITE_SHARD_INDEX:-1}" \
         SCATTER="${FUZZ_SCATTER:-0}" \
         RESULTS="$ROOT/results/${PPLAY_RESULTS_NAME:-pplay-suite}-v4" \
         SMITHPROXY_PID_FILE="$ROOT/data/proxy.pid" \
@@ -1035,6 +1134,8 @@ if [[ -n ${PPLAY_SUITE:-} && ${PPLAY_SUITE_SKIP_RUN:-0} != 1 ]]; then
         EXCLUDE="$PPLAY_CORPUS_EXCLUDE" \
         FUZZ_LEVEL="${FUZZ_LEVEL:-}" FUZZ_SEEDS="${FUZZ_SEEDS:-}" \
         FUZZ_AREA="${PPLAY_FUZZ_AREA:-}" \
+        SHARD_COUNT="${PPLAY_SUITE_SHARD_COUNT:-1}" \
+        SHARD_INDEX="${PPLAY_SUITE_SHARD_INDEX:-1}" \
         SCATTER="${FUZZ_SCATTER:-0}" \
         RESULTS="$ROOT/results/${PPLAY_RESULTS_NAME:-pplay-suite}-v6" \
         SMITHPROXY_PID_FILE="$ROOT/data/proxy.pid" \
@@ -1122,6 +1223,8 @@ if [[ ${HTTP2_OBSERVABILITY_TEST:-0} == 1 ]]; then
     done
 fi
 if [[ $QUIC_TEST == 1 ]]; then
+    python3 "$ROOT/runner/tests/quic-webhook-contract.py" verify \
+        "$ROOT/results/quic-webhooks.jsonl"
     [[ -s "$ROOT/results/quic-downstream.keys" ]]
     grep -Eq '_(HANDSHAKE|TRAFFIC)_SECRET ' "$ROOT/results/quic-downstream.keys"
     python3 "$ROOT/runner/tests/verify-quic-observability.py" \

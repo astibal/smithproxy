@@ -47,6 +47,7 @@
 #include <service/tpool.hpp>
 #include <service/cfgapi/cfgapi.hpp>
 #include <service/http/request.hpp>
+#include <service/webhook/webhook_broker.hpp>
 #include <log/logger.hpp>
 
 namespace sx::http {
@@ -70,10 +71,12 @@ namespace sx::http {
 
         struct request_settings {
             bool enabled = false;
+            bool sensitive = false;
             std::string url;
             std::string dns_servers;
             bool verify_tls = true;
             std::string bind_interface;
+            std::string unix_socket_path;
         };
 
         static inline std::atomic_size_t pending_requests = 0;
@@ -98,7 +101,12 @@ namespace sx::http {
             void execute(std::atomic_bool const& stop_flag) override {
                 if (stop_flag) return;
                 if(log_stream.has_value()) {
-                    emit_url_wait_log(settings, payload, log_stream.value(), hook);
+                    std::stringstream private_log;
+                    emit_url_wait_log(settings, payload, private_log, hook);
+                    // The worker marks this task finished under the pool lock
+                    // immediately after execute() returns. Diagnostics read
+                    // the published buffer only after observing that flag.
+                    log_stream->get().str(private_log.str());
                 }
                 else {
                     std::stringstream log;
@@ -114,7 +122,8 @@ namespace sx::http {
             std::string info_detailed() const override {
                 std::stringstream ss;
                 ss << string_format("web request details: POST %s with %dB of data\n", settings.url.c_str(), payload.length());
-                ss << "Payload: \n" << hex_dump((unsigned char*)payload.data(), payload.length()) << "\n";
+                if(!settings.sensitive)
+                    ss << "Payload: \n" << hex_dump((unsigned char*)payload.data(), payload.length()) << "\n";
                 ss << "-- \n";
 
                 return ss.str();
@@ -155,6 +164,7 @@ namespace sx::http {
             settings.url = factory->settings_webhook.active_url();
             settings.verify_tls = factory->settings_webhook.active_tls_verify();
             settings.bind_interface = factory->settings_webhook.bind_interface;
+            settings.unix_socket_path = sx::comm::webhook::transport_path();
             std::ostringstream dns;
             for (size_t i = 0; i < factory->db_nameservers.size(); ++i) {
                 dns << factory->db_nameservers[i].str_host;
@@ -219,21 +229,27 @@ namespace sx::http {
             try {
             log << make_ts() << ": init: settings: dns='" << settings.dns_servers
                 << "' vrfy=" << settings.verify_tls << " bind_if='"
-                << settings.bind_interface << "'\n";
+                << settings.bind_interface << "' unix_socket='"
+                << settings.unix_socket_path << "'\n";
 
             Request request(Request::DEFAULT, settings.dns_servers);
 
             // make custom setup
-            request.set_timeout(config::timeout);
+            request.set_timeout(settings.sensitive ? 3 : config::timeout);
             log << make_ts() << ": init: timeout='" << config::timeout << "\n";
 
             request.set_stale_detection();
 
             if(not settings.verify_tls) request.disable_tls_verify();
-            if(not settings.bind_interface.empty()) request.set_interface(settings.bind_interface);
+            if(not settings.unix_socket_path.empty()) {
+                if(!request.set_unix_socket_path(settings.unix_socket_path))
+                    throw AsyncRequestException("failed to configure webhook Unix transport");
+            }
+            else if(not settings.bind_interface.empty())
+                request.set_interface(settings.bind_interface);
 
             // set debugging explicitly
-            if(Request::DEBUG) {
+            if(Request::DEBUG && !settings.sensitive) {
                 log << make_ts() << ": init: extended debug is enabled\n";
                 request.setup_curl_debug(log);
             }
@@ -249,13 +265,14 @@ namespace sx::http {
 
             if(not reply or reply.value().response.first >= 300) {
                 long code = reply.has_value() ? reply->response.first : -1;
-                std::string msg = reply.has_value() ? reply->response.second : "request failed";
+                std::string msg = "request failed";
+                if(reply.has_value() && !settings.sensitive) msg = reply->response.second;
 
                 Log::get()->events().insert(ERR, "error in request '%s' (attempts: %d): %d:%s", settings.url.c_str(), request.attempts, code, msg.c_str());
                 log << make_ts() << ": finished: result is error: (code="<< code << ", msg='" << msg << "'\n";
 
 
-                if(Request::DEBUG) {
+                if(Request::DEBUG && !settings.sensitive) {
                     Log::get()->events().insert(ERR, "error payload:\n >>>%s<<<", pay.c_str());
                     Log::get()->events().insert(ERR, "error trace:\n %s", log.str().c_str());
                 }

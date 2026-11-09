@@ -20,6 +20,7 @@ struct proxy_limits {
 class flow_proxy {
 public:
     virtual ~flow_proxy() = default;
+    virtual void shutdown() {}
     virtual std::size_t pump_once(std::size_t chunk_size = 16 * 1024) = 0;
     virtual std::size_t pair_count() const = 0;
     virtual std::size_t queued_bytes() const = 0;
@@ -60,6 +61,8 @@ private:
         std::unique_ptr<MFFlowCom> right;
         std::deque<unsigned char> left_to_right; ///< Bytes blocked by the right side.
         std::deque<unsigned char> right_to_left; ///< Bytes blocked by the left side.
+        bool left_expects_fin = true;
+        bool right_expects_fin = true;
         bool left_peer_fin = false;
         bool right_peer_fin = false;
         bool left_finish_sent = false;

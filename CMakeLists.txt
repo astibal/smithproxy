@@ -284,14 +284,22 @@ add_executable(smithproxy
         src/staticcontent.cpp
 
         src/proxy/mitmhost.cpp
+        src/proxy/flowctx.cpp
+        src/inspect/protocol_fork.cpp
+        src/inspect/protocol_adapter.cpp
+        src/inspect/engine/http2_adapter.cpp
+        src/inspect/protocol_views.cpp
         src/proxy/mitmproxy.cpp
         src/proxy/capture_enrichment.cpp
         src/proxy/capture_protocol_tracer.cpp
+        src/proxy/proxy_hooks.cpp
+        src/proxy/tls_observer.cpp
         src/proxy/mitmcom.hpp
         src/proxy/mitmcom.cpp
         src/proxy/ssh/sshprotocol.cpp
         src/proxy/proxymaker.hpp
         src/proxy/proxymaker.cpp
+        src/proxy/quic_observer.cpp
         src/proxy/multiflow/mfflowcom.cpp
         src/proxy/multiflow/mfproxy.cpp
         src/proxy/multiflow/mfmitmproxy.cpp
@@ -299,6 +307,7 @@ add_executable(smithproxy
         src/proxy/quic/h3capture.cpp
         src/proxy/quic/spq1.cpp
         src/proxy/quic/openssl.cpp
+        src/proxy/quic/hooks.cpp
         src/service/quic/quicservice.cpp
         src/proxy/startstoptls.hpp
         src/proxy/startstoptls.cpp
@@ -338,8 +347,15 @@ add_executable(smithproxy
         src/async/asyncdns.hpp
 
         src/service/daemon.cpp
+        src/service/comm.cpp
         src/service/privileged_file.cpp
+        src/service/gre_broker.cpp
+        src/service/cli/cli_broker.cpp
+        src/service/api/api_broker.cpp
+        src/service/stream/tcp_relay.cpp
+        src/service/webhook/webhook_broker.cpp
         src/service/netservice.cpp
+        src/service/network_context.cpp
         src/service/dnsupd/smithdnsupd.cpp
         src/service/core/smithproxy.hpp
         src/service/core/smithproxy.cpp
@@ -411,8 +427,80 @@ add_executable(smithproxy
         src/proxy/filters/access_filter.cpp
 )
 
+add_executable(smithproxy-gre-broker
+        src/service/gre_broker_main.cpp
+        src/service/gre_broker.cpp
+        src/service/comm.cpp
+)
+target_include_directories(smithproxy-gre-broker PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(smithproxy-gre-broker socle_lib pthread ssl crypto)
 
-IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
+add_executable(smithproxy-cli-broker
+        src/service/cli/cli_broker_main.cpp
+        src/service/cli/cli_broker.cpp
+)
+target_include_directories(smithproxy-cli-broker PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(smithproxy-cli-broker pthread)
+
+add_executable(smithproxy-api-broker
+        src/service/api/api_broker_main.cpp
+        src/service/cli/cli_broker.cpp
+)
+target_include_directories(smithproxy-api-broker PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(smithproxy-api-broker pthread)
+
+add_executable(smithproxy-webhook-broker
+        src/service/webhook/webhook_broker_main.cpp
+        src/service/webhook/webhook_broker.cpp
+        src/service/stream/tcp_relay.cpp
+        src/service/cli/cli_broker.cpp
+)
+target_include_directories(smithproxy-webhook-broker PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(smithproxy-webhook-broker pthread)
+
+
+# Keep release packages unchanged, but allow an explicitly requested optimized
+# native test build for benchmarks. Measuring parser cost in Debug is misleading.
+option(SMITHPROXY_OPTIMIZED_TESTS "Build native tests outside Debug" OFF)
+if(BUILD_TESTING)
+        find_program(PATCH_RUNNER_PYTHON NAMES python3 REQUIRED)
+        add_subdirectory(tests/patch-runner/cpu-monitor)
+        add_test(NAME unit.patch_runner_profile_plan
+                COMMAND ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-profile-plan.sh)
+        set_tests_properties(unit.patch_runner_profile_plan
+                PROPERTIES LABELS "native;unit" TIMEOUT 15)
+        add_test(NAME unit.patch_runner_test_inventory
+                COMMAND ${PATCH_RUNNER_PYTHON}
+                ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-test-inventory.py)
+        set_tests_properties(unit.patch_runner_test_inventory
+                PROPERTIES LABELS "native;unit" TIMEOUT 15)
+        add_test(NAME unit.patch_runner_publish_report
+                COMMAND ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-publish-report.sh)
+        set_tests_properties(unit.patch_runner_publish_report
+                PROPERTIES LABELS "native;unit" TIMEOUT 15)
+        add_test(NAME unit.patch_runner_port_leases
+                COMMAND ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-port-leases.sh)
+        set_tests_properties(unit.patch_runner_port_leases
+                PROPERTIES LABELS "native;unit" TIMEOUT 15)
+        add_test(NAME unit.patch_runner_privilege_preflight
+                COMMAND ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-privilege-preflight.sh)
+        set_tests_properties(unit.patch_runner_privilege_preflight
+                PROPERTIES LABELS "native;unit" TIMEOUT 15)
+        add_test(NAME unit.patch_runner_proxy_nightmare_acquisition
+                COMMAND ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-prepare-proxy-nightmare.sh)
+        set_tests_properties(unit.patch_runner_proxy_nightmare_acquisition
+                PROPERTIES LABELS "native;unit" TIMEOUT 60)
+        add_test(NAME unit.patch_runner_proxy_nightmare_xfail
+                COMMAND ${PATCH_RUNNER_PYTHON}
+                ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-proxy-nightmare-expected-failures.py)
+        set_tests_properties(unit.patch_runner_proxy_nightmare_xfail
+                PROPERTIES LABELS "native;unit" TIMEOUT 15)
+        add_test(NAME unit.patch_runner_remote_artifacts
+                COMMAND ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-remote-scheduler-artifacts.sh)
+        set_tests_properties(unit.patch_runner_remote_artifacts
+                PROPERTIES LABELS "native;unit" TIMEOUT 15)
+endif()
+IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
     find_package(GTest)
     if(GTEST_FOUND)
         add_executable(sx_gtests
@@ -424,87 +512,98 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/ext/nltemplate/nltemplate.cpp
                 src/smithlog.cpp
                 src/service/daemon.cpp
+                src/service/comm.cpp
                 src/service/privileged_file.cpp
+                src/service/gre_broker.cpp
+                src/service/cli/cli_broker.cpp
                 src/service/netservice.cpp
+                src/service/network_context.cpp
                 src/service/core/authpam.cpp
 
-                src/utils/tests/str_test.cpp
-                src/utils/tests/fs_test.cpp
-                src/tests/staticcontent_tests.cpp
-                src/ext/nltemplate/nltemplate_tests.cpp
-                src/inspect/tests/dns_tests.cpp
-                src/inspect/tests/node_tests.cpp
-                src/inspect/tests/ja4_tests.cpp
+                tests/unit/utils/str_test.cpp
+                tests/unit/utils/fs_test.cpp
+                tests/unit/utils/atomic_json_tests.cpp
+                tests/unit/base/staticcontent_tests.cpp
+                tests/unit/ext/nltemplate/nltemplate_tests.cpp
+                tests/unit/inspect/dns_tests.cpp
+                tests/unit/inspect/node_tests.cpp
+                tests/unit/inspect/ja4_tests.cpp
                 src/ext/libcidr/cidr.cpp
 
                 src/policy/policy.cpp
                 src/policy/profile_routing_state.cpp
-                src/policy/tests/addrobj_test.cpp
-                src/policy/tests/policy_test.cpp
-                src/policy/tests/profile_routing_test.cpp
-                src/policy/tests/profile_types_test.cpp
+                tests/unit/policy/addrobj_test.cpp
+                tests/unit/policy/policy_test.cpp
+                tests/unit/policy/profile_routing_test.cpp
+                tests/unit/policy/profile_types_test.cpp
 
                 src/utils/tenants.cpp
-                src/tests/test_misc.cpp
+                tests/unit/base/test_misc.cpp
 
-                src/proxy/multiflow/tests/fake_tests.cpp
+                tests/unit/proxy/multiflow/fake_tests.cpp
                 src/proxy/multiflow/mfflowcom.cpp
-                src/proxy/multiflow/tests/mfflowcom_tests.cpp
+                tests/unit/proxy/multiflow/mfflowcom_tests.cpp
                 src/proxy/multiflow/mfproxy.cpp
-                src/proxy/multiflow/tests/mfproxy_tests.cpp
+                tests/unit/proxy/multiflow/mfproxy_tests.cpp
                 src/proxy/quic/wire.cpp
-                src/proxy/quic/tests/wire_tests.cpp
+                tests/unit/proxy/quic/wire_tests.cpp
                 src/proxy/quic/h3capture.cpp
                 src/proxy/quic/spq1.cpp
-                src/proxy/quic/tests/h3capture_tests.cpp
-                src/proxy/quic/tests/spq1_tests.cpp
-                src/proxy/quic/tests/qpack_vendor_tests.cpp
+                tests/unit/proxy/quic/h3capture_tests.cpp
+                tests/unit/proxy/quic/spq1_tests.cpp
+                tests/unit/proxy/quic/qpack_vendor_tests.cpp
                 src/proxy/quic/openssl.cpp
-                src/proxy/quic/tests/openssl_tests.cpp
+        src/proxy/quic/hooks.cpp
+                tests/unit/proxy/quic/openssl_tests.cpp
                 src/proxy/ssh/sshprotocol.cpp
-                src/proxy/ssh/tests/sshprotocol_test.cpp
-                src/proxy/tests/streamhandler_test.cpp
-                src/proxy/socks5/socks5_protocol_tests.cpp
-                src/proxy/tests/explicitproxy_dns_state_tests.cpp
-                src/proxy/tests/proxymaker_utils_tests.cpp
-                src/proxy/tests/capture_enrichment_tests.cpp
-                src/proxy/tests/capture_protocol_tracer_tests.cpp
+                tests/unit/proxy/ssh/sshprotocol_test.cpp
+                tests/unit/proxy/streamhandler_test.cpp
+                tests/unit/proxy/mitmproxy_identity_tests.cpp
+                tests/unit/proxy/socks5/socks5_protocol_tests.cpp
+                tests/unit/proxy/explicitproxy_dns_state_tests.cpp
+                tests/unit/proxy/proxymaker_utils_tests.cpp
+                tests/unit/proxy/proxystats_tests.cpp
+                tests/unit/proxy/capture_enrichment_tests.cpp
+                tests/unit/proxy/capture_protocol_tracer_tests.cpp
                 src/proxy/capture_enrichment.cpp
                 src/proxy/capture_protocol_tracer.cpp
                 src/proxy/filters/statistics/entropy.cpp
                 src/proxy/filters/statistics/flowanalysis.cpp
-                src/proxy/filters/statistics/statistics_tests.cpp
-                src/proxy/filters/access_filter_tests.cpp
+                tests/unit/proxy/filters/statistics/statistics_tests.cpp
+                tests/unit/proxy/filters/access_filter_tests.cpp
+                tests/unit/proxy/connection_start_test.cpp
                 src/proxy/filters/sinkhole.cpp
-                src/proxy/filters/sinkhole_tests.cpp
+                tests/unit/proxy/filters/sinkhole_tests.cpp
                 src/proxy/filters/statsfilter.cpp
-                src/proxy/filters/statsfilter_tests.cpp
+                tests/unit/proxy/filters/statsfilter_tests.cpp
                 src/service/quic/quicservice.cpp
-                src/service/quic/tests/quicservice_tests.cpp
+                tests/unit/service/quic/quicservice_tests.cpp
 
                 src/ext/hpack/hpack.hpp
-                src/ext/hpack/hpack_tests.cpp
+                tests/unit/ext/hpack/hpack_tests.cpp
 
-                src/service/libcli/tests/cli_tests.cpp
-                src/service/libcli/tests/fd_transport_tests.cpp
+                tests/unit/service/libcli/cli_tests.cpp
+                tests/unit/service/libcli/fd_transport_tests.cpp
                 src/service/cmd/config_cli2.cpp
-                src/service/cmd/config_cli2_tests.cpp
+                tests/unit/service/cmd/config_cli2_tests.cpp
                 src/service/cmd/config_cli2_schema.cpp
-                src/service/cmd/config_cli2_schema_tests.cpp
-                src/service/http/jsonize_tests.cpp
+                tests/unit/service/cmd/config_cli2_schema_tests.cpp
+                tests/unit/service/http/jsonize_tests.cpp
                 src/service/http/jsonize_x509.cpp
                 src/service/http/jsonize_config.cpp
-                src/service/http/webhooks_tests.cpp
+                tests/unit/service/http/webhooks_tests.cpp
                 src/service/core/sessionlist_state.cpp
-                src/service/core/sessionlist_tests.cpp
-                src/service/core/smithproxy_objapi_tests.cpp
-                src/service/cfgapi/cfgvalue_tests.cpp
-                src/tests/smithlog_tests.cpp
-                src/service/core/authpam_tests.cpp
-                src/service/daemon_tests.cpp
-                src/service/netservice_tests.cpp
-                src/service/httpd/httpd_tests.cpp
-                src/proxy/nbrhood_tests.cpp
+                tests/unit/service/core/sessionlist_tests.cpp
+                tests/unit/service/core/smithproxy_objapi_tests.cpp
+                tests/unit/service/core/live_listener_lifecycle_tests.cpp
+                src/service/cfgapi/cfgvalue.cpp
+                tests/unit/service/cfgapi/cfgvalue_tests.cpp
+                tests/unit/base/smithlog_tests.cpp
+                tests/unit/service/core/authpam_tests.cpp
+                tests/unit/service/daemon_tests.cpp
+                tests/unit/service/netservice_tests.cpp
+                tests/unit/service/httpd/httpd_tests.cpp
+                tests/unit/proxy/nbrhood_tests.cpp
 
                 src/inspect/engine.hpp
                 src/inspect/engine/http.cpp
@@ -533,8 +632,28 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 socle/common/tests/biostring_tests.cpp
                 socle/common/tests/cast_tests.cpp
                 )
+        add_executable(sx_gtests_webhook_lifetime
+                tests/unit/service/http/webhook_lifetime_tests.cpp
+                src/service/http/request.cpp)
+        target_compile_options(sx_gtests_webhook_lifetime PRIVATE
+                -include ${PROJECT_SOURCE_DIR}/tests/unit/service/http/webhook_runtime_stub.hpp)
+        target_link_libraries(sx_gtests_webhook_lifetime PRIVATE
+                gtest gtest_main "$<LINK_GROUP:RESCAN,socle_lib,socle_common_lib>"
+                nlohmann_json::nlohmann_json pthread curl crypto ssl)
+        add_test(NAME unit.webhook_lifetime COMMAND sx_gtests_webhook_lifetime)
+
         add_executable(sx_gtests_http1
-                src/inspect/tests/http1_tests.cpp
+                tests/unit/proxy/connection_start_test.cpp
+                tests/unit/inspect/http1_tests.cpp
+                tests/unit/inspect/http1_framing_tests.cpp
+                tests/unit/inspect/http2_content_framing_tests.cpp
+                tests/unit/inspect/protocol_views_tests.cpp
+                tests/unit/inspect/protocol_fork_tests.cpp
+                tests/unit/inspect/protocol_fork_benchmark.cpp
+                src/inspect/protocol_fork.cpp
+                src/inspect/protocol_adapter.cpp
+                src/inspect/engine/http2_adapter.cpp
+                src/inspect/protocol_views.cpp
 
                 src/inspect/engine.hpp
                 src/inspect/engine/http.cpp
@@ -547,27 +666,75 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/policy/addrobj.cpp
         )
         add_executable(sx_gtests_startstoptls
-                src/proxy/tests/startstoptls_test.cpp
+                tests/unit/proxy/startstoptls_test.cpp
+                tests/unit/proxy/flowmatch_test.cpp
         )
         add_executable(sx_gtests_httpconnect
-                src/proxy/httpconnect/tests/httpconnectrequest_test.cpp
-                src/proxy/tests/explicitproxyport_test.cpp
+                tests/unit/proxy/httpconnect/httpconnectrequest_test.cpp
+                tests/unit/proxy/explicitproxyport_test.cpp
                 src/proxy/httpconnect/httpconnectrequest.cpp
         )
 
         add_executable(sx_gtests_reloadable
                 src/service/reload/file_reload_service.cpp
-                src/service/reload/tests/reloadable_resource_test.cpp
+                tests/unit/service/reload/reloadable_resource_test.cpp
         )
+
+        add_executable(sx_gtests_network_context
+                src/service/network_context.cpp
+                tests/unit/service/network_context_tests.cpp
+        )
+
+        add_executable(webhook_control_test tests/webhook_control_test.cpp)
+        target_include_directories(webhook_control_test PRIVATE
+                ${PROJECT_SOURCE_DIR}/src
+                ${PROJECT_SOURCE_DIR}/third_party/nlohmann/include)
+        target_compile_options(webhook_control_test PRIVATE -UNDEBUG)
+        add_test(NAME unit.webhook_control COMMAND webhook_control_test)
 
         add_executable(sx_gtests_privsep
                 socle/tests/privileged_socket_tests.cpp
         )
 
         add_executable(sx_gtests_file_privsep
+                src/service/comm.cpp
                 src/service/privileged_file.cpp
-                src/service/tests/privileged_file_tests.cpp
+                tests/unit/service/comm_tests.cpp
+                tests/unit/service/privileged_file_tests.cpp
         )
+
+        add_executable(sx_gtests_gre_broker
+                src/service/comm.cpp
+                src/service/gre_broker.cpp
+                tests/unit/service/gre_broker_tests.cpp
+        )
+        add_executable(sx_gtests_cli_broker
+                src/service/cli/cli_broker.cpp
+                tests/unit/service/cli_broker_tests.cpp
+        )
+        add_executable(sx_gtests_api_broker
+                src/service/cli/cli_broker.cpp
+                src/service/api/api_broker.cpp
+                tests/unit/service/api_broker_tests.cpp
+        )
+        add_executable(sx_gtests_webhook_broker
+                src/service/cli/cli_broker.cpp
+                src/service/stream/tcp_relay.cpp
+                src/service/webhook/webhook_broker.cpp
+                tests/unit/service/webhook_broker_tests.cpp
+        )
+        target_compile_definitions(sx_gtests_webhook_broker PRIVATE
+                SMITHPROXY_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+
+        # Keep syscall fault injection isolated from the application and other
+        # tests. These wrappers exercise failures before and after publication.
+        add_executable(sx_gtests_atomic_json
+                tests/unit/utils/atomic_json_tests.cpp
+                tests/unit/utils/atomic_json_fault_tests.cpp)
+        target_link_libraries(sx_gtests_atomic_json PRIVATE
+                gtest gtest_main nlohmann_json::nlohmann_json pthread)
+        target_link_options(sx_gtests_atomic_json PRIVATE
+                -Wl,--wrap=fsync -Wl,--wrap=fclose -Wl,--wrap=rename)
 
         add_executable(tls_testbed
                 tests/tls/tls_testbed.cpp)
@@ -583,12 +750,25 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
         if (LIBCONFIGPP_FOUND)
             target_link_libraries(sx_gtests ${LIBCONFIGPP_LIBRARIES})
         endif()
-        target_link_libraries(sx_gtests_http1 gtest gtest_main socle_lib pthread crypto ssl)
-        target_link_libraries(sx_gtests_startstoptls gtest gtest_main)
+        target_link_libraries(sx_gtests_http1 gtest gtest_main socle_lib
+                nlohmann_json::nlohmann_json pthread crypto ssl)
+        target_link_libraries(sx_gtests_startstoptls
+                gtest gtest_main
+                "$<LINK_GROUP:RESCAN,socle_lib,socle_common_lib>"
+                pthread crypto ssl)
         target_link_libraries(sx_gtests_httpconnect gtest gtest_main)
         target_link_libraries(sx_gtests_reloadable gtest gtest_main pthread)
+        target_link_libraries(sx_gtests_network_context gtest gtest_main pthread
+                nlohmann_json::nlohmann_json ${LIBCONFIGPP_LIBRARIES})
         target_link_libraries(sx_gtests_privsep gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(sx_gtests_file_privsep gtest gtest_main socle_lib pthread crypto ssl)
+        target_link_libraries(sx_gtests_gre_broker gtest gtest_main socle_lib pthread crypto ssl)
+        target_link_libraries(sx_gtests_cli_broker gtest gtest_main pthread)
+        target_link_libraries(sx_gtests_api_broker gtest gtest_main pthread)
+        target_link_libraries(sx_gtests_webhook_broker gtest gtest_main pthread curl crypto ssl)
+        if("${USE_LMHPP}" STREQUAL "Y")
+            target_link_libraries(sx_gtests_api_broker microhttpd)
+        endif()
         target_link_libraries(tls_testbed gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(transfer_testbed gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries (sx_gtests nlohmann_json::nlohmann_json)
@@ -597,24 +777,25 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
         # unrelated application tests while keeping the complete MultiFlow,
         # wire-format, adapter, listener, and end-to-end stack in one runner.
         add_executable(quic_testbed
-                src/proxy/multiflow/tests/fake_tests.cpp
+                tests/unit/proxy/multiflow/fake_tests.cpp
                 src/proxy/multiflow/mfflowcom.cpp
-                src/proxy/multiflow/tests/mfflowcom_tests.cpp
+                tests/unit/proxy/multiflow/mfflowcom_tests.cpp
                 src/proxy/multiflow/mfproxy.cpp
-                src/proxy/multiflow/tests/mfproxy_tests.cpp
+                tests/unit/proxy/multiflow/mfproxy_tests.cpp
                 src/proxy/quic/wire.cpp
-                src/proxy/quic/tests/wire_tests.cpp
+                tests/unit/proxy/quic/wire_tests.cpp
                 src/proxy/quic/h3capture.cpp
                 src/proxy/quic/spq1.cpp
-                src/proxy/quic/tests/h3capture_tests.cpp
-                src/proxy/quic/tests/spq1_tests.cpp
-                src/proxy/quic/tests/qpack_vendor_tests.cpp
+                tests/unit/proxy/quic/h3capture_tests.cpp
+                tests/unit/proxy/quic/spq1_tests.cpp
+                tests/unit/proxy/quic/qpack_vendor_tests.cpp
                 src/proxy/quic/openssl.cpp
-                src/proxy/quic/tests/openssl_tests.cpp
+        src/proxy/quic/hooks.cpp
+                tests/unit/proxy/quic/openssl_tests.cpp
                 src/proxy/capture_protocol_tracer.cpp
                 src/service/quic/quicservice.cpp
-                src/service/quic/tests/quicservice_tests.cpp
-                src/service/quic/testbed/quic_testbed.cpp
+                tests/unit/service/quic/quicservice_tests.cpp
+                tests/quic/testbed/quic_testbed.cpp
         )
         target_link_libraries(quic_testbed gtest smithproxy_qpack socle_lib pthread crypto ssl)
 
@@ -626,24 +807,44 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/proxy/quic/spq1.cpp
                 src/proxy/quic/openssl.cpp
                 src/proxy/capture_protocol_tracer.cpp
+        src/proxy/quic/hooks.cpp
                 src/service/quic/quicservice.cpp
-                src/service/quic/testbed/quic_test_node.cpp
+                tests/quic/testbed/quic_test_node.cpp
         )
         target_link_libraries(quic_test_node smithproxy_qpack socle_lib pthread crypto ssl)
 
         if(BUILD_TESTING)
             add_test(NAME unit.core COMMAND sx_gtests
                     --gtest_filter=-InetTest.*:PcapExperiments.*:DNS_tests.*)
-            add_test(NAME unit.http1 COMMAND sx_gtests_http1 --gtest_filter=-HTTP1.benchmark)
+            add_test(NAME unit.listener_lifecycle COMMAND sx_gtests
+                    --gtest_filter=Libcli2.*Confirmation*:ConfigCli2Test.*Confirmation*:CfgValue.CopyAssignment*:CfgValue.LiveListenerMetadata*:CfgValue.LiveWorkerMetadata*:LiveListenerLifecycle.*:ThreadedWorkerLifecycle.*:QuicListenerService.*Drain*)
+            # Mandatory regression for CLI log-target churn. Keep this named
+            # separately so every native patch run reports it explicitly.
+            add_test(NAME unit.logging_concurrency COMMAND sx_gtests
+                    --gtest_filter=LogMux.RemoteTargetLifecycleIsSafeDuringConcurrentLogging)
+            add_test(NAME unit.http1 COMMAND sx_gtests_http1
+                    --gtest_filter=-HTTP1.benchmark:ProtocolForkBenchmark.*)
+            add_test(NAME unit.protocol_views COMMAND sx_gtests_http1
+                    --gtest_filter=*ProtocolViews*
+                    --gtest_output=xml:protocol-views-results.xml)
             add_test(NAME unit.startstoptls COMMAND sx_gtests_startstoptls)
             add_test(NAME unit.httpconnect COMMAND sx_gtests_httpconnect)
             add_test(NAME unit.reloadable COMMAND sx_gtests_reloadable)
+            add_test(NAME unit.network_context COMMAND sx_gtests_network_context)
             add_test(NAME unit.privsep COMMAND sx_gtests_privsep)
             add_test(NAME unit.file_privsep COMMAND sx_gtests_file_privsep)
+            add_test(NAME unit.gre_broker COMMAND sx_gtests_gre_broker)
+            add_test(NAME unit.cli_broker COMMAND sx_gtests_cli_broker)
+            add_test(NAME unit.api_broker COMMAND sx_gtests_api_broker)
+            add_test(NAME unit.webhook_broker COMMAND sx_gtests_webhook_broker)
             add_test(NAME integration.tls_testbed COMMAND tls_testbed)
             add_test(NAME integration.transfer_testbed COMMAND transfer_testbed)
             add_test(NAME integration.quic_testbed COMMAND quic_testbed)
             add_test(NAME benchmark.http1 COMMAND sx_gtests_http1 --gtest_filter=HTTP1.benchmark)
+            add_test(NAME benchmark.protocol_fork COMMAND sx_gtests_http1
+                    --gtest_filter=ProtocolForkBenchmark.*)
+            set_tests_properties(benchmark.protocol_fork PROPERTIES
+                    LABELS "benchmark" TIMEOUT 300 RUN_SERIAL TRUE)
             add_test(NAME external.inet COMMAND sx_gtests --gtest_filter=InetTest.*)
             add_test(NAME external.pcap_experiments COMMAND sx_gtests
                     --gtest_filter=PcapExperiments.*)
@@ -661,8 +862,15 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
             add_test(NAME platform.linux_distros
                     COMMAND ${PROJECT_SOURCE_DIR}/tools/test-linux-distros.sh)
             set_tests_properties(
-                    unit.core unit.http1 unit.startstoptls unit.httpconnect unit.reloadable
+                    unit.core unit.listener_lifecycle unit.http1 unit.startstoptls unit.httpconnect unit.reloadable
+                    unit.network_context
                     PROPERTIES LABELS "native;unit")
+            set_tests_properties(unit.listener_lifecycle
+                    PROPERTIES WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}")
+            set_tests_properties(
+                    unit.privsep unit.file_privsep unit.gre_broker unit.cli_broker unit.api_broker
+                    unit.webhook_broker
+                    PROPERTIES LABELS "native;unit;security;privsep")
             set_tests_properties(
                     integration.tls_testbed integration.transfer_testbed integration.quic_testbed
                     PROPERTIES LABELS "native;integration")
@@ -695,6 +903,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
             set_tests_properties(external.inet external.pcap_experiments external.dns
                     PROPERTIES TIMEOUT 180)
             set_tests_properties(unit.reloadable PROPERTIES LABELS "native;unit;reload")
+            set_tests_properties(unit.network_context PROPERTIES LABELS "native;unit;network")
             set_tests_properties(integration.tls_testbed PROPERTIES LABELS "native;integration;tls")
             set_tests_properties(integration.quic_testbed PROPERTIES LABELS "native;integration;quic")
 
@@ -747,13 +956,68 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                         ${PROJECT_SOURCE_DIR}/tests/httpapi/http_api_integration.py
                         --smithproxy $<TARGET_FILE:smithproxy>
                         --source ${PROJECT_SOURCE_DIR})
+                add_test(NAME integration.webhook_need_more
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/httpapi/need_more_integration.py
+                        --smithproxy $<TARGET_FILE:smithproxy>
+                        --source ${PROJECT_SOURCE_DIR})
+                add_test(NAME integration.webhook_control
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/httpapi/need_more_integration.py
+                        --smithproxy $<TARGET_FILE:smithproxy>
+                        --source ${PROJECT_SOURCE_DIR} --control-only)
+                add_test(NAME integration.webhook_control_binary
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/httpapi/need_more_integration.py
+                        --smithproxy $<TARGET_FILE:smithproxy>
+                        --source ${PROJECT_SOURCE_DIR} --control-only --binary)
+                set_tests_properties(integration.webhook_control integration.webhook_control_binary
+                        PROPERTIES LABELS "native;integration" TIMEOUT 120)
+                add_test(NAME integration.webhook_need_more_binary
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/httpapi/need_more_integration.py
+                        --smithproxy $<TARGET_FILE:smithproxy>
+                        --source ${PROJECT_SOURCE_DIR} --binary)
+                set_tests_properties(integration.webhook_need_more integration.webhook_need_more_binary
+                        PROPERTIES LABELS "native;integration" TIMEOUT 120)
+                foreach(webhook_format json binary)
+                    set(views_arguments --h2-views)
+                    if(webhook_format STREQUAL "binary")
+                        list(APPEND views_arguments --binary)
+                    endif()
+                    add_test(NAME integration.protocol_views_${webhook_format}
+                            COMMAND ${Python3_EXECUTABLE}
+                            ${PROJECT_SOURCE_DIR}/tests/httpapi/need_more_integration.py
+                            --smithproxy $<TARGET_FILE:smithproxy>
+                            --source ${PROJECT_SOURCE_DIR} ${views_arguments})
+                    set_tests_properties(integration.protocol_views_${webhook_format}
+                            PROPERTIES LABELS "native;integration;http2" TIMEOUT 180)
+                    set(injection_arguments --h2-inject)
+                    if(webhook_format STREQUAL "binary")
+                        list(APPEND injection_arguments --binary)
+                    endif()
+                    add_test(NAME integration.protocol_injection_${webhook_format}
+                            COMMAND ${Python3_EXECUTABLE}
+                            ${PROJECT_SOURCE_DIR}/tests/httpapi/need_more_integration.py
+                            --smithproxy $<TARGET_FILE:smithproxy>
+                            --source ${PROJECT_SOURCE_DIR} ${injection_arguments})
+                    set_tests_properties(integration.protocol_injection_${webhook_format}
+                            PROPERTIES LABELS "native;integration;http2" TIMEOUT 180)
+                endforeach()
+                add_test(NAME integration.connection_start
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/httpapi/need_more_integration.py
+                        --smithproxy $<TARGET_FILE:smithproxy>
+                        --source ${PROJECT_SOURCE_DIR} --setup-only)
+                set_tests_properties(integration.connection_start
+                        PROPERTIES LABELS "native;integration;webhook" TIMEOUT 180)
                 add_test(NAME integration.libcli2_process
                         COMMAND ${Python3_EXECUTABLE}
-                        ${PROJECT_SOURCE_DIR}/src/service/cmd/libcli2_process_e2e.py
+                        ${PROJECT_SOURCE_DIR}/tests/cli/libcli2_process_e2e.py
                         $<TARGET_FILE:smithproxy> --source ${PROJECT_SOURCE_DIR})
                 add_test(NAME integration.main_process
                         COMMAND ${Python3_EXECUTABLE}
-                        ${PROJECT_SOURCE_DIR}/src/main_process_e2e.py
+                        ${PROJECT_SOURCE_DIR}/tests/process/main_process_e2e.py
                         $<TARGET_FILE:smithproxy> --source ${PROJECT_SOURCE_DIR})
                 add_test(NAME integration.redirect
                         COMMAND ${Python3_EXECUTABLE}
@@ -774,6 +1038,33 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 add_test(NAME unit.patch_runner_session_list_probe
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-session-list-probe.py)
+                add_test(NAME unit.sslca_private_key_permissions
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/sslca/private_key_permissions.py
+                        --source ${PROJECT_SOURCE_DIR})
+                add_test(NAME unit.patch_runner_cpu_faults
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-cpu-monitor-faults.py)
+                set_tests_properties(unit.patch_runner_cpu_faults
+                        PROPERTIES LABELS "native;unit" TIMEOUT 45 RUN_SERIAL TRUE)
+                add_test(NAME unit.patch_runner_cpu_accounting
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-cpu-monitor-accounting.py)
+                set_tests_properties(unit.patch_runner_cpu_accounting
+                        PROPERTIES LABELS "native;unit" TIMEOUT 30)
+                add_test(NAME extended.patch_runner_cpu_diagnostics
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-cpu-monitor-diagnostics.py)
+                set_tests_properties(extended.patch_runner_cpu_diagnostics
+                        PROPERTIES LABELS "native;extended" TIMEOUT 600 RUN_SERIAL TRUE)
+                add_test(NAME unit.patch_runner_cpu_monitor
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-cpu-monitor.py)
+                set_tests_properties(unit.patch_runner_cpu_monitor
+                        PROPERTIES LABELS "native;unit" TIMEOUT 45 RUN_SERIAL TRUE)
+                set_tests_properties(unit.patch_runner_cpu_monitor unit.patch_runner_cpu_faults
+                        extended.patch_runner_cpu_diagnostics PROPERTIES
+                        ENVIRONMENT "CPU_MONITOR_BINARY=$<TARGET_FILE:smithproxy-cpu-monitor>")
                 add_test(NAME unit.patch_runner_native_parallel
                         COMMAND ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-native-parallel.sh)
                 add_test(NAME integration.wireshark_spq1
@@ -783,6 +1074,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                         integration.httpconnect integration.starttls_socks integration.socks5_udp integration.http_api
                         integration.libcli2_process integration.main_process integration.redirect integration.wireshark_spq1
                         PROPERTIES LABELS "native;integration")
+                set_tests_properties(unit.logging_concurrency PROPERTIES LABELS "native;unit" TIMEOUT 30)
                 set_tests_properties(stress.httpconnect PROPERTIES LABELS "native;integration;stress")
                 set_tests_properties(
                         integration.httpconnect stress.httpconnect integration.starttls_socks integration.socks5_udp integration.http_api
@@ -790,6 +1082,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 set_tests_properties(
                         unit.patch_runner_fuzz_areas unit.patch_runner_fuzz_seeds
                         unit.patch_runner_pplay unit.patch_runner_native_parallel
+                        unit.sslca_private_key_permissions
                         PROPERTIES LABELS "native;unit")
             endif()
         endif()
@@ -823,22 +1116,51 @@ if(SMITHPROXY_FUZZING)
 
     add_executable(quic_wire_fuzzer
             src/proxy/quic/wire.cpp
-            src/proxy/quic/fuzz/wire_fuzzer.cpp)
+            tests/fuzz/proxy/quic/wire_fuzzer.cpp)
     smithproxy_fuzzer(quic_wire_fuzzer)
 
     add_executable(multiflow_fuzzer
             src/proxy/multiflow/mfflowcom.cpp
             src/proxy/multiflow/mfproxy.cpp
-            src/proxy/multiflow/fuzz/multiflow_fuzzer.cpp)
+            tests/fuzz/proxy/multiflow/multiflow_fuzzer.cpp)
     target_link_libraries(multiflow_fuzzer socle_lib pthread)
     smithproxy_fuzzer(multiflow_fuzzer)
 
     add_executable(quic_lifecycle_fuzzer
             src/proxy/quic/openssl.cpp
+        src/proxy/quic/hooks.cpp
             src/proxy/quic/wire.cpp
-            src/proxy/quic/fuzz/lifecycle_fuzzer.cpp)
+            tests/fuzz/proxy/quic/lifecycle_fuzzer.cpp)
     target_link_libraries(quic_lifecycle_fuzzer socle_lib pthread crypto ssl)
     smithproxy_fuzzer(quic_lifecycle_fuzzer)
+
+    add_executable(http1_framing_fuzzer
+            tests/fuzz/inspect/http1_framing_fuzzer.cpp
+            src/inspect/engine/http.cpp
+            src/inspect/fp/ja4.cpp
+            src/inspect/dns.cpp
+            src/policy/inspectors.cpp
+            src/inspect/dnsinspector.cpp
+            src/ext/libcidr/cidr.cpp
+            src/policy/addrobj.cpp)
+    target_link_libraries(http1_framing_fuzzer socle_lib pthread crypto ssl)
+    target_compile_options(http1_framing_fuzzer PRIVATE
+            -Wno-error=missing-template-arg-list-after-template-kw)
+    smithproxy_fuzzer(http1_framing_fuzzer)
+
+    add_executable(http2_content_framing_fuzzer
+            tests/fuzz/inspect/http2_content_framing_fuzzer.cpp
+            src/inspect/engine/http.cpp
+            src/inspect/fp/ja4.cpp
+            src/inspect/dns.cpp
+            src/policy/inspectors.cpp
+            src/inspect/dnsinspector.cpp
+            src/ext/libcidr/cidr.cpp
+            src/policy/addrobj.cpp)
+    target_link_libraries(http2_content_framing_fuzzer socle_lib pthread crypto ssl)
+    target_compile_options(http2_content_framing_fuzzer PRIVATE
+            -Wno-error=missing-template-arg-list-after-template-kw)
+    smithproxy_fuzzer(http2_content_framing_fuzzer)
 endif()
 
 option(SMITHPROXY_TLS_FUZZING "Build Clang TLS libFuzzer targets" OFF)
@@ -857,9 +1179,9 @@ if(SMITHPROXY_TLS_FUZZING)
     endforeach()
 
     add_executable(tls_clienthello_fuzzer
-            src/proxy/tls/fuzz/clienthello_fuzzer.cpp)
+            tests/fuzz/proxy/tls/clienthello_fuzzer.cpp)
     add_executable(tls_revocation_fuzzer
-            src/proxy/tls/fuzz/revocation_fuzzer.cpp)
+            tests/fuzz/proxy/tls/revocation_fuzzer.cpp)
     target_compile_definitions(tls_revocation_fuzzer PRIVATE
             SMITHPROXY_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     foreach(fuzz_target tls_clienthello_fuzzer tls_revocation_fuzzer)
@@ -914,6 +1236,8 @@ endif (LIBCONFIGPP_FOUND)
 
 target_link_libraries (smithproxy crypt)
 target_link_libraries (smithproxy nlohmann_json::nlohmann_json)
+add_subdirectory(src/service/auth)
+target_link_libraries(smithproxy smithproxy_auth_client)
 target_link_libraries (smithproxy curl)
 
 if((CMAKE_SYSTEM_PROCESSOR MATCHES "arm") OR (CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64"))
@@ -931,7 +1255,7 @@ if("${USE_LIBSSH}" STREQUAL "Y")
     if(TARGET sx_gtests)
         target_sources(sx_gtests PRIVATE
                 src/proxy/ssh/sshmitm.cpp
-                src/proxy/ssh/tests/sshmitm_test.cpp)
+                tests/unit/proxy/ssh/sshmitm_test.cpp)
         target_link_libraries(sx_gtests LibSSH::LibSSH)
     endif()
 endif()

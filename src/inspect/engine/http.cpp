@@ -1,6 +1,7 @@
 #include <sslcom.hpp>
 
 #include <inspect/engine/http.hpp>
+#include <inspect/protocol_adapter.hpp>
 #include <inspect/fp/ja4.hpp>
 #include <inspect/http_identity.hpp>
 #include <proxy/mitmhost.hpp>
@@ -12,7 +13,413 @@
 #include <inspect/dnsinspector.hpp>
 #include <inspect/kb/kb.hpp>
 
+#include <charconv>
+
+namespace sx::engine {
+
+// Compatibility entry point for HTTP engines without endpoint-view support.
+void observe_unadapted_content(EngineCtx& ctx, bool from_client,
+                               buffer const& bytes, std::uint64_t read_bytes) {
+    http::observe_content(ctx, from_client ? 0U : 1U,
+                          bytes.string_view(), read_bytes, from_client);
+}
+
+} // namespace sx::engine
+
 namespace sx::engine::http {
+
+    namespace {
+        std::optional<L7PayloadRange> intersect_payload(
+                                        std::size_t payload_start,
+                                        std::size_t payload_end,
+                                        std::size_t current_offset,
+                                        std::size_t block_size) {
+            if(current_offset > block_size || payload_start > payload_end ||
+               payload_end > block_size) return std::nullopt;
+
+            const auto start = std::max(payload_start, current_offset);
+            const auto end = std::min(payload_end, block_size);
+            if(start >= end) return std::nullopt;
+            return L7PayloadRange{
+                static_cast<std::int64_t>(start - current_offset),
+                static_cast<std::int64_t>(end - current_offset)
+            };
+        }
+
+        bool ascii_equal_ci(std::string_view left, std::string_view right) {
+            if(left.size() != right.size()) return false;
+            return std::equal(left.begin(), left.end(), right.begin(),
+                [](unsigned char l, unsigned char r) {
+                    return std::tolower(l) == std::tolower(r);
+                });
+        }
+
+        bool ascii_contains_ci(std::string_view value, std::string_view needle) {
+            if(needle.size() > value.size()) return false;
+            for(std::size_t offset = 0; offset + needle.size() <= value.size(); ++offset) {
+                if(ascii_equal_ci(value.substr(offset, needle.size()), needle)) return true;
+            }
+            return false;
+        }
+
+        std::optional<std::string_view> header_value(std::string_view headers,
+                                                      std::string_view name) {
+            auto line_start = headers.find('\n');
+            if(line_start == std::string_view::npos) return std::nullopt;
+            ++line_start;
+            while(line_start < headers.size()) {
+                auto line_end = headers.find('\n', line_start);
+                if(line_end == std::string_view::npos) line_end = headers.size();
+                auto line = headers.substr(line_start, line_end - line_start);
+                if(!line.empty() && line.back() == '\r') line.remove_suffix(1);
+                if(line.empty()) break;
+                const auto colon = line.find(':');
+                if(colon != std::string_view::npos &&
+                   ascii_equal_ci(line.substr(0, colon), name)) {
+                    auto value = line.substr(colon + 1);
+                    while(!value.empty() && (value.front() == ' ' || value.front() == '\t'))
+                        value.remove_prefix(1);
+                    while(!value.empty() && (value.back() == ' ' || value.back() == '\t'))
+                        value.remove_suffix(1);
+                    return value;
+                }
+                line_start = line_end + (line_end < headers.size());
+            }
+            return std::nullopt;
+        }
+
+        std::vector<std::string_view> header_values(std::string_view headers,
+                                                     std::string_view name) {
+            std::vector<std::string_view> values;
+            auto line_start = headers.find('\n');
+            if(line_start == std::string_view::npos) return values;
+            ++line_start;
+            while(line_start < headers.size()) {
+                auto line_end = headers.find('\n', line_start);
+                if(line_end == std::string_view::npos) line_end = headers.size();
+                auto line = headers.substr(line_start, line_end - line_start);
+                if(!line.empty() && line.back() == '\r') line.remove_suffix(1);
+                if(line.empty()) break;
+                const auto colon = line.find(':');
+                if(colon != std::string_view::npos &&
+                   ascii_equal_ci(line.substr(0, colon), name)) {
+                    auto value = line.substr(colon + 1);
+                    while(!value.empty() &&
+                          (value.front() == ' ' || value.front() == '\t'))
+                        value.remove_prefix(1);
+                    while(!value.empty() &&
+                          (value.back() == ' ' || value.back() == '\t'))
+                        value.remove_suffix(1);
+                    values.push_back(value);
+                }
+                line_start = line_end + (line_end < headers.size());
+            }
+            return values;
+        }
+    }
+
+    L7PayloadHints v1::Http1Direction::observe(
+            std::string_view data, bool response_side,
+            std::deque<std::string>* pending_methods) {
+        L7PayloadHints ranges;
+        last_encodings_.clear();
+        last_annotations_.clear();
+        auto annotate = [&](std::size_t start, std::size_t end,
+                            std::string_view kind) {
+            if(start == end) return;
+            if(!last_annotations_.empty() &&
+               last_annotations_.back().end == static_cast<std::int64_t>(start) &&
+               last_annotations_.back().kind == kind) {
+                last_annotations_.back().end = static_cast<std::int64_t>(end);
+            } else {
+                last_annotations_.push_back({static_cast<std::int64_t>(start),
+                                             static_cast<std::int64_t>(end),
+                                             std::string(kind), {}});
+            }
+        };
+        auto add_body = [&](std::size_t start, std::size_t end) {
+            if(start == end) return;
+            if(!ranges.empty() && ranges.back().second == static_cast<std::int64_t>(start) &&
+               last_encodings_.back() == message_.encoding) {
+                ranges.back().second = static_cast<std::int64_t>(end);
+            } else {
+                ranges.emplace_back(static_cast<std::int64_t>(start),
+                                    static_cast<std::int64_t>(end));
+                last_encodings_.push_back(message_.encoding);
+            }
+        };
+        auto finish_line = [&]() {
+            if(message_.pending.empty() || message_.pending.back() != '\n') return false;
+            while(!message_.pending.empty() &&
+                  (message_.pending.back() == '\r' || message_.pending.back() == '\n'))
+                message_.pending.pop_back();
+            return true;
+        };
+
+        std::size_t cursor = 0;
+        while(cursor < data.size()) {
+            switch(message_.phase) {
+                case v1::Http1Message::phase_t::headers: {
+                    annotate(cursor, cursor + 1, message_.start_line
+                                                   ? "http1.start_line"
+                                                   : "http1.headers");
+                    const auto header_byte = data[cursor++];
+                    message_.pending.push_back(header_byte);
+                    if(message_.start_line && header_byte == '\n')
+                        message_.start_line = false;
+                    if(message_.pending.size() > 65536) {
+                        message_.pending.clear();
+                        message_.phase = v1::Http1Message::phase_t::opaque;
+                        break;
+                    }
+                    const bool complete = message_.pending.size() >= 4 &&
+                        message_.pending.compare(message_.pending.size() - 4, 4, "\r\n\r\n") == 0;
+                    const bool complete_lf = message_.pending.size() >= 2 &&
+                        message_.pending.compare(message_.pending.size() - 2, 2, "\n\n") == 0;
+                    if(!complete && !complete_lf) break;
+
+                    const auto headers = std::string_view(message_.pending);
+                    message_.start_line = true;
+                    message_.encoding.clear();
+                    if(auto value = header_value(headers, "content-encoding"))
+                        message_.encoding.assign(value->data(), value->size());
+                    const auto transfer_values = header_values(headers, "transfer-encoding");
+                    const auto length_values = header_values(headers, "content-length");
+                    std::optional<std::string_view> transfer;
+                    if(!transfer_values.empty())
+                        transfer.emplace(transfer_values.front());
+                    std::optional<std::string_view> length;
+                    if(!length_values.empty())
+                        length.emplace(length_values.front());
+                    const auto connection = header_value(headers, "connection");
+                    const auto upgrade = header_value(headers, "upgrade");
+
+                    bool body_forbidden = false;
+                    bool final_response = false;
+                    bool successful_connect = false;
+                    std::string request_method;
+                    if(response_side && headers.substr(0, 5) == "HTTP/") {
+                        const auto first_space = headers.find(' ');
+                        if(first_space != std::string_view::npos && first_space + 4 <= headers.size()) {
+                            unsigned status = 0;
+                            auto parsed = std::from_chars(headers.data() + first_space + 1,
+                                                          headers.data() + first_space + 4,
+                                                          status);
+                            if(parsed.ec == std::errc{}) {
+                                const bool informational = status >= 100 && status < 200;
+                                final_response = !informational || status == 101;
+                                body_forbidden = informational || status == 204 ||
+                                                 status == 205 || status == 304;
+                                if(final_response && pending_methods &&
+                                   !pending_methods->empty()) {
+                                    body_forbidden = body_forbidden ||
+                                        ascii_equal_ci(pending_methods->front(), "HEAD");
+                                    successful_connect = status >= 200 && status < 300 &&
+                                        ascii_equal_ci(pending_methods->front(), "CONNECT");
+                                }
+                            }
+                        }
+                    } else if(!response_side && pending_methods) {
+                        const auto method_end = headers.find(' ');
+                        if(method_end != std::string_view::npos && method_end != 0)
+                            request_method.assign(headers.substr(0, method_end));
+                    }
+                    message_.pending.clear();
+                    if(transfer_values.size() > 1 || length_values.size() > 1 ||
+                       (transfer && !ascii_equal_ci(*transfer, "chunked"))) {
+                        message_.phase = v1::Http1Message::phase_t::opaque;
+                    } else if(successful_connect ||
+                              (connection && ascii_contains_ci(*connection, "upgrade")) || upgrade) {
+                        message_.phase = v1::Http1Message::phase_t::opaque;
+                    } else if(body_forbidden) {
+                        message_.phase = v1::Http1Message::phase_t::headers;
+                    } else if(transfer && ascii_contains_ci(*transfer, "chunked")) {
+                        message_.phase = v1::Http1Message::phase_t::chunk_size;
+                    } else if(length) {
+                        std::uint64_t parsed_length = 0;
+                        auto parsed = std::from_chars(length->data(),
+                                                      length->data() + length->size(),
+                                                      parsed_length);
+                        if(parsed.ec != std::errc{} ||
+                           parsed.ptr != length->data() + length->size()) {
+                            message_.phase = v1::Http1Message::phase_t::opaque;
+                        } else if(parsed_length == 0) {
+                            message_.phase = v1::Http1Message::phase_t::headers;
+                        } else {
+                            message_.remaining = parsed_length;
+                            message_.phase = v1::Http1Message::phase_t::fixed_body;
+                        }
+                    } else {
+                        message_.phase = response_side ? v1::Http1Message::phase_t::until_close
+                                                       : v1::Http1Message::phase_t::headers;
+                    }
+                    if(!response_side && pending_methods && !request_method.empty() &&
+                       message_.phase != v1::Http1Message::phase_t::opaque)
+                        pending_methods->push_back(std::move(request_method));
+                    if(final_response && pending_methods && !pending_methods->empty())
+                        pending_methods->pop_front();
+                    break;
+                }
+                case v1::Http1Message::phase_t::fixed_body: {
+                    const auto count = static_cast<std::size_t>(
+                        std::min<std::uint64_t>(message_.remaining, data.size() - cursor));
+                    add_body(cursor, cursor + count);
+                    annotate(cursor, cursor + count, "http1.body");
+                    cursor += count;
+                    message_.remaining -= count;
+                    if(message_.remaining == 0) message_.phase = v1::Http1Message::phase_t::headers;
+                    break;
+                }
+                case v1::Http1Message::phase_t::chunk_size: {
+                    annotate(cursor, cursor + 1, "http1.chunk.size");
+                    message_.pending.push_back(data[cursor++]);
+                    if(message_.pending.size() > 128) {
+                        message_.pending.clear();
+                        message_.phase = v1::Http1Message::phase_t::opaque;
+                        break;
+                    }
+                    if(!finish_line()) break;
+                    auto size_text = std::string_view(message_.pending);
+                    if(auto extension = size_text.find(';'); extension != std::string_view::npos)
+                        size_text = size_text.substr(0, extension);
+                    while(!size_text.empty() && (size_text.front() == ' ' || size_text.front() == '\t'))
+                        size_text.remove_prefix(1);
+                    while(!size_text.empty() && (size_text.back() == ' ' || size_text.back() == '\t'))
+                        size_text.remove_suffix(1);
+                    std::uint64_t chunk_size = 0;
+                    auto parsed = std::from_chars(size_text.data(),
+                                                  size_text.data() + size_text.size(),
+                                                  chunk_size, 16);
+                    message_.pending.clear();
+                    if(size_text.empty() || parsed.ec != std::errc{} ||
+                       parsed.ptr != size_text.data() + size_text.size()) {
+                        message_.phase = v1::Http1Message::phase_t::opaque;
+                    } else if(chunk_size == 0) {
+                        message_.phase = v1::Http1Message::phase_t::trailers;
+                    } else {
+                        message_.remaining = chunk_size;
+                        message_.phase = v1::Http1Message::phase_t::chunk_data;
+                    }
+                    break;
+                }
+                case v1::Http1Message::phase_t::chunk_data: {
+                    const auto count = static_cast<std::size_t>(
+                        std::min<std::uint64_t>(message_.remaining, data.size() - cursor));
+                    add_body(cursor, cursor + count);
+                    annotate(cursor, cursor + count, "http1.chunk.data");
+                    cursor += count;
+                    message_.remaining -= count;
+                    if(message_.remaining == 0)
+                        message_.phase = v1::Http1Message::phase_t::chunk_delimiter;
+                    break;
+                }
+                case v1::Http1Message::phase_t::chunk_delimiter:
+                    annotate(cursor, cursor + 1, "http1.chunk.delimiter");
+                    message_.pending.push_back(data[cursor++]);
+                    if(message_.pending.back() == '\n') {
+                        message_.pending.clear();
+                        message_.phase = v1::Http1Message::phase_t::chunk_size;
+                    } else if(message_.pending.size() > 1 || message_.pending.back() != '\r') {
+                        message_.pending.clear();
+                        message_.phase = v1::Http1Message::phase_t::opaque;
+                    }
+                    break;
+                case v1::Http1Message::phase_t::trailers:
+                    annotate(cursor, cursor + 1, "http1.trailers");
+                    message_.pending.push_back(data[cursor++]);
+                    if(message_.pending.size() > 65536) {
+                        message_.pending.clear();
+                        message_.phase = v1::Http1Message::phase_t::opaque;
+                    } else if(finish_line()) {
+                        const bool final_line = message_.pending.empty();
+                        message_.pending.clear();
+                        if(final_line) message_.phase = v1::Http1Message::phase_t::headers;
+                    }
+                    break;
+                case v1::Http1Message::phase_t::until_close:
+                    add_body(cursor, data.size());
+                    annotate(cursor, data.size(), "http1.body");
+                    cursor = data.size();
+                    break;
+                case v1::Http1Message::phase_t::opaque:
+                    annotate(cursor, data.size(), "http1.opaque");
+                    cursor = data.size();
+                    break;
+            }
+        }
+        // A framing error anywhere in this input invalidates ranges already
+        // collected from the same block. Publishing a prefix would present
+        // attacker-controlled malformed framing as trusted L7 content.
+        if(message_.phase == v1::Http1Message::phase_t::opaque) {
+            last_encodings_.assign(1, "");
+            last_annotations_.push_back({0, static_cast<std::int64_t>(data.size()),
+                                         "http1.invalid", {}});
+            return L7PayloadHints{{-1, -1}};
+        }
+        if(!ranges.empty()) return ranges;
+        last_encodings_.assign(1, "");
+        return L7PayloadHints{{0, 0}};
+    }
+
+    void v1::observe_content(EngineCtx& ctx, std::size_t direction,
+                             std::string_view data, std::uint64_t read_bytes,
+                             bool response_side) {
+        auto app = std::dynamic_pointer_cast<app_HttpRequest>(ctx.application_data);
+        if(!app || app->version != app_HttpRequest::HTTP_VER::HTTP_1) return;
+
+        auto* connection = std::any_cast<Http1Connection>(&ctx.state_data);
+        if(!connection) {
+            ctx.state_data = std::make_any<Http1Connection>();
+            connection = std::any_cast<Http1Connection>(&ctx.state_data);
+        }
+
+        auto ranges = connection->observe(direction, data, response_side);
+        app->observe_l7_payload(data, read_bytes, std::move(ranges),
+                                connection->encodings(direction),
+                                connection->directions.at(direction).annotations(),
+                                ctx.payload_analysis);
+    }
+
+    L7PayloadHints http2_payload_hint(std::string_view block,
+                                      std::size_t current_offset) {
+        const L7PayloadHints unknown{{-1, -1}};
+        const L7PayloadHints none{{0, 0}};
+        if(current_offset > block.size()) return unknown;
+
+        std::size_t offset = 0;
+        if(block.size() >= v2::txt::magic_sz &&
+           block.substr(0, v2::txt::magic_sz) == v2::txt::magic) {
+            offset = v2::txt::magic_sz;
+        }
+        L7PayloadHints ranges;
+
+        while(offset < block.size()) {
+            if(block.size() - offset < 9) return unknown;
+            const auto* bytes = reinterpret_cast<const unsigned char*>(block.data() + offset);
+            const std::size_t length = (static_cast<std::size_t>(bytes[0]) << 16U) |
+                                       (static_cast<std::size_t>(bytes[1]) << 8U) |
+                                       static_cast<std::size_t>(bytes[2]);
+            const auto type = bytes[3];
+            const auto flags = bytes[4];
+            if(length > block.size() - offset - 9) return unknown;
+
+            if(type == 0 && length != 0) {
+                auto payload_start = offset + 9;
+                auto payload_end = payload_start + length;
+                if((flags & 0x08U) != 0) {
+                    const auto padding = static_cast<std::size_t>(bytes[9]);
+                    if(padding + 1 > length) return unknown;
+                    ++payload_start;
+                    payload_end -= padding;
+                }
+                if(auto range = intersect_payload(payload_start, payload_end,
+                                                  current_offset, block.size()))
+                    ranges.push_back(*range);
+            }
+            offset += 9 + length;
+        }
+        return ranges.empty() ? none : ranges;
+    }
 
     namespace v1 {
 
@@ -427,6 +834,15 @@ namespace sx::engine::http {
 
                 if(app_request) {
 
+                    if(auto value = exact_header_value(data, "content-type")) {
+                        app_request->http_data.content_type.assign(
+                            value->data(), value->size());
+                    }
+                    if(auto value = exact_header_value(data, "accept")) {
+                        app_request->http_data.accept.assign(
+                            value->data(), value->size());
+                    }
+
                     if(ctx.options.http.ja4h) {
                         sx::ja4::HTTP h;
                         h.version = "11";
@@ -475,6 +891,252 @@ namespace sx::engine::http {
             }
 
             _deb("start finished");
+        }
+    }
+
+    namespace v2 {
+
+        L7PayloadHints Http2Direction::observe(std::string_view data,
+                                               bool client_side) {
+            L7PayloadHints ranges;
+            last_stream_ids_.clear();
+            last_annotations_.clear();
+            auto frame_name = [](std::uint8_t type) -> std::string_view {
+                switch(type) {
+                    case 0: return "DATA";
+                    case 1: return "HEADERS";
+                    case 2: return "PRIORITY";
+                    case 3: return "RST_STREAM";
+                    case 4: return "SETTINGS";
+                    case 5: return "PUSH_PROMISE";
+                    case 6: return "PING";
+                    case 7: return "GOAWAY";
+                    case 8: return "WINDOW_UPDATE";
+                    case 9: return "CONTINUATION";
+                    default: return "UNKNOWN";
+                }
+            };
+            auto payload_kind = [](std::uint8_t type) -> std::string_view {
+                switch(type) {
+                    case 0: return "h2.data";
+                    case 1: return "h2.headers";
+                    case 2: return "h2.priority";
+                    case 3: return "h2.rst_stream";
+                    case 4: return "h2.settings";
+                    case 5: return "h2.push_promise";
+                    case 6: return "h2.ping";
+                    case 7: return "h2.goaway";
+                    case 8: return "h2.window_update";
+                    case 9: return "h2.continuation";
+                    default: return "h2.frame.payload";
+                }
+            };
+            auto annotate = [&](std::size_t start, std::size_t end,
+                                std::string_view kind,
+                                bool frame_attributes = false) {
+                if(start == end) return;
+                PayloadAnnotationAttributes attributes;
+                if(frame_attributes) {
+                    attributes["frame_type"] = std::string(frame_name(current_frame_type_));
+                    attributes["stream_id"] = static_cast<std::int64_t>(current_stream_id_);
+                }
+                if(!last_annotations_.empty() &&
+                   last_annotations_.back().end == static_cast<std::int64_t>(start) &&
+                   last_annotations_.back().kind == kind &&
+                   last_annotations_.back().attributes == attributes) {
+                    last_annotations_.back().end = static_cast<std::int64_t>(end);
+                } else {
+                    last_annotations_.push_back({static_cast<std::int64_t>(start),
+                                                 static_cast<std::int64_t>(end),
+                                                 std::string(kind),
+                                                 std::move(attributes)});
+                }
+            };
+            auto add_body = [&](std::size_t start, std::size_t end) {
+                if(start == end) return;
+                if(!ranges.empty() && ranges.back().second ==
+                        static_cast<std::int64_t>(start) &&
+                   last_stream_ids_.back() == current_stream_id_) {
+                    ranges.back().second = static_cast<std::int64_t>(end);
+                } else {
+                    ranges.emplace_back(static_cast<std::int64_t>(start),
+                                        static_cast<std::int64_t>(end));
+                    last_stream_ids_.push_back(current_stream_id_);
+                }
+            };
+            auto reset_frame = [&]() {
+                header_size_ = 0;
+                frame_remaining_ = 0;
+                data_remaining_ = 0;
+                padding_remaining_ = 0;
+                data_frame_ = false;
+                padded_ = false;
+                need_padding_length_ = false;
+            };
+
+            if(opaque_) return {{-1, -1}};
+            std::size_t cursor = 0;
+            if(first_input_) {
+                first_input_ = false;
+                reading_preface_ = client_side && !data.empty() && data.front() == txt::magic[0];
+            }
+            while(cursor < data.size()) {
+                if(reading_preface_) {
+                    if(data[cursor] != txt::magic[preface_size_]) {
+                        opaque_ = true;
+                        break;
+                    }
+                    annotate(cursor, cursor + 1, "h2.preface");
+                    ++cursor;
+                    if(++preface_size_ == txt::magic_sz) reading_preface_ = false;
+                    continue;
+                }
+                if(header_size_ < header_.size()) {
+                    annotate(cursor, cursor + 1, "h2.frame.header");
+                    header_[header_size_++] = static_cast<unsigned char>(data[cursor++]);
+                    if(header_size_ != header_.size()) continue;
+                    frame_remaining_ = (static_cast<std::uint32_t>(header_[0]) << 16U) |
+                                       (static_cast<std::uint32_t>(header_[1]) << 8U) |
+                                       static_cast<std::uint32_t>(header_[2]);
+                    current_frame_type_ = header_[3];
+                    data_frame_ = current_frame_type_ == 0;
+                    current_stream_id_ =
+                        (static_cast<std::uint32_t>(header_[5] & 0x7fU) << 24U) |
+                        (static_cast<std::uint32_t>(header_[6]) << 16U) |
+                        (static_cast<std::uint32_t>(header_[7]) << 8U) |
+                        static_cast<std::uint32_t>(header_[8]);
+                    if(!last_annotations_.empty() &&
+                       last_annotations_.back().kind == "h2.frame.header") {
+                        last_annotations_.back().attributes["frame_type"] =
+                            std::string(frame_name(current_frame_type_));
+                        last_annotations_.back().attributes["stream_id"] =
+                            static_cast<std::int64_t>(current_stream_id_);
+                    }
+                    padded_ = data_frame_ && (header_[4] & 0x08U) != 0;
+                    need_padding_length_ = padded_;
+                    data_remaining_ = data_frame_ && !padded_ ? frame_remaining_ : 0;
+                    if(frame_remaining_ == 0) reset_frame();
+                    continue;
+                }
+                if(need_padding_length_) {
+                    annotate(cursor, cursor + 1, "h2.padding.length", true);
+                    const auto padding = static_cast<std::uint32_t>(
+                        static_cast<unsigned char>(data[cursor++]));
+                    if(frame_remaining_ == 0 || padding > frame_remaining_ - 1) {
+                        opaque_ = true;
+                        break;
+                    }
+                    --frame_remaining_;
+                    padding_remaining_ = padding;
+                    data_remaining_ = frame_remaining_ - padding;
+                    need_padding_length_ = false;
+                    continue;
+                }
+                if(data_remaining_ != 0) {
+                    const auto count = std::min<std::size_t>(data_remaining_,
+                                                             data.size() - cursor);
+                    add_body(cursor, cursor + count);
+                    annotate(cursor, cursor + count, "h2.data", true);
+                    cursor += count;
+                    data_remaining_ -= static_cast<std::uint32_t>(count);
+                    frame_remaining_ -= static_cast<std::uint32_t>(count);
+                } else {
+                    const auto count = std::min<std::size_t>(
+                        frame_remaining_, data.size() - cursor);
+                    annotate(cursor, cursor + count,
+                             data_frame_ ? "h2.padding" :
+                                           payload_kind(current_frame_type_), true);
+                    cursor += count;
+                    frame_remaining_ -= static_cast<std::uint32_t>(count);
+                    if(padding_remaining_ >= count)
+                        padding_remaining_ -= static_cast<std::uint32_t>(count);
+                }
+                if(frame_remaining_ == 0) reset_frame();
+            }
+            if(opaque_) {
+                last_annotations_.push_back({0, static_cast<std::int64_t>(data.size()),
+                                             "h2.invalid", {}});
+                return {{-1, -1}};
+            }
+            return ranges.empty() ? L7PayloadHints{{0, 0}} : ranges;
+        }
+
+        bool is_prior_knowledge_preface(std::string_view data) {
+            return data.size() >= txt::magic_sz &&
+                   data.substr(0, txt::magic_sz) == txt::magic;
+        }
+
+        void observe_content(EngineCtx& ctx, std::size_t direction,
+                             std::string_view data, std::uint64_t read_bytes,
+                             bool client_side) {
+            auto app = std::dynamic_pointer_cast<app_HttpRequest>(ctx.application_data);
+            if(!app) return;
+            if(app->version != app_HttpRequest::HTTP_VER::HTTP2) {
+                // The content consumer runs before the ordinary flow detector.
+                // Bootstrap clear prior-knowledge H2 here so its very first
+                // block is never fed to the HTTP/1 framing tracker.
+                if(!client_side || !is_prior_knowledge_preface(data)) return;
+                app->version = app_HttpRequest::HTTP_VER::HTTP2;
+            }
+            auto* connection = std::any_cast<Http2Connection>(&ctx.state_data);
+            if(!connection) {
+                ctx.state_data = std::make_any<Http2Connection>();
+                connection = std::any_cast<Http2Connection>(&ctx.state_data);
+            }
+            auto& tracker = connection->content_directions.at(direction);
+            auto ranges = tracker.observe(data, client_side);
+            std::vector<std::string> encodings;
+            encodings.reserve(tracker.stream_ids().size());
+            for(const auto stream_id : tracker.stream_ids()) {
+                const auto stream = connection->streams.find(stream_id);
+                encodings.push_back(stream != connection->streams.end() &&
+                                    stream->second.content_encoding_ ==
+                                        Http2Stream::content_type_t::GZIP
+                                    ? "gzip" : "");
+            }
+            app->observe_l7_payload(data, read_bytes, std::move(ranges),
+                                    std::move(encodings), tracker.annotations(),
+                                    ctx.payload_analysis);
+        }
+
+    }
+
+    void observe_content(EngineCtx& ctx, std::size_t direction,
+                         std::string_view data, std::uint64_t read_bytes,
+                         bool client_side) {
+        auto app = std::dynamic_pointer_cast<app_HttpRequest>(ctx.application_data);
+
+        // Negotiated ALPN is authoritative. An unknown future protocol must
+        // not accidentally fall through to an HTTP/1 parser selected earlier.
+        if(!ctx.negotiated_alpn.empty()) {
+            if(ctx.negotiated_alpn == "h2") {
+                if(!app) {
+                    app = std::make_shared<app_HttpRequest>();
+                    ctx.application_data = app;
+                }
+                app->version = app_HttpRequest::HTTP_VER::HTTP2;
+                v2::observe_content(ctx, direction, data, read_bytes, client_side);
+            } else if(ctx.negotiated_alpn == "http/1.1" ||
+                      ctx.negotiated_alpn == "http/1.0") {
+                if(!app) {
+                    app = std::make_shared<app_HttpRequest>();
+                    ctx.application_data = app;
+                }
+                app->version = app_HttpRequest::HTTP_VER::HTTP_1;
+                v1::observe_content(ctx, direction, data, read_bytes, !client_side);
+            }
+            return;
+        }
+
+        if((app && app->version == app_HttpRequest::HTTP_VER::HTTP2) ||
+           (client_side && v2::is_prior_knowledge_preface(data))) {
+            if(!app) {
+                app = std::make_shared<app_HttpRequest>();
+                ctx.application_data = app;
+            }
+            v2::observe_content(ctx, direction, data, read_bytes, client_side);
+        } else if(app && app->version == app_HttpRequest::HTTP_VER::HTTP_1) {
+            v1::observe_content(ctx, direction, data, read_bytes, !client_side);
         }
     }
 
@@ -623,6 +1285,32 @@ namespace sx::engine::http {
                 output.push_back(static_cast<char>((value >> 16) & 0xff));
                 output.push_back(static_cast<char>((value >> 8) & 0xff));
                 output.push_back(static_cast<char>(value & 0xff));
+            }
+
+            bool is_http_token(std::string_view value) noexcept {
+                if(value.empty()) return false;
+                return std::all_of(value.begin(), value.end(), [](unsigned char ch) {
+                    return (ch >= 'a' && ch <= 'z') ||
+                           (ch >= 'A' && ch <= 'Z') ||
+                           (ch >= '0' && ch <= '9') ||
+                           ch == '!' || ch == '#' || ch == '$' || ch == '%' ||
+                           ch == '&' || ch == '\'' || ch == '*' || ch == '+' ||
+                           ch == '-' || ch == '.' || ch == '^' || ch == '_' ||
+                           ch == '`' || ch == '|' || ch == '~';
+                });
+            }
+
+            bool is_uri_scheme(std::string_view value) noexcept {
+                if(value.empty() || !((value.front() >= 'a' && value.front() <= 'z') ||
+                                      (value.front() >= 'A' && value.front() <= 'Z'))) {
+                    return false;
+                }
+                return std::all_of(value.begin() + 1, value.end(), [](unsigned char ch) {
+                    return (ch >= 'a' && ch <= 'z') ||
+                           (ch >= 'A' && ch <= 'Z') ||
+                           (ch >= '0' && ch <= '9') ||
+                           ch == '+' || ch == '-' || ch == '.';
+                });
             }
         }
 
@@ -921,19 +1609,28 @@ namespace sx::engine::http {
                             load_from_props(":authority", app_data->http_data.host);
                             load_from_props(":method", app_data->http_data.method);
                             load_from_props(":referer", app_data->http_data.referer);
+
+                            if(app_data->http_data.proto.empty()) {
+                                if(auto const scheme = app_data->properties().find(":scheme");
+                                   scheme != app_data->properties().end()) {
+                                    app_data->http_data.proto = scheme->second + "://";
+                                }
+                            }
                         }
 
                     } else if (hdr == ":method") {
                         if (app_data) app_data->http_data.method = hdr_elem;
                     }
 
-                    // save all left (request) values
-                    app_data->properties()[hdr] = hdr_elem;
+                    // Stream capture remains useful even if another inspector
+                    // already owns application_data.
+                    if(app_data) app_data->properties()[hdr] = hdr_elem;
 
                 }
                 else {
                     if(hdr == "content-encoding") {
-                        if(hdr_elem == "gzip") stream_state.content_encoding_ = Http2Stream::content_type_t::GZIP;
+                        if(ascii_equal_ci(hdr_elem, "gzip"))
+                            stream_state.content_encoding_ = Http2Stream::content_type_t::GZIP;
                     }
                 }
                 touch_header(hdr.c_str());
@@ -976,7 +1673,7 @@ namespace sx::engine::http {
                 return false;
             }
 
-            DNS_Inspector::store(response);
+            if (!ctx.protocol_only) DNS_Inspector::store(response);
             if(auto http = std::dynamic_pointer_cast<app_HttpRequest>(
                    ctx.application_data)) {
                 http->http_data.sub_proto = "dns";
@@ -985,11 +1682,53 @@ namespace sx::engine::http {
             return true;
         }
 
+        // RFC 9110 permits a comma-separated Content-Length list only when
+        // every member is the same valid decimal value. Keep parsing separate
+        // from stream mutation so rejection cannot leave partial framing state.
+        std::optional<std::uint64_t> parse_content_length_fields(
+            std::vector<std::string> const& fields, bool& valid) {
+            valid = false;
+            std::optional<std::uint64_t> result;
+
+            for(auto const& field: fields) {
+                std::string_view remaining = field;
+                do {
+                    const auto comma = remaining.find(',');
+                    auto item = remaining.substr(0, comma);
+                    while(!item.empty() &&
+                          (item.front() == ' ' || item.front() == '\t'))
+                        item.remove_prefix(1);
+                    while(!item.empty() &&
+                          (item.back() == ' ' || item.back() == '\t'))
+                        item.remove_suffix(1);
+
+                    if(item.empty()) return std::nullopt;
+                    std::uint64_t parsed = 0;
+                    for(unsigned char ch: item) {
+                        if(ch < '0' || ch > '9' ||
+                           parsed >
+                               (std::numeric_limits<std::uint64_t>::max() -
+                                static_cast<unsigned>(ch - '0')) / 10) {
+                            return std::nullopt;
+                        }
+                        parsed = parsed * 10 +
+                            static_cast<unsigned>(ch - '0');
+                    }
+
+                    if(result && *result != parsed) return std::nullopt;
+                    result = parsed;
+                    if(comma == std::string_view::npos) break;
+                    remaining.remove_prefix(comma + 1);
+                } while(true);
+            }
+
+            valid = result.has_value();
+            return result;
+        }
+
         void process_headers(EngineCtx& ctx, side_t side, long stream_id, uint8_t flags, buffer const& data) {
 
 #ifdef USE_HPACK
-            if(data.empty()) return;
-
             auto const& log = log::http2_headers;
 
             auto* connection = std::any_cast<Http2Connection>(&ctx.state_data);
@@ -998,16 +1737,50 @@ namespace sx::engine::http {
                 connection = std::any_cast<Http2Connection>(&ctx.state_data);
             }
             if(connection->connection_invalid) return;
+
+            auto mark_stream_error = [&] {
+                auto stream = connection->streams.find(stream_id);
+                if(stream == connection->streams.end()) return;
+                if(side == side_t::LEFT)
+                    stream->second.request_invalid_ = true;
+                else
+                    stream->second.response_invalid_ = true;
+            };
+            const auto numeric_stream_id = static_cast<uint32_t>(stream_id);
+            const bool known_closed_stream =
+                connection->streams.find(stream_id) == connection->streams.end() &&
+                ((numeric_stream_id & 1U) != 0
+                     ? numeric_stream_id <= connection->highest_client_stream_id
+                     : numeric_stream_id <= connection->highest_promised_stream_id);
+
+            if(data.empty()) {
+                // An empty HPACK block is structurally valid but cannot form
+                // initial request/response headers.  The endpoint resets the
+                // affected stream; do not let later HEADERS repair it.
+                if(side == side_t::RIGHT &&
+                   connection->streams.find(stream_id) == connection->streams.end() &&
+                   !known_closed_stream) {
+                    connection->connection_invalid = true;
+                } else {
+                    mark_stream_error();
+                }
+                return;
+            }
+
             if(data.size() > max_pending_header_block_size) {
                 _err("complete HTTP/2 header block exceeds inspection limit");
+                // Dropping the block loses any HPACK mutations it contains.
+                // Later frames must not regain semantics against stale state.
                 connection->connection_invalid = true;
                 return;
             }
             auto& decoder = side == side_t::LEFT
                             ? connection->request_decoder
                             : connection->response_decoder;
-            // Decode against a candidate copy. A malformed block must not
-            // partially mutate the connection-wide dynamic table.
+            // HPACK table updates are part of the header block.  Decode into a
+            // candidate state so structural HPACK failures remain
+            // transactional. Successfully decompressed state is committed
+            // before HTTP stream semantics are validated below.
             auto candidate = std::make_unique<HPACK::decoder_t>(*decoder);
             auto data_string = std::string((const char*)data.data(), data.size());
             auto vec = std::vector<uint8_t>(data_string.begin(), data_string.end());
@@ -1021,7 +1794,19 @@ namespace sx::engine::http {
             try {
                 if (not candidate->decode(vec)) {
                     _err("Frame: hpack decode error");
-                    connection->connection_invalid = true;
+                    if(candidate->failure() == HPACK::decoder_t::failure_t::header_semantics) {
+                        // HTTP field validation can reject a stream after
+                        // successful decompression.  Its dynamic-table
+                        // mutations still belong to the connection and later
+                        // blocks may legally reference them.
+                        decoder = std::move(candidate);
+                        mark_stream_error();
+                    } else {
+                        // Structural HPACK failures are connection-level
+                        // compression errors. A local capture limit is also
+                        // terminal because we cannot publish the full block.
+                        connection->connection_invalid = true;
+                    }
                     return;
                 }
             } catch (std::exception const& e) {
@@ -1030,7 +1815,306 @@ namespace sx::engine::http {
                 return;
             }
 
+            // HPACK state is connection-wide and commits after successful
+            // decompression even if HTTP stream semantics below reject the
+            // decoded field set.
             decoder = std::move(candidate);
+
+            for(auto const& [name, values]: decoder->headers()) {
+                (void)values;
+                if(name.empty() || name.front() != ':') continue;
+                const bool request_pseudo = name == ":method" ||
+                    name == ":scheme" || name == ":authority" ||
+                    name == ":path" || name == ":protocol";
+                const bool response_pseudo = name == ":status";
+                if((side == side_t::LEFT && !request_pseudo) ||
+                   (side == side_t::RIGHT && !response_pseudo)) {
+                    _err("Frame: invalid HTTP/2 pseudo-header %s for side %c",
+                         name.c_str(), from_side(side));
+                    mark_stream_error();
+                    return;
+                }
+            }
+
+            auto const stream_it = connection->streams.find(stream_id);
+            const bool prior_headers = stream_it != connection->streams.end() &&
+                !(side == side_t::LEFT
+                      ? stream_it->second.request_headers_.empty()
+                      : stream_it->second.response_headers_.empty());
+            const auto prior_response_status =
+                side == side_t::RIGHT && stream_it != connection->streams.end()
+                    ? stream_it->second.response_header(":status")
+                    : std::optional<std::string>{};
+            const bool prior_response_was_informational =
+                prior_response_status && prior_response_status->size() == 3 &&
+                prior_response_status->front() == '1';
+            const bool trailer = prior_headers &&
+                !(side == side_t::RIGHT && prior_response_was_informational);
+            if(stream_it != connection->streams.end() &&
+               (side == side_t::LEFT
+                    ? (stream_it->second.request_ended_ ||
+                       stream_it->second.request_invalid_)
+                    : (stream_it->second.response_ended_ ||
+                       stream_it->second.response_invalid_))) {
+                _err("Frame: HEADERS after HTTP/2 stream direction ended");
+                return;
+            }
+            if(trailer && stream_it != connection->streams.end()) {
+                auto const& state = stream_it->second;
+                const auto& declared = side == side_t::LEFT
+                    ? state.request_content_length_
+                    : state.response_content_length_;
+                const auto received = side == side_t::LEFT
+                    ? state.request_body_bytes_
+                    : state.response_body_bytes_;
+                if(declared && received != *declared) {
+                    _err("Frame: HTTP/2 trailers ended a body before content-length");
+                    mark_stream_error();
+                    return;
+                }
+            }
+            if(trailer && (flags & 0x01U) == 0) {
+                _err("Frame: HTTP/2 trailer block without END_STREAM");
+                mark_stream_error();
+                return;
+            }
+            auto const has = [&](std::string_view name) {
+                auto const it = decoder->headers().find(name);
+                return it != decoder->headers().end() && !it->second.empty();
+            };
+            auto const value = [&](std::string_view name) -> std::string_view {
+                auto const it = decoder->headers().find(name);
+                return it == decoder->headers().end() || it->second.empty()
+                    ? std::string_view{} : std::string_view(it->second.back());
+            };
+            std::optional<std::uint64_t> declared_content_length;
+            const auto content_length_it = decoder->headers().find("content-length");
+            if(content_length_it != decoder->headers().end()) {
+                if(trailer) {
+                    _err("Frame: content-length is forbidden in HTTP/2 trailers");
+                    mark_stream_error();
+                    return;
+                }
+                bool valid_content_length = false;
+                declared_content_length = parse_content_length_fields(
+                    content_length_it->second, valid_content_length);
+                if(!valid_content_length) {
+                    _err("Frame: invalid or ambiguous HTTP/2 content-length");
+                    mark_stream_error();
+                    return;
+                }
+            }
+            const auto content_type_it = decoder->headers().find("content-type");
+            if(content_type_it != decoder->headers().end() &&
+                (content_type_it->second.size() != 1 ||
+                (trailer && stream_it != connection->streams.end() &&
+                 (side == side_t::LEFT
+                      ? stream_it->second.request_header("content-type")
+                      : stream_it->second.response_header("content-type"))
+                     .has_value()))) {
+                _err("Frame: ambiguous repeated HTTP/2 content-type");
+                mark_stream_error();
+                return;
+            }
+            const bool has_pseudo = std::any_of(
+                decoder->headers().begin(), decoder->headers().end(),
+                [](auto const& item) {
+                    return !item.first.empty() && item.first.front() == ':';
+                });
+            if(trailer && has_pseudo) {
+                _err("Frame: pseudo-header in HTTP/2 trailer block");
+                mark_stream_error();
+                return;
+            }
+            if(!trailer) {
+                const bool known_pseudo_headers = std::all_of(
+                    decoder->headers().begin(), decoder->headers().end(),
+                    [side](auto const& item) {
+                        auto const& name = item.first;
+                        if(name.empty() || name.front() != ':') return true;
+                        if(side == side_t::RIGHT) return name == ":status";
+                        return name == ":method" || name == ":scheme" ||
+                               name == ":authority" || name == ":path" ||
+                               name == ":protocol";
+                    });
+                if(!known_pseudo_headers) {
+                    _err("Frame: unknown pseudo-header in HTTP/2 header block");
+                    mark_stream_error();
+                    return;
+                }
+            }
+            if(!trailer && side == side_t::LEFT) {
+                const auto method = value(":method");
+                const bool connect = method == "CONNECT";
+                const bool extended_connect = has(":protocol");
+                const auto scheme = value(":scheme");
+                const auto path = value(":path");
+                const auto protocol = value(":protocol");
+                const auto authority = value(":authority");
+                const auto host = value("host");
+                const auto host_it = decoder->headers().find("host");
+                const bool duplicate_host = host_it != decoder->headers().end() &&
+                    host_it->second.size() != 1;
+                const bool conflicting_authority = !authority.empty() &&
+                    !host.empty() && !ascii_equal_ci(authority, host);
+                const auto effective_authority = authority.empty() ? host : authority;
+                const bool missing_required_authority =
+                    sx::inspect::http_detail::scheme_requires_authority(scheme) &&
+                    effective_authority.empty();
+                const bool empty_explicit_authority = has(":authority") &&
+                    authority.empty() &&
+                    sx::inspect::http_detail::scheme_requires_authority(scheme);
+                const bool valid = is_http_token(method) &&
+                    !duplicate_host &&
+                    !conflicting_authority &&
+                    !missing_required_authority &&
+                    !empty_explicit_authority &&
+                    (effective_authority.empty() ||
+                     sx::inspect::http_detail::is_unambiguous_authority(
+                         effective_authority)) &&
+                    (connect
+                        ? (!authority.empty() &&
+                           (extended_connect
+                               ? connection->extended_connect_enabled &&
+                                 is_http_token(protocol) &&
+                                 is_uri_scheme(scheme) &&
+                                 sx::inspect::http_detail::is_valid_request_path(
+                                     method, path)
+                               : !has(":scheme") && !has(":path")))
+                        : (is_uri_scheme(scheme) &&
+                           sx::inspect::http_detail::is_valid_request_path(
+                               method, path) &&
+                           !extended_connect));
+                if(!valid) {
+                    _err("Frame: incomplete or inconsistent HTTP/2 request pseudo-headers");
+                    mark_stream_error();
+                    return;
+                }
+            } else if(!trailer && side == side_t::RIGHT) {
+                const auto status = value(":status");
+                if(status.size() != 3 ||
+                   status.front() < '1' || status.front() > '5' ||
+                   !std::all_of(status.begin(), status.end(), [](unsigned char c) {
+                       return c >= '0' && c <= '9';
+                   })) {
+                    _err("Frame: invalid HTTP/2 response status");
+                    mark_stream_error();
+                    return;
+                }
+                const unsigned status_code =
+                    static_cast<unsigned>(status[0] - '0') * 100U +
+                    static_cast<unsigned>(status[1] - '0') * 10U +
+                    static_cast<unsigned>(status[2] - '0');
+                // HTTP/2 has no protocol switch on an established stream;
+                // RFC 7540 section 8.1.1 explicitly forbids status 101.
+                if(status_code == 101U) {
+                    _err("Frame: switching protocols is forbidden in HTTP/2");
+                    mark_stream_error();
+                    return;
+                }
+                const auto request_method = stream_it == connection->streams.end()
+                    ? std::optional<std::string>{}
+                    : stream_it->second.request_header(":method");
+                if(declared_content_length &&
+                   ((status_code >= 100U && status_code < 200U) ||
+                    status_code == 204U ||
+                    (status_code == 205U && *declared_content_length != 0U) ||
+                    (request_method && *request_method == "CONNECT" &&
+                     status_code >= 200U && status_code < 300U))) {
+                    _err("Frame: content-length is forbidden for this HTTP/2 response");
+                    mark_stream_error();
+                    return;
+                }
+                if(status.front() == '1' && (flags & 0x01U) != 0) {
+                    _err("Frame: informational HTTP/2 response ended stream");
+                    mark_stream_error();
+                    return;
+                }
+            }
+            if(side == side_t::RIGHT &&
+               (stream_it == connection->streams.end() ||
+                stream_it->second.request_headers_.empty())) {
+                if(known_closed_stream) {
+                    _err("Frame: response HEADERS on a closed HTTP/2 stream");
+                    return;
+                }
+                _err("Frame: response HEADERS on an idle HTTP/2 stream");
+                connection->connection_invalid = true;
+                return;
+            }
+            if(side == side_t::LEFT && stream_it == connection->streams.end() &&
+               connection->streams.size() >= max_tracked_streams) {
+                _err("Frame: HTTP/2 semantic stream limit reached");
+                // HPACK has already advanced, but there is no room to retain
+                // the request state. Continuing would classify later DATA as
+                // a harmless closed-stream race and leave a valid live stream
+                // uninspected.
+                connection->connection_invalid = true;
+                return;
+            }
+            if(side == side_t::RIGHT && !trailer) {
+                auto found = connection->streams.find(stream_id);
+                if(found != connection->streams.end()) {
+                    const auto status = value(":status");
+                    const unsigned status_code =
+                        static_cast<unsigned>(status[0] - '0') * 100U +
+                        static_cast<unsigned>(status[1] - '0') * 10U +
+                        static_cast<unsigned>(status[2] - '0');
+                    const auto request_method = found->second.request_header(":method");
+                    const bool informational = status_code < 200U;
+                    const bool connect_tunnel = request_method &&
+                        *request_method == "CONNECT" && status_code < 300U;
+                    // Informational fields describe only that interim
+                    // response.  A final response starts a fresh field
+                    // section; retaining absent fields here can otherwise
+                    // leak e.g. content-type/content-encoding into DATA
+                    // inspection for the final response.
+                    if(!informational && prior_response_was_informational) {
+                        found->second.response_headers_.clear();
+                        found->second.content_encoding_ =
+                            Http2Stream::content_type_t::PLAIN;
+                    }
+                    found->second.response_final_headers_ = !informational;
+                    found->second.response_body_forbidden_ = informational ||
+                        (request_method && *request_method == "HEAD") ||
+                        status_code == 204U || status_code == 205U ||
+                        status_code == 304U;
+                    if(!informational) {
+                        found->second.response_body_bytes_ = 0;
+                        found->second.response_content_length_ = connect_tunnel ||
+                            found->second.response_body_forbidden_
+                            ? std::optional<std::uint64_t>{}
+                            : declared_content_length;
+                        if((flags & 0x01U) != 0 &&
+                           found->second.response_content_length_.value_or(0) != 0) {
+                            _err("Frame: response ended before declared HTTP/2 content-length");
+                            found->second.response_invalid_ = true;
+                            return;
+                        }
+                    }
+                }
+            }
+
+            std::string request_method;
+            std::string request_proto;
+            std::string request_host;
+            std::string request_path;
+            std::string request_referer;
+            std::string request_content_type;
+            std::string request_accept;
+            if(side == side_t::LEFT && !trailer && my_app_data) {
+                request_method = value(":method");
+                auto const scheme = value(":scheme");
+                request_proto = scheme.empty()
+                    ? std::string{} : std::string(scheme) + "://";
+                auto authority = value(":authority");
+                if(authority.empty()) authority = value("host");
+                request_host = authority;
+                request_path = value(":path");
+                request_referer = value("referer");
+                request_content_type = value("content-type");
+                request_accept = value("accept");
+            }
 
             std::optional<sx::ja4::HTTP> ja4h;
             if(ctx.options.http.ja4h) {
@@ -1038,6 +2122,23 @@ namespace sx::engine::http {
                 ja4h->version = "20";
             }
 
+            // HTTP/2 can carry several complete requests in one transport
+            // buffer.  The generic engine advances application history only
+            // between flow blocks, so preserve an already published request
+            // here before another stream replaces the connection-wide view.
+            if(side == side_t::LEFT && !trailer && my_app_data &&
+               my_app_data->populated()) {
+                my_app_data->next();
+            }
+
+            if(side == side_t::LEFT && !trailer &&
+               connection->streams.find(stream_id) == connection->streams.end()) {
+                auto& stream = connection->streams[stream_id];
+                stream.request_flow_window_ =
+                    connection->client_initial_stream_window;
+                stream.response_flow_window_ =
+                    connection->server_initial_stream_window;
+            }
 
             for (auto& [ hdr, vlist ] : decoder->headers()) {
                 for(auto const& hdr_elem: vlist) {
@@ -1051,7 +2152,32 @@ namespace sx::engine::http {
                     }
                 }
             }
-            if(ja4h.has_value()) {
+            if(side == side_t::LEFT && !trailer) {
+                auto found = connection->streams.find(stream_id);
+                if(found != connection->streams.end()) {
+                    found->second.request_content_length_ = declared_content_length;
+                    if((flags & 0x01U) != 0 && declared_content_length.value_or(0) != 0) {
+                        _err("Frame: request ended before declared HTTP/2 content-length");
+                        found->second.request_invalid_ = true;
+                        return;
+                    }
+                }
+            }
+            if(side == side_t::LEFT && !trailer && my_app_data) {
+                // Reconstruct the request from this header block rather than
+                // from persistent cross-request properties.  In particular,
+                // :authority is optional when Host is present, and neither
+                // identity nor Referer may bleed over from another stream.
+                my_app_data->http_data.method = std::move(request_method);
+                my_app_data->http_data.proto = std::move(request_proto);
+                my_app_data->http_data.host = std::move(request_host);
+                my_app_data->http_data.uri = std::move(request_path);
+                my_app_data->http_data.referer = std::move(request_referer);
+                my_app_data->http_data.content_type = std::move(request_content_type);
+                my_app_data->http_data.accept = std::move(request_accept);
+                my_app_data->mark_populated();
+            }
+            if(ja4h.has_value() && my_app_data) {
                 auto meth = my_app_data->http_data.method;
                 if(meth.size() >= 2)
                     ja4h->cmd = sx::ja4::util::to_lower(meth).substr(0,2);
@@ -1060,16 +2186,135 @@ namespace sx::engine::http {
             }
 
             detect_app(ctx, side, my_app_data, stream_id, flags, data);
-            if(side == side_t::LEFT) {
+            if(side == side_t::RIGHT && trailer && (flags & 0x01U) != 0) {
+                auto found = connection->streams.find(stream_id);
+                if(found != connection->streams.end() &&
+                   !finalize_doh_response(ctx, found->second)) {
+                    return;
+                }
+            }
+            if(side == side_t::LEFT && !trailer) {
                 connection->latest_request_stream_id = stream_id;
                 if(ctx.origin) {
                     ctx.origin->replacement_type(MitmHostCX::REPLACETYPE_HTTP2);
                 }
             }
-            if(ctx.origin && ctx.origin->opt_kb_enabled) {
+            if(ctx.origin && ctx.origin->opt_kb_enabled && my_app_data) {
                 fill_kb(ctx, side, my_app_data, stream_id, flags, data);
             }
+            if((flags & 0x01U) != 0) {
+                auto found = connection->streams.find(stream_id);
+                if(found != connection->streams.end()) {
+                    if(side == side_t::LEFT)
+                        found->second.request_ended_ = true;
+                    else
+                        found->second.response_ended_ = true;
+                    if(found->second.request_ended_ && found->second.response_ended_) {
+                        connection->streams.erase(found);
+                        if(connection->latest_request_stream_id == stream_id)
+                            connection->latest_request_stream_id = -1;
+                    }
+                }
+            }
 #endif
+        }
+
+        bool synchronize_headers_impl(EngineCtx& ctx, side_t side,
+                                      buffer const& data,
+                                      bool validate_push_promise) {
+#ifdef USE_HPACK
+            auto const& log = log::http2_headers;
+            if(data.empty() || data.size() > max_pending_header_block_size)
+                return false;
+            auto* connection = std::any_cast<Http2Connection>(&ctx.state_data);
+            if(!connection) {
+                ctx.state_data = std::make_any<Http2Connection>();
+                connection = std::any_cast<Http2Connection>(&ctx.state_data);
+            }
+            auto& decoder = side == side_t::LEFT
+                ? *connection->request_decoder : *connection->response_decoder;
+            std::vector<uint8_t> encoded(
+                static_cast<uint8_t const*>(data.data()),
+                static_cast<uint8_t const*>(data.data()) + data.size());
+            try {
+                if(!decoder.decode(encoded)) {
+                    _err("Frame: hpack synchronization decode error");
+                    if(decoder.failure() != HPACK::decoder_t::failure_t::header_semantics)
+                        connection->connection_invalid = true;
+                    return false;
+                }
+            } catch(std::exception const& error) {
+                _err("Frame: hpack synchronization exception: %s", error.what());
+                connection->connection_invalid = true;
+                return false;
+            }
+
+            if(validate_push_promise) {
+                const auto& headers = decoder.headers();
+                auto const find_header = [&](std::string_view name) {
+                    return headers.find(name);
+                };
+                auto const value = [&](std::string_view name) -> std::string_view {
+                    auto const it = find_header(name);
+                    return it == headers.end() || it->second.empty()
+                        ? std::string_view{} : std::string_view(it->second.back());
+                };
+
+                // PUSH_PROMISE describes a future request. Only request
+                // pseudo-headers are meaningful in its header block.
+                for(auto const& [name, values]: headers) {
+                    (void)values;
+                    if(!name.empty() && name.front() == ':' &&
+                       name != ":method" && name != ":scheme" &&
+                       name != ":authority" && name != ":path") {
+                        return false;
+                    }
+                }
+
+                const auto method = value(":method");
+                const auto scheme = value(":scheme");
+                const auto authority = value(":authority");
+                const auto path = value(":path");
+                const auto host = value("host");
+
+                const auto host_it = find_header("host");
+                const bool has_single_host = host_it == headers.end() ||
+                    host_it->second.size() == 1;
+                const bool host_matches_authority = host.empty() ||
+                    ascii_equal_ci(host, authority);
+                const bool valid_authority = !authority.empty() &&
+                    sx::inspect::http_detail::is_unambiguous_authority(authority) &&
+                    has_single_host && host_matches_authority;
+
+                // Extended CONNECT is negotiated on a live request stream;
+                // it is not a valid server-push request.
+                const auto protocol_it = find_header(":protocol");
+                const bool has_protocol = protocol_it != headers.end() &&
+                    !protocol_it->second.empty();
+                const bool valid = is_http_token(method) &&
+                    is_uri_scheme(scheme) &&
+                    sx::inspect::http_detail::is_valid_request_path(method, path) &&
+                    valid_authority && !has_protocol;
+                if(!valid) {
+                    _err("invalid PUSH_PROMISE semantics method='%.*s' scheme='%.*s' authority='%.*s' path='%.*s'",
+                         static_cast<int>(method.size()), method.data(),
+                         static_cast<int>(scheme.size()), scheme.data(),
+                         static_cast<int>(authority.size()), authority.data(),
+                         static_cast<int>(path.size()), path.data());
+                }
+                return valid;
+            }
+            return true;
+#else
+            (void)ctx; (void)side; (void)data;
+            (void)validate_push_promise;
+            return false;
+#endif
+        }
+
+        void synchronize_headers(EngineCtx& ctx, side_t side,
+                                 buffer const& data) {
+            (void)synchronize_headers_impl(ctx, side, data, false);
         }
 
         void process_data(EngineCtx& ctx, side_t side, long stream_id, uint8_t flags, buffer const& data) {
@@ -1114,8 +2359,81 @@ namespace sx::engine::http {
                     return;
                 }
 
-                if(data.empty() && (flags & 0x01U) == 0) return;
+                if(side == side_t::LEFT) {
+                    if(data.size() > std::numeric_limits<std::uint64_t>::max() -
+                                         stream_state.request_body_bytes_) {
+                        _err("Frame: HTTP/2 request body length overflow");
+                        stream_state.request_invalid_ = true;
+                        return;
+                    }
+                    stream_state.request_body_bytes_ += data.size();
+                    if(stream_state.request_content_length_ &&
+                       (stream_state.request_body_bytes_ >
+                            *stream_state.request_content_length_ ||
+                        ((flags & 0x01U) != 0 &&
+                         stream_state.request_body_bytes_ !=
+                            *stream_state.request_content_length_))) {
+                        _err("Frame: HTTP/2 request body disagrees with content-length");
+                        stream_state.request_invalid_ = true;
+                        return;
+                    }
+                } else {
+                    if(!stream_state.response_final_headers_ ||
+                       (stream_state.response_body_forbidden_ && !data.empty())) {
+                        _err("Frame: HTTP/2 response DATA is not allowed here");
+                        stream_state.response_invalid_ = true;
+                        return;
+                    }
+                    if(data.size() > std::numeric_limits<std::uint64_t>::max() -
+                                         stream_state.response_body_bytes_) {
+                        _err("Frame: HTTP/2 response body length overflow");
+                        stream_state.response_invalid_ = true;
+                        return;
+                    }
+                    stream_state.response_body_bytes_ += data.size();
+                    if(stream_state.response_content_length_ &&
+                       (stream_state.response_body_bytes_ >
+                            *stream_state.response_content_length_ ||
+                        ((flags & 0x01U) != 0 &&
+                         stream_state.response_body_bytes_ !=
+                            *stream_state.response_content_length_))) {
+                        _err("Frame: HTTP/2 response body disagrees with content-length");
+                        stream_state.response_invalid_ = true;
+                        return;
+                    }
+                }
 
+                if(side == side_t::RIGHT &&
+                   stream_state.sub_app_ == Http2Stream::sub_app_t::DNS) {
+                    constexpr std::size_t maximum_dns_wire_size = 65535;
+                    if(stream_state.doh_response_finished_ ||
+                       data.size() > maximum_dns_wire_size -
+                           stream_state.doh_response_body_.size()) {
+                        _err("DNS response: invalid or oversized HTTP/2 body");
+                        stream_state.response_invalid_ = true;
+                        return;
+                    }
+                    stream_state.doh_response_body_.append(data);
+                    if(ctx.origin)
+                        ctx.origin->acknowledge_continuous_mode(5000);
+                    if((flags & 0x01U) != 0 &&
+                       !finalize_doh_response(ctx, stream_state)) {
+                        _err("DNS response: malformed HTTP/2 body");
+                    }
+                    return;
+                }
+
+                // Record the representation used by non-empty payloads, but
+                // still process an empty DATA frame carrying END_STREAM.
+                if(!data.empty()) {
+                    if(auto app = std::dynamic_pointer_cast<app_HttpRequest>(
+                           ctx.application_data)) {
+                        app->observe_l7_encoding(
+                            stream_state.content_encoding_ ==
+                                    Http2Stream::content_type_t::GZIP
+                                ? "gzip" : "");
+                    }
+                }
                 if(stream_state.content_encoding_ == Http2Stream::content_type_t::GZIP) {
 //                    auto& gz_instance = state_data->streams[stream_id].gzip;
 //
@@ -1275,6 +2593,25 @@ namespace sx::engine::http {
 
                 // end of preamble
 
+                auto& first_seen = side == side_t::LEFT
+                    ? connection->left_first_frame_seen
+                    : connection->right_first_frame_seen;
+                auto& first_is_settings = side == side_t::LEFT
+                    ? connection->left_first_frame_is_settings
+                    : connection->right_first_frame_is_settings;
+                if(!first_seen) {
+                    first_seen = true;
+                    first_is_settings = typ == 4 && (flg & 0x01U) == 0;
+                }
+                if(connection->client_preface_complete && !first_is_settings) {
+                    _err("Frame: first HTTP/2 frame is not non-ACK SETTINGS");
+                    connection->connection_invalid = true;
+                    return preamble_sz + frame_sz;
+                }
+
+                if(connection->connection_invalid)
+                    return preamble_sz + frame_sz;
+
                 // These frame-shape violations are connection errors. Do not
                 // let later bytes regain HTTP semantics after mandatory close.
                 const bool invalid_frame_shape =
@@ -1290,6 +2627,55 @@ namespace sx::engine::http {
                     connection->connection_invalid = true;
                     connection->request_headers_pending.clear();
                     connection->response_headers_pending.clear();
+                    return preamble_sz + frame_sz;
+                }
+
+                if(typ == 2) {
+                    const auto dependency = ntohl(
+                        frame.get_at<uint32_t>(preamble_sz)) & 0x7fffffffU;
+                    if(dependency == static_cast<uint32_t>(stream_id)) {
+                        _err("Frame: HTTP/2 PRIORITY stream depends on itself");
+                        connection->connection_invalid = true;
+                        connection->request_headers_pending.clear();
+                        connection->response_headers_pending.clear();
+                        return preamble_sz + frame_sz;
+                    }
+                }
+
+                if(typ == 3 && connection->streams.count(stream_id) == 0) {
+                    // Finish an already fragmented block only to preserve the
+                    // connection-wide HPACK context. Never publish its stream
+                    // semantics after observing RST_STREAM.
+                    if(connection->request_headers_pending.stream_id == stream_id)
+                        connection->request_headers_pending.decode_only = true;
+                    if(connection->response_headers_pending.stream_id == stream_id)
+                        connection->response_headers_pending.decode_only = true;
+
+                    const auto id = static_cast<uint32_t>(stream_id);
+                    if(connection->refused_client_streams.erase(id) != 0)
+                        return preamble_sz + frame_sz;
+
+                    if(connection->promised_streams.erase(id) != 0) {
+                        connection->active_promised_streams.erase(id);
+                        connection->promised_flow_windows.erase(id);
+                        return preamble_sz + frame_sz;
+                    }
+
+                    if(connection->refused_promised_streams.erase(id) != 0)
+                        return preamble_sz + frame_sz;
+
+                    const bool previously_opened = (id & 1U) != 0
+                        ? id <= connection->highest_client_stream_id
+                        : id <= connection->highest_promised_stream_id;
+                    if(!previously_opened) {
+                        _err("Frame: RST_STREAM on idle HTTP/2 stream %ld",
+                             stream_id);
+                        connection->connection_invalid = true;
+                        connection->request_headers_pending.clear();
+                        connection->response_headers_pending.clear();
+                    }
+
+                    // A late reset racing a closed stream is legal.
                     return preamble_sz + frame_sz;
                 }
 
@@ -1457,6 +2843,51 @@ namespace sx::engine::http {
                     }
                 }
 
+                if(typ == 7) {
+                    const auto last_stream_id = ntohl(
+                        frame.get_at<uint32_t>(preamble_sz)) & 0x7fffffffU;
+                    const auto peer_initiated_parity = side == side_t::RIGHT
+                        ? 1U : 0U;
+                    if(last_stream_id != 0 &&
+                       (last_stream_id & 1U) != peer_initiated_parity) {
+                        _err("Frame: HTTP/2 GOAWAY boundary belongs to sender");
+                        connection->connection_invalid = true;
+                        return preamble_sz + frame_sz;
+                    }
+                    auto& prior = side == side_t::RIGHT
+                        ? connection->server_goaway_last_stream_id
+                        : connection->client_goaway_last_stream_id;
+                    if(prior && last_stream_id > *prior) {
+                        _err("Frame: increasing HTTP/2 GOAWAY last-stream-id");
+                        connection->connection_invalid = true;
+                        return preamble_sz + frame_sz;
+                    }
+                    prior = last_stream_id;
+
+                    if(side == side_t::RIGHT) {
+                        auto& pending = connection->request_headers_pending;
+                        if(pending.active() &&
+                           static_cast<uint32_t>(pending.stream_id) > last_stream_id) {
+                            pending.decode_only = true;
+                            connection->refused_client_streams.insert(
+                                static_cast<uint32_t>(pending.stream_id));
+                        }
+                    } else {
+                        for(auto it = connection->promised_streams.begin();
+                            it != connection->promised_streams.end();) {
+                            const auto promised = *it;
+                            if(promised > last_stream_id) {
+                                connection->refused_promised_streams.insert(promised);
+                                connection->active_promised_streams.erase(promised);
+                                connection->promised_flow_windows.erase(promised);
+                                it = connection->promised_streams.erase(it);
+                            } else {
+                                ++it;
+                            }
+                        }
+                    }
+                }
+
                 if(typ == 8) {
                     const auto increment = ntohl(
                         frame.get_at<uint32_t>(preamble_sz)) & 0x7fffffffU;
@@ -1518,16 +2949,20 @@ namespace sx::engine::http {
                 std::size_t payload_size = frame_sz;
                 std::size_t padding_size = 0;
 
-                if ((typ == 0 || typ == 1) && (flg & 0x08)) {
-                    if (payload_size < 1)
+                if ((typ == 0 || typ == 1 || typ == 5) && (flg & 0x08)) {
+                    if (payload_size < 1) {
+                        connection->connection_invalid = true;
                         return preamble_sz + frame_sz;
+                    }
                     padding_size = frame.get_at<uint8_t>(payload_offset++);
                     --payload_size;
                 }
 
                 if(typ == 1 && (flg & 0x20)) {
-                    if (payload_size < 5)
+                    if (payload_size < 5) {
+                        connection->connection_invalid = true;
                         return preamble_sz + frame_sz;
+                    }
                     stream_dep = ntohl(frame.get_at<uint32_t>(payload_offset));
                     payload_offset += sizeof(uint32_t);
                     wgh = frame.get_at<uint8_t>(payload_offset++);
@@ -1555,6 +2990,11 @@ namespace sx::engine::http {
                     return preamble_sz + frame_sz;
                 }
                 payload_size -= padding_size;
+                if(typ == 5 && payload_size < sizeof(uint32_t)) {
+                    _err("Frame: padded PUSH_PROMISE has no promised stream id");
+                    connection->connection_invalid = true;
+                    return preamble_sz + frame_sz;
+                }
 
                 {
                     _inf("Frame: type = %s, flags = %d, size = %d, stream = %d, side = %c", frame_type_str(typ), flg, frame_sz,
@@ -1638,7 +3078,16 @@ namespace sx::engine::http {
                             buffer data;
                             if(payload_size != 0)
                                 data = frame.view(payload_offset, payload_size);
-                            if(!pushed_stream)
+                            const auto id = static_cast<uint32_t>(stream_id);
+                            if(side == side_t::LEFT &&
+                               connection->refused_client_streams.count(id) != 0) {
+                                if((flg & 0x01U) != 0)
+                                    connection->refused_client_streams.erase(id);
+                            } else if(side == side_t::RIGHT &&
+                                      connection->refused_promised_streams.count(id) != 0) {
+                                if((flg & 0x01U) != 0)
+                                    connection->refused_promised_streams.erase(id);
+                            } else if(!pushed_stream)
                                 process_data(ctx, side, stream_id, flg, data);
                             else if((flg & 0x01U) != 0) {
                                 connection->promised_streams.erase(
@@ -1648,8 +3097,10 @@ namespace sx::engine::http {
                                 connection->promised_flow_windows.erase(
                                     static_cast<uint32_t>(stream_id));
                             }
-                        } else if (typ == 1 || typ == 9) {
-                            auto data = frame.view(payload_offset, payload_size);
+                        } else if (typ == 1 || typ == 5 || typ == 9) {
+                            buffer data;
+                            if(payload_size != 0)
+                                data = frame.view(payload_offset, payload_size);
                             auto* connection = std::any_cast<Http2Connection>(&ctx.state_data);
                             if (!connection) {
                                 ctx.state_data = std::make_any<Http2Connection>();
@@ -1660,17 +3111,156 @@ namespace sx::engine::http {
                                             : connection->response_headers_pending;
 
                             if (typ == 1) {
+                                const auto id = static_cast<uint32_t>(stream_id);
+
+                                bool pushed_response = side == side_t::RIGHT &&
+                                    connection->promised_streams.count(id) != 0;
+                                bool refused_pushed_response = side == side_t::RIGHT &&
+                                    connection->refused_promised_streams.count(id) != 0;
+
+                                // A promised stream becomes active on its first
+                                // response HEADERS.  The client-advertised limit
+                                // applies to active pushes, not all promises seen.
+                                const bool starts_pushed_response = pushed_response &&
+                                    connection->active_promised_streams.count(id) == 0;
+                                if(starts_pushed_response) {
+                                    const bool push_limit_reached =
+                                        connection->active_promised_streams.size() >=
+                                        connection->max_server_streams;
+                                    if(push_limit_reached) {
+                                        connection->promised_streams.erase(id);
+                                        connection->refused_promised_streams.insert(id);
+                                        pushed_response = false;
+                                        refused_pushed_response = true;
+                                    } else {
+                                        connection->active_promised_streams.insert(id);
+                                        connection->promised_flow_windows.emplace(
+                                            id, connection->server_initial_stream_window);
+                                    }
+                                }
+
+                                bool refused_request = side == side_t::LEFT &&
+                                    connection->refused_client_streams.count(id) != 0;
+                                const bool starts_client_request = side == side_t::LEFT &&
+                                    connection->streams.count(stream_id) == 0;
+                                if(starts_client_request && !refused_request) {
+                                    // A client must open streams in strictly increasing
+                                    // order; a closed stream id cannot be reused.
+                                    if(id <= connection->highest_client_stream_id) {
+                                        _err("non-increasing HTTP/2 client stream id");
+                                        connection->connection_invalid = true;
+                                        return preamble_sz + frame_sz;
+                                    }
+
+                                    connection->highest_client_stream_id = id;
+                                    const bool request_limit_reached =
+                                        connection->streams.size() >=
+                                        connection->max_client_streams;
+                                    const bool request_after_goaway =
+                                        connection->server_goaway_last_stream_id &&
+                                        id > *connection->server_goaway_last_stream_id;
+
+                                    // Keep consuming the rejected stream's HPACK block so
+                                    // the connection-wide decoder stays synchronized.
+                                    if(request_limit_reached || request_after_goaway) {
+                                        if(connection->refused_client_streams.size() >=
+                                           max_tracked_streams) {
+                                            connection->connection_invalid = true;
+                                            return preamble_sz + frame_sz;
+                                        }
+                                        connection->refused_client_streams.insert(id);
+                                        refused_request = true;
+                                    }
+                                }
                                 if (flg & flag_end_headers) {
-                                    process_headers(ctx, side, stream_id, flg, data);
+                                    if(pushed_response || refused_pushed_response) {
+                                        synchronize_headers(ctx, side, data);
+                                        if((flg & 0x01U) != 0) {
+                                            const auto id = static_cast<uint32_t>(stream_id);
+                                            connection->promised_streams.erase(id);
+                                            connection->active_promised_streams.erase(id);
+                                            connection->promised_flow_windows.erase(id);
+                                            connection->refused_promised_streams.erase(id);
+                                        }
+                                    } else if(refused_request) {
+                                        synchronize_headers(ctx, side, data);
+                                        if((flg & 0x01U) != 0)
+                                            connection->refused_client_streams.erase(
+                                                static_cast<uint32_t>(stream_id));
+                                    } else {
+                                        process_headers(ctx, side, stream_id, flg, data);
+                                    }
                                 } else {
                                     pending.stream_id = stream_id;
                                     pending.initial_flags = flg;
+                                    pending.decode_only = pushed_response ||
+                                        refused_pushed_response || refused_request;
                                     pending.bytes.clear();
                                     if (data.size() > max_pending_header_block_size) {
                                         _err("initial HTTP/2 header fragment exceeds inspection limit");
                                         pending.clear();
                                         connection->connection_invalid = true;
                                     } else if (!data.empty()) {
+                                        auto* begin = static_cast<unsigned char*>(data.data());
+                                        pending.bytes.assign(begin, begin + data.size());
+                                    }
+                                }
+                            } else if(typ == 5) {
+                                const auto associated = connection->streams.find(stream_id);
+                                const bool valid_push = side == side_t::RIGHT &&
+                                    connection->server_push_enabled && stream_id != 0 &&
+                                    payload_size >= 4 &&
+                                    associated != connection->streams.end() &&
+                                    !associated->second.response_ended_;
+                                if(!valid_push) {
+                                    _err("invalid HTTP/2 PUSH_PROMISE");
+                                    connection->connection_invalid = true;
+                                    return preamble_sz + frame_sz;
+                                }
+                                const auto promised_stream = ntohl(
+                                    frame.get_at<uint32_t>(payload_offset)) & 0x7fffffffU;
+                                if(promised_stream == 0 || (promised_stream & 1U) != 0 ||
+                                   promised_stream <= connection->highest_promised_stream_id) {
+                                    _err("invalid HTTP/2 promised stream id");
+                                    connection->connection_invalid = true;
+                                    return preamble_sz + frame_sz;
+                                }
+                                if(connection->promised_streams.size() +
+                                       connection->refused_promised_streams.size() >=
+                                   max_tracked_streams) {
+                                    connection->connection_invalid = true;
+                                    return preamble_sz + frame_sz;
+                                }
+                                connection->highest_promised_stream_id = promised_stream;
+                                const bool exceeds_goaway =
+                                    connection->client_goaway_last_stream_id &&
+                                    promised_stream > *connection->client_goaway_last_stream_id;
+                                if(exceeds_goaway)
+                                    connection->refused_promised_streams.insert(promised_stream);
+                                else
+                                    connection->promised_streams.insert(promised_stream);
+                                payload_offset += sizeof(uint32_t);
+                                payload_size -= sizeof(uint32_t);
+                                data.clear();
+                                if(payload_size != 0)
+                                    data = frame.view(payload_offset, payload_size);
+                                if(flg & flag_end_headers) {
+                                    if(data.empty() || !synchronize_headers_impl(
+                                           ctx, side, data, true)) {
+                                        connection->promised_streams.erase(promised_stream);
+                                        connection->refused_promised_streams.insert(promised_stream);
+                                        associated->second.response_invalid_ = true;
+                                    }
+                                } else {
+                                    pending.stream_id = stream_id;
+                                    pending.promised_stream_id = promised_stream;
+                                    pending.initial_flags = 0;
+                                    pending.decode_only = true;
+                                    pending.bytes.clear();
+                                    if(data.size() > max_pending_header_block_size) {
+                                        pending.clear();
+                                        connection->connection_invalid = true;
+                                    } else if(!data.empty()) {
                                         auto* begin = static_cast<unsigned char*>(data.data());
                                         pending.bytes.assign(begin, begin + data.size());
                                     }
@@ -1696,9 +3286,33 @@ namespace sx::engine::http {
                                     complete_headers.assign(pending.bytes.data(), pending.bytes.size());
                                     const auto complete_flags = static_cast<uint8_t>(
                                         pending.initial_flags | flag_end_headers);
+                                    const bool decode_only = pending.decode_only;
+                                    const auto promised_stream_id = pending.promised_stream_id;
+                                    const bool retire_refused = decode_only &&
+                                        side == side_t::LEFT &&
+                                        (complete_flags & 0x01U) != 0 &&
+                                        connection->refused_client_streams.count(
+                                            static_cast<uint32_t>(stream_id)) != 0;
                                     pending.clear();
-                                    process_headers(ctx, side, stream_id,
-                                                    complete_flags, complete_headers);
+                                    if(decode_only) {
+                                        if(promised_stream_id != 0) {
+                                            if(!synchronize_headers_impl(ctx, side,
+                                                   complete_headers, true)) {
+                                                connection->promised_streams.erase(
+                                                    promised_stream_id);
+                                                connection->refused_promised_streams.insert(
+                                                    promised_stream_id);
+                                            }
+                                        } else {
+                                            synchronize_headers(ctx, side, complete_headers);
+                                        }
+                                    } else {
+                                        process_headers(ctx, side, stream_id,
+                                                        complete_flags, complete_headers);
+                                    }
+                                    if(retire_refused)
+                                        connection->refused_client_streams.erase(
+                                            static_cast<uint32_t>(stream_id));
                                 }
                             }
                         } else if(typ == 6) {
@@ -1707,6 +3321,20 @@ namespace sx::engine::http {
                         } else {
                             auto data = frame.view(payload_offset, payload_size);
                             process_other(ctx, side, stream_id, flg, data);
+                        }
+
+                        if(typ == 3 && stream_id != 0 && frame_sz == 4) {
+                            if(connection->request_headers_pending.stream_id ==
+                               stream_id) {
+                                connection->request_headers_pending.decode_only = true;
+                            }
+                            if(connection->response_headers_pending.stream_id ==
+                               stream_id) {
+                                connection->response_headers_pending.decode_only = true;
+                            }
+                            connection->streams.erase(stream_id);
+                            if(connection->latest_request_stream_id == stream_id)
+                                connection->latest_request_stream_id = -1;
                         }
                     }
                     else {
@@ -1721,6 +3349,93 @@ namespace sx::engine::http {
 
             return 0;
         };
+
+        void process_directional_bytes(EngineCtx& ctx, side_t side, buffer& input) {
+            auto* connection = std::any_cast<Http2Connection>(&ctx.state_data);
+            if(!connection) {
+                ctx.state_data = std::make_any<Http2Connection>();
+                connection = std::any_cast<Http2Connection>(&ctx.state_data);
+            }
+            auto& pending = side == side_t::LEFT
+                ? connection->left_frame_pending
+                : connection->right_frame_pending;
+            if(connection->connection_invalid) {
+                pending.clear();
+                return;
+            }
+
+            buffer combined;
+            buffer* available = &input;
+            if(!pending.empty()) {
+                if(input.size() > std::numeric_limits<std::size_t>::max() -
+                                      pending.size()) {
+                    connection->connection_invalid = true;
+                    pending.clear();
+                    return;
+                }
+                combined.assign(pending.data(), pending.size());
+                combined.append(input);
+                pending.clear();
+                available = &combined;
+            }
+
+            std::size_t offset = 0;
+            while(offset < available->size()) {
+                auto remaining = available->view(offset);
+                const auto consumed = process_frame(ctx, side, remaining);
+                if(consumed == 0) {
+                    auto* begin = static_cast<unsigned char*>(remaining.data());
+                    pending.assign(begin, begin + remaining.size());
+                    return;
+                }
+                offset += consumed;
+                if(connection->connection_invalid) {
+                    pending.clear();
+                    return;
+                }
+            }
+        }
+
+        void process_client_prefaced_bytes(EngineCtx& ctx, buffer& input) {
+            auto* connection = std::any_cast<Http2Connection>(&ctx.state_data);
+            if(!connection) {
+                ctx.state_data = std::make_any<Http2Connection>();
+                connection = std::any_cast<Http2Connection>(&ctx.state_data);
+            }
+            if(ctx.status != EngineCtx::status_t::START) {
+                process_directional_bytes(ctx, side_t::LEFT, input);
+                return;
+            }
+
+            auto& pending = connection->client_preface_pending;
+            const auto needed = txt::magic_sz - pending.size();
+            const auto taken = std::min(input.size(), needed);
+            auto* begin = static_cast<unsigned char*>(input.data());
+            pending.insert(pending.end(), begin, begin + taken);
+
+            if(!std::equal(pending.begin(), pending.end(), txt::magic)) {
+                connection->connection_invalid = true;
+                pending.clear();
+                return;
+            }
+            if(pending.size() < txt::magic_sz) return;
+
+            pending.clear();
+            ctx.status = EngineCtx::status_t::MAGIC;
+            connection->client_preface_complete = true;
+            if((connection->left_first_frame_seen &&
+                !connection->left_first_frame_is_settings) ||
+               (connection->right_first_frame_seen &&
+                !connection->right_first_frame_is_settings)) {
+                connection->connection_invalid = true;
+                return;
+            }
+
+            if(input.size() > taken) {
+                auto mutable_frames = input.view(taken);
+                process_directional_bytes(ctx, side_t::LEFT, mutable_frames);
+            }
+        }
 
 
         size_t load_prev_state(EngineCtx& ctx, size_t abs_index) {
@@ -1829,68 +3544,23 @@ namespace sx::engine::http {
                 return;
             }
 
-            std::size_t if_magic = 0L;
             auto starting_buffer = h2_buffer->view(starting_index);
-
-            if(side == 'r') {
-                if (ctx.status == EngineCtx::status_t::START) {
-                    // eliminate finding magic later in the flow
-                    if (flow_pos < 5 and h2_buffer_sz >= txt::magic_sz) {
-                        if_magic = find_magic(starting_buffer);
-
-                        // save starting position + size of magic
-                        if (if_magic > 0) {
-                            save_state(ctx, abs_index, starting_index + if_magic);
-                            ctx.status = EngineCtx::status_t::MAGIC;
-
-                            auto const* state_data = std::any_cast<Http2Connection>(& ctx.state_data);
-                            if(not state_data)
-                                ctx.state_data = std::make_any<Http2Connection>();
-                        }
-
-                        if (if_magic + 4 > h2_buffer_sz) {
-                            _err("not enough data to read");
-                            return;
-                        }
-                    } else {
-                        _deb("too late for magic lookup");
-                        ctx.status = EngineCtx::status_t::MAGIC;
-                    }
+            try {
+                if(side == 'r' && ctx.status == EngineCtx::status_t::START) {
+                    process_client_prefaced_bytes(ctx, starting_buffer);
+                } else {
+                    process_directional_bytes(
+                        ctx, side == 'r' ? side_t::LEFT : side_t::RIGHT,
+                        starting_buffer);
                 }
             }
+            catch(std::out_of_range const& e) {
+                _err("incomplete frame: %s", e.what());
+                _war("data dump: \r\n%s",
+                     hex_dump(starting_buffer, 4, 'E', true).c_str());
+            }
 
-            buffer frame = starting_buffer.view(if_magic);
-            std::size_t cur_off = 0L;
-            std::size_t total = 0L;
-            do {
-                frame = frame.view(cur_off);
-
-                try {
-                    // convert side from signature read/write r/w meaning to left/right l/r
-                    cur_off = process_frame(ctx, side == 'r' ? side_t::LEFT : side_t::RIGHT , frame);
-                    if(cur_off == 0) {
-                        // frame not complete
-                        break;
-                    }
-                    total += cur_off;
-                }
-                catch(std::out_of_range const& e) {
-                    _err("incomplete frame: last read size = %d", cur_off);
-                    _err("incomplete frame: total read size = %d", total);
-                    _err("incomplete frame: %s", e.what());
-                    _war("data dump: \r\n%s", hex_dump(frame, 4, 'E', true).c_str());
-                    break;
-                }
-
-                if(cur_off > frame.size()) {
-                    _err("incomplete frame %d / %d", cur_off, frame.size());
-                    break;
-                }
-
-            } while(total < starting_buffer.size() - if_magic);
-
-
-            save_state(ctx, abs_index, starting_index + if_magic + total);
+            save_state(ctx, abs_index, h2_buffer_sz);
 
             if(flow_pos + 1 < ctx.origin->flow().flow_queue().size()) {
                 // move to next pos if we are not finished and missed more arrived blocks

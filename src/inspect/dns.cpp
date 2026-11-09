@@ -274,17 +274,38 @@ int DNSFactory::send_dns_request(std::string const& hostname, DNS_Record_Type t,
     _dum("DNS generated request: size %zub\n%s", req_sz, hex_dump(b).c_str());
 
     // create UDP socket
-    auto sock = raw::unique<int>(socle::socket(nameserver.family, SOCK_DGRAM, IPPROTO_UDP), raw::deleter::close);
+    auto sock = raw::unique<int>(
+        ::socket(nameserver.family, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP),
+        raw::deleter::close);
+
+    // The proxy event loop reserves descriptor zero as "not attached". A
+    // daemon started with closed stdin can still receive fd 0 from socket(),
+    // so move that valid socket to a representable descriptor before handoff.
+    if(sock.value == 0) {
+        const int promoted = static_cast<int>(sx::dns::io_detail::retry_on_eintr(
+            [&] { return ::fcntl(sock.value, F_DUPFD_CLOEXEC, 1); }));
+        if(promoted < 0) {
+            _err("resolve_dns_s: cannot promote descriptor zero: %s",
+                 string_error().c_str());
+            return -1;
+        }
+        ::close(sock.value);
+        sock.value = promoted;
+    }
 
 
     if(sock.value >= 0) {
 
-        if (0 != ::connect(sock.value, (sockaddr *) nameserver.as_ss(), sizeof(sockaddr_storage))) {
+        if (0 != sx::dns::io_detail::retry_on_eintr([&] {
+                return ::connect(sock.value, (sockaddr *) nameserver.as_ss(),
+                                 sizeof(sockaddr_storage));
+            })) {
             _err("resolve_dns_s: cannot connect: %s", string_error().c_str());
             return -2;
         }
 
-        if (::send(sock.value, b.data(), b.size(), 0) < 0) {
+        if (sx::dns::io_detail::retry_on_eintr(
+                [&] { return ::send(sock.value, b.data(), b.size(), 0); }) < 0) {
             _dia("%s", string_format("resolve_dns_s: cannot write remote socket: %d", sock.value).c_str());
             return -3;
         }
@@ -459,78 +480,26 @@ std::optional<size_t> DNS_Packet::load(const buffer *src) {
                 for (; mem_counter < src->size() && questions_togo > 0; ) {
                     _deb("DNS_Packet::load: question loop start: current memory pos: %d", mem_counter);
                     DNS_Question question_temp;
-                    unsigned int field_len = 0;
-
-                    for (unsigned int cur_mem = mem_counter; cur_mem < src->size() && questions_togo > 0;) {
-
-
-                        buffer tmp_b = src->view(cur_mem, src->size() - cur_mem);
-                        _dum("current buffer: %s", hex_dump(tmp_b).c_str());
-
-                        // load next field length
-                        field_len = src->get_at<uint8_t>(cur_mem);
-
-                        //
-                        if (cur_mem + field_len >= src->size()) {
-                            _dia("DNS_Packet::load: incomplete question data in the preamble, position %d, field_len %d "
-                                 "out of buffer bounds %d", cur_mem, field_len, src->size());
-                            failure = true;
-                            break;
-                        }
-
-                        _deb("DNS_Packet::load: question field_len=%d i=%d buffer_size=%d", field_len, cur_mem,
-                             src->size());
-
-                        // last part of the fqdn?
-                        if (field_len == 0) {
-
-                            if (cur_mem + 5 > src->size()) {
-                                _dia("DNS_Packet::load: incomplete question data in the preamble, index+5 = %d is out of "
-                                     "buffer bounds %d", cur_mem + 5, src->size());
-                                mem_counter = src->size();
-                                failure = true;
-                                break;
-                            }
-                            question_temp.rec_type = ntohs(src->get_at<unsigned short>(cur_mem + 1));
-                            _dum("DNS_Packet::load: read 'type' at index %d", cur_mem + 1);
-
-                            question_temp.rec_class = ntohs(src->get_at<unsigned short>(cur_mem + 1 + 2));
-                            _dum("DNS_Packet::load: read 'class' at index %d", cur_mem + 1 + 2);
-
-                            _deb("type=%d,class=%d", question_temp.rec_type, question_temp.rec_class);
-                            mem_counter += (1 + (2 * 2));
-                            _deb("DNS_Packet::load: s==0, mem counter changed to: %d (0x%x)", mem_counter, mem_counter);
-
-                            questions_list_.push_back(question_temp);
-                            questions_togo--;
-
-
-                        } else {
-                            if (field_len > src->size()) {
-                                _dia("DNS_Packet::load: incomplete question data in the preamble, "
-                                     "field_len %d is out of buffer bounds %d", field_len, src->size());
-                                mem_counter = src->size();
-                                failure = true;
-                                break;
-                            }
-                            if (cur_mem + 1 >= src->size()) {
-                                _dia("DNS_Packet::load: incomplete question data in the preamble, "
-                                     "cur_mem+1 = %d is out of buffer bounds %d", cur_mem + 1, src->size());
-                                mem_counter = src->size();
-                                failure = true;
-                                break;
-
-                            }
-
-                            if (!question_temp.rec_str.empty()) question_temp.rec_str += ".";
-
-                            std::string t((const char *) &src->data()[cur_mem + 1], field_len);
-
-                            cur_mem += (field_len + 1);
-                            mem_counter += (field_len + 1);
-                            question_temp.rec_str += t;
-                        }
+                    const auto qname_len = DNSFactory::get().skip_qname(
+                        src->data() + mem_counter, src->size() - mem_counter);
+                    const auto qname = decode_qname(
+                        src->data() + mem_counter, src->data(), src->size(), 128);
+                    if(qname_len == 0 || !qname.has_value()) {
+                        failure = true;
+                        break;
                     }
+
+                    const size_t fields = mem_counter + qname_len;
+                    if(fields + 4 > src->size()) {
+                        failure = true;
+                        break;
+                    }
+                    question_temp.rec_str = *qname;
+                    question_temp.rec_type = ntohs(src->get_at<unsigned short>(fields));
+                    question_temp.rec_class = ntohs(src->get_at<unsigned short>(fields + 2));
+                    mem_counter = fields + 4;
+                    questions_list_.push_back(question_temp);
+                    questions_togo--;
 
                     if (!failure) {
                         _dia("DNS_Packet::load: OK question[%d]: name: %s, type: %s, class: %d",

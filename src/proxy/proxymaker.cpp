@@ -41,7 +41,15 @@
 #include <proxy/mitmproxy.hpp>
 
 #include <proxy/proxymaker.hpp>
+#include <proxy/quic_observer.hpp>
 #include <proxy/proxymaker_utils.hpp>
+#include <proxy/connection_start.hpp>
+#include <proxy/connection_identity.hpp>
+#include <staticcontent.hpp>
+#include <service/http/webhooks.hpp>
+#include <proxy/filters/access_filter.hpp>
+#include <udpcom.hpp>
+
 
 #include <proxy/nbrhood.hpp>
 
@@ -142,8 +150,11 @@ namespace sx::proxymaker {
             }
         };
 
+        // CfgFactory prepares NetworkCtx ingress/egress metadata once for this
+        // selection; SOCKS and other vector callers use the same path.
         // apply policy and get result
         int policy_num = -1;
+        std::unique_lock config_lock(CfgFactory::lock(), std::defer_lock);
 
         if (implicit_allow) {
             // bypass ssl com to VIP
@@ -151,6 +162,10 @@ namespace sx::proxymaker {
             bypass_cx(proxy->first_right());
             policy_num = PolicyRule::POLICY_IMPLICIT_PASS;
         } else {
+            // Keep selection, profile application and routing bound to one
+            // configuration generation.  A reload must not reuse the numeric
+            // slot between authorization and routing.
+            config_lock.lock();
             policy_num = CfgFactory::get()->policy_apply(proxy->first_left(), proxy.get());
         }
 
@@ -178,6 +193,8 @@ namespace sx::proxymaker {
         if(proxy and not implicit_allow) {
             proxy->update_neighbors();
         }
+
+        if(config_lock.owns_lock()) config_lock.unlock();
 
         return true;
     }
@@ -327,38 +344,217 @@ namespace sx::proxymaker {
 
         // setup NAT
         if (not enforce_nat) {
-            try {
-                if (CfgFactory::get()->db_policy_list.at(proxy->matched_policy())->nat == PolicyRule::POLICY_NAT_NONE) {
-                    const auto parsed_port = parse_source_port(source_port);
-                    if(!parsed_port) return false;
-                    target_cx->com()->nonlocal_src_port() = *parsed_port;
-                    target_cx->com()->nonlocal_src_host() = source_host;
-                    target_cx->com()->nonlocal_src(true);
-                }
-            }
-            catch (std::invalid_argument const &e) {
-                _err("proxy_setup_snat (nonat)[%s]: policy #%d: error %s", proxy->to_string(iINF).c_str(),
-                     proxy->matched_policy(), e.what());
+            auto policy = CfgFactory::get()->policy_rule(proxy->matched_policy());
+            if(not policy) {
+                _err("proxy_setup_snat (nonat)[%s]: policy #%d disappeared",
+                     proxy->to_string(iINF).c_str(), proxy->matched_policy());
                 return false;
             }
-            catch (std::out_of_range const &e) {
-                _err("proxy_setup_snat (nonat)[%s]: policy #%d: error %s", proxy->to_string(iINF).c_str(),
-                     proxy->matched_policy(), e.what());
-                return false;
+            if(policy->nat == PolicyRule::POLICY_NAT_NONE) {
+                const auto parsed_port = parse_source_port(source_port);
+                if(!parsed_port) return false;
+                target_cx->com()->nonlocal_src_port() = *parsed_port;
+                target_cx->com()->nonlocal_src_host() = source_host;
+                target_cx->com()->nonlocal_src(true);
             }
-
         }
 
         return true;
     }
 
 
-    bool connect(MasterProxy* owner, std::unique_ptr<MitmProxy> &&new_proxy) {
+    namespace {
+
+        // The certificate probe and forwarding socket belong to one session.
+        // They share this decision, but never share worker-affine QUIC objects.
+        class QuicSessionSetup final : public SessionSetup {
+        public:
+            QuicSessionSetup(std::string const& source_host, std::string const& source_port) {
+                static std::atomic_uint64_t sequence {0};
+                id_ = "quic-" + sx::proxy::connection_id(StaticContent::boot_random, ++sequence);
+                details_["info"] = {
+                    {"phase", "setup"}, {"scope", "transport"},
+                    {"transport", "udp"}, {"protocol", "quic"},
+                    {"source", {{"host", source_host}, {"port", source_port}}},
+                    {"webhook_control", {{"version", 1}, {"mode", "regular"},
+                                         {"sequence", 0}, {"rewrite", false}}}
+                };
+            }
+
+            std::string connection_id() const override { return id_; }
+            sx::proxy::QuicObserver* quic_observer() override { return observer_.get(); }
+
+            std::optional<QuicTlsPolicy> tls_policy(
+                std::string const& host, std::string const& port) override {
+
+                // Reuse normal ordered UDP policy matching. These temporary
+                // contexts have no sockets and never perform transport I/O.
+                auto const& source = details_["info"]["source"];
+                auto const source_host = source["host"].get<std::string>();
+                auto const source_port = source["port"].get<std::string>();
+                baseHostCX left(new UDPCom, source_host.c_str(), source_port.c_str());
+                baseHostCX right(new UDPCom, host.c_str(), port.c_str());
+                left.com()->l3_proto(source_host.find(':') == std::string::npos ? AF_INET : AF_INET6);
+                right.com()->l3_proto(host.find(':') == std::string::npos ? AF_INET : AF_INET6);
+                std::vector<baseHostCX*> sources {&left};
+                std::vector<baseHostCX*> targets {&right};
+
+                // Copy values under one configuration generation. The normal
+                // connection-start webhook remains outside this operation.
+                std::scoped_lock lock(CfgFactory::lock());
+                auto config = CfgFactory::get();
+                const int index = config->policy_match(sources, targets);
+                auto rule = config->lookup_policy(index);
+                if(!rule || config->policy_action(index) != PolicyRule::POLICY_ACTION_PASS) {
+                    log::connect().war("QUIC TLS policy rejected target=%s:%s", host.c_str(), port.c_str());
+                    return std::nullopt;
+                }
+
+                QuicTlsPolicy result;
+                if(auto const& profile = rule->profile_tls) {
+                    result.use_pfs = profile->left_use_pfs && profile->right_use_pfs;
+                    result.alpn_block = profile->opt_alpn_block;
+                    result.disable_reuse = profile->left_disable_reuse;
+                }
+                return result;
+            }
+
+            ~QuicSessionSetup() override {
+                if (!notified_) return;
+
+                // Also retire setup when certificate verification fails before
+                // the listener can publish a normal forwarding session.
+                details_["info"].erase("phase");
+                sx::http::webhooks::send_action("connection-stop", id_, details_, control_);
+                sx::http::webhooks::send_sift_action("connection-stop", id_, details_);
+            }
+
+            bool start(std::string const& host, std::string const& port) override {
+                if (started_) {
+                    // Do not reuse a script's verdict for a different DNS result.
+                    return allowed_ && (!notified_ || (host == host_ && port == port_));
+                }
+
+                started_ = true;
+                host_ = host;
+                port_ = port;
+                details_["info"]["destination"] = {{"host", host}, {"port", port}};
+
+                // Keep the display label compatible with existing session filters.
+                // The envelope id, not this label, identifies the physical session.
+                auto endpoint_label = [](std::string const& address, std::string const& service) {
+                    const auto bracketed = address.find(':') == std::string::npos
+                        ? address : "[" + address + "]";
+                    return "quic_" + bracketed + ":" + service;
+                };
+                const auto& source = details_["info"]["source"];
+                details_["info"]["session"] = endpoint_label(
+                    source["host"].get<std::string>(), source["port"].get<std::string>())
+                    + "+" + endpoint_label(host, port);
+
+                const bool enabled = sx::http::webhooks::is_enabled();
+                notified_ = enabled || sx::http::webhooks::sift_enabled();
+                if (!notified_) {
+                    allowed_ = true;
+                    return true;
+                }
+
+                bool valid_reply = false;
+                bool denied = false;
+                if (enabled) {
+                    sx::http::webhooks::send_action_wait("connection-start", id_, details_,
+                        [&](sx::http::expected_reply reply) {
+                            if (!reply) return;
+
+                            auto result = sx::proxy::parse_setup_reply(
+                                reply->response.first, reply->response.second);
+                            control_->apply(result.body);
+                            const auto& control = result.body.value("control", nlohmann::json::object());
+                            if(result.action == sx::proxy::setup_action::accept &&
+                               control.value("quic_lifecycle", 0) == 1) {
+                                observer_ = std::make_unique<sx::proxy::QuicObserver>(
+                                    id_, control_->strict(), control.value("quic_start_server", 0) == 1,
+                                    control.value("quic_schema", 0) == 2);
+                            }
+                            valid_reply = result.action != sx::proxy::setup_action::invalid;
+                            denied = result.action == sx::proxy::setup_action::drop;
+                            if (result.action == sx::proxy::setup_action::not_interested
+                                && control_->strict()) valid_reply = false;
+                        });
+                }
+
+                if (enabled && !valid_reply) {
+                    log::connect().war("QUIC connection-start: invalid setup reply (%s)",
+                                       control_->strict() ? "fail-closed" : "fail-open");
+                }
+
+                sx::http::webhooks::send_sift_action("connection-start", id_, details_);
+                allowed_ = !denied && (!enabled || valid_reply || !control_->strict());
+                return allowed_;
+            }
+
+        private:
+            std::string id_;
+            std::string host_;
+            std::string port_;
+            nlohmann::json details_;
+            std::shared_ptr<sx::http::webhooks::webhook_control_t> control_ =
+                std::make_shared<sx::http::webhooks::webhook_control_t>();
+            std::unique_ptr<sx::proxy::QuicObserver> observer_;
+            bool started_ = false;
+            bool notified_ = false;
+            bool allowed_ = false;
+        };
+    }
+
+    std::shared_ptr<SessionSetup> make_quic_session_setup(
+        std::string const& source_host, std::string const& source_port) {
+        return std::make_shared<QuicSessionSetup>(source_host, source_port);
+    }
+
+    bool connection_start(MitmProxy& proxy) {
+        if (not proxy.webhook_session_start()) return false;
+
+        // Access authorization is still selected by policy. Run it here,
+        // outside the configuration lock and before opening the upstream.
+        for (auto const& [name, filter] : proxy.filters_) {
+            if (auto* access = dynamic_cast<AccessFilter*>(filter.get())) {
+                access->authorize();
+                if (proxy.state().dead()) return false;
+            }
+        }
+
+        return true;
+    }
+
+    int connect(MitmProxy& proxy, MitmHostCX& target) {
+        if (not connection_start(proxy)) return -1;
+
+        if(not proxy.hook_server_connect(&target)) return -1;
+
+        const int descriptor = target.connect();
+        if(!target.com()->descriptor_valid(descriptor)) {
+            proxy.hook_server_end(&target, "Upstream connect failed");
+        }
+        return descriptor;
+    }
+
+    bool connect(MasterProxy* owner, std::unique_ptr<MitmProxy> new_proxy) {
         auto const& log = log::connect();
         if(new_proxy)
             _deb("proxymaker::connect[%s]: connecting", new_proxy->to_string(iINF).c_str());
-        const bool connected = connect_owned_proxy(owner, std::move(new_proxy));
-        if(!connected) _deb("proxymaker::connect: cannot connect proxy");
+        if(!new_proxy) return false;
+
+        const bool admitted = owner && valid_proxy_endpoints(new_proxy.get()) &&
+            connection_start(*new_proxy) &&
+            new_proxy->hook_server_connect(new_proxy->first_right());
+        const bool connected = admitted && connect_owned_proxy(owner, new_proxy);
+
+        if(!connected) {
+            _deb("proxymaker::connect: cannot connect proxy");
+            new_proxy->shutdown();
+            new_proxy->finalize();
+        }
         return connected;
     }
 

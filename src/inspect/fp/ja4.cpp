@@ -413,7 +413,7 @@ namespace sx::ja4 {
         size_t offset = 4;
         if (offset + 2 > data.size()) return 1;
 
-        // Parsování verze protokolu TLS
+        // Parse the TLS protocol version.
         version = (data[offset] << 8) | data[offset + 1];
 
         offset += 2;

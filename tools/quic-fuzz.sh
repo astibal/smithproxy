@@ -67,21 +67,21 @@ run_target() {
 
 run_wire() {
     run_target wire quic_wire_fuzzer \
-        "${ROOT_DIR}/src/proxy/quic/fuzz/quic.dict" 4096 \
-        "${ROOT_DIR}/src/proxy/quic/fuzz/corpus/short-header.seed" \
-        "${ROOT_DIR}/src/proxy/quic/fuzz/corpus/long-header.seed"
+        "${ROOT_DIR}/tests/fuzz/proxy/quic/quic.dict" 4096 \
+        "${ROOT_DIR}/tests/fuzz/proxy/quic/corpus/short-header.seed" \
+        "${ROOT_DIR}/tests/fuzz/proxy/quic/corpus/long-header.seed"
 }
 
 run_multiflow() {
     run_target multiflow multiflow_fuzzer \
-        "${ROOT_DIR}/src/proxy/multiflow/fuzz/multiflow.dict" 4096 \
-        "${ROOT_DIR}/src/proxy/multiflow/fuzz/corpus/lifecycle.seed"
+        "${ROOT_DIR}/tests/fuzz/proxy/multiflow/multiflow.dict" 4096 \
+        "${ROOT_DIR}/tests/fuzz/proxy/multiflow/corpus/lifecycle.seed"
 }
 
 run_lifecycle() {
     run_target lifecycle quic_lifecycle_fuzzer \
-        "${ROOT_DIR}/src/proxy/multiflow/fuzz/multiflow.dict" 1024 \
-        "${ROOT_DIR}/src/proxy/multiflow/fuzz/corpus/lifecycle.seed"
+        "${ROOT_DIR}/tests/fuzz/proxy/multiflow/multiflow.dict" 1024 \
+        "${ROOT_DIR}/tests/fuzz/proxy/multiflow/corpus/lifecycle.seed"
 }
 
 cd "${ROOT_DIR}"

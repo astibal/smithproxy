@@ -1,0 +1,25 @@
+preamble
+name "Smithproxy client abort after upload"
+description "A client RST after a complete upload must not wedge the proxy"
+owner "smithproxy"
+timeout 10s
+begin using tcp
+server at "netns:sxr-origin"
+client at "netns:sxr-client"
+server listen "198.18.20.2:18082"
+client connect "198.18.20.2:18082"
+server drain 256KiB stamp-every 4KiB
+client transmit 256KiB stamp-every 4KiB chunk 257B
+client await-tx
+server await-rx
+client abort
+server sleep 100ms
+server close
+end
+outcome pass
+when server.rx.bytes == 256KiB
+and server.rx.integrity == valid
+describe "The complete upload survived and the client reset did not wedge the proxy."
+outcome fail "The upload was damaged or reset handling failed."
+outcome timeout "Smithproxy stalled while handling the client reset."
+end

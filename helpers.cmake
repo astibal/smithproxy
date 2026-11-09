@@ -24,6 +24,45 @@ function(install_if_not_exists src dest)
   ")
 endfunction(install_if_not_exists)
 
+# Preserve deployed private keys during upgrades while enforcing their mode.
+function(install_secret_if_not_exists src dest)
+    if(NOT IS_ABSOLUTE "${src}")
+        set(src "${CMAKE_CURRENT_SOURCE_DIR}/${src}")
+    endif()
+    get_filename_component(src_name "${src}" NAME)
+    if(NOT IS_ABSOLUTE "${dest}")
+        set(dest "${CMAKE_INSTALL_PREFIX}/${dest}")
+    endif()
+    find_program(chmod_program chmod)
+    if(NOT chmod_program)
+        message(FATAL_ERROR "chmod is required to install private keys")
+    endif()
+
+    install(CODE "
+        if(IS_SYMLINK \"\$ENV{DESTDIR}${dest}/${src_name}\")
+            message(FATAL_ERROR
+                    \"Refusing private-key symlink: \$ENV{DESTDIR}${dest}/${src_name}\")
+        elseif(IS_DIRECTORY \"\$ENV{DESTDIR}${dest}/${src_name}\")
+            message(FATAL_ERROR
+                    \"Private-key destination is a directory: \$ENV{DESTDIR}${dest}/${src_name}\")
+        elseif(NOT EXISTS \"\$ENV{DESTDIR}${dest}/${src_name}\")
+            message(STATUS \"Installing: \$ENV{DESTDIR}${dest}/${src_name}\")
+            file(INSTALL DESTINATION \"\$ENV{DESTDIR}${dest}\" TYPE FILE
+                 FILES \"${src}\" PERMISSIONS OWNER_READ OWNER_WRITE)
+        else()
+            message(STATUS \"Restricting: \$ENV{DESTDIR}${dest}/${src_name}\")
+            execute_process(
+                COMMAND \"${chmod_program}\" 0600 --
+                        \"\$ENV{DESTDIR}${dest}/${src_name}\"
+                RESULT_VARIABLE chmod_result
+                ERROR_VARIABLE chmod_error)
+            if(chmod_result)
+                message(FATAL_ERROR \"Unable to restrict private-key permissions: \${chmod_error}\")
+            endif()
+        endif()
+    ")
+endfunction(install_secret_if_not_exists)
+
 function (create_dir _dirpath)
     install(CODE "
         message(STATUS \"Directory : ${_dirpath}\")

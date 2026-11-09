@@ -23,6 +23,7 @@ percentage change.
 | PXM-014 | Stream event classification | The epoll adapter merged clean `EPOLLHUP` with `EPOLLERR`; the poll loop then unconditionally marked the owning proxy dead. It also did not subscribe to `EPOLLRDHUP`, so a directional peer close depended on incidental read readiness and could be mistaken for a fatal full close. | Subscribe read-monitored descriptors to `EPOLLRDHUP`, keep peer-shutdown events separate from socket errors, and route HUP/RDHUP through the normal read path so final bytes are drained before EOF is recorded. Only `EPOLLERR` remains unconditionally fatal. | `EpollLifecycle.PeerHalfCloseIsReadableButNotSocketError`, transfer lifecycle suite and privileged delayed-half-close E2E. |
 | PXM-015 | Permanent stream reconnect | A reconnected `baseHostCX` retained the previous stream's read-EOF flag, so the new connection could remain permanently unreadable. Each reconnect also overwrote the one descriptor deferred for destruction, leaking the prior retired descriptor. | Retire the previously shut-down descriptor before opening its replacement and reset directional EOF state for the new stream. | `TransferLifecycle.ReconnectResetsReadEofAndClosesRetiredDescriptor`. |
 | PXM-016 | Permanent connect failure | A failed left/right permanent connection abandoned its newly allocated context and transport. The same error path formatted the integer result as `%s`, which could dereference it as a pointer while logging the failure. | Keep the candidate context in a `unique_ptr` until a successful connection transfers ownership, and use the correct integer log format on both sides. | `ProxyLifecycle.FailedPermanentConnectReleasesBothSideContexts`. |
+| PXM-017 | SOCKS/implicit TLS CONNECT stalls | The delayed-accept path clears the upstream `opening` flag before the explicit handler can flush CONNECT success. | **FIXED** by origin/master `3de21bd`, merged into ProtocolViews in `d7aaef2`. CONNECT completion has its own readiness flag. | Post-merge implicit TLS, STARTTLS and HTTP CONNECT pass; setup metadata passes all 47 scenarios over both JSON and SXBN. Historical debugger evidence remains below. |
 | TST-001 | QUIC soak | The origin counted a completed short-lived certificate-probe handshake on a later polling tick. A peer close between accept and that tick made a valid handshake disappear from the counter. | Record the handshake immediately when OpenSSL publishes the accepted connection, retaining the later check only as a fallback. | Repeated `QuicTestbed.RepeatedVerifiedReconnectsReleaseEveryIdleSession` soak. |
 | TST-002 | QUIC interop | The OpenSSL client closed at stdin EOF immediately after a verified QUIC handshake, racing delivery of its first application-stream payload and making the external interop test deterministically fail. | Keep `s_client` alive until the origin confirms the echo, with a bounded poll and cleanup. | `external.quic_interop` with the system OpenSSL QUIC client. |
 | TST-003 | Privileged PCAP tests | Legacy PCAP unit tests reused fixed files in `/tmp` and passed their unchecked `fopen()` result to `fileno()`. Under root, Linux sticky-directory protection rejected truncating a user-owned prior artifact and the coverage suite segfaulted; concurrent runs could also overwrite each other. | Generate every throwaway PCAP/PCAPNG through an anonymous `tmpfile()` and assert successful creation before using its descriptor. | Root `PcapTest.*` and `NgTest.*` runs plus the privileged coverage profile. |
@@ -115,7 +116,7 @@ percentage change.
 | TLS-042 | Divergent per-context trust stores | The factory loaded one `X509_STORE` for OCSP, while TLS/DTLS client contexts independently loaded the same locations into private stores; server contexts had their own empty stores and QUIC loaded yet another copy only when upstream verification was enabled. Runtime additions and future trust-state changes were therefore not observed consistently across protocols and context roles. | Make the factory store the single owner of trust configuration and attach a refcounted reference to that exact store to every TLS, DTLS and QUIC client/server context at construction. Repeated initialization preserves store identity, and context/factory destruction remains independent through OpenSSL reference counting. | `TLS_Tests.CertificateFactoryLoadsContextsAndGeneratesMitmCertificates`, the complete TLS suite, and `OpenSslQuic.CreatesClientAndServerContextsWhenAvailable` assert pointer identity and exercise teardown. |
 | TLS-043 | Certificate Transparency threshold | The CT callback marked a certificate as missing/failed when at least two SCT records were present but fewer than two validated successfully, yet left its return value successful. Strict CT policy could therefore accept two unknown or otherwise unverifiable SCT records; only an explicitly invalid status happened to fail closed. | Return failure whenever fewer than two SCT records validate, while preserving the configured replacement-page override and all diagnostic flags. | `TLS_Tests.CertificateTransparencyInsufficientValidEntriesFailsClosed` reproduces two unverifiable records, asserts the strict rejection and verifies the explicit replacement override. |
 | TLS-044 | Certificate exception scope | The generic OpenSSL verification-error branch used `allow_not_valid` to forgive every error not handled explicitly. A profile intended only to allow expired or not-yet-valid certificates could therefore also accept revocation, invalid signatures, path constraints, invalid purpose and other structural failures. | Restrict `allow_not_valid` to the four explicit certificate-time errors; unclassified verification failures now remain rejected unless certificate-failure replacement was explicitly requested. | `TLS_Tests.OpenSslVerifyCallbackMapsFailuresAndHonorsOnlyMatchingExceptions` asserts that both self-signed and date exceptions cannot forgive `CERT_REVOKED`, while the replacement path remains available. |
-| TLS-045 | Missing Certificate Transparency log list | A profile with `ct_enable=true` installed no CT callback when the configured log list was missing or failed to load. The warning-only path silently disabled a requested certificate control and allowed the handshake without any SCT decision. | Enable strict CT and the application validation callback whenever the profile requests CT. An unavailable log list leaves every SCT unverifiable and therefore rejected; explicit `ct_enable=false` remains the opt-out. Treat callback setup failure itself as a terminal TLS error. | `TLS_Tests.CertificateTransparencyRemainsEnabledWithoutLogList` asserts that the SSL connection retains active CT validation even when factory availability is false; the missing and insufficient-SCT callback tests cover fail-closed decisions and replacement override. |
+| TLS-045 | Missing Certificate Transparency log list | A profile with `ct_enable=true` installed no CT callback when the configured log list was missing or failed to load. The warning-only path silently disabled a requested certificate control and allowed the handshake without any SCT decision. | Keep strict CT and the application validation callback enabled whenever the profile requests CT. An unavailable log list leaves every SCT unverifiable and therefore rejected. Report that degraded fail-closed state in CLI, log and event list at most once per five minutes; explicit `ct_enable=false` suppresses the warning. | `TLS_Tests.CertificateTransparencyRemainsEnabledWithoutLogList` asserts that the SSL connection retains active CT validation even when factory availability is false; the insufficient-SCT callback test covers the strict decision. |
 | TLS-046 | TLS 1.3 crypto-profile enforcement | Per-side crypto controls were applied only with `SSL_set_cipher_list()`, which configures TLS 1.2 and older. A profile disabling AES-128 still offered `TLS_AES_128_GCM_SHA256`, and disabling ephemeral DH still allowed every TLS 1.3 handshake even though TLS 1.3 has no static RSA key exchange. Return values from the legacy cipher configuration were also ignored. | Apply the AES-128 restriction to the TLS 1.3 cipher-suite list, cap the protocol at TLS 1.2 when ephemeral DH is disabled, and make every failed OpenSSL policy operation terminal. Older OpenSSL builds retain their existing legacy-only behavior. | `TLS_Tests.CryptoPolicyRestrictsTls13AlongsideLegacyCipherList` inspects the effective per-connection cipher/protocol configuration for both controls. |
 | TLS-047 | Certificate hostname enforcement and DNS SAN precedence | Base TLS certificate checking logged a hostname mismatch but returned success. MITM checking additionally passed `X509_CHECK_FLAG_ALWAYS_CHECK_SUBJECT`, forcing OpenSSL to inspect the legacy common name even when a DNS subjectAltName extension was present; a certificate with `CN=requested.example` and `SAN=other.example` was therefore accepted for `requested.example`. | Make the base certificate check return failure and record `VRF_HOSTNAME_FAILED` on identity mismatch. Use OpenSSL's standard hostname rules everywhere: DNS SANs are authoritative when present, while CN remains the fallback for certificates without DNS SAN. | `TLS_Tests.BaseCertificateCheckRejectsHostnameMismatch` proves the generic transport rejects a mismatched identity; `MitmHostnameValidationDoesNotLetCommonNameOverrideDnsSan` covers conflicting CN/SAN, and the matching-CN test preserves SAN-absent fallback. |
 | TLS-048 | SNI rewrite identity separation | Routing correctly replaced SNI on the origin-facing handshake, but certificate spoofing reused that rewritten value for custom-certificate lookup and client-facing SAN generation. A client requesting `client.example` through a rewrite to `origin.internal` could therefore receive a proxy certificate identifying only the internal origin name. | Keep the two identities separate: validate, connect and cache the upstream session under rewritten SNI, while selecting/generating the client-facing certificate under the original ClientHello SNI. Add the original name as a SAN whenever routing changed it, including certificate-failure replacement paths. | `TLS_Tests.SniRewriteKeepsOriginalClientIdentityForSpoofedCertificate` captures the complete spoof request after a valid rewritten upstream handshake and requires the original SNI in both lookup identity and SANs. |
@@ -182,3 +183,71 @@ percentage change.
 | POL-006 | Degraded enforcement profiles | An accept rule that named a missing content, detection, TLS, DNS ALG, script or routing profile—or the removed authentication profile—was retained as degraded and continued matching with its original allow verdict. Traffic was therefore accepted without the explicitly requested enforcement. A valid script profile was loaded but never applied at all. | Force a degraded rule to deny within its original match scope, make structurally invalid rules terminal deny barriers instead of falling through to later allows, invoke configured script profiles during policy application and reject the connection if runtime attachment fails. | Policy configuration fallback case, focused policy tests and production build. |
 | POL-007 | Port-object lookup | Looking up an unknown port object returned a synthetic `0-0` range rather than “not found”. Policy loading therefore considered the reference valid; the rule silently failed to match normal traffic and could fall through to a later allow. Port objects also accepted values outside the transport range, including a negative-to-large interval that could unexpectedly match every real port. | Return a null lookup result so an unresolved reference becomes a fail-closed selection barrier, and reject port-object endpoints outside `0..65535`. | Policy configuration fallback coverage and production build. |
 | POL-008 | Default authorization posture | A missing policy match and a non-positive access-request webhook result historically favored availability. This made transient configuration or webhook failures indistinguishable from authorization and could pass traffic without an affirmative decision. | Default both paths to deny. `settings.policy_fail_open=true` restores no-match allow, and `settings.policy_access_request_fail_open=true` restores webhook failure allow; neither option overrides an explicit deny/reject. Schema 1040 records the compatibility change. | `PolicyTest.*`, `AccessFilterDecision.MalformedAndNonSuccessRepliesFailClosedByDefault`, `LegacyFailOpenMustBeExplicit`, policy dataplane matrix and production build. |
+
+## PXM-017 — SOCKS/implicit TLS CONNECT reply stalls
+
+Delayed TLS accept can clear the upstream transport's `opening` flag before
+the explicit proxy handles write readiness. Using that flag to gate CONNECT
+completion leaves the success reply pending: the client waits for CONNECT
+while TLS waits for ClientHello.
+
+CONNECT completion now uses `connect_response_ready_`, independently of TCP
+opening state. The existing SO_ERROR/connect-failure and destination checks
+still run before the reply becomes ready. Partial replies retain their offset
+and are not revalidated or replaced on subsequent upstream events.
+
+Verified on origin/master `ae0bfe6` with Socle `62dee06`: the implicit TLS
+regression times out reading the SOCKS reply with the original condition and
+passes the handshake and HTTP transfer with the fix. The 15-case IPv4 SOCKS
+STARTTLS matrix and HTTP CONNECT integration (including failed upstream and
+local-destination protection) also pass. See `tests/tls/README.md` for the
+isolated-network regression command.
+
+Full P3 subsequently passed all 43 sections (39/39 native CTest entries and
+remote dataplane/fuzz coverage). The first native attempt failed the unrelated
+`QuicTestbed.RepeatedVerifiedReconnectsReleaseEveryIdleSession` handshake-count
+assertion (22 instead of 24); ten isolated repetitions and both subsequent
+full native gates passed. One remote smoke attempt stopped at process startup
+because libconfig++ and libmicrohttpd runtime libraries were missing; after
+installing them, the complete unchanged P3 run passed. The successful run is
+recorded in `tests/docs/patch-run-history`; preceding failed reports are retained.
+
+ProtocolViews post-merge verification (2026-10-26): `d7aaef2` plus the working
+setup/rewrite changes passes the upstream implicit-TLS regression, STARTTLS
+matrix and HTTP CONNECT integration. The setup fixture also passes all 47
+scenarios over JSON and SXBN, including SNI/ALPN before content forwarding.
+Its SNI now matches the repository certificate SAN: the initial post-merge
+failure was a hostname mismatch, not a CONNECT stall. HTTP CONNECT requires
+system DNS for localtest.me and was rerun outside the loopback-only namespace.
+Logs, initial failures and reruns: `/tmp/master-merge-20261026/`.
+
+### Original ProtocolViews diagnosis and handoff (2026-10-25)
+
+- **Status at handoff:** OPEN; diagnosed on 2026-10-25, no fix applied then.
+  The fix from origin/master `3de21bd` was merged into this worktree on
+  2026-10-26; the original evidence below is retained as historical context.
+- **Worktree:** `smithproxy-need-more-test`, branch `wip/protocol-endpoint-views`,
+  HEAD `6d72e7d` plus working changes; Socle `1806c70`.
+- **Cause:** `socle/baseproxy.cpp:1004` clears the connected upstream's
+  `opening` flag from the delayed TLS accept path. The subsequent
+  `src/proxy/socks5/socksproxy.cpp:515` gate requires that flag to process
+  CONNECT completion, so the prepared success reply is never sent.
+- **Observed:** debugger stack confirms the flag change above, then
+  `EXPLICIT_WRITE side=r opening=0 pending=10 ready=0`. The client receives
+  no SOCKS success bytes; the origin TLS handshake times out. This happens
+  before the new setup webhook; an older binary also reproduces the failure.
+  This does not establish the regression's introducing commit or affect all SOCKS paths.
+- **Reproduce:** from that worktree, using its current uncommitted test fixture:
+
+  ```sh
+  unshare -Urn -- sh -c 'ip link set lo up && python3 tests/httpapi/need_more_integration.py --smithproxy build/smithproxy --source . --setup-only --setup-tls'
+  ```
+
+- **Evidence:** `/tmp/connection-start-tls-gdb.log` (stack and state),
+  `/tmp/connection-start-tls-trace.gdb`, `/tmp/connection-start-tls-baseline.log`.
+- **Fix/regression target:** explicit CONNECT readiness must not depend on
+  `opening` still being true. Preserve SO_ERROR/local-destination validation
+  and partial reply writes. Test a connected upstream whose opening flag was
+  already cleared, plus real SOCKS/TLS success, plain SOCKS, failed connect and
+  the shared HTTP CONNECT path. No change to connection-start is needed to
+  explain this failure.

@@ -54,6 +54,7 @@ struct DaemonFactory : public LoganMate {
 
     std::string pid_file = PID_FILE_DEFAULT;
     volatile char crashlog_file[LOG_FILENAME_SZ];
+    bool pid_file_enabled = true;
     bool pid_file_owned = false;
 
     [[nodiscard]] std::string &class_name() const override;

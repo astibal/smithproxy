@@ -209,7 +209,9 @@ inline client_certificate_action client_certificate_next(bool requested,
     if(!requested) return client_certificate_action::none;
     if(configured_action == 0) return client_certificate_action::block;
     if(configured_action == 2) return client_certificate_action::whitelist_next;
-    return client_certificate_action::none;
+    if(configured_action == 1 || configured_action == 3)
+        return client_certificate_action::none;
+    return client_certificate_action::block;
 }
 
 inline bool tls_verification_failed(unsigned status,
@@ -347,6 +349,18 @@ bool half_close_peer_drained(Host* cx) {
     return peer->com()->descriptor_valid(peer->socket()) &&
            peer->writebuf()->empty() &&
            !peer->com()->write_event_pending();
+}
+
+// TCP directions finish independently; other transports keep their existing
+// response-drain lifecycle until they opt into half-close support.
+template<class Host>
+bool half_close_finished(Host* cx) {
+    if(!cx || !cx->read_eof() || !half_close_peer_drained(cx)) return false;
+
+    auto* peer = cx->peer();
+    return !cx->com()->supports_half_close() ||
+           !peer->com()->supports_half_close() ||
+           (cx->write_eof() && peer->write_eof());
 }
 
 } // namespace sx::mitmproxy

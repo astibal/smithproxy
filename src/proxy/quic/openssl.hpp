@@ -5,6 +5,7 @@
 #include <openssl/ssl.h>
 
 #include <sys/socket.h>
+#include <netinet/in.h>
 
 #include <deque>
 #include <functional>
@@ -17,6 +18,7 @@
 #include <vector>
 
 #include "proxy/multiflow/multiflow.hpp"
+#include "proxy/quic/hooks.hpp"
 
 #if OPENSSL_VERSION_NUMBER >= 0x30500000L && !defined(OPENSSL_NO_QUIC)
 #define SMITHPROXY_OPENSSL_QUIC 1
@@ -31,7 +33,13 @@ namespace sx::quic {
 struct datagram_endpoint {
     sockaddr_storage address {};
     socklen_t size = 0;
-    bool valid() const { return size != 0; }
+    bool valid() const {
+        if (address.ss_family == AF_INET)
+            return size == sizeof(sockaddr_in);
+        if (address.ss_family == AF_INET6)
+            return size == sizeof(sockaddr_in6);
+        return false;
+    }
 };
 
 #if SMITHPROXY_OPENSSL_QUIC
@@ -80,7 +88,8 @@ public:
 
     void remember(std::vector<std::uint8_t> const& connection_id,
                   datagram_route const& route);
-    void learn(unsigned char const* data, std::size_t size,
+    /** Learn long-header CIDs unless one is already owned by another tuple. */
+    bool learn(unsigned char const* data, std::size_t size,
                datagram_route const& route);
     std::optional<datagram_route> resolve(
         unsigned char const* data, std::size_t size) const;
@@ -241,8 +250,8 @@ std::unique_ptr<openssl_connection> connect_openssl_quic(
 /** Same connector with an explicit single-protocol ALPN offer. */
 std::unique_ptr<openssl_connection> connect_openssl_quic(
     SSL_CTX* context, const sockaddr* peer, socklen_t peer_size,
-    std::string const& server_name, std::string const& alpn,
-    std::string* error = nullptr);
+    std::string const& server_name, std::string const& alpn, std::string* error = nullptr,
+    HookEvent const* offer = nullptr);
 
 /**
  * Nonblocking OpenSSL QUIC listener over a caller-owned UDP socket.

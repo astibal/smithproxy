@@ -1,0 +1,89 @@
+Connection-start boundary refactor
+=================================
+
+Base: 018ae4a1bddf8c0e30d14166dfe076d00f4301d0 (master).
+Working branch: refactor-connection-start (local only); target: origin/master.
+
+Scope
+-----
+Transparent TCP/UDP, explicit CONNECT/SOCKS TCP, SOCKS UDP and the QUIC
+parent connector enter proxymaker::connect before opening the upstream.
+Socket registration stays at its existing call sites. The owning connect
+overload and its helper now take unique_ptr by value: failure destroys the
+proxy locally rather than leaving ownership with the caller.
+
+MitmProxy setup now runs before upstream connect, after policy and routing.
+Negotiated TLS metadata is consequently not available during setup.
+Destruction closes any admitted setup exactly once, including failed upstream
+connects and logical-stream retirement without socket error callbacks.
+The per-policy access-request filter is initialized without network I/O;
+its authorization runs after setup at the pre-connect boundary.
+
+QUIC retains one shared setup decision across the certificate probe,
+staged route and forwarding session. A rejected setup never opens the probe.
+Its connection-start has info.scope=transport and info.protocol=quic.
+Logical streams carry scope=stream, parent_id and their downstream wire stream_id
+on setup, content and stop. Parent display labels retain endpoint formatting.
+The setup object sends connection-stop even if certificate preparation fails.
+A verdict obtained for one resolved destination cannot authorize another.
+
+This is the connection-entry refactor, not the subscriber-map implementation.
+Existing logical H3 stream setups remain separate from parent admission and
+still apply each stream's policy. Subscriptions are explicitly deferred.
+The companion Spider change skips transport-only setup for HTTP addons, while
+native scripts can still observe it. This does not implement QUIC/TLS addon
+hooks or shared HTTP/3 client identities; existing stream inspection remains
+independent. Deploy the companion Spider change before enabling this producer
+with content addons on QUIC.
+Proxy authentication still precedes destination discovery where required by
+SOCKS negotiation; it has not been moved into this target-based gate.
+
+Validation on an isolated Linux test host
+----------------------------------------
+PASS production build, including the by-value ownership adjustment.
+PASS ProxyMakerUtils.*: 5 focused tests, including destruction on connect failure
+     and ownership transfer on success.
+PASS unit.core.
+PASS integration.httpconnect, integration.socks5_udp, integration.starttls_socks.
+PASS integration.proxy_auth.
+PASS integration.redirect, including setup before per-policy access-request.
+PASS integration.protocol_views_json and integration.protocol_views_binary.
+PASS integration.connection_start; blocked setup leaves the origin unconnected,
+     and deny/invalid strict replies prevent upstream connection entirely.
+PASS isolated TLS setup integration: 46 scenarios.
+PASS integration.quic_testbed and extended.quic_soak.
+PASS direct QUIC denial regression with verification both enabled and disabled:
+     neither the certificate probe nor forwarding emits an upstream datagram.
+PASS production QUIC/H3 patch-runner suite, including UDP policy selection,
+     HTTP/3, PCAP, GRE, keylog decryption and independent streams.
+
+Two additional legacy standalone scripts (external.quic_interop and
+privileged.quic_tproxy) failed while initializing their test origin TLS context
+("origin TLS setup failed"), before exercising the changed proxy path.
+They are not counted as passes. The production QUIC/H3 suite above passed.
+
+Final merge gate (2026-11-02)
+---------------------------
+PASS full P3, parallelism 3: all 43 sections, no FLAKY_PASS.
+PASS native CTest: 47/47 suites, including early setup denial followed by exactly
+     one terminal notification before an upstream connection can exist.
+PASS real QUIC webhook lifecycle: one physical parent and ten logical streams;
+     start precedes content, parent linkage remains stable, all lifetimes retire.
+PASS Spider complete configured CTest: 119/119 suites. The final setup-only
+     metadata guard also passed the three affected host/adapter suites.
+PASS actual QUIC webhook capture replayed through Spider's inspection host and
+     packaged native/addon workers. This is lifecycle/envelope integration,
+     not a claim of HTTP/3 addon content support.
+PASS live HTTP CONNECT/SOCKS5/PAM with native and mitmproxy addon vetoes,
+     rejected AAA, wrong reply identity and unavailable webhook behavior.
+
+Native report: 20261102T203627Z-018ae4a1-full.
+The test host used a pristine 018ae4a1 tree plus these changes. SHA-256 checks
+confirmed all 22 changed production/test files matched the local commit inputs.
+Standard full P3 excludes the optional external, benchmark, extended and
+platform CTest labels according to TESTING_POLICY.md.
+
+The first full attempt exposed missing stop events on logical-stream retirement.
+Transport shutdown now retires setup before deferred object destruction, with
+an idempotent destructor fallback. The superseded run was stopped and its labs
+cleaned before the complete final run above. No failed result was relabeled.

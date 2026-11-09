@@ -114,6 +114,7 @@ ssize_t MFFlowCom::peek(int, void* destination, size_t size, int) {
 }
 
 ssize_t MFFlowCom::write(int, const void* source, size_t size, int) {
+    if (size == 0) return 0;
     auto connection = lock_connection();
     if (!connection) {
         errno = ENOTCONN;

@@ -3,6 +3,7 @@
 #include <service/httpd/handlers/handlers.hpp>
 
 #include <service/httpd/diag/diag_ssl.hpp>
+#include <service/httpd/diag/diag_network.hpp>
 #include <service/httpd/diag/daig_proxy.hpp>
 
 #include <service/httpd/do/do_comands.hpp>
@@ -12,6 +13,57 @@
 #include <service/httpd/cfg/get.hpp>
 
 #include <service/httpd/wh/whcontrol.hpp>
+
+namespace {
+
+template<class ListenerList>
+nlohmann::json listener_stats(std::string_view name, ListenerList& listeners) {
+    std::uint64_t sessions_total = 0;
+    std::uint64_t sessions_active = 0;
+    std::uint64_t bytes_up = 0;
+    std::uint64_t bytes_down = 0;
+    std::uint64_t workers = 0;
+
+    for(auto& listener : listeners) {
+        if(!listener) continue;
+        for(auto& task : listener->tasks()) {
+            if(!task.second) continue;
+            auto const& stats = task.second->stats();
+            sessions_total += stats.sessions_total();
+            sessions_active += stats.sessions_active();
+            bytes_up += stats.bytes_up();
+            bytes_down += stats.bytes_down();
+            ++workers;
+        }
+    }
+
+    return {
+        {"name", name},
+        {"workers", workers},
+        {"sessions_total", sessions_total},
+        {"sessions_active", sessions_active},
+        {"bytes_up", bytes_up},
+        {"bytes_down", bytes_down},
+    };
+}
+
+nlohmann::json proxy_listener_stats() {
+    auto& smithproxy = SmithProxy::instance();
+    auto listeners = nlohmann::json::array();
+    listeners.push_back(listener_stats("tcp", smithproxy.plain_proxies));
+    listeners.push_back(listener_stats("tls", smithproxy.ssl_proxies));
+    listeners.push_back(listener_stats("udp", smithproxy.udp_proxies));
+    listeners.push_back(listener_stats("dtls", smithproxy.dtls_proxies));
+    listeners.push_back(listener_stats("socks-tcp", smithproxy.socks_proxies));
+    listeners.push_back(listener_stats("socks-udp", smithproxy.socks_udp_proxies));
+    listeners.push_back(listener_stats("http-connect", smithproxy.http_connect_proxies));
+    listeners.push_back(listener_stats("redir-tcp", smithproxy.redir_plain_proxies));
+    listeners.push_back(listener_stats("redir-tls", smithproxy.redir_ssl_proxies));
+    listeners.push_back(listener_stats("redir-udp", smithproxy.redir_udp_proxies));
+    return {{"listeners", std::move(listeners)}};
+}
+
+} // namespace
 
 namespace sx::webserver::dispatchers {
 
@@ -62,6 +114,20 @@ namespace sx::webserver::dispatchers {
 
     void controller_add_diag(lmh::WebServer &server) {
 
+        for(auto const& method: {"GET", "POST"}) {
+            auto* handler = new Http_Responder(
+                method, "/api/diag/network/interfaces",
+                authorized::token_protected<json>(
+                    []([[maybe_unused]] MHD_Connection* connection,
+                       [[maybe_unused]] const std::string& method,
+                       [[maybe_unused]] const std::string& request) -> json {
+                        return sx::net::network_interfaces_json();
+                    })
+            );
+            handler->Content_Type = "application/json";
+            server.addController(std::shared_ptr<lmh::Controller>(handler));
+        }
+
         for(auto const& meth: { "GET", "POST"}) {
             auto* handler = new Http_Responder(meth, "/api/diag/ssl/cache/stats",
                                           authorized::token_protected<json>(json_ssl_cache_stats));
@@ -85,6 +151,21 @@ namespace sx::webserver::dispatchers {
                     meth,
                     "/api/diag/proxy/session/list",
                     authorized::token_protected<json>(json_proxy_session_list)
+            );
+            handler->Content_Type = "application/json";
+            server.addController(std::shared_ptr<lmh::Controller>(handler));
+        }
+
+        for(auto const& meth: {"GET", "POST"}) {
+            auto* handler = new Http_Responder(
+                    meth,
+                    "/api/diag/proxy/listener/stats",
+                    authorized::token_protected<json>(
+                        []([[maybe_unused]] MHD_Connection* connection,
+                           [[maybe_unused]] std::string const& method,
+                           [[maybe_unused]] std::string const& request) -> json {
+                            return proxy_listener_stats();
+                        })
             );
             handler->Content_Type = "application/json";
             server.addController(std::shared_ptr<lmh::Controller>(handler));
@@ -169,5 +250,18 @@ namespace sx::webserver::dispatchers {
         webhook_unregister->Content_Type = "application/json";
         server.addController(std::shared_ptr<lmh::Controller>(webhook_unregister));
     }
-}
 
+    void controller_add_wh_v2(lmh::WebServer& server) {
+        auto* lease = new Http_Responder(
+                "POST", "/api/v2/webhook/lease",
+                authorized::token_protected<Http_JsonResponseParams>(wh_lease_v2));
+        lease->Content_Type = "application/json";
+        server.addController(std::shared_ptr<lmh::Controller>(lease));
+
+        auto* release = new Http_Responder(
+                "POST", "/api/v2/webhook/lease/release",
+                authorized::token_protected<Http_JsonResponseParams>(wh_lease_release_v2));
+        release->Content_Type = "application/json";
+        server.addController(std::shared_ptr<lmh::Controller>(release));
+    }
+}

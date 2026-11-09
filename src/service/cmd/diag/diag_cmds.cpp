@@ -1,3 +1,4 @@
+#include <service/core/session_interfaces.hpp>
 /*
     Smithproxy- transparent proxy with SSL inspection capabilities.
     Copyright (c) 2014, Ales Stibal <astib@mag0.net>, All rights reserved.
@@ -44,7 +45,10 @@
 #include <cctype>
 #include <cstdio>
 #include <ctime>
+#include <chrono>
+#include <iomanip>
 #include <memory>
+#include <sstream>
 #include <pwd.h>
 #include <sys/ioctl.h>
 #include <linux/sockios.h>
@@ -57,10 +61,17 @@
 
 #include <service/core/smithproxy.hpp>
 #include <service/core/sessionlist.hpp>
+#include <service/network_context.hpp>
 #include <service/cmd/diag/diag_cmds.hpp>
 #include <service/httpd/httpd.hpp>
 #include <service/cfgapi/cfgapi.hpp>
 #include <service/tpool.hpp>
+#include <service/gre_broker.hpp>
+#include <service/cli/cli_broker.hpp>
+#include <service/api/api_broker.hpp>
+#include <service/webhook/webhook_broker.hpp>
+#include <service/http/async_request.hpp>
+#include <service/http/webhooks.hpp>
 #include <inspect/engine/http.hpp>
 
 
@@ -1121,7 +1132,7 @@ int cli_diag_capture_schemas(DiagCli *cli, const char *command, char *argv[], in
                      "  SXPP type=1 version=2 format=smithproxy.protocol-profile.csv.v2\n");
 }
 
-int cli_diag_priv_stats(DiagCli* cli, const char* command, char* argv[], int argc) {
+int cli_diag_sys_priv_stats(DiagCli* cli, const char* command, char* argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
 
     const uid_t uid = ::geteuid();
@@ -1174,6 +1185,286 @@ int cli_diag_priv_stats(DiagCli* cli, const char* command, char* argv[], int arg
               static_cast<unsigned long long>(stats.transport_errors),
               static_cast<unsigned long long>(stats.drains),
               static_cast<unsigned long long>(stats.max_ops_per_drain));
+    return CLI_OK;
+}
+
+int cli_diag_sys_netlink_info(DiagCli* cli, const char* command,
+                              char* argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+
+    const auto& monitor = sx::net::NetworkCtx::instance();
+    const auto stats = monitor.stats();
+    const auto snapshot = monitor.snapshot();
+    if(!snapshot) {
+        cli_print(cli, "Netlink interface monitor snapshot unavailable");
+        return CLI_ERROR;
+    }
+
+    const auto ipv4_count = std::count_if(
+        snapshot->addresses.begin(), snapshot->addresses.end(),
+        [](const sx::net::InterfaceAddress& address) { return address.family == AF_INET; });
+    const auto ipv6_count = std::count_if(
+        snapshot->addresses.begin(), snapshot->addresses.end(),
+        [](const sx::net::InterfaceAddress& address) { return address.family == AF_INET6; });
+
+    std::ostringstream output;
+    output << "Netlink interface monitor:\n"
+           << "  running: " << (stats.running ? "yes" : "no") << '\n'
+           << "  snapshot valid: " << (snapshot->valid ? "yes" : "no") << '\n'
+           << sx::net::network_generations_text(*snapshot) << '\n'
+           << "  generation: " << snapshot->generation << '\n'
+           << "  synchronization attempts: " << stats.synchronization_attempts << '\n'
+           << "  synchronization successes: " << stats.synchronization_successes << '\n'
+           << "  errors: " << stats.errors << '\n'
+           << "  event datagrams: " << stats.event_datagrams << '\n'
+           << "  changed event datagrams: " << stats.changed_event_datagrams << '\n'
+           << "  interfaces: " << snapshot->interfaces.size() << '\n'
+           << "  addresses: " << snapshot->addresses.size()
+           << " (IPv4 " << ipv4_count << ", IPv6 " << ipv6_count << ")\n";
+
+    const auto last_error = monitor.last_error();
+    if(!last_error.empty()) output << "  last error: " << last_error << '\n';
+
+    output << "  roles valid: " << (snapshot->roles_valid ? "yes" : "no") << '\n';
+
+    output << "\nInterfaces:\n"
+           << "  " << std::left << std::setw(7) << "index"
+           << std::setw(18) << "interface"
+           << std::setw(24) << "role"
+           << std::setw(9) << "uplink" << "flags\n";
+    for(const auto& interface : snapshot->interfaces) {
+        output << "  " << std::left << std::setw(7) << interface.index
+               << std::setw(18) << interface.name
+               << std::setw(24) << interface.role
+               << std::setw(9) << (snapshot->uplinks.count(interface.index) ? "yes" : "no")
+               << "0x" << std::hex << interface.flags << std::dec << '\n';
+    }
+    if(snapshot->interfaces.empty()) {
+        output << "  (none)\n";
+    }
+
+    output << "\nIP addresses:\n"
+           << "  " << std::left << std::setw(7) << "index"
+           << std::setw(18) << "interface"
+           << std::setw(8) << "family"
+           << std::setw(44) << "address/prefix"
+           << std::setw(7) << "scope" << "flags\n";
+
+    for(const auto& address : snapshot->addresses) {
+        const char* family = address.family == AF_INET ? "IPv4" :
+                             address.family == AF_INET6 ? "IPv6" : "other";
+        std::ostringstream address_with_prefix;
+        address_with_prefix << address.text() << '/'
+                            << static_cast<unsigned>(address.prefix_length);
+        output << "  " << std::left << std::setw(7) << address.interface_index
+               << std::setw(18) << address.interface_name
+               << std::setw(8) << family
+               << std::setw(44) << address_with_prefix.str()
+               << std::setw(7) << static_cast<unsigned>(address.scope)
+               << "0x" << std::hex << address.flags << std::dec << '\n';
+    }
+    if(snapshot->addresses.empty()) output << "  (none)\n";
+
+    cli_print(cli, "%s", output.str().c_str());
+    return snapshot->valid ? CLI_OK : CLI_ERROR;
+}
+
+int cli_diag_sys_gre_stats(DiagCli* cli, const char* command,
+                           char* argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+    using sx::comm::gre::Mode;
+    const auto mode = sx::comm::gre::mode();
+    const auto local = sx::comm::gre::stats();
+    const char* mode_name = mode == Mode::internal ? "internal"
+        : mode == Mode::external ? "external" : "disabled";
+    std::ostringstream output;
+    output << "GRE communication worker:\n"
+           << "  mode: " << mode_name << "\n";
+    if(mode == Mode::internal) output << "  pid: " << sx::comm::gre::owned_broker_pid() << "\n";
+    if(mode == Mode::external) output << "  socket: " << sx::comm::gre::external_path() << "\n";
+    output << "  connected: " << (local.connected ? "yes" : "no") << "\n"
+           << "  submitted: " << local.submitted << "\n"
+           << "  dropped: " << local.dropped << "\n"
+           << "  reconnects: " << local.reconnects;
+
+    if(mode == Mode::disabled) {
+        cli_print(cli, "%s", output.str().c_str());
+        return CLI_OK;
+    }
+
+    sx::comm::gre::Stats broker;
+    if(sx::comm::gre::broker_stats(broker) != 0) {
+        const int saved_errno = errno;
+        output << "\nGRE broker stats unavailable: " << string_error(saved_errno);
+        cli_print(cli, "%s", output.str().c_str());
+        return CLI_ERROR;
+    }
+    output << "\nGRE broker:\n"
+           << "  received: " << broker.received << "\n"
+           << "  exported: " << broker.exported << "\n"
+           << "  errors: " << broker.errors;
+    cli_print(cli, "%s", output.str().c_str());
+    return CLI_OK;
+}
+
+void append_stream_broker_stats(std::ostringstream& output,
+                                const sx::comm::stream::Stats& stats) {
+    output << "  accepted: " << stats.accepted << "\n"
+           << "  rejected: " << stats.rejected << "\n"
+           << "  core connect errors: " << stats.core_connect_errors << "\n"
+           << "  active: " << stats.active << "\n"
+           << "  peak active: " << stats.peak_active << "\n"
+           << "  completed: " << stats.completed << "\n"
+           << "  relay errors: " << stats.relay_errors << "\n"
+           << "  bytes to core: " << stats.bytes_to_core << "\n"
+           << "  bytes from core: " << stats.bytes_from_core;
+}
+
+int cli_diag_sys_cli_stats(DiagCli* cli, const char* command,
+                           char* argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+    const bool external = sx::comm::cli::uses_external_broker();
+    std::ostringstream output;
+    output << "CLI communication worker:\n"
+           << "  mode: " << (external ? "external" : "internal") << "\n";
+    if(external) {
+        output << "  socket: " << sx::comm::cli::external_path()
+               << "\n  broker stats: unavailable (external process)";
+    } else {
+        output << "  pid: " << sx::comm::cli::internal_broker_pid() << "\n";
+        append_stream_broker_stats(output, sx::comm::cli::stats());
+    }
+    cli_print(cli, "%s", output.str().c_str());
+    return CLI_OK;
+}
+
+int cli_diag_sys_api_stats(DiagCli* cli, const char* command,
+                           char* argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+    const bool external = sx::comm::api::uses_external_broker();
+    const auto pid = sx::comm::api::internal_broker_pid();
+    std::ostringstream output;
+    output << "API communication worker:\n";
+    if(external) {
+        output << "  mode: external\n"
+               << "  socket: " << sx::comm::api::external_path()
+               << "\n  broker stats: unavailable (external process)";
+    } else if(pid > 0) {
+        output << "  mode: internal\n  pid: " << pid << "\n";
+        append_stream_broker_stats(output, sx::comm::api::stats());
+    } else {
+        output << "  mode: disabled";
+    }
+    cli_print(cli, "%s", output.str().c_str());
+    return CLI_OK;
+}
+
+int cli_diag_sys_webhook_stats(DiagCli* cli, const char* command,
+                               char* argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+    const auto stats = sx::http::webhooks::webhook_diagnostics();
+    const auto inflight = stats.accepted >= stats.completed
+        ? stats.accepted - stats.completed : 0;
+    const auto now_ms = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count());
+    const auto age = [now_ms](std::uint64_t timestamp) -> std::string {
+        if(timestamp == 0) return "never";
+        return std::to_string(now_ms >= timestamp ? now_ms - timestamp : 0) + " ms ago";
+    };
+    const auto append_timing = [](std::ostringstream& stream, char const* name,
+                                  sx::http::webhooks::timing_diagnostics_snapshot const& timing) {
+        stream << "  " << name << " ms (" << timing.samples << " samples): last "
+               << timing.last_ms << ", avg " << timing.average_ms
+               << ", median " << timing.median_ms << ", p95 " << timing.p95_ms
+               << ", min " << timing.min_ms << ", max " << timing.max_ms << "\n";
+    };
+    std::ostringstream output;
+    output << "Webhook communication worker:\n";
+    if(sx::comm::webhook::enabled()) {
+        output << "  mode: external\n"
+               << "  socket: " << sx::comm::webhook::transport_path() << "\n"
+               << "  broker stats: unavailable (external process)\n";
+    } else {
+        output << "  mode: direct\n";
+    }
+    output << "  enabled: " << (stats.enabled ? "yes" : "no") << "\n"
+           << "  endpoint: " << (stats.url.empty() ? "<not configured>" : stats.url) << "\n"
+           << "  TLS verify: " << (stats.verify_tls ? "yes" : "no") << "\n"
+           << "  content protocol: " << (stats.binary_content ? "sxbn-001" : "json-base64") << "\n"
+           << "  timeout: " << stats.timeout_seconds << " s\n"
+           << "  requests: " << stats.requests
+           << " (async " << stats.asynchronous_requests
+           << ", waiting " << stats.waiting_requests << ")\n"
+           << "  request types: actions " << stats.action_requests
+           << ", content " << stats.content_requests << "\n"
+           << "  accepted/rejected: " << stats.accepted << "/" << stats.rejected << "\n"
+           << "  in flight: " << inflight << "\n"
+           << "  completed: " << stats.completed
+           << " (ok " << stats.succeeded << ", failed " << stats.failed << ")\n"
+           << "  bytes: tx " << stats.request_bytes << ", rx " << stats.response_bytes << "\n"
+           << "  worker pool pending/dropped: "
+           << sx::http::AsyncRequest::pending_requests.load(std::memory_order_relaxed) << "/"
+           << sx::http::AsyncRequest::dropped_requests.load(std::memory_order_relaxed) << "\n"
+           << "  last request: " << age(stats.last_request_ms) << "\n"
+           << "  last response: " << age(stats.last_response_ms) << "\n"
+           << "  last status: " << (stats.last_status ? std::to_string(stats.last_status) : "n/a") << "\n"
+           << std::fixed << std::setprecision(3);
+    append_timing(output, "total delay", stats.total_delay);
+    append_timing(output, "queue delay", stats.queue_delay);
+    append_timing(output, "transport delay", stats.transport_delay);
+    if(!stats.actions.empty()) {
+        output << "  actions:";
+        for(auto const& [action, count]: stats.actions) {
+            output << " " << action << "=" << count;
+        }
+        output << "\n";
+    }
+    if(!stats.last_error.empty()) output << "  last error: " << stats.last_error;
+    cli_print(cli, "%s", output.str().c_str());
+    return CLI_OK;
+}
+
+int cli_diag_sys_sift_stats(DiagCli* cli, const char* command,
+                            char* argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+    const auto stats = sx::http::webhooks::sift_diagnostics();
+    const auto inflight = stats.accepted >= stats.completed
+        ? stats.accepted - stats.completed : 0;
+    const auto now_ms = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count());
+    const auto age = [now_ms](std::uint64_t timestamp) -> std::string {
+        if(timestamp == 0) return "never";
+        return std::to_string(now_ms >= timestamp ? now_ms - timestamp : 0) + " ms ago";
+    };
+    std::ostringstream output;
+    output << "Sift communication worker:\n";
+    if(sx::comm::sift::enabled()) {
+        output << "  mode: external\n"
+               << "  socket: " << sx::comm::sift::transport_path() << "\n";
+    } else {
+        output << "  mode: direct\n";
+    }
+    output << "  enabled: " << (stats.enabled ? "yes" : "no") << "\n"
+           << "  endpoint: " << (stats.url.empty() ? "<not configured>" : stats.url) << "\n"
+           << "  timeout: " << stats.timeout_seconds << " s\n"
+           << "  requests: " << stats.requests
+           << " (content " << stats.content_requests
+           << ", lifecycle " << stats.action_requests << ")\n"
+           << "  accepted/rejected: " << stats.accepted << "/" << stats.rejected << "\n"
+           << "  in flight: " << inflight << "\n"
+           << "  completed: " << stats.completed
+           << " (ok " << stats.succeeded << ", failed " << stats.failed << ")\n"
+           << "  bytes: tx " << stats.request_bytes << ", rx " << stats.response_bytes << "\n"
+           << "  last request: " << age(stats.last_request_ms) << "\n"
+           << "  last response: " << age(stats.last_response_ms) << "\n"
+           << "  last status: " << (stats.last_status ? std::to_string(stats.last_status) : "n/a") << "\n"
+           << std::fixed << std::setprecision(3)
+           << "  RTT ms: last " << stats.rtt_last_ms
+           << ", avg " << stats.rtt_average_ms
+           << ", min " << stats.rtt_min_ms
+           << ", max " << stats.rtt_max_ms;
+    if(!stats.last_error.empty()) output << "\n  last error: " << stats.last_error;
+    cli_print(cli, "%s", output.str().c_str());
     return CLI_OK;
 }
 
@@ -1486,23 +1777,39 @@ int cli_diag_proxy_session_list(DiagCli *cli, const char *command, char *argv[],
     return cli_diag_proxy_session_list_extra(cli, command, args, flags);
 }
 
-int cli_diag_proxy_quic_list(DiagCli* cli, [[maybe_unused]] const char *command,
-                             [[maybe_unused]] char *argv[], [[maybe_unused]] int argc) {
+static void print_quic_sessions(DiagCli* cli, int flags, bool listener_summary) {
+
+    // QUIC snapshots describe the transport, not an SSLCom or TCP OS buffer.
+    // Keep protocol-specific filters honest rather than inventing those fields.
+    if(flag_check<int>(flags, SL_SSH_DETAILS)) return;
+    if((flags & (SL_IO_EMPTY | SL_IO_OSBUF_NZ)) &&
+       !flag_check<int>(flags, SL_IO_ALL)) return;
+
+    const auto decor = cli->context.decor();
     auto const& services = SmithProxy::instance().quic_services;
     std::size_t total = 0;
     for (std::size_t listener = 0; listener < services.size(); ++listener) {
         auto const& service = services[listener];
         auto const sessions = service->session_diagnostics();
-        auto const counters = service->diagnostics();
-        cli_print(cli, "QUIC listener[%zu]: udp/*:%u, sessions: %zu, accepted: %llu, completed: %llu",
-                  listener, service->bound_port(), sessions.size(),
-                  static_cast<unsigned long long>(counters.accepted_sessions),
-                  static_cast<unsigned long long>(counters.completed_sessions));
+
+        if(listener_summary) {
+            auto const counters = service->diagnostics();
+            cli_print(cli, "QUIC listener[%zu]: udp/*:%u, sessions: %zu, accepted: %llu, completed: %llu",
+                      listener, service->bound_port(), sessions.size(),
+                      static_cast<unsigned long long>(counters.accepted_sessions),
+                      static_cast<unsigned long long>(counters.completed_sessions));
+        }
+
         for (auto const& session : sessions) {
-            cli_print(cli, "QUIC|MitM|l:<udp_%s> <+> r:<udp_%s>",
-                      session.client.c_str(), session.target.c_str());
-            cli_print(cli, "    id: %llu  state: %s  age: %llums  idle: %llums",
-                      static_cast<unsigned long long>(session.id), session.state.c_str(),
+            if(flag_check<int>(flags, SL_ACTIVE) &&
+               (session.forwarded_bytes == 0 || session.idle_ms >= 5000)) continue;
+
+            // Match the ordinary list's decorated title and indented details.
+            cli->context.print(decor.command(string_format(
+                "QUIC|MitM|l:<udp_%s> <+> r:<udp_%s>",
+                session.client.c_str(), session.target.c_str())));
+            cli_print(cli, "    listener: %zu  id: %llu  state: %s  age: %llums  idle: %llums",
+                      listener, static_cast<unsigned long long>(session.id), session.state.c_str(),
                       static_cast<unsigned long long>(session.age_ms),
                       static_cast<unsigned long long>(session.idle_ms));
             cli_print(cli, "    SNI: %s", session.server_name.empty()
@@ -1517,8 +1824,17 @@ int cli_diag_proxy_quic_list(DiagCli* cli, [[maybe_unused]] const char *command,
         }
         total += sessions.size();
     }
-    if (services.empty()) cli_print(cli, "No QUIC listeners configured.");
-    cli_print(cli, "QUIC sessions total: %zu", total);
+    if(listener_summary) {
+        if(services.empty()) cli_print(cli, "No QUIC listeners configured.");
+        cli_print(cli, "QUIC sessions total: %zu", total);
+    }
+}
+
+
+int cli_diag_proxy_quic_list(DiagCli* cli, [[maybe_unused]] const char *command,
+                             [[maybe_unused]] char *argv[], [[maybe_unused]] int argc) {
+
+    print_quic_sessions(cli, SL_NONE, true);
     return CLI_OK;
 }
 
@@ -1773,7 +2089,7 @@ auto get_tls_info(MitmHostCX const* lf, MitmHostCX const* rg, int sl_flags, int 
                         tls_ss << "\n    sni: " << sni;
 
                         if (lf) {
-                            auto *app = lf->engine_ctx.application_data.get();
+                            auto *app = lf->engine().application_data.get();
                             auto http_app = dynamic_cast<sx::engine::http::app_HttpRequest *>(app);
                             if (http_app) {
 
@@ -1920,9 +2236,9 @@ auto get_more_info(MitmProxy const* curr_proxy, MitmHostCX* lf, MitmHostCX* rg, 
                     }
                 }
             }
-            if (lf->engine_ctx.signature) {
+            if (lf->engine().signature) {
 
-                auto mysig = std::dynamic_pointer_cast<MyDuplexFlowMatch>(lf->engine_ctx.signature);
+                auto mysig = std::dynamic_pointer_cast<MyDuplexFlowMatch>(lf->engine().signature);
                 if (mysig) {
                     info_ss << "\n    L7_engine: " << mysig->sig_engine;
                     info_ss << "\n    L7_signature: " << mysig->name() << ", group: "
@@ -1934,8 +2250,8 @@ auto get_more_info(MitmProxy const* curr_proxy, MitmHostCX* lf, MitmHostCX* rg, 
                 info_ss << "\n    L7_engine: none";
             }
 
-            if (lf->engine_ctx.application_data) {
-                auto const app = lf->engine_ctx.application_data;
+            if (lf->engine().application_data) {
+                auto const app = lf->engine().application_data;
                 std::string desc = app->to_string(verbosity);
                 if (verbosity < DEB && desc.size() > 120) {
                     desc = desc.substr(0, 117);
@@ -2075,15 +2391,32 @@ int cli_diag_proxy_session_list_extra (DiagCli *cli, const char *command, std::v
                     do_print = true;
                 }
 
-                if(lf and lf->engine_ctx.application_data) {
-                    suffix += " (" + decor.muted(lf->engine_ctx.application_data->protocol()) + ")";
+                if(lf and lf->engine().application_data) {
+                    suffix += " (" + decor.muted(lf->engine().application_data->protocol()) + ")";
                 }
                 if(curr_proxy and not curr_proxy->filters_.empty()) {
                     for(auto const& fi: curr_proxy->filters_) {
                         suffix += " " + decor.warning("!" + fi.first);
                     }
                 }
-
+                if(auto classifications = curr_proxy->sift_classifications();
+                   !classifications.empty()) {
+                    suffix += " " + decor.muted("[sift:");
+                    for(std::size_t i = 0; i < classifications.size(); ++i) {
+                        if(i != 0) suffix += decor.muted(",");
+                        suffix += decor.muted(classifications[i]);
+                    }
+                    suffix += decor.muted("]");
+                }
+                if(auto classifications = curr_proxy->lored_classifications();
+                   !classifications.empty()) {
+                    suffix += " " + decor.muted("[lored:");
+                    for(std::size_t i = 0; i < classifications.size(); ++i) {
+                        if(i != 0) suffix += decor.muted(",");
+                        suffix += decor.muted(classifications[i]);
+                    }
+                    suffix += decor.muted("]");
+                }
                 auto const& io_info = get_io_info(lf, rg, sl_flags);
 
                 do_print |= std::get<0>(io_info);
@@ -2125,6 +2458,9 @@ int cli_diag_proxy_session_list_extra (DiagCli *cli, const char *command, std::v
                 std::stringstream cur_obj_ss;
                 cur_obj_ss << prefix << decor.command(get_proxy_title(curr_proxy, sl_flags, verbosity)) << suffix;
 
+                cur_obj_ss << "\r\n" << sx::net::session_interfaces_text(
+                    lf && lf->com() ? lf->com()->ingress_ifindex() : 0,
+                    rg && rg->com() ? rg->com()->egress_ifindex() : 0) << "\r\n";
                 cur_obj_ss << get_more_info(curr_proxy, lf, rg, verbosity);
                 return cur_obj_ss.str();
     };
@@ -2139,6 +2475,15 @@ int cli_diag_proxy_session_list_extra (DiagCli *cli, const char *command, std::v
     }
 
     cli_print(cli, "%s", request->text_result().c_str());
+
+    // QUIC workers already publish owned snapshots; never inspect their live
+    // sessions from the CLI thread or add another dataplane snapshot request.
+    print_quic_sessions(cli, sl_flags, false);
+
+    if(const auto network = sx::net::NetworkCtx::instance().snapshot()) {
+        cli_print(cli, "\n%s", sx::net::network_generations_text(*network).c_str());
+    }
+
     if( sl_flags == SL_NONE ) {
         unsigned long l = MitmProxy::total_mtr_up().get();
         unsigned long r = MitmProxy::total_mtr_down().get();
@@ -2401,6 +2746,8 @@ int cli_diag_worker_proxy_list(DiagCli *cli, [[maybe_unused]] const char *comman
 
     list_acceptor("== socks acceptor", sx.socks_proxies, sx.socks_threads, verbosity);
     list_acceptor("== socks receiver", sx.socks_udp_proxies, sx.socks_udp_threads, verbosity);
+    list_acceptor("== http-connect acceptor", sx.http_connect_proxies,
+                  sx.http_connect_threads, verbosity);
 
     list_acceptor("== plain redirect acceptor", sx.redir_plain_proxies, sx.redir_plain_threads, verbosity);
     list_acceptor("== dns redirect receiver", sx.redir_udp_proxies, sx.redir_udp_threads, verbosity);
@@ -2477,7 +2824,7 @@ int cli_diag_worker_pool_list(DiagCli *cli, const char *command, char *argv[], i
                     if(not info.is_finished[i] or (info.is_finished[i] and verbosity >iDEB))
                     ss << "\n[#" << i << (info.is_finished[i] ? " (finished)" : " (running)") << "]: " << s << "\n";
 
-                    if(not info.is_finished[i] or verbosity > iDEB) {
+                    if(info.is_finished[i] and verbosity > iDEB) {
                         auto lb = info.log_buffer[i].str();
                         if(not lb.empty()) {
                             ss << "[#"  << i << " (log)] \n";
@@ -2706,10 +3053,22 @@ void register_diags(libcli2::Cli& native) {
     auto* cli = &registry;
     auto* diag = diag_register_command(cli, nullptr, "diag", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC,
                                       "diagnose commands helping to troubleshoot");
-    auto diag_priv = diag_register_command(cli, diag, "priv", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC,
-                                           "privileged helper diagnostics");
-    diag_register_command(cli, diag_priv, "stats", cli_diag_priv_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC,
-                          "display effective identity and privileged helper statistics");
+    auto diag_sys = diag_register_command(cli, diag, "sys", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC,
+                                          "system service diagnostics");
+        auto diag_sys_priv = diag_register_command(cli, diag_sys, "priv", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "privileged helper diagnostics");
+            diag_register_command(cli, diag_sys_priv, "stats", cli_diag_sys_priv_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display effective identity and privileged helper statistics");
+        auto diag_sys_netlink = diag_register_command(cli, diag_sys, "netlink", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "netlink interface monitor diagnostics");
+            diag_register_command(cli, diag_sys_netlink, "info", cli_diag_sys_netlink_info, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display interface roles, addresses and monitor statistics");
+        auto diag_sys_gre = diag_register_command(cli, diag_sys, "gre", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "GRE communication broker diagnostics");
+            diag_register_command(cli, diag_sys_gre, "stats", cli_diag_sys_gre_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display GRE transport and broker statistics");
+        auto diag_sys_cli = diag_register_command(cli, diag_sys, "cli", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "CLI communication broker diagnostics");
+            diag_register_command(cli, diag_sys_cli, "stats", cli_diag_sys_cli_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display CLI broker statistics");
+        auto diag_sys_api = diag_register_command(cli, diag_sys, "api", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "API communication broker diagnostics");
+            diag_register_command(cli, diag_sys_api, "stats", cli_diag_sys_api_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display API broker statistics");
+        auto diag_sys_webhook = diag_register_command(cli, diag_sys, "webhook", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "webhook communication broker diagnostics");
+            diag_register_command(cli, diag_sys_webhook, "stats", cli_diag_sys_webhook_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display webhook transport statistics");
+        auto diag_sys_sift = diag_register_command(cli, diag_sys, "sift", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "Sift communication broker diagnostics");
+            diag_register_command(cli, diag_sys_sift, "stats", cli_diag_sys_sift_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display Sift transport statistics");
     auto diag_ssl = diag_register_command(cli, diag, "tls", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "ssl related troubleshooting commands");
     auto diag_ssl_cache = diag_register_command(cli, diag_ssl, "cache", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl certificate cache");
     diag_register_command(cli, diag_ssl_cache, "stats", cli_diag_ssl_cache_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "display ssl cert cache statistics");
@@ -2749,9 +3108,6 @@ void register_diags(libcli2::Cli& native) {
             diag_register_command(cli, diag_workers_proxy, "list", cli_diag_worker_proxy_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,  "list worker threads");
         auto diag_workers_pool = diag_register_command(cli, diag_workers, "pool", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "misc task worker and threads diagnostics");
             diag_register_command(cli, diag_workers_pool, "list", cli_diag_worker_pool_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,  "list misc pool worker threads");
-
-
-
 #ifndef USE_OPENSSL11
         auto diag_ssl_memcheck = diag_register_command(cli, diag_ssl, "memcheck", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose openssl memcheck");
             diag_register_command(cli, diag_ssl_memcheck, "list", cli_diag_ssl_memcheck_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "print out OpenSSL memcheck status");

@@ -1,0 +1,179 @@
+diff --git a/common/signature.hpp b/common/signature.hpp
+index af705d5..1587119 100644
+--- a/common/signature.hpp
++++ b/common/signature.hpp
+@@ -24,6 +24,9 @@
+ #include <vector>
+ #include <tuple>
+ #include <optional>
++#include <memory>
++#include <stdexcept>
++#include <type_traits>
+ 
+ #include <buffer.hpp>
+ #include <display.hpp>
+@@ -32,12 +35,16 @@
+ #include <log/logan.hpp>
+ #include <ranges.hpp>
+ 
++template <class SourceType> class Flow;
++
+ template <class SourceType>
+ struct FlowEntry {
+     FlowEntry(SourceType const&  s, std::unique_ptr<buffer> d) : source_(s), data_(std::move(d)) {};
+     FlowEntry() = delete;
+ 
+     FlowEntry& operator=(FlowEntry&) = delete;
++    FlowEntry(FlowEntry&&) = default;
++    FlowEntry& operator=(FlowEntry&&) = default;
+ 
+     [[nodiscard]] buffer const* data() const { return data_.get(); }
+     [[nodiscard]] auto size() const { return data_ ? data_->size() : 0; }
+@@ -75,6 +82,7 @@ struct FlowEntry {
+     config_t config{};
+ 
+ private:
++    friend class Flow<SourceType>;
+     SourceType source_;
+     std::unique_ptr<buffer> data_;
+     std::size_t counter_ {1L};
+@@ -93,13 +101,123 @@ class Flow {
+     std::size_t pop_count_ {0L};
+ 
+     logan_lite log;
++
++    // A journal of append/pop operations, not a copy of the payload history.
++    // Popped blocks keep their ownership here until the snapshot is released.
++    struct Journal {
++        Flow* owner;
++        std::size_t blocks;
++        std::size_t popped;
++        unsigned int exchanges;
++        int domain;
++        buffer const* tail = nullptr;
++        std::size_t tail_size = 0;
++        std::size_t tail_counter = 0;
++        std::size_t observed_pops = 0;
++        typename FlowType::validation_t tail_validation;
++        flow_queue_type removed;
++    };
++
++    std::weak_ptr<Journal> journal_;
++
++    void restore(Journal& journal) {
++        static_assert(std::is_nothrow_move_assignable_v<FlowType>);
++
++        if (domain_ != journal.domain ||
++            pop_count_ != journal.popped + journal.observed_pops ||
++            journal.removed.size() + flow_queue_.size() < journal.blocks) {
++            throw std::logic_error("Flow changed outside append/pop transaction");
++        }
++
++        auto entry = [&](std::size_t index) -> FlowType& {
++            if (index < journal.removed.size()) return journal.removed.at(index);
++            return flow_queue_.at(index - journal.removed.size());
++        };
++
++        if (journal.blocks != 0) {
++            auto const& tail = entry(journal.blocks - 1);
++            if (tail.data() != journal.tail || tail.size() < journal.tail_size) {
++                throw std::logic_error("Original flow tail is no longer available");
++            }
++        }
++
++        // Allocate the deque's slots BEFORE transferring ownership. From the
++        // first move onwards there must be no allocation or throwing operation.
++        flow_queue_type restored;
++        for (std::size_t i = 0; i < journal.blocks; ++i) {
++            restored.emplace_back(entry(i).source(), nullptr);
++        }
++
++        for (std::size_t i = 0; i < journal.blocks; ++i) {
++            restored[i] = std::move(entry(i));
++        }
++
++        if (!restored.empty()) {
++            auto& tail = restored.back();
++            tail.data_->size(journal.tail_size);
++            tail.counter_ = journal.tail_counter;
++            tail.validation = journal.tail_validation;
++        }
++
++        flow_queue_.swap(restored);
++        journal.removed.clear();
++        journal.observed_pops = 0;
++        pop_count_ = journal.popped;
++        exchanges = journal.exchanges;
++    }
++
+ public:
++    class Checkpoint {
++    public:
++        void restore() const {
++            if (!journal_ || !journal_->owner) {
++                throw std::logic_error("Flow checkpoint has no live owner");
++            }
++            journal_->owner->restore(*journal_);
++        }
++
++    private:
++        friend class Flow;
++        explicit Checkpoint(std::shared_ptr<Journal> journal)
++            : journal_(std::move(journal)) {}
++        std::shared_ptr<Journal> journal_;
++    };
++
++    // Only append() and pop() may mutate this flow while a checkpoint lives.
++    // Existing byte prefixes must not be overwritten. Nested snapshots are
++    // rejected; copying one token shares the same transaction instead.
++    [[nodiscard]] Checkpoint snapshot() {
++        if (!journal_.expired()) {
++            throw std::logic_error("Flow already has an active checkpoint");
++        }
++
++        auto journal = std::make_shared<Journal>();
++        journal->owner = this;
++        journal->blocks = flow_queue_.size();
++        journal->popped = pop_count_;
++        journal->exchanges = exchanges;
++        journal->domain = domain_;
++
++        if (!flow_queue_.empty()) {
++            auto const& tail = flow_queue_.back();
++            journal->tail = tail.data();
++            journal->tail_size = tail.size();
++            journal->tail_counter = tail.counter();
++            journal->tail_validation = tail.validation;
++        }
++
++        journal_ = journal;
++        return Checkpoint(std::move(journal));
++    }
++
+     unsigned int exchanges = 0; // count how many times flow changed side
+ 
+     explicit Flow() {
+         log = logan::create("flow");
+     }
+-    virtual ~Flow() = default;
++    virtual ~Flow() {
++        if (auto journal = journal_.lock()) journal->owner = nullptr;
++    }
+ 
+     inline void domain(int domain) { domain_ = domain; };
+     inline int domain() const { return domain_ ; };
+@@ -111,6 +229,14 @@ public:
+ 
+     void pop() {
+         if(not flow_queue_.empty()) {
++            if (auto journal = journal_.lock()) {
++                // Only pre-snapshot blocks can be needed by rollback. Newly
++                // appended and subsequently popped blocks may be freed now.
++                if (journal->removed.size() < journal->blocks) {
++                    journal->removed.emplace_back(std::move(flow_queue_.front()));
++                }
++                ++journal->observed_pops;
++            }
+             flow_queue_.pop_front();
+             pop_count_++;
+         }

@@ -3,6 +3,7 @@
  */
 
 #include <proxy/ssh/sshstream.hpp>
+#include <proxy/ssh/ssh_runtime_detail.hpp>
 
 #include <utility>
 
@@ -45,12 +46,12 @@ bool stream_handler::attach(MitmProxy& proxy) {
     if (options.upstream_host.empty()) {
         options.upstream_host = right->host();
     }
-    try {
-        options.upstream_port = static_cast<unsigned int>(std::stoul(right->port()));
-    } catch (std::exception const&) {
+    auto const upstream_port = detail::parse_port(right->port());
+    if (!upstream_port) {
         final_error_ = "SSH upstream port is invalid: " + right->port();
         return false;
     }
+    options.upstream_port = *upstream_port;
     transport_ = std::make_unique<mitm_transport>(std::move(options));
     if (!transport_->attach(left->real_socket(), right->real_socket())) {
         final_error_ = transport_->error();
@@ -105,6 +106,13 @@ std::uint64_t stream_handler::bytes_up() const noexcept {
 
 std::uint64_t stream_handler::bytes_down() const noexcept {
     return transport_ ? transport_->bytes_down() : final_bytes_down_;
+}
+
+bool stream_handler::write_event_pending(stream_direction direction) const noexcept {
+    if (!transport_) return false;
+    return direction == stream_direction::upstream
+        ? transport_->upstream_write_pending()
+        : transport_->downstream_write_pending();
 }
 
 std::string stream_handler::state() const {

@@ -48,6 +48,12 @@
 #include <proxy/mitmproxy.hpp>
 #include <proxy/capture_enrichment.hpp>
 #include <proxy/capture_protocol_tracer.hpp>
+#include <limits>
+
+#include <proxy/proxy_hooks.hpp>
+#include <proxy/content_webhook_metadata.hpp>
+#include <proxy/connection_start.hpp>
+#include <proxy/directional_content.hpp>
 #include <proxy/mitmhost.hpp>
 #include <proxy/streamhandler.hpp>
 #include <proxy/mitmproxy_utils.hpp>
@@ -65,6 +71,7 @@
 #include <staticcontent.hpp>
 
 #include <traflog/fsoutput.hpp>
+#include <traflog/traflog.hpp>
 #include <service/tpool.hpp>
 
 #include <algorithm>
@@ -73,9 +80,35 @@
 #include <socle/timed_guard.hpp>
 
 #include <inspect/fp/ja4.hpp>
-#include <traflog/traflog.hpp>
+#include <proxy/connection_identity.hpp>
 
 using namespace socle;
+
+namespace {
+
+using HttpApplication = sx::engine::http::app_HttpRequest;
+
+std::shared_ptr<HttpApplication> ensure_http_application(MitmHostCX* context) {
+    if(!context) return {};
+    auto app = std::dynamic_pointer_cast<HttpApplication>(
+        context->engine().application_data);
+    if(!app) {
+        app = std::make_shared<HttpApplication>();
+        context->engine().application_data = app;
+    }
+    return app;
+}
+
+std::string_view content_payload_layer(baseHostCX* context) {
+    auto const* current = MitmHostCX::from_baseHostCX(context);
+    if(!current) return "tcp";
+    auto const app = std::dynamic_pointer_cast<HttpApplication>(
+        current->engine().application_data);
+    return app && app->version == HttpApplication::HTTP_VER::HTTP3
+        ? std::string_view{"http3"} : std::string_view{"tcp"};
+}
+
+} // namespace
 
 namespace sx::capture {
 
@@ -151,10 +184,36 @@ nlohmann::json tls_leg(SSLCom const& com, bool include_verify) {
 
 } // namespace sx::capture
 
-MitmProxy::MitmProxy(baseCom* c): baseProxy(c), start_stop_tls_(*this) {
+MitmProxy::MitmProxy(baseCom* c):
+    baseProxy(c),
+    flow_ctx_(std::make_shared<FlowCtx>()),
+    start_stop_tls_(*this) {
 
     current_sessions()++;
-    total_sessions()++;
+    session_id_ = total_sessions().fetch_add(1, std::memory_order_relaxed) + 1;
+}
+
+void MitmProxy::attach_flow(MitmHostCX& host, char leg) {
+    host.com()->protocol_hooks_enabled(tls_observer_enabled_);
+    host.flow_context(flow_ctx_);
+    flow_ctx_->attach(host, leg);
+}
+
+void MitmProxy::tls_observer_enabled(bool enabled) {
+
+    if(tls_observer_enabled_ == enabled) return;
+    tls_observer_enabled_ = enabled;
+
+    // Include delayed contexts: their first handshake may happen on release.
+    for(auto* contexts : {&ls(), &rs(), &lda(), &rda(), &lbs(), &rbs(), &lpc(), &rpc()}) {
+        for(auto* cx : *contexts) {
+            cx->com()->protocol_hooks_enabled(enabled);
+        }
+    }
+}
+
+std::atomic_uint64_t& MitmProxy::sift_payload_limit_per_direction() {
+    return sift_ctl_t::payload_limit_per_direction();
 }
 
 bool MitmProxy::stage_stream_handler(std::unique_ptr<sx::StreamHandler> handler) {
@@ -170,6 +229,8 @@ bool MitmProxy::activate_stream_handler() {
     if (!stream_handler_ || stream_handler_attached_) {
         return false;
     }
+
+    if (!webhook_session_start()) return false;
 
     tap();
     stream_handler_->observe_plaintext(
@@ -325,13 +386,21 @@ void MitmProxy::toggle_tlog () {
 }
 
 
+void MitmProxy::shutdown() {
+    tls_observer_enabled(false);
+
+    // MasterProxy can defer object destruction until a later busy poll cycle.
+    // Retire inspection state when transport shuts down, not when memory is freed.
+    prepare_session_stop();
+    readiness_.clear();
+    baseProxy::shutdown();
+}
+
 MitmProxy::~MitmProxy() {
-    trace_protocol({socle::trace_side::proxy,
-                    protocol_trace_subject_ ? socle::trace_component::stream
-                                            : socle::trace_component::proxy,
-                    socle::trace_scope::session, 0, false,
-                    socle::trace_event::closed, socle::trace_status::ok, {}});
-    
+    prepare_capture_stop();
+    // Base destruction must not dispatch back into the retired derived object.
+    tls_observer_enabled(false);
+
     if(writer_opts()->write_payload) {
         _deb("MitmProxy::destructor: syncing writer");
 
@@ -350,49 +419,8 @@ MitmProxy::~MitmProxy() {
         }         
         
         if(tlog()) tlog()->write_left("Connection stop\n");
-        write_capture_enrichment();
     }
 
-
-    if(sx::http::webhooks::is_enabled()) {
-        auto event = nlohmann::json();
-        bool got_something = false;
-
-        for (auto &[name, filter]: filters_) {
-            if(filter->update_states()) {
-                event[name] = filter->to_json(iINF);
-                got_something = true;
-            }
-            else {
-                _dia("filter %s did not profile any useful data for webhook", name.c_str());
-            }
-        }
-
-        auto capture = nlohmann::json::object();
-        if(capture_metadata_payload_) {
-            capture["metadata"] = *capture_metadata_payload_;
-        }
-        if(capture_statistics_payload_) {
-            capture["statistics"] = *capture_statistics_payload_;
-        }
-        if(capture_tls_payload_) {
-            capture["tls"] = *capture_tls_payload_;
-        }
-        if(auto profile = capture_protocol_profile(); profile) {
-            capture["protocol_profile"] = std::move(*profile);
-        }
-        if(!capture.empty()) {
-            event["capture"] = std::move(capture);
-            got_something = true;
-        }
-
-        if(got_something) {
-            sx::http::webhooks::send_action("connection-info", to_connection_ID(), event);
-            _dia("webhook sent");
-        } else {
-            _dia("nothing to sent to webhook");
-        }
-    }
 
     current_sessions()--;
 }
@@ -693,21 +721,166 @@ std::string_view MitmProxy::session_protocol() const noexcept {
     return stream_handler_ ? stream_handler_->session_protocol() : std::string_view{};
 }
 
+bool MitmProxy::add_sift_classification(std::string classification) {
+    if(classification.empty()) return false;
 
-std::string MitmProxy::to_connection_ID() const {
-    return string_format("Proxy-%lX-PTR-%lX", StaticContent::boot_random,
-                         reinterpret_cast<std::uintptr_t>(this));
+    auto lock = std::scoped_lock(sift_classifications_lock_);
+    return sift_classifications_.insert(std::move(classification)).second;
 }
 
-void MitmProxy::webhook_session_start() const {
-    if(not sx::http::webhooks::is_enabled() or wh_start) return;
+bool MitmProxy::add_lored_classification(std::string classification) {
+    if(classification.empty()) return false;
 
-    nlohmann::json j;
-    auto cl = to_connection_label();
-    j["info"] = { {"session", cl } };
-    sx::http::webhooks::send_action("connection-start", to_connection_ID(), j);
+    auto lock = std::scoped_lock(sift_classifications_lock_);
+    return lored_classifications_.insert(std::move(classification)).second;
+}
 
-    wh_start = true;
+std::vector<std::string> MitmProxy::sift_classifications() const {
+    auto lock = std::scoped_lock(sift_classifications_lock_);
+    return {sift_classifications_.begin(), sift_classifications_.end()};
+}
+
+std::vector<std::string> MitmProxy::lored_classifications() const {
+    auto lock = std::scoped_lock(sift_classifications_lock_);
+    return {lored_classifications_.begin(), lored_classifications_.end()};
+}
+
+std::string MitmProxy::lored_status() const {
+    auto lock = std::scoped_lock(sift_classifications_lock_);
+    return lored_status_;
+}
+
+bool MitmProxy::apply_sift_reply(nlohmann::json const& reply) {
+    bool changed = false;
+    if(auto matches = reply.find("matches");
+       matches != reply.end() && matches->is_array()) {
+        for(auto const& match : *matches) {
+            if(!match.is_object()) continue;
+            if(auto signature = match.find("signature");
+               signature != match.end() && signature->is_string()) {
+                changed |= add_sift_classification(signature->get<std::string>());
+            }
+        }
+    }
+
+    if(auto lored = reply.find("lored");
+       lored != reply.end() && lored->is_object()) {
+        if(auto status = lored->find("status");
+           status != lored->end() && status->is_string()) {
+            auto value = status->get<std::string>();
+            auto lock = std::scoped_lock(sift_classifications_lock_);
+            if(lored_status_ != value) {
+                lored_status_ = std::move(value);
+                changed = true;
+            }
+        }
+
+        if(auto candidates = lored->find("candidates");
+           candidates != lored->end() && candidates->is_array()) {
+            for(auto const& candidate : *candidates) {
+                if(!candidate.is_object()) continue;
+                if(auto value = candidate.find("value");
+                   value != candidate.end() && value->is_string()) {
+                    changed |= add_lored_classification(value->get<std::string>());
+                }
+            }
+        }
+    }
+
+    return changed;
+}
+
+void MitmProxy::publish_sift_classifications() const {
+    if(!sx::http::webhooks::is_enabled()) return;
+
+    auto const classifications = sift_classifications();
+    auto const lored = lored_classifications();
+    auto const lored_state = lored_status();
+    if(classifications.empty() && lored.empty() && lored_state.empty()) return;
+
+    nlohmann::json details;
+    details["info"]["session"] = to_connection_label();
+    if(!classifications.empty())
+        details["info"]["classification"]["sift"] = classifications;
+    if(!lored.empty())
+        details["info"]["classification"]["lored"] = lored;
+    if(!lored_state.empty())
+        details["info"]["classification"]["lored_status"] = lored_state;
+    sx::http::webhooks::send_action(
+        "connection-info", to_connection_ID(), details, webhook_control_);
+}
+
+void MitmProxy::submit_flow_observation(
+    sx::traffic_log_adapter::flow_observation fields,
+    std::string_view payload_layer) {
+    if(fields.empty()) return;
+
+    if(payload_layer == "http3.headers") {
+        if(auto* left = first_left(); left != nullptr) {
+            auto app = ensure_http_application(left);
+            app->version = HttpApplication::HTTP_VER::HTTP3;
+            auto copy = [&](char const* source, std::string& target) {
+                if(auto const found = fields.find(source); found != fields.end())
+                    target = found->second;
+            };
+            copy("flow.http3.method", app->http_data.method);
+            copy("flow.http3.authority", app->http_data.host);
+            copy("flow.http3.path", app->http_data.uri);
+            copy("flow.http3.scheme", app->http_data.proto);
+        }
+    }
+
+    nlohmann::json details;
+    auto& info = details["info"];
+    info["session"] = to_connection_label();
+    info["side"] = "L";
+    info["payload_layer"] = payload_layer;
+
+    for(auto const& [name, value] : fields) {
+        info[name] = value;
+    }
+
+    if(sx::http::webhooks::is_enabled()) {
+        sx::http::webhooks::send_action(
+            "connection-info", to_connection_ID(), details, webhook_control_);
+    }
+
+    if(!sx::http::webhooks::sift_enabled()) return;
+
+    sx::http::webhooks::send_sift_content_wait(
+        to_connection_ID(), std::move(details), {},
+        [this](sx::http::expected_reply reply) {
+            if(!reply.has_value()) return;
+
+            auto body = nlohmann::json::parse(
+                reply.value().response.second, nullptr, false);
+            if(body.is_discarded()) return;
+
+            if(apply_sift_reply(body)) publish_sift_classifications();
+        });
+}
+
+std::string MitmProxy::to_connection_ID() const {
+    return sx::proxy::connection_id(StaticContent::boot_random, session_id_);
+}
+
+void MitmProxy::add_webhook_stream_details(nlohmann::json& info) const {
+    if (!webhook_stream) return;
+
+    info["scope"] = "stream";
+    info["parent_id"] = webhook_stream->parent_id;
+    info["stream_id"] = webhook_stream->stream_id;
+}
+
+nlohmann::json MitmProxy::connection_start_details() const {
+    return sx::proxy::ProxyHooks::start_details(*this, sx::proxy::ProxyHooks::StartDetailsArgs{});
+}
+
+bool MitmProxy::webhook_session_start() {
+    if (state().dead()) return false;
+    if (wh_start) return true;
+
+    return sx::proxy::ProxyHooks::start(*this, sx::proxy::ProxyHooks::StartArgs{});
 }
 
 std::optional<std::string> MitmProxy::get_application() const {
@@ -716,7 +889,7 @@ std::optional<std::string> MitmProxy::get_application() const {
     if(not mh) return std::nullopt;
 
     std::string connection_protocol;
-    auto app = mh->engine_ctx.application_data;
+    auto app = mh->engine().application_data;
 
     if(app) {
         return app->protocol();
@@ -725,59 +898,78 @@ std::optional<std::string> MitmProxy::get_application() const {
     return std::nullopt;
 }
 
-void MitmProxy::webhook_session_stop() const {
-    if(not sx::http::webhooks::is_enabled() or wh_stop) return;
+void MitmProxy::prepare_capture_stop() {
+    if(capture_stopped_) return;
+    capture_stopped_ = true;
+    trace_protocol({socle::trace_side::proxy,
+                    protocol_trace_subject_ ? socle::trace_component::stream
+                                            : socle::trace_component::proxy,
+                    socle::trace_scope::session, 0, false,
+                    socle::trace_event::closed, socle::trace_status::ok, {}});
+    observe_tls_ready();
+    write_capture_enrichment();
+}
 
-    nlohmann::json j;
-    auto cl = to_connection_label();
+void MitmProxy::prepare_session_stop() {
+    // Capture output also retires without webhooks, while CXs still exist.
+    prepare_capture_stop();
+    if(!wh_start || wh_stop || (!sx::http::webhooks::is_enabled() &&
+                               !sx::http::webhooks::sift_enabled())) return;
 
-    uint64_t uB = 0L;
-    uint64_t dB = 0L;
-    std::optional<nlohmann::json> l7;
-    std::optional<nlohmann::json> tls;
+    // A failed snapshot must not prevent transport teardown or run again.
+    wh_stop = true;
+    try {
+        // Every retirement path must finish server callbacks before Spider releases
+        // the session. This only orders observations; transport teardown stays put.
+        if(observe_tls(true) == ObserverStatus::Terminate) {
+            state().dead(true);
+        }
+        finish_server_hooks();
 
-    auto const* l = first_left();
-    if(l) {
-        uB = l->meter_read_bytes;
-        dB = l->meter_write_bytes;
+        auto snapshot = std::make_unique<sx::proxy::ProxyHooks::Epitaph>(
+            sx::proxy::ProxyHooks::prepare_stop(*this, sx::proxy::ProxyHooks::StopArgs{}));
 
-        if(auto app = l->engine_ctx.application_data; app) {
-            l7 =  { { "app", app->protocol() },
-                    { "details", app->requests_all() },
-                    { "signatures", l->matched_signatures() }
-            };
-            if(! app->custom_list_name().empty()) {
-                l7.value()[app->custom_list_name()] = app->custom_list();
+        // Filters must be sampled while their session context is still alive.
+        for(auto& [name, filter] : filters_) {
+            if(filter->update_states()) {
+                snapshot->filter_info[name] = filter->to_json(iINF);
             }
         }
-    }
-    auto const* r = first_right();
-    if(r){
 
-        if(auto* scom = dynamic_cast<SSLCom*>(r->com()); scom) {
-            nlohmann::json x;
-            x["sni"] = scom->get_sni();
-            tls = x;
+        auto capture = nlohmann::json::object();
+        if(capture_metadata_payload_) capture["metadata"] = *capture_metadata_payload_;
+        if(capture_statistics_payload_) capture["statistics"] = *capture_statistics_payload_;
+        if(capture_tls_payload_) capture["tls"] = *capture_tls_payload_;
+        if(auto profile = capture_protocol_profile(); profile) {
+            capture["protocol_profile"] = std::move(*profile);
         }
+        if(!capture.empty()) snapshot->filter_info["capture"] = std::move(capture);
+
+        epitaph_ = std::move(snapshot);
     }
-
-    j["info"] = { {"session", cl },
-                  {"policy", matched_policy() },
-                  { "bytes_up", uB },
-                  { "bytes_down", dB },
-                  { "ja4_ch", ja4.ClientHello },
-                  { "ja4_ch_ignore_sni", acct_opts.ja4_clienthello_ignore_sni },
-                  { "ja4_sh", ja4.ServerHello },
-    };
-
-    if(tls.has_value())  j["info"]["tls"] = tls.value();
-    if(l7.has_value())  j["info"]["l7"] = l7.value();
+    catch(...) {
+        try { _err("MitmProxy::prepare_session_stop: failed to prepare session epitaph"); }
+        catch(...) {}
+    }
+}
 
 
+void MitmProxy::finalize() noexcept {
 
-    sx::http::webhooks::send_action("connection-stop", to_connection_ID(), j);
+    // Consume once. The asynchronous request owns its own payload before this
+    // snapshot is released; callbacks must never retain the proxy or its CXs.
+    auto snapshot = std::move(epitaph_);
+    if(!snapshot) return;
 
-    wh_stop = true;
+    try {
+        sx::proxy::ProxyHooks::stop(*snapshot, sx::proxy::ProxyHooks::StopArgs{});
+    }
+    catch(...) {
+        // Finalization is best effort. Even diagnostic allocation may fail;
+        // neither failure may escape into the owner's resource cleanup.
+        try { _err("MitmProxy::finalize: failed to enqueue session stop"); }
+        catch(...) {}
+    }
 }
 
 
@@ -812,8 +1004,16 @@ std::string MitmProxy::to_string(int verbosity) const {
 
 
             if(matched_policy() >= 0) {
-                auto p = CfgFactory::get()->db_policy_list.at(matched_policy());
-                r << string_format("\n    Policy: %s", p->element_name().c_str());
+                auto lock = std::scoped_lock(CfgFactory::lock());
+                auto p = CfgFactory::get()->lookup_policy(
+                    static_cast<std::size_t>(matched_policy()));
+                if(p) {
+                    r << string_format("\n    Policy: %s", p->element_name().c_str());
+                } else if(matched_policy() == PolicyRule::POLICY_IMPLICIT_PASS) {
+                    r << "\n    Policy: implicit pass (fail-open)";
+                } else {
+                    r << "\n    Policy: unavailable";
+                }
             }
 
 
@@ -842,10 +1042,263 @@ void MitmProxy::add_filter(std::string const& name, FilterProxy* fp) {
 }
 
 
+void MitmProxy::finish_server_hooks() {
+
+    // Announce session retirement while endpoint metadata is still available.
+    // The existing baseProxy path remains solely responsible for closing CXs.
+    for(const auto& [cx, server] : servers_) {
+        hook_server_end(cx, {}, true);
+    }
+
+    servers_.clear();
+}
+
+bool MitmProxy::hook_server_connect(baseHostCX* cx) {
+
+    if(!wh_start || !webhook_server_lifecycle_ ||
+       !sx::http::webhooks::is_enabled() || !cx || !dynamic_cast<TCPCom*>(cx->com())) {
+        return true;
+    }
+
+    auto& server = servers_.get_or_create(cx);
+    server = {};
+    server.attempt = ++server_sequence_;
+
+    sx::proxy::ProxyHooks::ServerArgs args;
+    args.cx = cx;
+    args.event = "connect";
+    args.attempt = server.attempt;
+
+    if(!sx::proxy::ProxyHooks::server(*this, args)) {
+        hook_server_end(cx, "Connection rejected by addon");
+        return false;
+    }
+
+    return true;
+}
+
+void MitmProxy::hook_server_connected(baseHostCX* cx) {
+
+    auto* server = servers_.find(cx);
+    if(!server || server->connected || server->finished) {
+        return;
+    }
+
+    server->connected = true;
+
+    sx::proxy::ProxyHooks::ServerArgs args;
+    args.cx = cx;
+    args.event = "connected";
+    args.attempt = server->attempt;
+
+    if(!sx::proxy::ProxyHooks::server(*this, args)) {
+        state().dead(true);
+    }
+}
+
+void MitmProxy::hook_server_end(baseHostCX* cx, std::string_view error,
+                                bool session_ending) {
+
+    auto* server = servers_.find(cx);
+    if(!server || server->finished) {
+        return;
+    }
+
+    server->finished = true;
+
+    sx::proxy::ProxyHooks::ServerArgs args;
+    args.cx = cx;
+    args.event = server->connected ? "disconnected" : "error";
+    args.attempt = server->attempt;
+    args.session_ending = session_ending;
+    args.error = !server->connected && error.empty()
+        ? "Upstream connection closed before TCP completion" : error;
+
+    sx::proxy::ProxyHooks::server(*this, args);
+}
+
+void MitmProxy::readiness_webhook(unsigned char side, baseHostCX* cx,
+                                  const char* event, std::uint64_t attempt) {
+    sx::proxy::ProxyHooks::ReadinessArgs args;
+    args.side = side;
+    args.cx = cx;
+    args.event = event;
+    args.attempt = attempt;
+
+    sx::proxy::ProxyHooks::readiness(*this, args);
+}
+
+MitmProxy::ObserverStatus MitmProxy::observe_tls(bool retiring) {
+
+    if(!wh_start || (wh_stop && !retiring) || !webhook_tls_lifecycle_ ||
+       !sx::http::webhooks::is_enabled()) {
+        return ObserverStatus::Continue;
+    }
+
+    // The upstream may finish while processing the client's hello. Inspect
+    // both legs before delivering payload or retiring either transport.
+    const auto upstream = observe_tls_side(first_right(), false);
+    const auto client = observe_tls_side(first_left(), true);
+
+    // Observe both legs even when one hook requests termination.
+    if(upstream == ObserverStatus::Terminate || client == ObserverStatus::Terminate) {
+        return ObserverStatus::Terminate;
+    }
+
+    return ObserverStatus::Continue;
+}
+
+MitmProxy::TlsLifecycle& MitmProxy::tls_lifecycle(baseHostCX& cx) {
+
+    auto& observed = tls_.get_or_create(&cx);
+    if(observed.communication != cx.com() ||
+       (cx.socket() > 0 && observed.descriptor != cx.socket())) {
+        observed = {};
+        observed.communication = cx.com();
+        observed.descriptor = cx.socket();
+        observed.attempt = ++tls_sequence_;
+    }
+
+    return observed;
+}
+
+MitmProxy::ObserverStatus MitmProxy::observe_tls_side(baseHostCX* cx, bool client) {
+
+    auto* tls = cx ? dynamic_cast<SSLCom*>(cx->com()) : nullptr;
+    if(!tls) {
+        return ObserverStatus::Continue;
+    }
+
+    auto& observed = tls_lifecycle(*cx);
+
+    if(observed.finished) {
+        tls->clear_tls_proto_history();
+        return ObserverStatus::Continue;
+    }
+
+    const auto& history = tls->tls_proto_history();
+    const auto current = tls->tls_proto_state();
+    const bool established = history.contains(TlsProtoState::established) ||
+                             current == TlsProtoState::established;
+    if(history.overflowed && !observed.history_gap) {
+        _war("TLS observation history overflowed; handshake failure cannot be inferred safely");
+    }
+    observed.history_gap = observed.history_gap || history.overflowed;
+
+    // A later I/O failure must never turn an accepted handshake into tls_failed.
+    // With a history gap, only positive evidence of success remains reliable.
+    const bool pending_handshake = current == TlsProtoState::prepared ||
+        current == TlsProtoState::handshaking || current == TlsProtoState::handshake_want_read ||
+        current == TlsProtoState::handshake_want_write || current == TlsProtoState::checking_peer;
+    const bool interrupted = pending_handshake &&
+        (cx->error() || tls->error() || cx->opening_timeout() || cx->idle_timeout());
+    const bool failed = !observed.history_gap &&
+        (history.contains(TlsProtoState::failed) || current == TlsProtoState::failed || interrupted);
+    tls->clear_tls_proto_history();
+
+    if(!established && !failed) {
+        return ObserverStatus::Continue;
+    }
+
+    observed.finished = true;
+
+    sx::proxy::ProxyHooks::TlsArgs args;
+    args.cx = cx;
+    args.client = client;
+    args.established = established;
+    args.attempt = observed.attempt;
+    args.error = established ? "" : "TLS handshake failed";
+
+    if(!sx::proxy::ProxyHooks::tls(*this, args)) {
+        return ObserverStatus::Terminate;
+    }
+
+    return ObserverStatus::Continue;
+}
+
+void MitmProxy::observe_readiness(unsigned char side, baseHostCX* cx) {
+    if(!wh_start || wh_stop || !sx::http::webhooks::is_enabled()) return;
+    if(!cx || cx->socket() <= 0 || cx->error() || cx->com()->error()) return;
+
+    // Virtual streams and datagrams have different lifecycle contracts.
+    auto* tcp = dynamic_cast<TCPCom*>(cx->com());
+    if(!tcp) return;
+
+    auto& observed = readiness_.get_or_create(cx);
+    observed.observe_context(cx->socket(), cx->com(), readiness_sequence_);
+    if(!observed.connected && tcp->is_connected(cx->socket())) {
+        observed.connected = true;
+        if(side == 'r' || side == 'y') {
+            hook_server_connected(cx);
+        }
+        readiness_webhook(side, cx, "tcp-connected", observed.attempt);
+    }
+    // com_status() also checks readiness of the higher layer, such as TLS.
+    // TCP can be connected while the TLS handshake is still in progress.
+    if(observed.connected && !observed.ready && cx->com()->com_status()) {
+        observed.ready = true;
+        readiness_webhook(side, cx, "application-ready", observed.attempt);
+    }
+}
+
+bool MitmProxy::handle_cx_read_once(unsigned char side, baseCom* com, baseHostCX* cx) {
+    observe_readiness(side, cx);
+
+    if(observe_tls() == ObserverStatus::Terminate) {
+        state().dead(true);
+    }
+
+    return baseProxy::handle_cx_read_once(side, com, cx);
+}
+
+bool MitmProxy::handle_cx_write_once(unsigned char side, baseCom* com, baseHostCX* cx) {
+    observe_readiness(side, cx);
+
+    if(observe_tls() == ObserverStatus::Terminate) {
+        state().dead(true);
+    }
+
+    return baseProxy::handle_cx_write_once(side, com, cx);
+}
+
+void MitmProxy::on_left_pc_error(baseHostCX* cx) {
+    // Permanent contexts can reconnect before the next per-context I/O call.
+    readiness_.erase(cx);
+    baseProxy::on_left_pc_error(cx);
+}
+
+void MitmProxy::on_right_pc_error(baseHostCX* cx) {
+    readiness_.erase(cx);
+    baseProxy::on_right_pc_error(cx);
+}
+
+bool MitmProxy::handle_cx_events(unsigned char side, baseHostCX* cx) {
+    observe_tls_ready();
+    // Sample again after transport I/O advanced a handshake. Retire the record
+    // before baseProxy can reconnect, including reuse of the same numeric fd.
+    observe_readiness(side, cx);
+
+    if(observe_tls() == ObserverStatus::Terminate) {
+        state().dead(true);
+    }
+
+    if(cx->error() || cx->opening_timeout() || cx->idle_timeout())
+        readiness_.erase(cx);
+    return baseProxy::handle_cx_events(side, cx);
+}
+
 int MitmProxy::handle_sockets_once(baseCom* xcom) {
     attach_protocol_tracer();
+    // Exclusive stream handlers bypass baseProxy's ordinary per-context I/O.
+    if(stream_handler_) {
+        observe_readiness('l', first_left());
+        observe_readiness('r', first_right());
 
-    webhook_session_start();
+        if(observe_tls() == ObserverStatus::Terminate) {
+            state().dead(true);
+        }
+    }
+
 
     // A policy stages the handler before the non-blocking upstream connect.
     // Activate it at the first worker cycle where the upstream is connected,
@@ -868,6 +1321,20 @@ int MitmProxy::handle_sockets_once(baseCom* xcom) {
         do {
             result = stream_handler_->drive();
         } while (result == result_t::progress && !state().dead());
+
+        // A protocol library can retain encrypted/control output internally
+        // after returning its non-blocking equivalent of EAGAIN.  Track that
+        // demand explicitly; otherwise an EPOLLIN-only socket can sleep
+        // forever while the peer is ready for our pending write.
+        auto update_handler_monitor = [this](baseHostCX* cx,
+                                             sx::stream_direction direction) {
+            if (!cx) return;
+            int events = EPOLLIN;
+            if (stream_handler_->write_event_pending(direction)) events |= EPOLLOUT;
+            com()->change_monitor(cx->socket(), events);
+        };
+        update_handler_monitor(first_left(), sx::stream_direction::downstream);
+        update_handler_monitor(first_right(), sx::stream_direction::upstream);
 
         if (result == result_t::finished
             || result == result_t::blocked
@@ -900,8 +1367,7 @@ int MitmProxy::handle_sockets_once(baseCom* xcom) {
     // was written, without waiting for the next periodic timer tick.
     if(!state().dead()) {
         for(auto* upstream : rs()) {
-            if(upstream && upstream->read_eof() &&
-               sx::mitmproxy::half_close_peer_drained(upstream)) {
+            if(sx::mitmproxy::half_close_finished(upstream)) {
                 state().dead(true);
                 break;
             }
@@ -1071,6 +1537,20 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
         }
     }
 
+    // Publish the origin server's selected ALPN into the inspection context
+    // once it becomes available. Application engines consume this metadata;
+    // they never have to reach back into SSLCom or the proxy topology.
+    if(scom && mh->engine().negotiated_alpn.empty()) {
+        mh->engine().negotiated_alpn = scom->negotiated_alpn();
+    }
+
+    if(not wh_sni and scom and not scom->get_sni().empty()) {
+        if(auto const* target = first_right(); target) {
+            wh_sni = sx::http::webhooks::hostname_info(
+                "sni", {target->host()}, scom->get_sni());
+        }
+    }
+
     bool redirected = false;
 
     auto const client_cert_action = scom
@@ -1170,8 +1650,19 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
                     }
                 }
 
-                if(mh->replacement_type() == MitmHostCX::REPLACETYPE_NONE) {
-                    _war("certificate not OK; deferring replacement until client protocol is known");
+                bool h2_request_ready = false;
+                if(mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP2) {
+                    auto* connection =
+                        std::any_cast<sx::engine::http::v2::Http2Connection>(
+                            &mh->engine().state_data);
+                    h2_request_ready =
+                        connection && connection->latest_request_stream_id > 0;
+                }
+
+                if(mh->replacement_type() == MitmHostCX::REPLACETYPE_NONE ||
+                   (mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP2 &&
+                    !h2_request_ready)) {
+                    _war("certificate not OK; deferring replacement until client request is known");
                     tls_replacement_pending = true;
                     redirected = true;
                 }
@@ -1255,83 +1746,45 @@ void MitmProxy::proxy_dump_packet(side_t sid, buffer const& buf) {
     }
 };
 
-static std::string b64_encode(buffer &buffer) {
-    return libbase64::encode<std::string, char, unsigned char, true>(buffer.data(), buffer.size());
+bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer,
+                                std::string_view payload_layer,
+                                bool regular_webhook, bool sift, ::buffer& reverse_output) {
+    if(!regular_webhook && !sift) return false;
+    if(!cx || buffer.empty()) return false;
+
+    sx::proxy::ProxyHooks::ContentArgs args;
+    args.cx = cx;
+    args.side = side;
+    args.data = &buffer;
+    args.payload_layer = payload_layer;
+    args.regular_webhook = regular_webhook;
+    args.sift = sift;
+    args.reverse_output = &reverse_output;
+
+    return sx::proxy::ProxyHooks::content(*this, args);
 }
 
-static std::string b64_decode(std::string const& encoded) {
-    return libbase64::decode<std::string, char, unsigned char, false>(encoded);
-}
+bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t side,
+                                     buffer& reverse_output) {
+    const auto sift_is_enabled = sx::http::webhooks::sift_enabled();
+    const auto webhook_enabled = sx::http::webhooks::is_enabled() and
+                                 writer_opts()->webhook_enable;
 
+    // Classification waits only for this flow. It must never participate in
+    // the forensic global webhook lock used by the interactive Spider app.
+    auto const payload_layer = content_payload_layer(from);
 
+    if(sift_is_enabled and content_webhook(
+            from, side, from->to_read(), payload_layer, false, true, reverse_output)) {
+        if(!webhook_control_->strict()) return true;
+    }
+    if(!webhook_enabled) {
+        if(webhook_control_->strict()) state().dead(true);
+        return false;
+    }
 
-bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer) {
+    if(!webhook_content_wanted_ && !webhook_control_->strict()) return false;
 
-    auto& log = log_content;
-
-    if(not sx::http::webhooks::is_enabled()) return false;
-    if(not cx or buffer.empty()) return false;
-
-    if(not writer_opts()->webhook_enable) return false;
-
-    bool was_modified = false;
-
-    nlohmann::json j;
-    auto cl = to_connection_label();
-    std::string encoded = b64_encode(buffer);
-    j["info"] = {
-        { "session", cl },
-        { "side", string_format("%c", from_side(side)) },
-        { "content", encoded }
-    };
-
-    sx::http::webhooks::send_action_wait("connection-content", to_connection_ID(), j, [&](sx::http::expected_reply r){
-        if(r.has_value()) {
-            auto reply = r.value();
-            _dia("webhook content-replace: response %d", reply.response.first);
-
-            if(reply.response.first >= 200 and reply.response.first < 300) {
-                auto json_obj = nlohmann::json::parse(reply.response.second, nullptr, false);
-                if(json_obj.is_discarded()) {
-                    _err("MitmProxy::content_webhook: response body is invalid");
-                }
-                else {
-                    if(json_obj.contains("action")) {
-                        if(json_obj["action"] == "discard") {
-                            // data sent to webhook shall be discarded
-                            buffer.size(0);
-                            was_modified = true;
-                        }
-                        else {
-                            // catch-all code to decode response if present
-                            if(json_obj.contains("content")) {
-                                std::string body = json_obj["content"];
-                                auto decoded = b64_decode(body);
-
-                                _dia("webhook content-replace: received %dB of replacement data", decoded.size());
-                                {
-                                    auto& log = log_content_dump;
-                                    _deb("webhook content-replace: replacement: %s\r\n",
-                                         hex_dump((unsigned char*)decoded.data(), decoded.size(), 4, 0, true).c_str());
-                                }
-
-                                buffer.assign(decoded.data(), decoded.size());
-                                was_modified = true;
-                            }
-                            else {
-                                _dia("webhook content-replace: no replacement body received");
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    });
-
-    return was_modified;
-}
-
-bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t side) {
     if(writer_opts()->webhook_lock_traffic) {
 
         if(from->com() and from->com()->l4_proto() == SOCK_STREAM) {
@@ -1372,7 +1825,7 @@ bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t 
                          to_string(iNOT).c_str(), attempt_no);
 
                 }
-                return content_webhook(from, side, from->to_read());
+                return content_webhook(from, side, from->to_read(), payload_layer, true, false, reverse_output);
             }
         }
         _err("[%s]: content_webhook: previous webhook takes too long to complete, content NOT sent to webhook.",
@@ -1380,19 +1833,38 @@ bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t 
         log.event(ERR, "[%s]: content_webhook: previous webhook takes too long to complete, content NOT sent to webhook.",
              to_string(iNOT).c_str());
 
+        if(webhook_control_->strict()) state().dead(true);
+
     }
     else {
-        return content_webhook(from, side, from->to_read());
+        return content_webhook(from, side, from->to_read(), payload_layer, true, false, reverse_output);
     }
     return false;
 }
 
 void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected,
-                      bool consume_source) {
+                      bool consume_source, FlowCtx::Tx const* tx) {
 
-    if(not to or not from or from->to_read().empty()) return;
+    auto stop_io = [this] {
+        // proxy() runs inside a traversal of these vectors. shutdown() would
+        // clear them, invalidate that traversal and cause a second Tx discard.
+        // Close descriptors now; normal proxy cleanup retires the contexts.
+        for(auto const* sockets : {&left_sockets, &right_sockets,
+                                   &left_delayed_accepts, &right_delayed_accepts}) {
+            for(auto* host : *sockets) host->shutdown();
+        }
+    };
+
+    if(not to or not from or from->to_read().empty()) {
+        // Even an early exit must close the observation transaction. In
+        // particular, a preceding destination may have consumed the source.
+        if(tx) flow_ctx_->discard(*tx);
+        return;
+    }
 
     if(redirected) {
+        if(tx) flow_ctx_->discard(*tx);
+
         if(tls_replacement_pending) {
             // Upstream application data must not reach the client after a
             // failed certificate decision. Keep the client leg alive until
@@ -1409,13 +1881,44 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
         return;
     }
 
+    // Transport adapters may enrich the ordinary application state before
+    // the same content webhook path used by TCP-based inspection engines.
+    if(traffic_log_adapter_) {
+        if(auto metadata = traffic_log_adapter_->inspect_content(side, from->to_read())) {
+            if(auto* current = MitmHostCX::from_baseHostCX(from); current != nullptr) {
+                auto app = std::dynamic_pointer_cast<HttpApplication>(
+                    current->engine().application_data);
+                if(!app && metadata->payload_layer == "http3") {
+                    app = ensure_http_application(current);
+                }
+                if(app) {
+                    if(metadata->payload_layer == "http3")
+                        app->version = HttpApplication::HTTP_VER::HTTP3;
+                    app->observe_l7_payload(
+                        from->to_read().string_view(), current->meter_read_bytes,
+                        sx::engine::http::L7PayloadHints(
+                            metadata->payload_ranges.begin(),
+                            metadata->payload_ranges.end()),
+                        std::move(metadata->encodings));
+                }
+            }
+        }
+    }
+
+    buffer reverse_output;
     // 1. content webhook first (potentially modifies from->to_read() buffer
-    if(writer_opts()->webhook_enable) {
+    if(writer_opts()->webhook_enable or sx::http::webhooks::sift_enabled() or webhook_control_->strict()) {
         auto orig_sz = from->to_read().size();
-        if(handle_content_webhook(from, to, side)) {
+        if(handle_content_webhook(from, to, side, reverse_output)) {
             auto sz = from->to_read().size();
             _dia("mitmproxy::proxy-%c: %dB replaced with %dB (webhook)", from_side(side), orig_sz, sz);
         }
+    }
+
+    if(state().dead()) {
+        if(tx) flow_ctx_->discard(*tx);
+        stop_io();
+        return;
     }
 
     // 2. do filtering (stats, access, etc.)
@@ -1428,8 +1931,9 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
             _deb("MitmProxy::proxy: filter %s: proxy marked dead", filter_name.c_str());
 
             // after marking dead, session is not getting on_error anymore
-            webhook_session_stop();
-            shutdown();
+            prepare_session_stop();
+            if(tx) flow_ctx_->discard(*tx);
+            stop_io();
             return;
         }
     }
@@ -1446,31 +1950,96 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
         proxy_dump_packet(side, dump_buffer);
     }
 
-    if(replacement.has_value()) {
-        to->to_write(replacement.value());
-        write_traffic_log(side, from, &replacement.value());
+    try {
+        auto& outgoing = replacement ? *replacement : from->to_read();
+        const auto size = outgoing.size();
 
-        auto orig_sz = from->to_read().size();
-        auto sz = replacement.value().size();
-        _dia("mitmproxy::proxy-%c: %dB replaced with %dB (content rule)", from_side(side), orig_sz, sz);
+        // Reserve before publishing either output. Socket I/O remains deferred
+        // to the write phase; a failure below closes both legs.
+        if(!reverse_output.empty()) {
+            if(size > std::numeric_limits<std::size_t>::max() - to->writebuf()->size()) {
+                throw std::length_error("Forward output exceeds write buffer capacity");
+            }
+            to->writebuf()->capacity(to->writebuf()->size() + size);
+        }
+
+        if(tx) flow_ctx_->commit(*tx, outgoing);
+        write_traffic_log(side, from, replacement ? &*replacement : nullptr);
+        inject(reverse_output, side);
+        to->to_write(outgoing, replacement.has_value() || consume_source);
+        _dia("mitmproxy::proxy-%c: queued %dB", from_side(side), size);
     }
-    else {
-        write_traffic_log(side, from);
-        to->to_write(from->to_read(), consume_source);
-
-        auto sz = from->to_read().size();
-        auto fastlane = sz > 0 and from->to_read().empty();
-        _dia("mitmproxy::proxy-%c: %dB copied %s", from_side(side), sz, fastlane ? "(fastlane)": "");
+    catch(std::exception const& error) {
+        _err("Cannot publish proxy output: %s", error.what());
+        state().dead(true);
+        from->to_read().clear();
+        stop_io();
+        return;
     }
 
+    // All current bytes have now been queued (or deliberately discarded).
+    // finish() still counts the original input bytes, not a webhook's resized
+    // replacement. Leaving a copied replacement here would replay its tail on
+    // the next read. A fastlane swap already emptied it; clear is then a no-op.
+    // Preserve the source until the final destination has received its copy.
+    if(consume_source) from->to_read().clear();
 }
 
 
+void MitmProxy::inject(buffer& data, side_t side) {
+    if(data.empty()) return;
+
+    if(side != side_t::LEFT && side != side_t::RIGHT) {
+        throw std::invalid_argument("Invalid injection side");
+    }
+
+    // A side alone identifies a destination only on a one-to-one stream proxy.
+    // Do not silently choose the first peer of a multi-destination proxy.
+    const auto& sockets = side == side_t::LEFT ? left_sockets : right_sockets;
+    const auto& delayed = side == side_t::LEFT ? left_delayed_accepts : right_delayed_accepts;
+
+    if(state().dead() || sockets.size() + delayed.size() != 1) {
+        throw std::logic_error("Injection requires one live destination");
+    }
+
+    auto* target = side == side_t::LEFT ? first_left() : first_right();
+
+    if(!target || target->error() || target->socket() <= 0) {
+        throw std::logic_error("Injection destination is unavailable");
+    }
+
+    if(data.size() > std::numeric_limits<std::size_t>::max() - target->writebuf()->size()) {
+        throw std::length_error("Injection exceeds write buffer capacity");
+    }
+
+    try {
+        // Reserve before advancing protocol state. Neither this pass nor
+        // to_write() invokes inspectors, a content webhook or a socket write.
+        target->writebuf()->capacity(target->writebuf()->size() + data.size());
+        const auto direction = side == side_t::LEFT ? FlowCtx::Dir::R2I : FlowCtx::Dir::I2R;
+        flow_ctx_->inject(direction, data);
+        target->to_write(data, false);
+        target->com()->forced_write(true);
+    }
+    catch(...) {
+        // Protocol parsing may have advanced before queueing fails. Do not
+        // continue the connection with a context that differs from its output.
+        state().dead(true);
+        throw;
+    }
+}
+
 void MitmProxy::write_traffic_log(side_t side, baseHostCX* cx, buffer* custom_buffer) {
 
-    if(writer_opts()->write_payload) {
-        if(not cx) return;
+    if(not cx) return;
 
+    auto* observed = custom_buffer ? custom_buffer : &cx->to_read();
+
+    if(traffic_log_adapter_ and observed and not observed->empty()) {
+        traffic_log_adapter_->observe(side, *observed);
+    }
+
+    if(writer_opts()->write_payload) {
         auto* buffer = custom_buffer;
         if(not buffer) {
             buffer = &cx->to_read();
@@ -1512,7 +2081,20 @@ void MitmProxy::write_stream_event(sx::stream_direction direction,
 
 void MitmProxy::on_left_bytes(baseHostCX* cx) {
 
+    // A single read may complete TLS and return application data together.
+    if(observe_tls() == ObserverStatus::Terminate) {
+        state().dead(true);
+        return;
+    }
+
+    observe_readiness('l', cx);
+
+
     if(not cx or state().dead()) return;
+    if(cx->to_read().empty() || !webhook_session_start()) return;
+
+    auto tx = flow_ctx_->begin(
+        FlowCtx::Dir::I2R, cx->to_read(), cx->meter_read_bytes);
 
     bool redirected = handle_requirements(cx);
 
@@ -1523,6 +2105,7 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
             tls_replacement_pending = false;
             ssl_handled = true;
             state().dead(true);
+            flow_ctx_->discard(tx);
             return;
         }
     }
@@ -1548,8 +2131,9 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
             right_sockets.end(),
             [&](auto* to) {
                 if(not state().dead()) {
+                    const bool final = destinations_remaining == 1;
                     proxy(cx, to, side_t::LEFT, redirected,
-                          destinations_remaining == 1);
+                          final, final ? &tx : nullptr);
                     --destinations_remaining;
                 }
             });
@@ -1560,11 +2144,17 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
             right_delayed_accepts.end(),
             [&](auto* to) {
                 if(not state().dead()) {
+                    const bool final = destinations_remaining == 1;
                     proxy(cx, to, side_t::LEFT, redirected,
-                          destinations_remaining == 1);
+                          final, final ? &tx : nullptr);
                     --destinations_remaining;
                 }
             });
+
+    if(destinations_remaining != 0 ||
+       (right_sockets.empty() && right_delayed_accepts.empty())) {
+        flow_ctx_->discard(tx);
+    }
 
 }
 
@@ -1587,7 +2177,20 @@ bool MitmProxy::handle_requirements(baseHostCX* cx) {
 
 void MitmProxy::on_right_bytes(baseHostCX* cx) {
 
+    // A single read may complete TLS and return application data together.
+    if(observe_tls() == ObserverStatus::Terminate) {
+        state().dead(true);
+        return;
+    }
+
+    observe_readiness('r', cx);
+
+
     if(not cx or state().dead()) return;
+    if(cx->to_read().empty() || !webhook_session_start()) return;
+
+    auto tx = flow_ctx_->begin(
+        FlowCtx::Dir::R2I, cx->to_read(), cx->meter_read_bytes);
 
     bool redirected = handle_requirements(cx->peer());
 
@@ -1613,8 +2216,9 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
             left_sockets.end(),
             [&](auto* to) {
                 if(not state().dead()) {
+                    const bool final = destinations_remaining == 1;
                     proxy(cx, to, side_t::RIGHT, redirected,
-                          destinations_remaining == 1);
+                          final, final ? &tx : nullptr);
                     --destinations_remaining;
                 }
             });
@@ -1625,11 +2229,17 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
             left_delayed_accepts.end(),
             [&](auto* to) {
                 if(not state().dead()) {
+                    const bool final = destinations_remaining == 1;
                     proxy(cx, to, side_t::RIGHT, redirected,
-                          destinations_remaining == 1);
+                          final, final ? &tx : nullptr);
                     --destinations_remaining;
                 }
             });
+
+    if(destinations_remaining != 0 ||
+       (left_sockets.empty() && left_delayed_accepts.empty())) {
+        flow_ctx_->discard(tx);
+    }
 
 }
 
@@ -1724,14 +2334,14 @@ std::string get_connection_details_str(MitmProxy* px, baseHostCX* cx, char side)
             detail << string_format("sni=%s ", sc->get_sni().c_str());
         }
     }
-    if(mh && mh->engine_ctx.application_data) {
+    if(mh && mh->engine().application_data) {
 
-        auto* app = dynamic_cast<sx::engine::http::app_HttpRequest*>(mh->engine_ctx.application_data.get());
+        auto* app = dynamic_cast<sx::engine::http::app_HttpRequest*>(mh->engine().application_data.get());
         if(app) {
             detail << "app=" << app->http_data.proto << app->http_data.host << " ";
         }
         else {
-            detail << "app=" << mh->engine_ctx.application_data->str() << " ";
+            detail << "app=" << mh->engine().application_data->str() << " ";
         }
     }
 
@@ -1904,7 +2514,7 @@ void MitmProxy::on_error(baseHostCX* cx, char side, const char* side_label) {
             }
         }
 
-        webhook_session_stop();
+        prepare_session_stop();
     }
 }
 
@@ -1921,12 +2531,10 @@ void MitmProxy::on_right_error(baseHostCX* cx) {
 bool MitmProxy::run_timers() {
     auto ret = baseProxy::run_timers();
 
-    // Client half-close keeps the upstream request alive. Origin EOF is the
-    // reverse direction: close as soon as its final response has drained.
+    // Preserve each supported half until its queued output has drained.
     if(ret && !state().dead()) {
         for(auto* upstream : rs()) {
-            if(upstream && upstream->read_eof() &&
-               sx::mitmproxy::half_close_peer_drained(upstream)) {
+            if(sx::mitmproxy::half_close_finished(upstream)) {
                 state().dead(true);
                 break;
             }
@@ -1954,7 +2562,7 @@ bool MitmProxy::run_timers() {
             }
         }
 
-        webhook_session_stop();
+        prepare_session_stop();
     }
 
     return ret;
@@ -2130,12 +2738,12 @@ bool MitmProxy::write_replacement_response(MitmHostCX* cx,
     if(!cx) return false;
 
     auto* app_request = dynamic_cast<sx::engine::http::app_HttpRequest*>(
-        cx->engine_ctx.application_data.get());
+        cx->engine().application_data.get());
     bool const head_only = app_request && app_request->http_data.method == "HEAD";
 
     if(cx->replacement_type() == MitmHostCX::REPLACETYPE_HTTP2) {
         auto* connection = std::any_cast<sx::engine::http::v2::Http2Connection>(
-            &cx->engine_ctx.state_data);
+            &cx->engine().state_data);
         auto const stream_id = connection ? connection->latest_request_stream_id : -1;
         if(stream_id > 0) {
             auto response = sx::engine::http::v2::make_response(
@@ -2178,7 +2786,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
     }
 
 
-    auto* app_request = dynamic_cast<sx::engine::http::app_HttpRequest*>(cx->engine_ctx.application_data.get());
+    auto* app_request = dynamic_cast<sx::engine::http::app_HttpRequest*>(cx->engine().application_data.get());
     if(app_request != nullptr) {
         log.event(INF, "[%s]: HTTP replacement active", socle::com::ssl::connection_name(scom, true).c_str());
 
@@ -2390,7 +2998,6 @@ std::optional<buffer> MitmProxy::content_replace_apply(const buffer &ref) {
     for(auto& profile: *content_rule()) {
         
         try {
-            const std::regex re_match(profile.match.c_str());
             const std::string repl = profile.replace;
             
             if(profile.replacement_due()) {

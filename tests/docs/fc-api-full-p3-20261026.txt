@@ -1,0 +1,111 @@
+FC-API RELEASE-CANDIDATE REGRESSION -- 2026-10-26
+================================================
+
+Verdict: PASS. All 43 full-run sections passed; no FAIL or FLAKY_PASS.
+No product or test changes were needed to obtain this result.
+
+Pinned source
+-------------
+Smithproxy fc-api: 274f73a5f224aa4b5ba690270aaf96326e08986c
+Spider fc-api:     20a754196be2b72127ef1ade182bfce358823458
+Socle baseline:   decc93fe2957f89f2cf508fe90118710ab224729
+All source trees were clean when the run began. Socle remains unmodified.
+The runner subsequently appended its successful invocation to patch-run-history.
+
+Execution
+---------
+Full runner: 2026-10-26 06:34:13 through 07:13:11 UTC (38m58s).
+Fresh RelWithDebInfo production build and fresh Debug native build.
+Native gate: local coordinator, four build/test jobs.
+Dataplane gate: one dedicated remote Linux target, three section workers.
+Smoke, RTT and throughput ran before the parallel workload, as prescribed.
+The target had 16 logical CPUs and 123 GiB RAM.
+No SASlik instance or production configuration was changed.
+
+From the Smithproxy repository:
+  tests/patch-runner/test-patch.sh full --remote root@TEST_HOST \
+      --parallel 3 --jobs 4 \
+      --dir /tmp/fc-api-full-p3-20261026 --unique=gate --quiet
+
+Coverage and results
+--------------------
+Layer                                      Result
+Smithproxy native CTest gate                PASS 43/43 suites, 131.16 s
+Full P3 aggregate                          PASS 43/43 sections
+Spider complete CTest selection             PASS 41/41 suites, 147.87 s
+  Easy safety                              PASS
+  Expert safety                            PASS
+  real-proxy Translate E2E                  PASS 7/7 suites
+TLS connection-start / JSON                 PASS 47 scenarios
+TLS connection-start / SXBN                 PASS 47 scenarios
+API documentation generator --check         PASS
+
+Spider includes executable cookbook examples, H1/H2 Parts/corpus tests,
+hold/need-more, Content-Digest, setup, sandbox, storage, worker/pool and
+Translate coverage. Translate E2E includes missing calls, exceptions,
+fragmentation, SETTINGS, policy, DATA and Expert behavior.
+Setup tests used isolated loopback namespaces. Spider CTest also ran in an
+isolated user/network namespace with loopback; no CTest cases were skipped.
+These companion API tests ran locally, not on the remote dataplane target.
+
+Every full P3 section below returned PASS:
+  native, smoke, rtt, tls-throughput, tls-policy, routing, transfer,
+  quic, tcp-churn, udp-churn, capture,
+  corpus-regular, corpus-edge, corpus-insanity,
+  fuzz.h1.regular, fuzz.h1.edge, fuzz.h1.insanity,
+  fuzz.h2.regular, fuzz.h2.edge, fuzz.h2.insanity,
+  fuzz.tls, fuzz.socks5, fuzz.dns, fuzz.quic, fuzz.redis, fuzz.mqtt,
+  fuzz.smtp, fuzz.imap, fuzz.pop3, fuzz.ftp, fuzz.ssh, fuzz.websocket,
+  fuzz.memcached, fuzz.postgresql, fuzz.mysql, fuzz.amqp, fuzz.telnet,
+  fuzz.ntp, fuzz.syslog, fuzz.stun, fuzz.tftp, fuzz.snmp, fuzz.raw.
+Deterministic fuzz seed: smithproxy-baseline-v1.
+IPv4 and IPv6 gates both passed where applicable.
+
+Measurements (not a rewrite-specific throughput benchmark)
+---------------------------------------------------------
+                                   IPv4            IPv6
+TLS-total RTT P50                   2.748 ms        2.613 ms
+HTTPS RTT P50                      0.484 ms        0.430 ms
+TLS download, concurrency 1         309.6 MiB/s     301.7 MiB/s
+TLS download, concurrency 4         320.6 MiB/s     322.1 MiB/s
+TLS download, concurrency 16        318.3 MiB/s     315.6 MiB/s
+TLS upload, concurrency 1           218.7 MiB/s     213.0 MiB/s
+TLS upload, concurrency 4           282.5 MiB/s     280.7 MiB/s
+TLS upload, concurrency 16          287.5 MiB/s     287.0 MiB/s
+
+Throughput values are medians of three samples, with 64 MiB per flow.
+RTT enforces its normal gates; throughput is integrity-checked measurement,
+not a numeric performance gate. No claim of a baseline speedup is made.
+TCP churn: 1280 flows per address family, zero churn/probe errors.
+UDP churn: 768 flows per address family, zero churn/probe errors.
+Capture matrix and H2 observability passed, including PCAPNG/GRE validation.
+
+Cleanup and limitations
+-----------------------
+Runner cleanup/no-bypass checks passed. Independent final remote inspection
+found no network namespaces, test veths or running Smithproxy processes.
+Retained logs/lab artifacts were not deleted.
+
+This is the standard complete full P3 profile, not every optional profile:
+no sanitizer/line-coverage run, optional external/privileged native tests,
+extended soak, Docker platform matrix, new random fuzz seed exploration or
+browser interaction smoke was requested as a separate gate here.
+Passing tests support the current implemented contract; they do not prove
+unlimited protocol coverage or replace the remaining API contract review.
+
+Evidence
+--------
+Original full report:
+  /tmp/fc-api-full-p3-20261026_gate/results/20261026T063413Z-274f73a5-full/
+  summary.json, summary.txt, sections.tsv, native/junit.xml, native/ctest.log
+Original API evidence:
+  /tmp/fc-api-extra-tests-20261026/
+  spider-all.xml, spider-all.log, setup-tls-{json,sxbn}.log, results.tsv
+Companion runner:
+  /tmp/fc-api-extra-tests-20261026.sh
+
+Durable local evidence copy outside temporary storage:
+  /home/astib/Documents/ChatGPT/Smithproxy/p3-runs/fc-api-274f73a-20261026/
+  reports/, coordinator/, api/, fc-api-extra-tests-20261026.sh
+The coordinator artifacts contain the remote per-section result archives.
+These paths describe local evidence, not files distributed with the repository.

@@ -19,7 +19,9 @@ tests/patch-runner/
 ├── test-patch.sh          main command-line entry point
 ├── native-tests.sh        CTest build/run driver used by native/full/coverage
 ├── coverage-report.py     gcov JSON to text, JSON and HTML line reports
-├── remote-scheduler.sh    target-local worker pool for full/fuzz runs
+├── remote-scheduler.sh    target-local worker pool for distributed profiles
+├── prepare-proxy-nightmare.sh  pinned Git acquisition/build for lifecycle
+├── proxy-nightmare.lock   reviewed ProxyNightmare repository and commit
 ├── fuzz-seeds.py          bounded regression/recent/archive seed selection
 ├── harness/               network lab, origins, probes and validators
 ├── corpus/
@@ -64,7 +66,7 @@ tests/patch-runner/test-patch.sh sanity --remote root@test-runner-1
 # Recommended comprehensive correctness gate: modest section parallelism,
 # predictable work directory and no unrelated host-load experiment.
 tests/patch-runner/test-patch.sh full --remote root@test-runner-1 \
-    --parallel 3 --jobs 8 --dir /tmp/patch-runner/manual-full-p3
+    --parallel 3 --jobs 8 --dir /var/tmp/smithproxy-patch-runner/manual-full-p3
 
 # Build once, then run three workers on each of two targets.
 tests/patch-runner/test-patch.sh full --remote root@test-runner-1 \
@@ -95,24 +97,30 @@ For a long foreground run, use `screen` or another terminal multiplexer:
 ```bash
 screen -S smithproxy-full
 tests/patch-runner/test-patch.sh full --remote root@test-runner-1 \
-    --parallel 3 --dir /tmp/patch-runner/manual-full-p3
+    --parallel 3 --dir /var/tmp/smithproxy-patch-runner/manual-full-p3
 # Detach with Ctrl-A D; return with: screen -r smithproxy-full
 ```
 
-The default work root is `/tmp/patch-runner/<branch>_@_<commit>/`. Prefer an
-explicit `--dir` for long runs so reports and live logs have a predictable
-location. Useful first checks are:
+The default work root is
+`/var/tmp/smithproxy-patch-runner/<branch>_@_<commit>_<UTC>-<pid>/`. Every
+invocation therefore owns a separate tree even when two coordinators test the
+same branch and commit concurrently. Prefer an explicit `--dir` for long runs
+so reports and live logs have a predictable location. Useful first checks are:
 
 ```bash
-tail -f /tmp/patch-runner/manual-full-p3/results/*/test.log
-cat /tmp/patch-runner/manual-full-p3/results/*/summary.txt
-cat /tmp/patch-runner/manual-full-p3/results/*/sections.tsv
-df -h /tmp
+tail -f /var/tmp/smithproxy-patch-runner/manual-full-p3/results/*/test.log
+cat /var/tmp/smithproxy-patch-runner/manual-full-p3/results/*/summary.txt
+cat /var/tmp/smithproxy-patch-runner/manual-full-p3/results/*/sections.tsv
+df -h /var/tmp
+df -i /var/tmp
 ```
 
 Remote lab directories and heavy capture artifacts are deliberately retained
-for diagnosis. Monitor free space before long runs and remove only explicitly
-identified, no-longer-needed work roots.
+for diagnosis. The coordinator receives section summaries and logs, while
+per-case `lab-results/` stay on the execution target. Before unpacking a result
+archive, the coordinator verifies that the work filesystem has enough free
+inodes. Monitor both free space and free inodes before long runs and remove
+only explicitly identified, no-longer-needed work roots.
 
 `--parallel N` controls how many independent sections run simultaneously on
 each target. It is a scheduler/load control, not a controlled contention test
@@ -122,8 +130,95 @@ focused workload that ramps identical flows against one instance and measures
 control probes between them; do not infer a product bottleneck merely by
 running every unrelated section at once.
 
+With exactly one `--remote HOST`, that host owns the complete run. The
+coordinator stages the current working tree there, then dependency preparation,
+configure, build, native tests, benchmarks and parallel runtime sections all
+execute remotely. Only progress output and the final report return to the
+coordinator, so a full run does not consume the developer workstation's CPU.
+Mixed local or multiple-target invocations continue to use the distributed
+worker scheduler.
+
+Each parallel section owns its work tree, lab directories, namespaces, veth
+names, PID files, result files and lifecycle monitor. Host API/CLI ports use
+cross-process `flock` leases, so P4/P6 workers cannot select the same port.
+Internal ports may repeat because their network namespaces are independent.
+
+Before dispatch, known sections are ordered by their duration in the previous
+completed run, longest first. This lets shorter sections fill worker gaps while
+the longest sections are still running. A first run without history keeps the
+profile order. Target-local history lives outside Git at
+`/var/tmp/smithproxy-patch-runner-history/<uid>/section-durations.tsv`; an
+absolute `PATCH_TEST_TIMING_HISTORY` path can isolate an experiment or start a
+new history. Concurrent runs use `flock` and atomic replacement. `schedule.tsv`
+records the selected order and `sections.tsv` records each observed
+`duration_ms`.
+
 Run `tests/patch-runner/test-patch.sh --help` for the authoritative option
 syntax.
+
+### Protocol endpoint views
+
+The native gate includes `unit.protocol_views` and the two real-proxy webhook
+tests `integration.protocol_views_json` / `integration.protocol_views_binary`.
+The live tests use a deterministic webhook stand-in, not a running Spider.
+
+`FlowCtx` and `ProtocolViews` coordinate endpoint routing and callback lifetime;
+they do not select H2 types or parse frames. `ProtocolAdapter` owns detection,
+initialization, observation and independent state copying. The first production
+adapter is HTTP/2; a non-HTTP ledger adapter tests that the coordinator does not
+depend on its wire format. Unsupported protocols retain their legacy path.
+Output observation suppresses external inspector effects and never invokes a
+second webhook. Setup selects Observe (one input context) or Rewrite (one
+initial fork, then two endpoint-local contexts). The retired snapshot/journal
+and speculative per-callback fork live only in the
+[design archive](../../docs/design-history/protocol-checkpoints-20261026/README.txt).
+
+Measure the one-time setup fork cost separately from parser cost in an optimized
+build; the ordinary native runner intentionally uses Debug:
+
+```bash
+cmake -S . -B /tmp/sx-protocol-benchmark -DCMAKE_BUILD_TYPE=Release \
+  -DSMITHPROXY_OPTIMIZED_TESTS=ON -DBUILD_TESTING=ON \
+  -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+cmake --build /tmp/sx-protocol-benchmark --target sx_gtests_http1 -j2
+ctest --test-dir /tmp/sx-protocol-benchmark -R '^benchmark.protocol_fork$' -V
+```
+
+Do not run the measurement alongside the full runner, builds or other load.
+Its CSV-style rows report median/min/max microseconds per operation over seven
+batches, not request latency percentiles. They distinguish one parser, Observe
+without a fork, the first Rewrite payload (including its setup fork), steady
+Rewrite with two parsers, and fork alone. Separate fixtures measure retained header/gzip storage and completed
+request history. These are in-process costs, not network throughput claims.
+
+The `two_contexts_from_start` row is a benchmark-only eager alternative: two
+independent engines receive the same initialization traffic, then each parses
+the current DATA block once. It uses neither a fork nor a delta. Initialization
+and teardown remain outside the timing, as for the other paths. The fixture's
+output-only observation guard is inert (no host/DNS side effects); this is not
+an alternate production forwarding path. Both contexts' body counters and
+protocol validity are checked. DATA timings do not measure repeated HPACK header
+decoding, connection setup, webhook latency or per-connection memory overhead.
+
+`two_contexts_shared_analysis` adds a callback-local `PayloadAnalysis` shared
+by the two observations. Its owned byte snapshot, allocation, equality checks
+and destruction are included in timing. Only the byte fingerprint is reused;
+L7 boundaries, encoding and protocol validity still come from each context's
+own state. A same-size in-place replacement must miss the cache.
+
+`two_contexts_no_output_fingerprint` retains that input workspace but passes
+an explicit protocol-only `PayloadAnalysis` to the receiver. Its absent
+publication fingerprint means "not needed", not "compute on cache miss".
+The normal ProtocolViews output/seed pass uses this policy too; input still
+creates a publication identity. The historical single/two/shared benchmark
+controls explicitly request publication so they remain comparable. Stateful
+parsing is not skipped and old publication identities are invalidated.
+Production uses the setup-selected Observe/Rewrite strategy, not these diagnostic
+alternatives. The old `unchanged_with_fork` and `first_split` rows are archived;
+do not compare them as if they were the new `observe_no_fork` and
+`setup_rewrite_first_payload` rows.
+HPACK decoders share an immutable process-wide Huffman tree independently of
+this workspace; dynamic compression tables remain private to each context.
 
 ## Options
 
@@ -145,6 +240,7 @@ syntax.
 | `--include-benchmarks` | Add benchmark-shaped native tests |
 | `--include-extended` | Add long-running soak tests |
 | `--include-platform` | Add the Docker Linux distribution matrix |
+| `--preflight-only` | Check SSH, sudo and namespace capabilities without building |
 | `--skip-build` | Require and reuse `BUILD_DIR/smithproxy` |
 | `--quiet` | Print verdicts, failures and report paths instead of full logs |
 | `-h`, `--help` | Print built-in help |
@@ -154,18 +250,22 @@ output is their primary interface.
 
 ## Profiles and coverage
 
-| Check | `quick` | `native` | `coverage` | `sanity` | `full` | `fuzz` | `fuzz-dyn` | `benchmark` | `--run` |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| Build `smithproxy` | yes | yes | yes | yes | yes | yes | yes | yes | yes |
-| C++/Python native and runner self-tests | - | yes | yes | - | gate | - | - | - | - |
-| GCC line report | - | - | yes | - | - | - | - | - | - |
-| Authenticated API startup | - | - | - | yes | yes | every shard | every shard | yes | yes |
-| IPv4/IPv6 functional layers | - | - | - | yes | yes | smoke gate | smoke gate | yes | manual |
-| TLS/policy/RTT/transfer/throughput/churn | - | - | - | focused | yes | - | - | report only | manual |
-| Corpus and capture observability | - | - | - | focused | yes | - | - | - | manual |
-| Bounded deterministic `fuzz.*` | - | - | - | focused | yes | yes | - | - | manual |
-| New-seed `fuzz.*` exploration | - | - | - | - | - | - | yes | - | manual |
-| No-bypass and cleanup checks | - | - | - | yes | every section | every shard | every shard | yes | on exit |
+| Profile | Contents |
+|---|---|
+| `quick` | production Smithproxy build |
+| `native` | hermetic C++/Python/runner tests |
+| `sanity` | isolated smoke gate |
+| `traffic` | RTT, TLS throughput/policy/transfer, routing, QUIC, churn and capture |
+| `lifecycle` | ProxyNightmare TCP/TLS lifecycle scenarios plus C++ CPU monitoring |
+| `corpus` | regular, edge and insanity corpus replay |
+| `fuzz` | bounded deterministic protocol fuzz shards |
+| `full` | ordered union of `native sanity traffic lifecycle corpus fuzz` |
+| `coverage` | native plus dataplane smoke under GCC/gcov |
+| `benchmark` | latency measurement without numeric gates |
+| `--run` | interactive isolated lab |
+
+The canonical composition lives in `profile-plan.sh`. Standalone profiles and
+`full` read the same section lists; repeated prerequisites such as `smoke` run once.
 
 Applicable dataplane checks produce separate `PASS4` and `PASS6` verdicts. A
 failure in either address family fails its section. Management-only checks use
@@ -187,10 +287,9 @@ adopted. Reports are written below `<report>/native/coverage/` as
 The report denominator comes from all built `.gcno` files, so a product object
 which was never executed remains visible at 0% instead of inflating the total.
 
-`sanity` runs in one lab. `full` first runs the native gate on its coordinator,
-then a serial smoke gate, followed by exclusive
-RTT and TLS throughput phases. Only after both measurement phases are the
-remaining isolated sections started:
+`full` first runs `native` on its coordinator, then `sanity`. The `traffic`
+measurement sections run exclusively before the remaining selected profiles
+are distributed:
 
 ```text
 native (coordinator gate)
@@ -205,9 +304,10 @@ native (coordinator gate)
     ├── tcp-churn
     ├── udp-churn
     ├── capture      (basic capture, capture matrix and HTTP/2 observability)
-    ├── corpus-regular
-    ├── corpus-edge
-    ├── corpus-insanity
+    ├── lifecycle    (ProxyNightmare plus per-proxy C++ CPU monitor)
+    ├── corpus-regular.1 .. .4
+    ├── corpus-edge.1 .. .4
+    ├── corpus-insanity.1 .. .4
     └── fuzz.<area>  (one independently scheduled shard per protocol)
 ```
 
@@ -228,7 +328,7 @@ connection storm. Section labs symlink the staged `smithproxy` binary.
 
 ## Selecting one suite
 
-`--suite NAME` is accepted with `sanity`, `full`, `fuzz` and `fuzz-dyn`. The original focused
+`--suite NAME` is accepted with the test profiles. The original focused
 suites remain available:
 
 ```text
@@ -238,8 +338,8 @@ tls  transfer  tls-throughput  starttls  policy  routing  rtt  session-list  qui
 Full-run sections can also be invoked directly:
 
 ```text
-smoke  tls-policy  routing  rtt  transfer  tls-throughput  quic  tcp-churn  udp-churn  capture
-corpus-regular  corpus-edge  corpus-insanity
+smoke  tls-policy  routing  rtt  transfer  tls-throughput  quic  tcp-churn  udp-churn  capture  lifecycle
+corpus-regular[.1-.4]  corpus-edge[.1-.4]  corpus-insanity[.1-.4]
 fuzz.h1  fuzz.h2  fuzz.h2.insanity  fuzz.tls  fuzz.socks5  fuzz.dns  ...
 ```
 
@@ -247,6 +347,18 @@ Every selected suite still performs API startup, no-bypass and cleanup checks.
 The four original focused suites (`tls`, `policy`, `rtt`, `session-list`) also
 retain the basic dual-stack HTTP/TLS/UDP smoke around their named check. The
 `quic` suite runs its dedicated HTTP/3 origin, diagnostics, PCAP and GRE checks.
+The TLS profile matrix and separate QUIC enforcement probes are documented in
+[TLS profile coverage](../../docs/TLS_PROFILE_COVERAGE.md).
+`lifecycle` uses a private outer user/mount/network namespace. Every concurrent
+run owns its proxy, CPU monitor, control socket and results. The runner reads
+`proxy-nightmare.lock`, checks out its exact Git commit, builds and tests `pn`,
+and caches it below the work root. `--proxy-nightmare-root DIR` optionally uses
+an already prepared developer checkout instead. Only the PN binary comes from
+that checkout. Smithproxy owns the executed `.pn` scenarios under
+`proxy-nightmare/`, and remote runs receive them in the ordinary runner bundle.
+Known product failures use exact diagnostic signatures in
+`proxy-nightmare/expected-failures.json`; mismatched failures and unexpected
+passes both stop the gate.
 
 Examples:
 
@@ -257,6 +369,12 @@ tests/patch-runner/test-patch.sh sanity --suite capture --remote root@test-runne
 tests/patch-runner/test-patch.sh sanity --suite corpus-edge \
     --remote root@test-runner-1 --env MATCH='h2_generated_*'
 ```
+
+The corpus profile and `full` split every category into four deterministic,
+disjoint shards. Their union is exactly the original category, and the
+target-local scheduler learns each shard's duration independently. The
+unqualified names such as `--suite corpus-edge` remain available for a focused
+unsharded diagnostic run.
 
 ## Fuzz layers and seeds
 
@@ -291,17 +409,16 @@ still runs the complete protocol area.
 The default work root is:
 
 ```text
-/tmp/patch-runner/<branch>_@_<8-character-commit>/
+/var/tmp/smithproxy-patch-runner/<branch>_@_<8-character-commit>_<UTC>-<pid>/
 ```
 
 Unsafe branch-name characters are replaced with `-`; detached HEAD uses
 `detached`. Override the base with `--dir` or `PATCH_TEST_DIR`.
 
-Two invocations for the same branch and commit would otherwise share the build
-directory. Use `--unique=TAG` to append a sanitized label:
+Use `--unique=TAG` to append a human-readable sanitized label:
 
 ```text
-/tmp/patch-runner/master_@_622620c9_udp-flaky-results/
+/var/tmp/smithproxy-patch-runner/master_@_622620c9_20261104T120000Z-1234_udp-flaky-results/
 ```
 
 Bare `--unique` uses `date -I`. Directory claiming is atomic; an existing name
@@ -321,11 +438,28 @@ lab; full mode supplies it automatically.
 
 ## Remote and interactive operation
 
-There is no implicit execution target. Use `--local` for local privileged setup
-(through `sudo` unless already root), or one or more `--remote [USER@]HOST`
-arguments. `root@host` runs directly; another user requires passwordless remote
-`sudo`. Focused and interactive runs require exactly one target; distributed
-profiles accept a mixed local/remote worker pool.
+There is no implicit execution target. Use `--local` or one or more
+`--remote [USER@]HOST` arguments. Before configuration or build, the runner
+performs the same namespace, mount and netfilter operations required by the
+selected profile. SSH uses batch mode and a connection timeout. Privileged
+profiles use root directly or verified passwordless `sudo -n`; they never open
+an interactive password prompt. Lifecycle and the privileged native integration
+layer use rootless user/network namespaces. Focused and interactive runs require
+exactly one target; distributed profiles accept a mixed local/remote worker pool.
+
+To diagnose a host without spending time on a build:
+
+```bash
+tests/patch-runner/test-patch.sh sanity --preflight-only --remote test-runner-1
+tests/patch-runner/test-patch.sh lifecycle --preflight-only --remote test-runner-1
+```
+
+Successful output names the selected backend (`root`, `sudo-n`, `rootless` or
+`unprivileged`). A missing SSH credential, sudo rule, user-namespace feature,
+capability, command, mount permission or netfilter permission fails immediately.
+When a local automation sandbox blocks namespace creation, run the whole runner
+with host privileges or select a prepared remote target; do not retry individual
+failed sections with ad-hoc sudo.
 
 `--run` starts Smithproxy plus the origin services, publishes random API and
 CLI ports on the selected host's loopback interface, prints connection details,
@@ -406,6 +540,8 @@ Frequently useful `--env NAME=VALUE` controls:
 | `SESSION_LIST_P95_LIMIT_MS` / `SESSION_LIST_MAX_LIMIT_MS` | `1000` / `3000` | CLI snapshot gates |
 | `TLS_WRITE_CHUNK` | `20480` | Maximum plaintext bytes offered to one `SSL_write()`; intended for comparative transfer tests |
 | `SSL_USE_KTLS` | config default | Request OpenSSL KTLS for focused enabled/disabled comparisons |
+| `TLS_PROFILE_TEST` | follows `TLS_SUITE_TEST` | Real TLS 1.2/1.3 profile enforcement on both legs, IPv4/IPv6, including reuse, PFS and certificate exceptions |
+| `QUIC_TLS_PROFILE_TEST` | unset | Focused QUIC profile probe: `baseline`, `no_reuse`, `no_pfs`, `no_alpn`, or `old_ticket`; verifies admission and per-policy ticket isolation |
 | `KTLS_PROBE_TEST` / `KTLS_EXPECT_ACTIVE` | `0` / `any` | Hold a TLS flow, record both legs' effective BIO KTLS state, optionally require `on` or `off` |
 | `TLS_TEST_VERSION` / `TLS_TEST_CIPHER` | unset | Pin both legs to TLS 1.2/1.3 and, for TLS 1.2, pin the cipher for focused KTLS checks |
 
@@ -428,6 +564,46 @@ views to contain exactly 12 requests and 12 responses.
 
 ## Results and failure diagnostics
 
+### Presenting a test run
+
+Report a completed run in this order:
+
+1. Overall verdict: `PASS`, `FLAKY_PASS` or `FAIL`.
+2. Tested commit and whether the working tree was dirty.
+3. Profile, optional suite and test groups that actually ran.
+4. Available test groups and optional layers that were not run.
+5. Section totals and every non-`PASS` section, including `XFAIL` and `XPASS`.
+6. For a failure, the observed reason and the exact reproduction command.
+7. The report directory containing the supporting logs and artifacts.
+
+Keep the first paragraph short enough to answer whether the tested revision is
+ready. Add detail only for non-passing sections. Treat `reason` as observed
+evidence and `likely` as a diagnostic hypothesis; never present `likely` as the
+proven cause. Do not collapse `FLAKY_PASS`, `XFAIL` or `XPASS` into `PASS`.
+
+Example:
+
+```text
+FLAKY_PASS — full on 1ff4a572 (clean)
+39/40 sections PASS; rtt FLAKY_PASS; tls_client_hello_fin XFAIL
+Observed: HTTPS P50 exceeded the stable limit in rtt.
+Reproduce: tests/patch-runner/test-patch.sh full --suite rtt --local
+Report: /var/tmp/smithproxy-patch-runner/.../results/...
+```
+
+The authoritative values come from `summary.json` and `sections.tsv`. Use
+`failure.txt`, the failing section log and retained lab artifacts for diagnosis.
+Console output alone is insufficient when these report files are available.
+
+`summary.md` follows progressive disclosure: verdict first, then selected and
+omitted scope, measurements, section results, a complete test inventory,
+failure diagnostics, run details and reproduction. The inventory is ordered by
+profile and section rather than parallel completion time. It includes native
+CTest cases, named dataplane checks, both address families, corpus/fuzz cases
+and lifecycle scenarios. A reader can stop after any section without losing
+the meaning of the sections above it. Benchmark and coverage values belong in
+measurements; raw evidence remains in linked logs and artifacts.
+
 Every top-level run writes:
 
 ```text
@@ -435,6 +611,8 @@ Every top-level run writes:
 ├── summary.txt          concise human-readable result
 ├── summary.md
 ├── summary.json
+├── test-inventory.md    every reported test in stable top-down order
+├── test-inventory.json  machine-readable form of the same inventory
 ├── build.log
 ├── test.log             except build-only quick runs
 ├── failure.txt          failed runs only
@@ -442,9 +620,11 @@ Every top-level run writes:
 ```
 
 `<report-root>` is `<work-root>/results` unless `PATCH_TEST_RESULTS_DIR` is set.
-Full-run worker reports remain below their isolated section work roots.
+Full-run worker reports remain below their isolated section work roots. For a
+remote worker, complete per-case lab artifacts remain on that target; the
+coordinator copies back the report metadata used for aggregation.
 
-A full run additionally writes `sections.tsv`, `sections.md`, and
+A full run additionally writes `sections.tsv` (including section durations), `sections.md`, and
 `sections/<name>.log`. Each worker keeps its complete report below
 `<work-root>/sections/<name>/results/`.
 
@@ -459,6 +639,13 @@ target order (`local`, `remote-1`, `remote-2`, ...), and effective section
 coverage. The run-local report retains actual targets for diagnostics. Internal
 workers do not write history. The runner never commits or pushes either history
 or seed-registry changes.
+
+For a durable validation record, run `publish-report.sh` instead of invoking
+this script directly. It requires a clean named branch, creates a compact UTC-
+timestamped report under `docs/test-reports/`, verifies that the tested branch
+did not change, commits only report metadata and pushes explicitly to the same
+branch. The full inventory, logs and lab artifacts are deliberately excluded
+from Git.
 
 ## Requirements
 

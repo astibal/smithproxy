@@ -66,7 +66,7 @@ The JSON snapshots (`SXME`, `SXST`, `SXTL`) contain both correlation keys:
 
 The correlation identity is frozen when protocol profiling is enabled, while
 both connection contexts still exist. Final SXME/SXST records reuse that identity
-after teardown instead of recomputing an `unknown-unknown` tuple. Native keys
+at retirement instead of recomputing an `unknown-unknown` tuple. Native keys
 prefix both endpoints, for example `tcp_192.0.2.1:50000-tcp_198.51.100.1:443`;
 intercepted TLS uses the `ssli` endpoint prefix.
 
@@ -74,7 +74,10 @@ intercepted TLS uses the `ssli` endpoint prefix.
 
 ### SXME — connection metadata
 
-Written when the capture session closes, after buffered payload is flushed.
+Written once when the capture session retires, before connection contexts are
+destroyed. The same owned snapshot is included in the final connection-info
+webhook; deferred destruction does not emit a duplicate summary. Destruction
+retains a fallback for sessions which did not take the normal retirement path.
 Schema: `smithproxy.metadata.v1`.
 
 The payload includes connection start/end time, duration, policy index,

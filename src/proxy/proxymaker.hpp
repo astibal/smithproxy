@@ -41,6 +41,7 @@
 #define PROXYMAKER_HPP
 
 #include <proxy/mitmproxy.hpp>
+#include <proxy/proxymaker_connect.hpp>
 #include <policy/profiles.hpp>
 
 #include <memory>
@@ -56,7 +57,15 @@ namespace sx::proxymaker {
     bool is_replaceable (unsigned short port);
 
     bool setup_snat (std::unique_ptr<MitmProxy> &proxy, std::string const &source_host, std::string const &source_port);
-    bool connect (MasterProxy *owner, std::unique_ptr<MitmProxy> &&new_proxy);
+
+    std::shared_ptr<SessionSetup> make_quic_session_setup(
+        std::string const& source_host, std::string const& source_port);
+
+    // Session setup always precedes the first upstream connect attempt.
+    bool connection_start(MitmProxy& proxy);
+    // Take ownership immediately; failure destroys the unconnected proxy.
+    bool connect(MasterProxy* owner, std::unique_ptr<MitmProxy> proxy);
+    int connect(MitmProxy& proxy, MitmHostCX& target);
 }
 
 #endif //PROXYMAKER_HPP

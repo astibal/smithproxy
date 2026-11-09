@@ -1,0 +1,59 @@
+Protocol snapshot/journal retirement -- validation, 2026-10-26
+=============================================================
+
+This is the initial retirement run. Final validation after adapter extraction
+and returning Socle to its unmodified decc93f baseline is recorded in
+tests/docs/protocol-setup-rewrite-sanity-20261026.txt.
+
+Source: Smithproxy d7aaef2406640d12b14c9d652d9584718f7c184e and working changes;
+Socle 76510148c27e593710258fa9804667380b0ff602 and journal removal.
+The archive manifest identifies the exact before/after cleanup source bytes.
+No commit or push was performed as part of this cleanup.
+
+Build
+-----
+PASS: cmake --build build --target smithproxy sx_gtests_http1 -j2
+
+Post-cleanup regression
+-----------------------
+PASS  protocol unit: 218 cases / 15 suites, 2.87 s including runner overhead
+PASS  connection-start JSON with TLS metadata: 47 scenarios, 2.67 s
+PASS  connection-start SXBN with TLS metadata: 47 scenarios, 12.74 s
+PASS  webhook/control/need-more/protocol-views/setup: 7 CTest suites, 52.92 s
+PASS  implicit TLS over SOCKS: upstream fixture, 2.42 s
+PASS  HTTP CONNECT / SOCKS STARTTLS / private-key permissions: 3 suites, 7.13 s
+PASS  Spider: all 41 CTest suites, including 7 real-proxy Translate E2E suites,
+      149.75 s
+
+Unit selection: --gtest_filter=-HTTP1.benchmark:ProtocolForkBenchmark.*
+The previous 270-case count included 60 checkpoint-only cases now archived.
+Seven forward-fork/storage cases and one eight-path benchmark correctness smoke
+case were added: 270 - 60 + 7 + 1 = 218. This is an intentional change of scope,
+not a claim that removed rollback behavior remains covered in production.
+
+The benchmark smoke checks protocol state only. No new performance claim is
+made, and the benchmark-scale timing suite was not run. This was not a full P3
+or sanitizer run; QUIC remains outside this change's scope.
+
+Reproduction and evidence
+-------------------------
+Local runner: /tmp/run-protocol-retirement-tests.py
+Commands, timings, exit codes: /tmp/protocol-retirement/tests/results.json
+Individual logs and JUnit XML: /tmp/protocol-retirement/tests/
+These temporary artifacts are local evidence, not permanent repository assets.
+
+Each network test lane used an isolated user/network namespace with loopback.
+The CONNECT regression lane used the host network because its existing fixture
+resolves localtest.me through host DNS; origins/listeners remained local.
+
+Archive integrity
+-----------------
+PASS: both restoration patches checked against the cleaned working tree.
+PASS: exported patches applied and reversed in disposable fixture directories;
+      all file bytes compared to the captured pre-cleanup working files.
+PASS: git diff --check in Smithproxy and Socle.
+
+The live forward-only protocol_fork and endpoint-view adapters remain. The
+retired snapshot API, flow journal and speculative SnapshotFork mode have no
+remaining live source/build registrations. Unrelated snapshots (e.g. interface
+monitoring and counters) were deliberately not touched.

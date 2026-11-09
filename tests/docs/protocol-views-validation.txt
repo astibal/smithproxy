@@ -1,0 +1,157 @@
+PROTOCOL ENDPOINT VIEWS — VALIDATION AND COST
+Historical report: the checkpoint/journal and speculative fork were retired
+on 2026-10-26. Sources and tests: docs/design-history/protocol-checkpoints-20261026/.
+Date: 2026-10-25
+Source: ddb5ce1fbc34 + uncommitted checkpoint, journal and endpoint-view changes.
+This is a local test report, NOT approval to merge or a full P3 pass.
+
+VERDICT
+Functional tests below passed. The pre-split deep copy is a significant
+performance problem in the current implementation. It is paid on EVERY H2
+callback before the first changed/held output, not just on the first rewrite.
+FlowCtx currently starts this path for recognized H2 even without an enabled
+content webhook. The two-parser path after splitting is substantially cheaper
+than repeatedly preparing and discarding the deep copy.
+No runtime optimization was made during this measurement task.
+
+CORRECTNESS
+PASS  Native patch-runner gate: 42/42 CTest entries, 0 skipped, 202.53 s.
+      Includes protocol tests, TLS/QUIC/SSH, process tests, old need-more/control
+      tests in both webhook formats, and runner self-tests.
+PASS  ProtocolViews: 25 native cases.
+PASS  ProtocolCheckpoint: 60 native cases.
+PASS  Release: unit.http1 + protocol_checkpoint + protocol_views.
+      The latter two are filtered repeats/subsets, not additional unique coverage.
+PASS  ASan + UBSan: 85 checkpoint/view cases, 10 shuffled repetitions
+      (850 test executions), seeds 61025 through 61034, halt_on_error enabled.
+      Leak checking disabled; this is not a LeakSanitizer result.
+PASS  Real proxy / JSON webhook: 6 scenarios, 71 input callbacks, 0 output callbacks.
+PASS  Real proxy / SXBN webhook: 6 scenarios, 71 input callbacks, 0 output callbacks.
+PASS  Three opt-in optimized benchmark cases; each checks its state invariants.
+FAIL  Privileged full P3 stopped at its native gate: 41/42 entries passed.
+      QUIC RepeatedVerifiedReconnectsReleaseEveryIdleSession counted 23 of 24
+      origin handshakes. A separate unchanged-binary rerun passed 20/20 times
+      (240 reconnects). This suggests timing sensitivity, not a proven cause.
+      QUIC investigation is deferred. Corpus, fuzz, churn and throughput
+      sections were not reached; this is NOT a full P3 pass.
+
+The live webhook is a deterministic stand-in, not a running Spider. The new
+view-specific integration scenarios are plaintext H2 over SOCKS. Broader native
+TLS tests passed, but that does not imply a dedicated H2-rewrite-over-TLS matrix.
+
+NEW SCENARIOS
+- partial held frame while the opposite direction keeps sending
+- resized padded DATA, independent body counts in both endpoint views
+- first rewrite inside a CONTINUATION block, then an HPACK indexed reference
+- 16 deterministic seeds x 100 mixed-direction DATA/hold/release/resize steps
+  checked against an independent endpoint byte ledger (1,600 steps per run)
+- response metadata must refer to rewritten GET, not the original POST
+- live CONTINUATION rewrite and cross-direction hold/release
+The two integration variants are now registered in CTest and the native gate.
+
+MEASUREMENT METHOD
+AMD Ryzen 7 3700X; GCC Release -O3, -DNDEBUG, LTO, BUILD_RELEASE.
+Single process pinned to logical CPU 14, after our builds/tests had finished.
+Normal host activity was not disabled; these are microbenchmarks, not network
+latency/throughput results. Seven warmed batches with rotated path order.
+Numbers below are median microseconds per callback/operation; min/max and
+sample counts are in benchmark-final.log. They are NOT request percentiles.
+Payload means H2 DATA body bytes (wire size also includes the 9-byte header).
+Windows were explicitly increased so the workload stays on the valid parser
+path, and each timed sample checks resulting body counters and validity.
+Initialization and payload allocation are outside timed intervals.
+The one-parser baseline uses seed(), the same parser + annotation code without
+forking or a webhook; it is NOT a separately built old proxy binary.
+
+64-BYTE BODY
+Active streams     One parser   Unchanged + fork   After split    First split
+1                       1.865            102.846         3.780         76.416
+32                      1.888            198.948         3.833        154.434
+256                     1.928            967.728         3.929        778.133
+1024                    1.952           3695.869         3.921       3352.261
+
+16-KiB BODY
+Active streams     One parser   Unchanged + fork   After split    First split
+1                      31.967            135.953        64.040        137.201
+32                     31.960            232.299        64.173        218.607
+256                    32.232           1017.283        64.016        900.367
+1024                   32.154           3903.665        64.256       3430.349
+
+First split retains the fork; unchanged/fork-only batches also pay destruction
+of the discarded copy. Therefore the first split can be faster than no-op.
+
+RETAINED STATE
+Fork only with one active stream and completed HTTP request history:
+  0 requests:       105.836 us
+  100 requests:     115.234 us
+  1,000 requests:   279.746 us
+  10,000 requests: 4610.338 us
+These histories are generated by actual completed H2 exchanges.
+
+Separate synthetic storage fixtures (one stream, fork only):
+  pending header bytes, 0 -> 1 MiB: 107.956 -> 199.051 us
+  gzip cache bytes,     0 -> 1 MiB: 109.199 -> 235.260 us
+These fixtures exercise copied storage, not decoding arbitrary gzip content.
+The complete benchmark process peaked at 187,280 KiB RSS; that is NOT memory
+per connection. User CPU 42.82 s + system 3.03 s, wall 45.87 s, no swaps.
+
+CODE-LEVEL FINDINGS (not a sampled allocation profile)
+1. ProtocolViews::begin forks before observing every input until split.
+2. protocol_fork first copies EngineCtx (including std::any protocol state),
+   then replaces that state with clone_protocol: stream containers are copied
+   once by the EngineCtx copy and again by clone_protocol.
+3. Copying each HPACK decoder rebuilds its immutable canonical Huffman tree.
+4. app_HttpRequest copy includes up to 10,000 historical HTTP request records.
+These are independent optimization candidates. Sharing immutable structures
+does not justify sharing mutable HPACK tables or endpoint protocol state.
+
+REPRODUCTION
+Optimized benchmark commands are in tests/patch-runner/README.md.
+Native invocation used:
+  tests/patch-runner/test-patch.sh native --local --jobs 2
+    --dir /tmp/protocol-views-validation-E80DfL/native --quiet
+The runner uses its native/native-build directory for this profile.
+
+Still required (run from this repository in a terminal with working sudo):
+  tests/patch-runner/test-patch.sh full --local --parallel 3 --jobs 2
+    --dir /tmp/protocol-views-validation-E80DfL/full
+
+SANITIZER REPRODUCTION
+  cmake -S . -B /tmp/sx-views-asan -DCMAKE_BUILD_TYPE=Debug
+    -DSMITHPROXY_TLS_SANITIZERS=ON -DBUILD_TESTING=ON
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+  cmake --build /tmp/sx-views-asan --target sx_gtests_http1 -j2
+  ASAN_OPTIONS=detect_leaks=0:halt_on_error=1
+    UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
+    /tmp/sx-views-asan/sx_gtests_http1
+    --gtest_filter='*ProtocolViews*:*ProtocolCheckpoint*'
+    --gtest_repeat=10 --gtest_shuffle --gtest_random_seed=61025
+Commands above wrap for reading; join continuation lines when executing.
+
+ARTIFACTS
+/tmp/protocol-views-validation-E80DfL/
+  benchmark-final.log, benchmark-final.xml, benchmark-time.txt
+  benchmark-preliminary.log (under concurrent build load; not final results)
+  sanitized-repeat.log, sanitized-repeat.xml
+  release-correctness.log, release-correctness.xml
+  views-live-json.log, views-live-binary.log
+  native/results/20261025T150237Z-ddb5ce1f-native/native/ctest.log
+  native/results/20261025T150237Z-ddb5ce1f-native/native/junit.xml
+
+PRE-CHECKPOINT INTERFACE CLEANUP
+FlowCtx and ProtocolViews now use ProtocolAdapter without H2-specific types,
+detection or parsing. The HTTP/2 adapter owns recognition, initialization,
+observation and deep forking. Other protocols retain the legacy engine path.
+The snapshot/journal remains a separate primitive, not runtime reconciliation.
+Six additional cases cover a non-HTTP adapter, bidirectional routing, hold,
+unsupported protocols, ALPN rejection, fragmented bootstrap and transitions.
+PASS  Refactored Debug unit target: 233 tests, including 31 ProtocolViews cases
+      and 60 ProtocolCheckpoint cases; benchmarks excluded, no skipped tests.
+      Log: /tmp/protocol-adapter-unit.log; XML: /tmp/protocol-adapter-unit.xml.
+PASS  Refactored proxy integration: 4/4 CTest entries, 49.25 s wall time.
+      protocol_views_json/binary and webhook_need_more/_binary.
+      Log: /tmp/protocol-adapter-integration.log.
+The benchmark and sanitizer results above precede this interface-only cleanup;
+they are not claimed as fresh measurements of the refactored binary.
+No runtime optimization, push, deployment or SASlik change in this checkpoint.
+The successful native run was recorded automatically in tests/docs/patch-run-history.

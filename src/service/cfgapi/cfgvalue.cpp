@@ -171,22 +171,47 @@ void CfgValueHelp::init() {
             .may_be_empty(false)
             .value_filter(VALUE_UINT_RANGE<1024, 65535>);
 
+    add("settings.http_connect_port", "base HTTP CONNECT proxy listening port")
+            .help_quick("<number>: a high port number")
+            .may_be_empty(false)
+            .value_filter(VALUE_UINT_RANGE<1024, 65535>);
+
 
     // worker setup
 
     add("settings.accept_tproxy", "whether to accept incoming connections via TPROXY")
-            .help_quick("<bool>: set to 'true' to disable tproxy acceptor (default: false)")
+            .live_action("tproxy", CfgValue::live_apply_t::tproxy)
+            .help_quick("<bool>: enable the TPROXY listener")
             .may_be_empty(false)
+            .suggestion_generator(CfgValue::SUGGESTION_BOOL)
             .value_filter(CfgValue::VALUE_BOOL);
 
     add("settings.accept_redirect", "whether to accept incoming connections via REDIRECT")
-            .help_quick("<bool>: set to 'true' to disable redirect acceptor (default: false)")
+            .live_action("redirect", CfgValue::live_apply_t::redirect)
+            .help_quick("<bool>: enable the REDIRECT listener")
             .may_be_empty(false)
+            .suggestion_generator(CfgValue::SUGGESTION_BOOL)
             .value_filter(CfgValue::VALUE_BOOL);
 
     add("settings.accept_socks", "whether to accept incoming connections via SOCKS")
-            .help_quick("<bool>: set to 'true' to disable socks acceptor (default: false)")
+            .live_action("socks", CfgValue::live_apply_t::socks)
+            .help_quick("<bool>: enable the SOCKS listener")
             .may_be_empty(false)
+            .suggestion_generator(CfgValue::SUGGESTION_BOOL)
+            .value_filter(CfgValue::VALUE_BOOL);
+
+    add("settings.accept_http_connect", "whether to accept incoming connections via HTTP CONNECT")
+            .live_action("http-connect", CfgValue::live_apply_t::http_connect)
+            .help_quick("<bool>: enable the explicit HTTP CONNECT listener")
+            .may_be_empty(false)
+            .suggestion_generator(CfgValue::SUGGESTION_BOOL)
+            .value_filter(CfgValue::VALUE_BOOL);
+
+    add("settings.extended_local_destination_protection",
+        "block explicit proxy connections to local and loopback addresses")
+            .help_quick("<bool>: protect local services on every host interface")
+            .may_be_empty(false)
+            .suggestion_generator(CfgValue::SUGGESTION_BOOL)
             .value_filter(CfgValue::VALUE_BOOL);
 
     add("settings.policy_fail_open", "allow traffic when no policy rule matches")
@@ -209,32 +234,44 @@ void CfgValueHelp::init() {
     };
 
     add("settings.plaintext_workers", "non-SSL TCP traffic worker thread count")
+            .live_action("plaintext", CfgValue::live_apply_t::workers_tproxy)
             .help_quick("<number> acceptor subordinate worker threads count (max 4xCPU)")
             .may_be_empty(false)
             .value_filter(HW_FILTER);
 
 
     add("settings.ssl_workers", "SSL TCP traffic worker thread count")
+            .live_action("TLS", CfgValue::live_apply_t::workers_tproxy)
             .help_quick("<number> acceptor subordinate worker threads count (max 4xCPU)")
             .may_be_empty(false)
             .value_filter(HW_FILTER);
 
     add("settings.udp_workers", "non-DTLS traffic worker thread count")
+            .live_action("UDP", CfgValue::live_apply_t::workers_tproxy)
             .help_quick("<number> acceptor subordinate worker threads count (max 4xCPU)")
             .may_be_empty(false)
             .value_filter(HW_FILTER);
 
 
     add("settings.dtls_workers", "DTLS traffic worker thread count")
+            .live_action("DTLS", CfgValue::live_apply_t::workers_tproxy)
             .help_quick("<number> acceptor subordinate worker threads count (max 4xCPU)")
             .may_be_empty(false)
             .value_filter(HW_FILTER);
 
     add("settings.quic_workers", "experimental QUIC listener thread count")
+            .live_action("QUIC", CfgValue::live_apply_t::workers_tproxy)
             .help_quick("<number>: -1 disabled, 0 or 1 enables one event loop")
             .may_be_empty(false);
 
     add("settings.socks_workers", "SOCKS proxy traffic thread count")
+            .live_action("SOCKS", CfgValue::live_apply_t::workers_socks)
+            .help_quick("<number> acceptor subordinate worker threads count (max 4xCPU)")
+            .may_be_empty(false)
+            .value_filter(HW_FILTER);
+
+    add("settings.http_connect_workers", "HTTP CONNECT proxy traffic thread count")
+            .live_action("HTTP CONNECT", CfgValue::live_apply_t::workers_http_connect)
             .help_quick("<number> acceptor subordinate worker threads count (max 4xCPU)")
             .may_be_empty(false)
             .value_filter(HW_FILTER);
@@ -402,6 +439,16 @@ void CfgValueHelp::init() {
         .value_filter(CfgValue::VALUE_BOOL);
 
 
+    add("settings.socks.proxy_authorization", "require proxy authentication for SOCKS")
+        .may_be_empty(false)
+        .value_filter(CfgValue::VALUE_BOOL);
+
+    add("settings.http_connect", "** configure HTTP CONNECT specific settings");
+    add("settings.http_connect.proxy_authorization", "require proxy authentication for HTTP CONNECT")
+        .may_be_empty(false)
+        .value_filter(CfgValue::VALUE_BOOL);
+
+
     add("settings.accept_api", "whether to accept HTTP API request")
             .help_quick("<bool>: set to 'true' to disable API server (default: true)")
             .may_be_empty(false)
@@ -473,6 +520,41 @@ void CfgValueHelp::init() {
 
     add("settings.webhook.tls_verify", "https webhooks service certificate validity check")
             .help_quick("<bool>: set false to disable - not recommended (default: true)")
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_BOOL);
+
+    add("settings.webhook.sift", "send content to the local Sift decision engine")
+            .help_quick("<bool>: enable the secondary sx-siftd webhook (default: false)")
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_BOOL);
+
+    add("settings.webhook.sift_url", "sx-siftd webhook URL")
+            .help_quick("<string>: local engine endpoint (default: http://127.0.0.1:18081/webhook)")
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_ANY);
+
+    add("settings.webhook.sift_tenant_id", "Sift tenant identity")
+            .help_quick("<string>: isolate flows under this tenant; restart required (default: default)")
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_ANY);
+
+    add("settings.webhook.sift_instance_id", "Sift producer instance identity")
+            .help_quick("<string>: stable Smithproxy ID; restart required (default: webhook hostid or hostname)")
+            .may_be_empty(true)
+            .value_filter(CfgValue::VALUE_ANY);
+
+    add("settings.webhook.sift_payload_limit_per_direction", "soft Sift payload limit per flow direction")
+            .help_quick("<bytes>: stop before the next complete message after this L/R limit (default: 262144)")
+            .may_be_empty(false)
+            .value_filter(VALUE_UINT_RANGE<1,1073741824>);
+
+    add("settings.webhook.sift_lored_mode", "request LoreD enrichment through Sift")
+            .help_quick("<disabled|optional|required>: per-request LoreD policy (default: disabled)")
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_ANY);
+
+    add("settings.webhook.sift_lored_include_url", "allow Sift to send observed URLs to LoreD")
+            .help_quick("<bool>: opt in to URL/path disclosure to LoreD (default: false)")
             .may_be_empty(false)
             .value_filter(CfgValue::VALUE_BOOL);
 
@@ -692,10 +774,10 @@ void CfgValueHelp::init() {
             .suggestion_generator(CfgValue::SUGGESTION_BOOL);
 
 
-    add("detection_profiles.[x].mode", "0 = disabled, 1 = enabled")
-            .help_quick("<integer>: 0-1")
+    add("detection_profiles.[x].mode", "0 = disabled, 1 = pre-read detection, 2 = post-read detection")
+            .help_quick("<integer>: 0-2")
             .may_be_empty(false)
-            .value_filter(VALUE_UINT_RANGE<0,1>);
+            .value_filter(VALUE_UINT_RANGE<0,2>);
 
 
     add("detection_profiles.[x].engines_enabled", "enable/disable L7 engines")
@@ -718,6 +800,27 @@ void CfgValueHelp::init() {
             .suggestion_generator(CfgValue::SUGGESTION_BOOL);
 
     add("tls_profiles.[x].ip_based_cert", "enable/disable loading custom, address based certificates (no mitm)")
+            .help_quick(CfgValue::HELP_BOOL)
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_BOOL)
+            .suggestion_generator(CfgValue::SUGGESTION_BOOL);
+
+    add("tls_profiles.[x].sni_filter_use_dns_cache",
+        "allow SNI bypass filters to match destination addresses from the DNS cache")
+            .help_quick(CfgValue::HELP_BOOL)
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_BOOL)
+            .suggestion_generator(CfgValue::SUGGESTION_BOOL);
+
+    add("tls_profiles.[x].sni_filter_use_dns_domain_tree",
+        "allow wildcard SNI bypass filters to match the DNS domain tree")
+            .help_quick(CfgValue::HELP_BOOL)
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_BOOL)
+            .suggestion_generator(CfgValue::SUGGESTION_BOOL);
+
+    add("tls_profiles.[x].alpn_block",
+        "reject ALPN negotiation instead of accepting the offered application protocol")
             .help_quick(CfgValue::HELP_BOOL)
             .may_be_empty(false)
             .value_filter(CfgValue::VALUE_BOOL)

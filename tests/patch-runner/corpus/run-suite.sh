@@ -2,6 +2,7 @@
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
+source "$HERE/log-diagnostics.sh"
 PPLAY_PY=${PPLAY_PY:-}
 CATEGORY=${1:-all}
 MODE=${MODE:-loopback}
@@ -17,6 +18,8 @@ FUZZ_MAGIC=${FUZZ_MAGIC:-smithproxy-corpus}
 FUZZ_SEEDS=${FUZZ_SEEDS:-}
 FUZZ_AREA=${FUZZ_AREA:-}
 SCATTER=${SCATTER:-0}
+SHARD_COUNT=${SHARD_COUNT:-1}
+SHARD_INDEX=${SHARD_INDEX:-1}
 SOURCE_PORT=${SOURCE_PORT:-}
 EXPECTED_FAILURES_FILE=${EXPECTED_FAILURES_FILE:-$HERE/expected-failures.txt}
 export PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}"
@@ -30,6 +33,9 @@ export PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}"
     exit 2
 }
 [[ $IP_FAMILY == 4 || $IP_FAMILY == 6 ]] || { echo 'IP_FAMILY must be 4 or 6' >&2; exit 2; }
+[[ $SHARD_COUNT =~ ^[1-9][0-9]*$ ]] || { echo 'SHARD_COUNT must be positive' >&2; exit 2; }
+[[ $SHARD_INDEX =~ ^[1-9][0-9]*$ ]] || { echo 'SHARD_INDEX must be positive' >&2; exit 2; }
+((SHARD_INDEX <= SHARD_COUNT)) || { echo 'SHARD_INDEX must not exceed SHARD_COUNT' >&2; exit 2; }
 
 if [[ -n $FUZZ_SEEDS ]]; then
     IFS=, read -r -a fuzz_seed_list <<< "$FUZZ_SEEDS"
@@ -236,6 +242,14 @@ mapfile -t CASES < <(
         done
     done
 )
+if ((SHARD_COUNT > 1)); then
+    ALL_CASES=("${CASES[@]}")
+    CASES=()
+    for case_index in "${!ALL_CASES[@]}"; do
+        ((case_index % SHARD_COUNT == SHARD_INDEX - 1)) || continue
+        CASES+=("${ALL_CASES[$case_index]}")
+    done
+fi
 if (( ${#CASES[@]} == 0 )); then
     if [[ $ALLOW_EMPTY == 1 ]]; then
         echo "family=IPv$IP_FAMILY passed=0 flaky=0 failed=0 xfailed=0 xpassed=0 selected=0 results=$RESULTS"
@@ -364,7 +378,7 @@ for fixture in "${CASES[@]}"; do
         # Accept only that asymmetric outcome: the client must fail promptly,
         # and the origin log must prove that it received no payload at all.
         if grep -Eq 'Broken pipe|connection closed by peer' "$client_log" \
-            && ! grep -Eqi 'DIE.AFTER|TIMEOUT|Traceback|AssertionError' "$client_log" \
+            && ! pplay_has_failure_diagnostic "$client_log" \
             && ! grep -Eqi 'received [0-9]+B|has been received|DIFFERENT DATA' "$server_log"; then
             tls_early_reset=true
         fi

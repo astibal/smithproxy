@@ -49,7 +49,8 @@ std::shared_ptr<DNS_Response> send_dns_request(libcli2::Context& context, const 
     context.print(context.decor().heading("DNS generated request:") + "\n" + hex_dump(request) + ", " +
                   context.decor().value(std::to_string(generated) + "B"));
 
-    const int fd = socle::socket(nameserver.family, SOCK_DGRAM, IPPROTO_UDP);
+    const int fd = socle::socket(nameserver.family,
+                                 SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
     if (fd < 0 || ::connect(fd, reinterpret_cast<const sockaddr*>(nameserver.as_ss()), sizeof(sockaddr_storage)) != 0) {
         if (fd >= 0) ::close(fd);
         context.print(libcli2::Style::error, "cannot connect socket");
@@ -142,7 +143,7 @@ void register_smithproxy_cli2_test(libcli2::Cli& cli) {
         .handler([](libcli2::Context& context, const libcli2::Invocation& invocation) {
             const int fd = context.io_handle;
             sx::http::AsyncRequest::emit_url(invocation.arguments.front(), R"({"key": "value"})", [fd](auto reply) {
-                if (Log::get()->target_profiles().find(static_cast<std::uint64_t>(fd)) == Log::get()->target_profiles().end()) return;
+                if (!Log::get()->remote_target_profile(fd)) return;
                 // AsyncRequest uses a negative response code for its internal
                 // initialization hook. It is not a remote HTTP response.
                 if (reply && reply->response.first <= 0) return;

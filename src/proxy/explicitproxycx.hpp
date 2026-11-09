@@ -2,12 +2,75 @@
 #define SMITHPROXY_EXPLICITPROXYCX_HPP
 
 #include <proxy/mitmhost.hpp>
+#include <proxy/local_destination.hpp>
 #include <async/asyncdns.hpp>
 #include <socketinfo.hpp>
+#include <algorithm>
+#include <array>
+#include <arpa/inet.h>
+#include <cctype>
+#include <cstring>
 #include <optional>
+#include <unordered_set>
 
 namespace sx::explicit_proxy {
+    // baseCom reserves zero as its "no descriptor" sentinel. DNSFactory
+    // promotes a raw fd 0 before handing a query to this event-loop path.
     inline bool valid_dns_socket(int fd) { return fd > 0; }
+
+    inline std::vector<std::string> fresh_dns_addresses(
+            std::shared_ptr<DNS_Response> const& response,
+            std::time_t now = std::time(nullptr)) {
+        std::vector<std::string> addresses;
+        if (!response || response->questions().size() != 1 ||
+            response->questions().front().rec_class != 1 ||
+            response->answers().empty() ||
+            (response->flags() & 0x0200U) != 0 ||
+            (response->flags() & 0x000fU) != 0)
+            return addresses;
+
+        auto normalize = [](std::string_view value) {
+            while(!value.empty() && value.back() == '.') value.remove_suffix(1);
+            std::string result(value);
+            std::transform(result.begin(), result.end(), result.begin(),
+                           [](unsigned char c) {
+                               return static_cast<char>(std::tolower(c));
+                           });
+            return result;
+        };
+        std::unordered_set<std::string> permitted_names;
+        permitted_names.insert(normalize(response->questions().front().rec_str));
+        const auto age = now > response->loaded_at
+            ? static_cast<std::uint64_t>(now - response->loaded_at) : 0U;
+        for(std::size_t pass = 0; pass < response->answers().size(); ++pass) {
+            bool changed = false;
+            for(auto const& answer : response->answers()) {
+                if(answer.class_ != 1 || answer.type_ != CNAME ||
+                   answer.ttl_ == 0 || age >= answer.ttl_ ||
+                   answer.rdata_name_.empty() ||
+                   permitted_names.count(normalize(answer.qname_)) == 0) {
+                    continue;
+                }
+                changed |= permitted_names.insert(
+                    normalize(answer.rdata_name_)).second;
+            }
+            if(!changed) break;
+        }
+
+        const auto requested_type = response->questions().front().rec_type;
+        for (auto const& answer : response->answers()) {
+            if(answer.class_ != 1 || answer.type_ != requested_type ||
+               (answer.type_ != A && answer.type_ != AAAA) ||
+               permitted_names.count(normalize(answer.qname_)) == 0) {
+                continue;
+            }
+            if(answer.ttl_ == 0 || age >= answer.ttl_)
+                continue;
+            if (auto address = answer.ip(false); !address.empty())
+                addresses.push_back(std::move(address));
+        }
+        return addresses;
+    }
 
     inline std::optional<DNS_Record_Type> next_dns_retry(
             bool mixed_ip_versions, bool tested_a, bool tested_aaaa) {
@@ -19,16 +82,35 @@ namespace sx::explicit_proxy {
             return A;
         return std::nullopt;
     }
+
+    inline std::vector<DNS_Record_Type> dns_query_order(
+            int carrier_family, bool prefer_ipv6, bool mixed_ip_versions) {
+        const auto first = carrier_family == AF_INET6 || prefer_ipv6 ? AAAA : A;
+        std::vector<DNS_Record_Type> order {first};
+        if (mixed_ip_versions)
+            order.push_back(first == A ? AAAA : A);
+        return order;
+    }
+
+    template <class Resolver>
+    bool resolve_first_available(
+            std::vector<DNS_Record_Type> const& order, Resolver&& resolver) {
+        for (auto const type : order) {
+            if (resolver(type))
+                return true;
+        }
+        return false;
+    }
 }
 
 using explicit_state = enum class explicit_state_ {
     INIT = 1u, HELLO_SENT, WAIT_REQUEST, REQ_RECEIVED, WAIT_POLICY,
     POLICY_RECEIVED, REQRES_SENT, DNS_QUERY_SENT, DNS_RESP_RECV,
-    DNS_RESP_FAILED, HANDOFF, ZOMBIE
+    DNS_RESP_FAILED, HANDOFF, ZOMBIE, WAIT_AUTH
 };
 using explicit_request_error = enum class explicit_request_error_ {
     NONE = 0, UNSUPPORTED_VERSION, UNSUPPORTED_ATYPE, UNSUPPORTED_METHOD,
-    MALFORMED_DATA, UNAUTHORIZED
+    MALFORMED_DATA, UNAUTHORIZED, LOCAL_DESTINATION
 };
 using explicit_policy = enum class explicit_policy_ { PENDING, ACCEPT, REJECT };
 
@@ -47,10 +129,14 @@ public:
     virtual std::size_t process_proxy_reply() = 0;
     virtual std::string_view upstream_success_response() const { return {}; }
     virtual std::string_view upstream_failure_response() const { return {}; }
+    virtual std::string_view upstream_policy_failure_response() const { return {}; }
 
     virtual bool setup_target();
     explicit_request_error prepare_connect_target(std::string const& host,
                                                    unsigned short port);
+    [[nodiscard]] bool local_destination_protection() const noexcept {
+        return local_destination_protection_;
+    }
 
     void wait_policy();
     void pre_write() override;
@@ -72,6 +158,7 @@ protected:
     std::string req_str_addr;
     unsigned short req_port = 0;
     std::size_t req_hdr_size = 0;
+    bool local_destination_protection_ = true;
 
 private:
     using dns_response_t = std::pair<std::shared_ptr<DNS_Response>, ssize_t>;
@@ -80,6 +167,8 @@ private:
     void dns_response_callback(dns_response_t const& resp);
     bool process_dns_response(std::shared_ptr<DNS_Response> resp);
     bool choose_server_ip(std::vector<std::string>& target_ips);
+
+    bool local_destination_rejected_ = false;
 
     bool async_dns_ = true;
     std::unique_ptr<AsyncDnsQuery> async_dns_query_;

@@ -46,7 +46,7 @@ run_fuzzer() {
         "-timeout=${TLS_FUZZ_TIMEOUT:-5}"
         "-rss_limit_mb=${TLS_FUZZ_RSS_LIMIT_MB:-2048}")
     if [[ "${name}" == "clienthello" ]]; then
-        arguments+=("-dict=${ROOT_DIR}/src/proxy/tls/fuzz/clienthello.dict")
+        arguments+=("-dict=${ROOT_DIR}/tests/fuzz/proxy/tls/clienthello.dict")
     fi
 
     echo "==> fuzzing ${name} for ${DURATION}s"
@@ -58,16 +58,16 @@ run_fuzzer() {
 case "${TARGET}" in
     clienthello)
         run_fuzzer clienthello tls_clienthello_fuzzer \
-            "${ROOT_DIR}/src/proxy/tls/fuzz/corpus/minimal.seed" 65536
+            "${ROOT_DIR}/tests/fuzz/proxy/tls/corpus/minimal.seed" 65536
         ;;
     revocation)
         run_fuzzer revocation tls_revocation_fuzzer \
-            "${ROOT_DIR}/src/proxy/tls/fuzz/corpus/revocation.seed" 4096
+            "${ROOT_DIR}/tests/fuzz/proxy/tls/corpus/revocation.seed" 4096
         ;;
     all)
         run_fuzzer clienthello tls_clienthello_fuzzer \
-            "${ROOT_DIR}/src/proxy/tls/fuzz/corpus/minimal.seed" 65536
+            "${ROOT_DIR}/tests/fuzz/proxy/tls/corpus/minimal.seed" 65536
         run_fuzzer revocation tls_revocation_fuzzer \
-            "${ROOT_DIR}/src/proxy/tls/fuzz/corpus/revocation.seed" 4096
+            "${ROOT_DIR}/tests/fuzz/proxy/tls/corpus/revocation.seed" 4096
         ;;
 esac

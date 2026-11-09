@@ -41,6 +41,7 @@
  #define POLICY_HPP
  
  
+#include <service/network_context.hpp>
 #include <vector> 
 
 #include <hostcx.hpp>
@@ -84,6 +85,8 @@ public:
     bool cfg_err_is_degraded = false;
     bool cfg_err_is_disabled = false;
     std::string policy_name;
+    std::string ingress_role;
+    std::string egress_role;
 
     std::shared_ptr<CfgUint8> proto;
 
@@ -107,8 +110,12 @@ public:
 
     ~PolicyRule() override = default;
 
-    bool match(baseProxy*);
-    bool match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r);
+    bool match_roles(const std::vector<baseHostCX*>& left,
+                     const std::vector<baseHostCX*>& right,
+                     const sx::net::InterfaceSnapshot& network) const;
+    bool match(baseProxy*, const sx::net::InterfaceSnapshot* network = nullptr);
+    bool match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r,
+               const sx::net::InterfaceSnapshot* network = nullptr);
 
 
     int sock_2_net(int sock_type) const;
@@ -131,6 +138,21 @@ public:
     private:
         logan_lite log {"proxy.policy"};
 };
+
+namespace sx::policy {
+
+inline bool authorized_snapshot_is_current(
+        std::shared_ptr<PolicyRule> const& authorized,
+        std::shared_ptr<PolicyRule> const& current) {
+    return authorized && authorized == current;
+}
+
+inline bool implicit_pass_is_current(bool implicit_pass,
+                                     bool policy_fail_open) noexcept {
+    return !implicit_pass || policy_fail_open;
+}
+
+}
 
 
 #endif

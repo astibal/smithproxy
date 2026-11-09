@@ -2,6 +2,7 @@
 #define HANDLERS_HPP_
 
 #include <memory>
+#include <type_traits>
 
 #include <service/core/smithproxy.hpp>
 #include <service/httpd/httpd.hpp>
@@ -57,8 +58,12 @@ namespace sx::webserver::authorized {
         auto validate_and_call = [&](auto const& key, auto const& token) {
             if (HttpSessions::validate_tokens(key, token)
                     ) {
-                ret.response = Func(conn, meth, req);
-                ret.response_code = MHD_HTTP_OK;
+                if constexpr (std::is_same_v<T, Http_JsonResponseParams>) {
+                    ret = Func(conn, meth, req);
+                } else {
+                    ret.response = Func(conn, meth, req);
+                    ret.response_code = MHD_HTTP_OK;
+                }
             } else {
                 Log::get()->events().insert(ERR, "unauthorized API access attempt using tokens from %s",
                                             client_address(conn).c_str());
@@ -71,8 +76,12 @@ namespace sx::webserver::authorized {
 
         auto validate_api_key_and_call = [&](auto const& key) {
             if (HttpSessions::has_api_key(key)) {
-                ret.response = Func(conn, meth, req);
-                ret.response_code = MHD_HTTP_OK;
+                if constexpr (std::is_same_v<T, Http_JsonResponseParams>) {
+                    ret = Func(conn, meth, req);
+                } else {
+                    ret.response = Func(conn, meth, req);
+                    ret.response_code = MHD_HTTP_OK;
+                }
             } else {
                 Log::get()->events().insert(ERR, "unauthorized API access attempt using API key header from %s",
                                             client_address(conn).c_str());
@@ -132,7 +141,7 @@ namespace sx::webserver::authorized {
 
                 validate_and_call(cookies_headers.value().first, cookies_headers.value().second);
             }
-            else if (auto key = extract_api_key(); key.has_value() and HttpSessions::allow_api_header and meth == "GET") {
+            else if (auto key = extract_api_key(); key.has_value() and HttpSessions::api_header_allowed() and meth == "GET") {
                 // API key is fine only for GET requests
                 validate_api_key_and_call(key.value());
             }

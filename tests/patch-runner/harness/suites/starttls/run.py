@@ -138,12 +138,20 @@ def run_client(args):
     print(json.dumps(results))
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument("mode", choices=("server", "client"))
-parser.add_argument("--host", required=True)
-parser.add_argument("--port", type=int, default=2525)
-parser.add_argument("--cert")
-parser.add_argument("--key")
-parser.add_argument("--ca")
-arguments = parser.parse_args()
-serve(arguments) if arguments.mode == "server" else run_client(arguments)
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("mode", choices=("server", "client"))
+    parser.add_argument("--host", required=True)
+    parser.add_argument("--port", type=int, default=2525)
+    parser.add_argument("--cert")
+    parser.add_argument("--key")
+    parser.add_argument("--ca")
+    arguments = parser.parse_args()
+    if arguments.mode == "server":
+        serve(arguments)
+    else:
+        run_client(arguments)
+
+
+if __name__ == "__main__":
+    main()

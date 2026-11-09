@@ -433,7 +433,14 @@ namespace HPACK
         }
 
 
-        std::string decode(std::string const& src)
+        // All decoders use the same immutable canonical tree. C++ static
+        // initialization is synchronized; decode keeps its cursor locally.
+        static huffman_tree_t const& shared() {
+            static const huffman_tree_t tree;
+            return tree;
+        }
+
+        std::string decode(std::string const& src) const
         {
             std::stringstream	dst;
             huffman_node_t*		current(m_root);
@@ -722,7 +729,6 @@ namespace HPACK
 
         header_map_type	m_headers;
         ringtable_t		m_dynamic;
-        huffman_tree_t	m_huffman;
         uint64_t            m_maximum_table_size;
         uint64_t            m_required_minimum_table_size = 0;
         bool                m_table_size_update_required = false;
@@ -799,7 +805,7 @@ namespace HPACK
 
 
             if ( true == huff )
-                dst = m_huffman.decode(dst);
+                dst = huffman_tree_t::shared().decode(dst);
 
             return dst;
         }

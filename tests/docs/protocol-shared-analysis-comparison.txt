@@ -1,0 +1,78 @@
+Shared immutable Huffman tree and callback-local payload analysis
+================================================================
+Date: 2026-10-25
+Base: smithproxy 6d72e7d, socle 1806c70, plus the eager comparison harness.
+
+Scope
+-----
+HPACK decoders share one immutable canonical Huffman tree. Dynamic tables
+remain private. L7 publication can reuse the byte fingerprint within one
+callback. This is NOT shared protocol parsing: ranges, encoding, annotations
+and protocol state are still evaluated independently for each endpoint view.
+Identical bytes can have different meanings in the two endpoint histories.
+
+PayloadAnalysis owns the original bytes. A same-size in-place replacement
+must not reuse the original fingerprint. The borrowed workspace is scoped
+to observation and is not retained by protocol_fork.
+
+Method
+------
+Same Release benchmark as protocol-eager-comparison.txt: CPU 14, seven
+warmed samples with rotated path order, DATA bodies of 64 and 16384 bytes,
+1/32/256/1024 active streams. Initialization is outside timing. The shared
+path includes allocation, original-byte copy, equality checks and cleanup.
+No concurrent build or test workload was started during measurement.
+Numbers below are median microseconds per input; two-context paths include
+BOTH observations. Measurements are parser microbenchmarks, not proxy
+throughput, header-heavy HPACK workloads, or webhook/network/TLS latency.
+
+Current binary, same-run comparison
+----------------------------------
+streams  body    single    two independent   two shared fingerprint
+      1     64     1.913              3.828                    3.774
+     32     64     1.933              3.816                    3.855
+    256     64     1.952              3.918                    3.935
+   1024     64     1.963              3.944                    3.907
+      1  16384    31.920             64.024                   35.403
+     32  16384    31.995             64.092                   35.483
+    256  16384    32.010             63.947                   35.431
+   1024  16384    32.010             63.977                   35.424
+
+For 16 KiB, shared fingerprinting reduces two-pass cost by about 44.6%,
+leaving about 11% overhead over one parser. For 64 bytes there is no
+meaningful improvement: two parsers still cost approximately twice one.
+
+Fork-only comparison, before / after (64-byte fixture)
+-----------------------------------------------------
+streams       before       after
+      1       96.679        4.737
+     32      194.775       97.076
+    256      963.154      852.318
+   1024     3672.973     3557.875
+
+Removing per-decoder tree construction/copy saves roughly 90-115 us here.
+The large-state copy remains expensive; this does not solve history-copy
+costs. Fixture setup uses plain literals: this demonstrates removal of
+unnecessary tree work, not faster Huffman decoding throughput.
+
+Production remains lazy-fork, not eager-two-context. Shared fingerprinting
+is used in its input/output observations after split too. Before split it
+reuses the original-byte snapshot already needed for change detection;
+after split the new byte snapshot adds a copy, included in the measurement.
+
+Validation and artifacts
+------------------------
+Release unit suite: 238/238 passed (benchmark tests excluded).
+Benchmark suite: 3/3 passed.
+ASan/UBSan unit suite: 238/238 passed (leak detection disabled).
+ASan/UBSan views/checkpoint: 96 tests x 10 shuffled repetitions passed.
+Live integration: 4/4 passed, need-more and protocol views, each JSON/binary.
+Production smithproxy target rebuilt successfully. QUIC was not rerun.
+
+Baseline: /tmp/protocol-eager-benchmark.log
+Current: /tmp/protocol-shared-benchmark.log
+Timing/resources: /tmp/protocol-shared-benchmark-time.txt
+Unit results: /tmp/protocol-shared-unit.xml
+Sanitizers: /tmp/protocol-shared-sanitized-unit.xml
+Repeated sanitizer tests: /tmp/protocol-shared-sanitized-tests.log
+Live integration: /tmp/protocol-shared-integration.log

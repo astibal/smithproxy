@@ -43,17 +43,22 @@
 #include <openssl/rand.h>
 
 #include <staticcontent.hpp>
+#include <proxy/proxymaker.hpp>
 #include <privileged_socket.hpp>
 
 #include <inspect/sigfactory.hpp>
 
 #include <service/core/smithproxy.hpp>
+#include <service/api/api_broker.hpp>
 #include <service/cmd/cmdserver.hpp>
+#include <service/cli/cli_broker.hpp>
 #include <service/httpd/httpd.hpp>
 #include <service/cfgapi/cfgapi.hpp>
+#include <service/network_context.hpp>
 #include "service/http/webhooks.hpp"
 #include "proxy/nbrhood.hpp"
 #include "proxy/multiflow/mfmitmproxy.hpp"
+#include <inspect/dnsinspector.hpp>
 
 #ifdef ASAN_LEAKS
 extern "C" int __lsan_do_recoverable_leak_check();
@@ -85,6 +90,15 @@ void SmithProxy::create_log_writer_thread() {
 
 
 void SmithProxy::create_dns_thread() {
+    DNS_Inspector::set_hostname_observer(
+        [](std::string const& origin, std::vector<std::string> const& addresses,
+           std::string const& hostname) {
+            sx::http::webhooks::hostname_info(origin, addresses, hostname);
+        });
+    DNS_Inspector::set_dns_observer(
+        [](DNS_Inspector::dns_observation const& observation) {
+            sx::http::webhooks::send_sift_dns_observation(observation);
+        });
     dns_thread = std::shared_ptr<std::thread>(create_dns_updater());
     if(dns_thread) {
         pthread_setname_np( dns_thread->native_handle(),
@@ -94,8 +108,15 @@ void SmithProxy::create_dns_thread() {
 
 void SmithProxy::create_api_thread() {
 #ifdef USE_LMHPP
-
-    api_thread = std::shared_ptr<std::thread>(sx::webserver::create_httpd_thread(sx::webserver::HttpSessions::api_port + tenant_index()));
+    const int listener = sx::comm::api::ingress_fd();
+    if(listener < 0) {
+        Log::get()->events().insert(CRI, "cannot obtain API communication listener: %s",
+                                    string_error().c_str());
+        terminate_flag = true;
+        return;
+    }
+    api_thread = std::shared_ptr<std::thread>(sx::webserver::create_httpd_thread(
+        sx::webserver::HttpSessions::api_port + tenant_index(), listener));
     if(api_thread) {
         pthread_setname_np( api_thread->native_handle(),
                             string_format("sxy_api_%d",tenant_index()).c_str());
@@ -103,6 +124,259 @@ void SmithProxy::create_api_thread() {
 #endif
 }
 
+bool SmithProxy::create_tproxy_listeners() {
+    plain_proxies = NetworkServiceFactory::prepare_listener<theAcceptor, TCPCom>(
+        std::stoi(CfgFactory::get()->listen_tcp_port), "tcp",
+        CfgFactory::get()->num_workers_tcp, proxyType::transparent());
+    ssl_proxies = NetworkServiceFactory::prepare_listener<theAcceptor, MySSLMitmCom>(
+        std::stoi(CfgFactory::get()->listen_tls_port), "tls",
+        CfgFactory::get()->num_workers_tls, proxyType::transparent());
+    udp_proxies = NetworkServiceFactory::prepare_listener<theReceiver, UDPCom>(
+        std::stoi(CfgFactory::get()->listen_udp_port), "udp",
+        CfgFactory::get()->num_workers_udp, proxyType::transparent());
+
+    if (CfgFactory::get()->num_workers_quic >= 0) {
+        if (!sx::quic::openssl_quic_available()) {
+            _war("QUIC listener disabled: linked OpenSSL has no QUIC server support (OpenSSL 3.5+ required)");
+        } else {
+            auto certs_path = SSLFactory::factory().certs_path();
+            if (!certs_path.empty() && certs_path.back() != '/') certs_path += '/';
+            auto service = std::make_unique<sx::quic::listener_service>(
+                static_cast<std::uint16_t>(std::stoi(CfgFactory::get()->listen_quic_port)),
+                certs_path + SSLFactory::config_t::SR_CERTF,
+                certs_path + SSLFactory::config_t::SR_KEYF,
+                true, 443, true, sx::quic::lifecycle_options {}, sx::quic::resource_limits {},
+                std::string {}, sx::multiflow::make_mitm_flow_proxy,
+                CfgFactory::get()->capture_local.enabled || CfgFactory::get()->capture_remote.enabled,
+                sx::proxymaker::make_quic_session_setup);
+            if (!service->prepare()) {
+                _err("Failed to setup QUIC listener: %s", service->last_error().c_str());
+                return false;
+            }
+            quic_services.emplace_back(std::move(service));
+        }
+    }
+
+    return !((plain_proxies.empty() && CfgFactory::get()->num_workers_tcp >= 0) ||
+             (ssl_proxies.empty() && CfgFactory::get()->num_workers_tls >= 0) ||
+             (udp_proxies.empty() && CfgFactory::get()->num_workers_udp >= 0));
+}
+
+void SmithProxy::launch_tproxy_listeners() {
+    auto launch = [](auto& proxies, auto& threads, const std::string& name) {
+        for (auto& proxy : proxies) {
+            auto* proxy_ptr = proxy.get();
+            auto thread = std::make_shared<std::thread>([proxy_ptr]() {
+                CRYPTO_set_mem_functions(mempool_alloc, mempool_realloc, mempool_free);
+                DaemonFactory::set_daemon_signals(SmithProxy::instance().terminate_handler_,
+                                                  SmithProxy::instance().reload_handler_);
+                proxy_ptr->run();
+            });
+            pthread_setname_np(thread->native_handle(), name.c_str());
+            threads.push_back(std::move(thread));
+        }
+    };
+    const auto tenant = CfgFactory::get()->tenant_index;
+    launch(plain_proxies, plain_threads, string_format("sxy_tcp_%d", tenant));
+    launch(ssl_proxies, ssl_threads, string_format("sxy_tls_%d", tenant));
+    launch(udp_proxies, udp_threads, string_format("sxy_udp_%d", tenant));
+    for (auto& service : quic_services) {
+        auto* service_ptr = service.get();
+        auto thread = std::make_shared<std::thread>([service_ptr]() { service_ptr->run(); });
+        pthread_setname_np(thread->native_handle(), string_format("sxy_quic_%d", tenant).c_str());
+        quic_threads.push_back(std::move(thread));
+    }
+}
+
+void SmithProxy::stop_tproxy_listeners() {
+    for (auto& service : quic_services) if (service) service->drain();
+    auto stop = [](auto& proxies) { for (auto& proxy : proxies) if (proxy) proxy->state().dead(true); };
+    stop(plain_proxies);
+    stop(ssl_proxies);
+    stop(udp_proxies);
+    stop(dtls_proxies);
+    auto join = [](auto& threads) {
+        for (auto& thread : threads) if (thread && thread->joinable()) thread->join();
+        threads.clear();
+    };
+    join(plain_threads);
+    join(ssl_threads);
+    join(udp_threads);
+    join(dtls_threads);
+    join(quic_threads);
+    for (auto& proxy : plain_proxies) if (proxy) proxy->drain_workers();
+    for (auto& proxy : ssl_proxies) if (proxy) proxy->drain_workers();
+    for (auto& proxy : udp_proxies) if (proxy) proxy->drain_workers();
+    for (auto& proxy : dtls_proxies) if (proxy) proxy->drain_workers();
+    plain_proxies.clear();
+    ssl_proxies.clear();
+    udp_proxies.clear();
+    dtls_proxies.clear();
+    quic_services.clear();
+}
+
+bool SmithProxy::create_socks_listeners() {
+    socks_proxies = NetworkServiceFactory::prepare_listener<socksAcceptor, socksTCPCom>(
+        std::stoi(CfgFactory::get()->listen_socks_port), "socks-tcp",
+        CfgFactory::get()->num_workers_socks, proxyType::proxy());
+    socks_udp_proxies = NetworkServiceFactory::prepare_listener<socksReceiver, socksUDPCom>(
+        std::stoi(CfgFactory::get()->listen_socks_port), "socks-udp",
+        CfgFactory::get()->num_workers_socks, proxyType::proxy());
+    return !((socks_proxies.empty() || socks_udp_proxies.empty()) &&
+             CfgFactory::get()->num_workers_socks >= 0);
+}
+
+bool SmithProxy::create_http_connect_listeners() {
+    http_connect_proxies = NetworkServiceFactory::prepare_listener<httpConnectAcceptor, TCPCom>(
+        std::stoi(CfgFactory::get()->listen_http_connect_port), "http-connect",
+        CfgFactory::get()->num_workers_http_connect, proxyType::proxy());
+    return !(http_connect_proxies.empty() && CfgFactory::get()->num_workers_http_connect >= 0);
+}
+
+bool SmithProxy::create_redirect_listeners() {
+    redir_plain_proxies = NetworkServiceFactory::prepare_listener<theAcceptor, TCPCom>(
+        std::stoi(CfgFactory::get()->listen_tcp_port) + 1000, "redirect-tcp",
+        CfgFactory::get()->num_workers_tcp, proxyType::redirect());
+    redir_ssl_proxies = NetworkServiceFactory::prepare_listener<theAcceptor, MySSLMitmCom>(
+        std::stoi(CfgFactory::get()->listen_tls_port) + 1000, "redirect-tls",
+        CfgFactory::get()->num_workers_tls, proxyType::redirect());
+    redir_udp_proxies = NetworkServiceFactory::prepare_listener<theReceiver, UDPCom>(
+        std::stoi(CfgFactory::get()->listen_udp_port) + 1000, "redirect-udp",
+        CfgFactory::get()->num_workers_udp, proxyType::redirect());
+    return !((redir_plain_proxies.empty() && CfgFactory::get()->num_workers_tcp >= 0) ||
+             (redir_ssl_proxies.empty() && CfgFactory::get()->num_workers_tls >= 0) ||
+             (redir_udp_proxies.empty() && CfgFactory::get()->num_workers_udp >= 0));
+}
+
+namespace {
+template <class Proxies, class Threads>
+void launch_live(Proxies& proxies, Threads& threads, const std::string& name) {
+    for (auto& proxy : proxies) {
+        auto* proxy_ptr = proxy.get();
+        auto thread = std::make_shared<std::thread>([proxy_ptr]() { proxy_ptr->run(); });
+        pthread_setname_np(thread->native_handle(), name.c_str());
+        threads.push_back(std::move(thread));
+    }
+}
+
+template <class Proxies, class Threads>
+void drain_live(Proxies& proxies, Threads& threads) {
+    // Stop accepting first. Workers observe the dead parent, reject new work and
+    // leave only after their already-owned sessions have disappeared.
+    for (auto& proxy : proxies) if (proxy) proxy->state().dead(true);
+    for (auto& thread : threads) if (thread && thread->joinable()) thread->join();
+    for (auto& proxy : proxies) if (proxy) proxy->drain_workers();
+    threads.clear();
+    proxies.clear();
+}
+}
+
+void SmithProxy::launch_socks_listeners() {
+    const auto tenant = CfgFactory::get()->tenant_index;
+    launch_live(socks_proxies, socks_threads, string_format("sxy_skx_%d", tenant));
+    launch_live(socks_udp_proxies, socks_udp_threads, string_format("sxy_sku_%d", tenant));
+}
+
+void SmithProxy::launch_http_connect_listeners() {
+    launch_live(http_connect_proxies, http_connect_threads,
+                string_format("sxy_hcx_%d", CfgFactory::get()->tenant_index));
+}
+
+void SmithProxy::launch_redirect_listeners() {
+    const auto tenant = CfgFactory::get()->tenant_index;
+    launch_live(redir_plain_proxies, redir_plain_threads, string_format("sxy_rtcp_%d", tenant));
+    launch_live(redir_ssl_proxies, redir_ssl_threads, string_format("sxy_rtls_%d", tenant));
+    launch_live(redir_udp_proxies, redir_udp_threads, string_format("sxy_rudp_%d", tenant));
+}
+
+void SmithProxy::stop_socks_listeners() {
+    drain_live(socks_proxies, socks_threads);
+    drain_live(socks_udp_proxies, socks_udp_threads);
+}
+
+void SmithProxy::stop_http_connect_listeners() {
+    drain_live(http_connect_proxies, http_connect_threads);
+}
+
+void SmithProxy::stop_redirect_listeners() {
+    drain_live(redir_plain_proxies, redir_plain_threads);
+    drain_live(redir_ssl_proxies, redir_ssl_threads);
+    drain_live(redir_udp_proxies, redir_udp_threads);
+}
+
+bool SmithProxy::listener_enabled(LiveListener listener) const {
+    switch (listener) {
+        case LiveListener::tproxy: return CfgFactory::get()->accept_tproxy;
+        case LiveListener::redirect: return CfgFactory::get()->accept_redirect;
+        case LiveListener::socks: return CfgFactory::get()->accept_socks;
+        case LiveListener::http_connect: return CfgFactory::get()->accept_http_connect;
+    }
+    return false;
+}
+
+bool SmithProxy::create_listener_group(LiveListener listener) {
+    switch (listener) {
+        case LiveListener::tproxy: return create_tproxy_listeners();
+        case LiveListener::redirect: return create_redirect_listeners();
+        case LiveListener::socks: return create_socks_listeners();
+        case LiveListener::http_connect: return create_http_connect_listeners();
+    }
+    return false;
+}
+
+void SmithProxy::launch_listener_group(LiveListener listener) {
+    switch (listener) {
+        case LiveListener::tproxy: launch_tproxy_listeners(); break;
+        case LiveListener::redirect: launch_redirect_listeners(); break;
+        case LiveListener::socks: launch_socks_listeners(); break;
+        case LiveListener::http_connect: launch_http_connect_listeners(); break;
+    }
+}
+
+void SmithProxy::stop_listener_group(LiveListener listener) {
+    switch (listener) {
+        case LiveListener::tproxy: stop_tproxy_listeners(); break;
+        case LiveListener::redirect: stop_redirect_listeners(); break;
+        case LiveListener::socks: stop_socks_listeners(); break;
+        case LiveListener::http_connect: stop_http_connect_listeners(); break;
+    }
+}
+
+bool SmithProxy::apply_listener_setting(LiveListener listener, bool previous_enabled) {
+    std::lock_guard lock(listeners_mutex_);
+    try {
+        return smithproxy::live::apply_listener(
+            previous_enabled,
+            [this, listener] { return listener_enabled(listener); },
+            [this, listener] { stop_listener_group(listener); },
+            [this, listener] { return create_listener_group(listener); },
+            [this, listener] { launch_listener_group(listener); });
+    } catch (const std::exception& exception) {
+        _err("Cannot apply listener setting live: %s", exception.what());
+        stop_listener_group(listener);
+        return false;
+    }
+}
+
+bool SmithProxy::apply_worker_setting(LiveWorkers workers) {
+    std::lock_guard lock(listeners_mutex_);
+    try {
+        // Worker counts are baked into a listener group. Rebuild only enabled
+        // groups; stop_listener_group() performs the graceful drain first.
+        const auto restart = [this](LiveListener listener) {
+            if (!listener_enabled(listener)) return true;
+            stop_listener_group(listener);
+            if (!create_listener_group(listener)) return false;
+            launch_listener_group(listener);
+            return true;
+        };
+
+        return smithproxy::live::apply_workers(workers, restart);
+    } catch (const std::exception& exception) {
+        _err("Cannot apply worker setting live: %s", exception.what());
+        return false;
+    }
+}
 
 bool SmithProxy::create_listeners() {
 
@@ -112,7 +386,6 @@ bool SmithProxy::create_listeners() {
 
         std::string tcp_frm = "tcp";
         std::string tls_frm = "tls";
-        std::string dtls_frm = "dtls";
         std::string udp_frm = "udp";
         std::string quic_frm = "quic";
 
@@ -150,15 +423,6 @@ bool SmithProxy::create_listeners() {
             log_listener(tls_frm, ssl_proxies);
 
 
-            dtls_proxies = NetworkServiceFactory::prepare_listener<theReceiver, MyDTLSMitmCom>(
-                    std::stoi(CfgFactory::get()->listen_dtls_port),
-                    dtls_frm,
-                    CfgFactory::get()->num_workers_dtls,
-                    proxyType::transparent());
-
-            log_listener(dtls_frm, dtls_proxies);
-
-
             udp_proxies = NetworkServiceFactory::prepare_listener<theReceiver, UDPCom>(
                     std::stoi(CfgFactory::get()->listen_udp_port),
                     udp_frm,
@@ -186,7 +450,8 @@ bool SmithProxy::create_listeners() {
                         sx::quic::resource_limits {}, std::string {},
                         sx::multiflow::make_mitm_flow_proxy,
                         CfgFactory::get()->capture_local.enabled
-                            || CfgFactory::get()->capture_remote.enabled);
+                            || CfgFactory::get()->capture_remote.enabled,
+                        sx::proxymaker::make_quic_session_setup);
                     if (!service->prepare()) {
                         _fat("Failed to setup QUIC listener: %s", service->last_error().c_str());
                         return false;
@@ -199,7 +464,6 @@ bool SmithProxy::create_listeners() {
 
             if ((plain_proxies.empty() && CfgFactory::get()->num_workers_tcp >= 0) ||
                 (ssl_proxies.empty() && CfgFactory::get()->num_workers_tls >= 0) ||
-                (dtls_proxies.empty() && CfgFactory::get()->num_workers_dtls >= 0) ||
                 (udp_proxies.empty() && CfgFactory::get()->num_workers_udp >= 0)) {
 
                 _fat("Failed to setup tproxy proxies. Bailing!");
@@ -352,7 +616,7 @@ void SmithProxy::run() {
         DaemonFactory::set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
         _dia("smithproxy_cli: max file descriptors: %d", this_daemon->get_limit_fd());
 
-        cli_loop(CfgFactory::get()->cli_port + CfgFactory::get()->tenant_index);
+        cli_loop(sx::comm::cli::ingress_fd());
         _dia("cli workers torn down.");
     } );
     pthread_setname_np(cli_thread->native_handle(),friendly_thread_name_cli.c_str());
@@ -384,7 +648,6 @@ void SmithProxy::run() {
     if(CfgFactory::get()->accept_tproxy) {
         launch_proxy_threads(plain_proxies, plain_threads, "TCP listener", friendly_thread_name_tcp.c_str());
         launch_proxy_threads(ssl_proxies, ssl_threads, "TLS listener", friendly_thread_name_tls.c_str());
-        launch_proxy_threads(dtls_proxies, dtls_threads, "DTLS listener", friendly_thread_name_dls.c_str());
         launch_proxy_threads(udp_proxies, udp_threads, "UDP listener", friendly_thread_name_udp.c_str());
         for (auto& service : quic_services) {
             _inf("Starting: QUIC listener");
@@ -444,6 +707,7 @@ void SmithProxy::run() {
     unsigned int wh_ping_seconds = webhook_ping_interval > 10
                                    ? webhook_ping_interval - 10 : 0; // speed-up first ping
     unsigned int wh_nbr_seconds = 0;
+    bool wh_hostname_snapshot_sent = false;
 
 
 
@@ -480,6 +744,10 @@ void SmithProxy::run() {
 
                 wh_ping_seconds = 0;
                 sx::http::webhooks::ping();
+                if(not wh_hostname_snapshot_sent) {
+                    sx::http::webhooks::hostname_info_dns_cache();
+                    wh_hostname_snapshot_sent = true;
+                }
                 sx::webserver::HttpSessions::cleanup();
 
                 state_save();
@@ -508,6 +776,23 @@ void SmithProxy::run() {
             }
             ++wh_nbr_seconds;
         }
+
+        static unsigned int ct_warning_seconds = 5 * 60;
+        if(ct_warning_seconds >= 5 * 60) {
+            bool ct_unavailable = false;
+            {
+                const auto lock = std::scoped_lock(CfgFactory::lock());
+                ct_unavailable = CfgFactory::get()->ct_requested() &&
+                    !SSLFactory::factory().is_ct_available();
+            }
+            if(ct_unavailable) {
+                _war("%s", CfgFactory::CT_UNAVAILABLE_WARNING.data());
+                Log::get()->events().insert(
+                    WAR, "%s", CfgFactory::CT_UNAVAILABLE_WARNING.data());
+            }
+            ct_warning_seconds = 0;
+        }
+        ++ct_warning_seconds;
 
         // Keep the housekeeping loop paced even when webhooks are disabled.
         std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -556,15 +841,17 @@ void SmithProxy::run() {
         if (!cfg_daemonize)
             std::cerr << "all master threads terminated" << std::endl;
 
-        state_save();
-        std::cerr << "state saved." << std::endl;
+        if (state_save())
+            std::cerr << "state saved." << std::endl;
+        else
+            std::cerr << "state save failed; see error log." << std::endl;
     }
     else {
         bail_it();
     }
 }
 
-void SmithProxy::state_save() const {
+bool SmithProxy::state_save() const {
 
     std::string state_dir;
     std::string tenant_name = "default";
@@ -578,15 +865,20 @@ void SmithProxy::state_save() const {
 
     auto nbr_file = string_format("%s/nbr-%s.json", state_dir.c_str(), tenant_name.c_str());
 
-    state_save_neighbors(nbr_file);
+    return state_save_neighbors(nbr_file);
 }
 
-void SmithProxy::state_save_neighbors(std::string const& fnm) const {
-    auto js = NbrHood::instance().ser_json_out();
-    auto of = std::ofstream(fnm, std::ios::out);
-    if(of.is_open()) {
-        of << js.dump(4);
-        of.close();
+bool SmithProxy::state_save_neighbors(std::string const& fnm) const {
+    try {
+        auto snapshot = NbrHood::instance().snapshot();
+        // The live cache is already unlocked. Only the detached record values
+        // are serialized, validated and atomically published from here on.
+        NbrHood::save_snapshot(snapshot, fnm);
+        return true;
+    }
+    catch (std::exception const& e) {
+        _err("state_save_neighbors: %s: %s", fnm.c_str(), e.what());
+        return false;
     }
 }
 
@@ -635,6 +927,10 @@ bool SmithProxy::state_load_neighbors(std::string const& fnm) {
 
 
 void SmithProxy::join_all() {
+
+    // The monitor owns a blocking rtnetlink reader. Wake and join it while
+    // logging is still available and before process-wide cleanup begins.
+    sx::net::NetworkCtx::instance().stop();
 
     auto join_thread_list = [](auto thread_list) {
         for(auto const& t: thread_list) {
@@ -798,22 +1094,29 @@ bool SmithProxy::init_syslog() {
 
     AddressInfo ai;
     ai.str_host = CfgFactory::get()->syslog_server;
-    ai.port = htons(raw::down_cast_signed<unsigned short>(CfgFactory::get()->syslog_port).value_or(514));
+    ai.port = raw::down_cast_signed<unsigned short>(CfgFactory::get()->syslog_port).value_or(514);
     ai.family = CfgFactory::get()->syslog_family == 6 ? AF_INET6 : AF_INET;
-    ai.pack();
+    if(!ai.pack()) {
+        _err("cannot parse syslog server address '%s'", CfgFactory::get()->syslog_server.c_str());
+        return false;
+    }
 
     // create UDP socket
-    int syslog_socket = socle::socket(ai.family, SOCK_DGRAM, IPPROTO_UDP);
+    int syslog_socket = socle::socket(ai.family,
+                                      SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
+    if(syslog_socket < 0) {
+        _err("cannot create syslog socket: %s", string_error().c_str());
+        return false;
+    }
 
-    if(0 != ::connect(syslog_socket,(sockaddr*) ai.as_ss(),sizeof(sockaddr_storage))) {
+    const socklen_t address_size = ai.family == AF_INET ? sizeof(sockaddr_in) : sizeof(sockaddr_in6);
+    if(0 != ::connect(syslog_socket, reinterpret_cast<sockaddr*>(ai.as_ss()), address_size)) {
         _err("cannot connect syslog socket %d: %s", syslog_socket, string_error().c_str());
         ::close(syslog_socket);
+        return false;
     } else {
 
-        Log::get()->remote_targets(string_format("syslog-udp%d-%d", CfgFactory::get()->syslog_family, syslog_socket),
-                                   syslog_socket);
-
-        auto lp = std::make_unique<logger_profile>();
+        auto lp = std::make_shared<logger_profile>();
 
         lp->logger_type = logger_profile::REMOTE_SYSLOG;
         lp->level_ = CfgFactory::get()->syslog_level;
@@ -828,7 +1131,14 @@ bool SmithProxy::init_syslog() {
         lp->syslog_settings.severity = static_cast<int>(lp->level_.level());
         lp->syslog_settings.facility = CfgFactory::get()->syslog_facility;
 
-        Log::get()->target_profiles()[(uint64_t) syslog_socket] = std::move(lp);
+        const auto target_name = string_format("syslog-udp%d-%d", CfgFactory::get()->syslog_family,
+                                               syslog_socket);
+        if(!Log::get()->add_remote_target(target_name, syslog_socket, std::move(lp))) {
+            _err("cannot duplicate syslog socket %d: %s", syslog_socket, string_error().c_str());
+            ::close(syslog_socket);
+            return false;
+        }
+        ::close(syslog_socket);
     }
 
     return true;
@@ -868,6 +1178,7 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
         CfgFactory::get()->load_db_prof_tls();
         CfgFactory::get()->load_db_prof_ssh();
         CfgFactory::get()->load_db_prof_alg_dns();
+        CfgFactory::get()->load_db_prof_script();
         CfgFactory::get()->load_db_prof_auth();
         CfgFactory::get()->load_db_routing();
 
