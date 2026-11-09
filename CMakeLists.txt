@@ -901,6 +901,11 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
 
             find_package(Python3 COMPONENTS Interpreter)
             if(Python3_Interpreter_FOUND)
+                add_test(NAME unit.capture_output_gate
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/patch-runner/harness/test-capture-output.py)
+                set_tests_properties(unit.capture_output_gate PROPERTIES
+                        LABELS "native;capture" TIMEOUT 30)
                 if(USE_LIBSSH)
                     execute_process(
                             COMMAND ${Python3_EXECUTABLE} -c "import paramiko"

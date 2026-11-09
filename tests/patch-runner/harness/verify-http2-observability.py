@@ -3,11 +3,13 @@
 
 import collections
 import json
+import os
 import pathlib
 import re
 import socket
 import struct
 import sys
+from gre_pcapng import restore
 
 
 EXPECTED_REQUESTS = {f"command-{number:02d}" for number in range(1, 13)}
@@ -142,7 +144,11 @@ def main(cli_name, pcapng_name, gre_name, family_name="4"):
     assert_exact(pcap_counts, EXPECTED_REQUESTS, "PCAP requests")
     assert_exact(pcap_counts, EXPECTED_RESPONSES, "PCAP responses")
 
-    gre_counts = gre_stream_markers(pathlib.Path(gre_name), family)
+    if os.environ.get('CAPTURE_GRE_FORMAT') == 'pcapng':
+        restored, _ = restore(gre_name)
+        gre_counts = local_stream_markers(restored, family)
+    else:
+        gre_counts = gre_stream_markers(pathlib.Path(gre_name), family)
     assert_exact(gre_counts, EXPECTED_REQUESTS, "GRE requests")
     assert_exact(gre_counts, EXPECTED_RESPONSES, "GRE responses")
 

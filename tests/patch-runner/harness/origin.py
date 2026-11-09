@@ -7,6 +7,15 @@ if os.environ.get('TLS_PROFILE_TEST') == '1':
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path.startswith('/capture-matrix/'):
+            from capture_tls_cases import cases
+            for number, _, _, response in cases():
+                if self.path == f'/capture-matrix/{number}':
+                    self.wfile.write(response)
+                    self.close_connection = True
+                    return
+            self.send_error(404)
+            return
         if self.path == '/delayed-half-close':
             time.sleep(0.25)
         if self.path.startswith('/bulk/'):

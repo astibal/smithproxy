@@ -10,6 +10,7 @@ import pwd
 import shutil
 import subprocess
 import tempfile
+from gre_pcapng import restore
 
 
 SPQ1_FIELDS = [
@@ -30,8 +31,8 @@ def tshark_command(capture, fields, display_filter, dissector=None, keylog=None)
     command = ["tshark", "-r", str(capture)]
     if dissector:
         command += ["-X", f"lua_script:{dissector}"]
-    if keylog:
-        command += ["-o", f"tls.keylog_file:{keylog}"]
+    # Never inherit an external keylog from the user's Wireshark profile.
+    command += ["-o", f"tls.keylog_file:{keylog or ''}"]
     # The fields output defaults to a tab separator, which is unambiguous for
     # the scalar protocol fields selected below.
     command += ["-Y", display_filter, "-T", "fields"]
@@ -159,7 +160,10 @@ def validate_native(capture, keylog, expected_urls):
         "http3.headers.status",
         "quic.stream.stream_id",
     ]
-    rows = tshark(capture, fields, "http3", keylog=keylog)
+    captures = capture if isinstance(capture, list) else [capture]
+    rows = []
+    for path in captures:
+        rows.extend(tshark(path, fields, "http3", keylog=keylog))
     urls = set()
     methods = collections.Counter()
     statuses = collections.Counter()
@@ -215,6 +219,17 @@ def validate_cli(path, minimum_streams):
         raise AssertionError(f"CLI did not expose {minimum_streams} live streams")
 
 
+def validate_remote_pcapng(capture, dissector, urls):
+    restored, counts = restore(capture, capture.with_name("remote-restored.pcapng"))
+    if not counts.get(10):
+        raise AssertionError("remote PCAPNG lacks packets or embedded DSB secrets")
+    if spq1_rows([restored], dissector):
+        raise AssertionError("remote PCAPNG contains legacy SPQ1 records")
+    result = validate_native(restored, None, urls)
+    result["blocks"] = dict(counts)
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", type=pathlib.Path, required=True)
@@ -231,25 +246,31 @@ def main():
     if not local_captures:
         raise AssertionError("no local QUIC PCAPNG capture")
     local_rows = spq1_rows(local_captures, arguments.dissector)
-    gre_rows = spq1_rows([arguments.gre], arguments.dissector)
-    local_sessions, local_streams, local_summary = validate_spq1(
-        local_rows, arguments.urls, "local PCAP", False)
-    gre_sessions, gre_streams, gre_summary = validate_spq1(
-        gre_rows, arguments.urls, "GRE PCAP", True)
-    if local_sessions != gre_sessions or local_streams != gre_streams:
-        raise AssertionError("local PCAP and GRE identities differ")
-    if local_summary != gre_summary:
-        raise AssertionError("local PCAP and GRE semantic records differ")
+    if local_rows:
+        raise AssertionError("local PCAP contains legacy SPQ1 records")
+    remote = None
+    gre_rows, gre_sessions, gre_streams = [], set(), set()
+    if os.environ.get("QUIC_REMOTE_PCAPNG_TEST") == "1":
+        remote = validate_remote_pcapng(arguments.gre, arguments.dissector, arguments.urls)
+    else:
+        gre_rows = spq1_rows([arguments.gre], arguments.dissector)
+        gre_sessions, gre_streams, _ = validate_spq1(
+            gre_rows, arguments.urls, "GRE PCAP", True)
     validate_cli(arguments.cli, len(arguments.urls))
     native = validate_native(arguments.native, arguments.keylog, arguments.urls)
+    # The exported artifact must decrypt on its own. The external-keylog test
+    # above only proves interception, and can hide missing DSB export records.
+    embedded = validate_native(local_captures, None, arguments.urls)
 
     print(json.dumps({
         "urls": arguments.urls,
-        "sessions": sorted(local_sessions),
-        "streams": sorted(local_streams),
+        "sessions": sorted(gre_sessions),
+        "streams": sorted(gre_streams),
         "local_packets": len(local_rows),
         "gre_packets": len(gre_rows),
         "native": native,
+        "embedded_secrets": embedded,
+        "remote_pcapng": remote,
     }, indent=2, sort_keys=True))
 
 
