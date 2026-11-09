@@ -24,6 +24,11 @@ std::string payload_hash(std::string_view payload) {
 
 CfgArchiveMonitor::CfgArchiveMonitor(Context context)
     : path_(std::move(context.path)),
+      read_archive_(context.read_archive
+          ? std::move(context.read_archive)
+          : [](const std::string& path, std::string& payload) {
+                return sx::privsep::files::config_read(path, payload);
+            }),
       accepted_hash_(payload_hash(context.accepted_payload)) {
     if(path_.empty()) throw CfgTarError("archive monitor path is empty");
 }
@@ -105,6 +110,16 @@ sx::reload::ReloadResult CfgArchiveMonitor::check(bool force) {
     {
         std::lock_guard lock(state_lock_);
         if(!force && have_attempted_signature_ && attempted_signature_ == before) {
+            // A cached invalid generation remains a failure until the bytes
+            // change or an accepted internal publication replaces it. Do not
+            // downgrade a persistent archive error to an "unchanged" success.
+            if(!last_error_.empty()) {
+                return {
+                    sx::reload::ReloadStatus::failed,
+                    version_.load(),
+                    last_error_,
+                };
+            }
             return {sx::reload::ReloadStatus::unchanged, version_.load(), {}};
         }
         attempted_signature_ = before;
@@ -114,7 +129,7 @@ sx::reload::ReloadResult CfgArchiveMonitor::check(bool force) {
     // Read through the privilege-separation facade. It uses the direct path in
     // isolated tests and the fixed privileged capability after identity drop.
     std::string payload;
-    if(sx::privsep::files::config_read(path_, payload) != 0) {
+    if(read_archive_(path_, payload) != 0) {
         return fail(
             "cannot read configuration archive: " + std::string(std::strerror(errno)));
     }

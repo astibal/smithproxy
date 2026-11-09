@@ -2,6 +2,7 @@
 
 #include <string>
 
+#include "cfg_io.hpp"
 #include "cfg_tar.hpp"
 
 namespace sx::cfg {
@@ -11,7 +12,11 @@ namespace sx::cfg {
 // in-memory resource bytes, notably custom-certificate directory discovery.
 class CfgRuntimeTree {
 public:
+    // Materialize an archive through the production filesystem provider.
     static CfgRuntimeTree create(const CfgTar& archive);
+    // Materialize through an alternate provider for deterministic failures or
+    // platform-specific temporary-directory handling.
+    static CfgRuntimeTree create(const CfgTar& archive, CfgIoPtr io);
 
     CfgRuntimeTree(const CfgRuntimeTree&) = delete;
     CfgRuntimeTree& operator=(const CfgRuntimeTree&) = delete;

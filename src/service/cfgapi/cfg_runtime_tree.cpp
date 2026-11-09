@@ -2,7 +2,6 @@
 
 #include <filesystem>
 #include <utility>
-#include <unistd.h>
 
 namespace sx::cfg {
 
@@ -10,8 +9,13 @@ CfgRuntimeTree::CfgRuntimeTree(std::string generation, std::string root)
     : generation_(std::move(generation)), root_(std::move(root)) {}
 
 CfgRuntimeTree CfgRuntimeTree::create(const CfgTar& archive) {
+    return create(archive, std::make_shared<CfgIo>());
+}
+
+CfgRuntimeTree CfgRuntimeTree::create(const CfgTar& archive, CfgIoPtr io) {
+    if(!io) throw CfgTarError("CFtar runtime I/O provider is not available");
     std::string pattern = "/tmp/smithproxy-cftar-runtime-XXXXXX";
-    if(!::mkdtemp(pattern.data())) {
+    if(io->create_temp_directory(pattern) != 0) {
         throw CfgTarError("cannot create private CFtar runtime generation");
     }
 

@@ -174,11 +174,29 @@ TEST(CfgTar, UpsertsAndRemovesEntriesWithCorrectSizeAccounting) {
 
 TEST(CfgTar, RejectsUnsafePaths) {
     CfgTar archive;
+    EXPECT_THROW(archive.add("", "x"), CfgTarError);
     EXPECT_THROW(archive.add("/etc/passwd", "x"), CfgTarError);
+    EXPECT_THROW(archive.add("pki/", "x"), CfgTarError);
+    EXPECT_THROW(archive.add("./pki", "x"), CfgTarError);
     EXPECT_THROW(archive.add("pki/../passwd", "x"), CfgTarError);
     EXPECT_THROW(archive.add("pki//passwd", "x"), CfgTarError);
     EXPECT_THROW(archive.add("pki\\passwd", "x"), CfgTarError);
     EXPECT_THROW(archive.add("pki/trust\nforged", "x"), CfgTarError);
+}
+
+TEST(CfgTar, EnforcesReadLimitsBeforeAllocatingEntryData) {
+    CfgTar::Limits limits;
+    limits.max_file_size = 4;
+
+    EXPECT_THROW(
+        CfgTar::read(raw_archive({"resource", AE_IFREG, "12345"}), limits),
+        CfgTarError);
+
+    limits.max_file_size = 16;
+    limits.max_path_size = 4;
+    EXPECT_THROW(
+        CfgTar::read(raw_archive({"too-long", AE_IFREG, "x"}), limits),
+        CfgTarError);
 }
 
 TEST(CfgTar, RejectsLinksAndSpecialFiles) {
@@ -275,6 +293,18 @@ TEST(CfgTar, MaterializesPrivateFilesWithoutFollowingLinks) {
     EXPECT_THROW(archive.materialize(destination), CfgTarError);
 }
 
+TEST(CfgTar, RejectsFileDirectoryNamespaceCollisions) {
+    TempDir temp;
+    const auto destination = temp.path() + "/generation";
+    CfgTar archive;
+    archive.add("pki", "blocks the directory");
+    archive.add("pki/ca.pem", "certificate");
+
+    EXPECT_THROW(archive.materialize(destination), CfgTarError);
+    EXPECT_EQ(read_file(destination + "/pki"), "blocks the directory");
+    EXPECT_FALSE(std::filesystem::exists(destination + "/pki/ca.pem"));
+}
+
 TEST(CfgTar, RefusesDestinationSymlinkAndPreservesTarget) {
     TempDir temp;
     const auto target = temp.path() + "/target";
@@ -313,6 +343,13 @@ TEST(CfgTar, WriteFileRefusesExistingFilesAndSymlinks) {
     EXPECT_THROW(archive.write_file(target), CfgTarError);
     EXPECT_THROW(archive.write_file(link), CfgTarError);
     EXPECT_EQ(read_file(target), "original");
+}
+
+TEST(CfgTar, ReadFileRejectsMissingAndNonRegularArchives) {
+    TempDir temp;
+
+    EXPECT_THROW(CfgTar::read_file(temp.path() + "/missing.cftar"), CfgTarError);
+    EXPECT_THROW(CfgTar::read_file(temp.path()), CfgTarError);
 }
 
 TEST(CfgTar, WriteFailureIsReported) {

@@ -4,6 +4,7 @@
 #include <string_view>
 #include <vector>
 
+#include "cfg_io.hpp"
 #include "cfg_tar.hpp"
 
 namespace sx::cfg {
@@ -27,6 +28,9 @@ class CfgArchiveSession {
 public:
     // Read and validate one archive, then capture its initial content hash.
     static CfgArchiveSession open(std::string archive_path);
+    // Open an archive through an alternate I/O implementation. This keeps
+    // fault injection and platform adaptation outside session control flow.
+    static CfgArchiveSession open(std::string archive_path, CfgIoPtr io);
 
     // Return the persistent archive path represented by this session.
     const std::string& path() const noexcept { return archive_path_; }
@@ -62,7 +66,8 @@ private:
     CfgArchiveSession(
         std::string archive_path,
         std::string base_hash,
-        CfgTar original);
+        CfgTar original,
+        CfgIoPtr io);
 
     // Enforce manifest policy and parse the complete main libconfig document.
     static void validate_archive(const CfgTar& archive);
@@ -71,6 +76,7 @@ private:
     std::string base_hash_;
     CfgTar original_;
     CfgTar working_;
+    CfgIoPtr io_;
 };
 
 }  // namespace sx::cfg

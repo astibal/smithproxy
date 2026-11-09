@@ -3,6 +3,8 @@
 #include <chrono>
 #include <string>
 
+#include "cfg_io.hpp"
+
 namespace sx::cfg {
 
 // Holds the stable sidecar lock shared by the daemon and offline CFtar tools.
@@ -15,6 +17,12 @@ public:
     static CfgFileLock acquire(
         const std::string& archive_path,
         std::chrono::milliseconds timeout = std::chrono::seconds(5));
+    // Acquire through an alternate I/O implementation used by deterministic
+    // failure tests and platform-specific adapters.
+    static CfgFileLock acquire(
+        const std::string& archive_path,
+        std::chrono::milliseconds timeout,
+        CfgIoPtr io);
 
     // Transfer lock ownership without releasing the underlying descriptor.
     CfgFileLock(CfgFileLock&& other) noexcept;
@@ -28,12 +36,14 @@ public:
     ~CfgFileLock();
 
 private:
-    // Adopt an already locked descriptor returned by acquire().
-    explicit CfgFileLock(int fd) noexcept;
-    // Idempotently unlock and close the owned descriptor.
+    // Adopt the locked directory anchor and sidecar returned by acquire().
+    explicit CfgFileLock(int directory_fd, int sidecar_fd, CfgIoPtr io) noexcept;
+    // Idempotently unlock and close both owned descriptors.
     void release() noexcept;
 
-    int fd_ {-1};
+    int directory_fd_ {-1};
+    int sidecar_fd_ {-1};
+    CfgIoPtr io_;
 };
 
 }  // namespace sx::cfg

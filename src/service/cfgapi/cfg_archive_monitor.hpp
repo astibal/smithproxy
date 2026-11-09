@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -16,11 +17,16 @@ namespace sx::cfg {
 // an administrator still decides when Smithproxy may consume those bytes.
 class CfgArchiveMonitor final : public sx::reload::ReloadableResourceBase {
 public:
+    using ReadArchive = std::function<int(const std::string&, std::string&)>;
+
     struct Context {
         // Persistent native archive selected by CfgFactory.
         std::string path;
         // Exact archive generation already accepted by the running process.
         std::string accepted_payload;
+        // Optional privileged reader override used by alternate runtimes and
+        // deterministic tests. Production defaults to config_read().
+        ReadArchive read_archive {};
     };
 
     // Establish the accepted generation without reporting an initial change.
@@ -62,6 +68,7 @@ private:
     sx::reload::ReloadResult fail(std::string detail);
 
     std::string path_;
+    ReadArchive read_archive_;
     mutable std::mutex state_lock_;
     std::string accepted_hash_;
     std::string detected_hash_;

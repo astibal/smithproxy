@@ -5,7 +5,9 @@
 
 #include <filesystem>
 #include <fstream>
+#include <fcntl.h>
 #include <string>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace {
@@ -63,6 +65,23 @@ TEST_F(PackTest, RejectsMissingRequiredInput) {
     EXPECT_THROW(CfgPack::build(input_), CfgTarError);
 }
 
+TEST_F(PackTest, RejectsIncompleteResourceAndDirectoryMappings) {
+    input_.files.push_back({"messages/en/missing", "", false});
+    EXPECT_THROW(CfgPack::build(input_), CfgTarError);
+
+    input_.files.clear();
+    input_.directories.push_back({"pki/ca/default", ""});
+    EXPECT_THROW(CfgPack::build(input_), CfgTarError);
+
+    input_.directories.clear();
+    input_.directories.push_back({"", directory_});
+    EXPECT_THROW(CfgPack::build(input_), CfgTarError);
+}
+
+TEST_F(PackTest, RejectsMigrationWithoutDestination) {
+    EXPECT_THROW(CfgPack::migrate({input_, ""}), CfgTarError);
+}
+
 TEST_F(PackTest, RejectsSymlinkInput) {
     const auto link = directory_ + "/linked.cfg";
     ASSERT_EQ(::symlink(input_.main_config.c_str(), link.c_str()), 0);
@@ -73,6 +92,17 @@ TEST_F(PackTest, RejectsSymlinkInput) {
 
 TEST_F(PackTest, RejectsDirectoryInput) {
     input_.files.push_back({"messages/en/file", directory_, false});
+    EXPECT_THROW(CfgPack::build(input_), CfgTarError);
+}
+
+TEST_F(PackTest, RejectsOversizedSparseInputBeforeAllocation) {
+    const auto oversized = directory_ + "/oversized.cfg";
+    const int fd = ::open(oversized.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
+    ASSERT_GE(fd, 0);
+    ASSERT_EQ(::ftruncate(fd, 64LL * 1024LL * 1024LL + 1), 0);
+    ASSERT_EQ(::close(fd), 0);
+    input_.main_config = oversized;
+
     EXPECT_THROW(CfgPack::build(input_), CfgTarError);
 }
 
@@ -161,6 +191,15 @@ TEST_F(PackTest, RejectsSymlinksInResourceDirectory) {
     const auto target = write("outside-key", "secret");
     ASSERT_EQ(::symlink(target.c_str(), (root + "/key.pem").c_str()), 0);
     input_.directories.push_back({"pki/ca/default", root});
+
+    EXPECT_THROW(CfgPack::build(input_), CfgTarError);
+}
+
+TEST_F(PackTest, RejectsSpecialFilesInResourceDirectory) {
+    const auto root = directory_ + "/resources";
+    ASSERT_TRUE(std::filesystem::create_directories(root));
+    ASSERT_EQ(::mkfifo((root + "/stream").c_str(), 0600), 0);
+    input_.directories.push_back({"messages/en", root});
 
     EXPECT_THROW(CfgPack::build(input_), CfgTarError);
 }

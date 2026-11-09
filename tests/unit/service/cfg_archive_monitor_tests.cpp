@@ -69,6 +69,59 @@ TEST_F(ArchiveMonitorTest, AcceptedInitialGenerationIsUnchanged) {
     EXPECT_FALSE(watched.change_detected());
     EXPECT_TRUE(watched.detected_hash().empty());
     EXPECT_TRUE(watched.last_error().empty());
+    EXPECT_EQ(watched.poll().status, ReloadStatus::unchanged);
+}
+
+TEST_F(ArchiveMonitorTest, NonRegularArchiveIsAConservativeFailure) {
+    auto watched = monitor();
+    ASSERT_EQ(::unlink(archive_path_.c_str()), 0);
+    ASSERT_EQ(::symlink(directory_.c_str(), archive_path_.c_str()), 0);
+
+    EXPECT_EQ(watched.poll().status, ReloadStatus::failed);
+    EXPECT_TRUE(watched.change_detected());
+    EXPECT_NE(watched.last_error().find("not a regular file"), std::string::npos);
+}
+
+TEST_F(ArchiveMonitorTest, PrivilegedReadFailureRemainsVisible) {
+    CfgArchiveMonitor watched({
+        archive_path_,
+        initial_payload_,
+        [](const std::string&, std::string&) {
+            errno = EACCES;
+            return -1;
+        },
+    });
+
+    EXPECT_EQ(watched.poll().status, ReloadStatus::failed);
+    EXPECT_TRUE(watched.change_detected());
+    EXPECT_NE(watched.last_error().find("Permission denied"), std::string::npos);
+}
+
+TEST_F(ArchiveMonitorTest, ReplacementDuringReadIsRejectedAndRetried) {
+    const auto replacement = archive("changed-during-read").write();
+    bool replace_during_read = true;
+    CfgArchiveMonitor watched({
+        archive_path_,
+        initial_payload_,
+        [&](const std::string& path, std::string& payload) {
+            const auto result = sx::privsep::files::config_read(path, payload);
+            if(result == 0 && replace_during_read) {
+                replace_during_read = false;
+                EXPECT_EQ(sx::privsep::files::write_file_atomic(
+                              archive_path_, replacement), 0);
+            }
+            return result;
+        },
+    });
+
+    const auto raced = watched.poll();
+    EXPECT_EQ(raced.status, ReloadStatus::failed);
+    EXPECT_NE(watched.last_error().find("changed while it was being read"),
+              std::string::npos);
+
+    const auto retried = watched.poll();
+    EXPECT_EQ(retried.status, ReloadStatus::published);
+    EXPECT_TRUE(watched.last_error().empty());
 }
 
 TEST_F(ArchiveMonitorTest, ValidExternalReplacementRequiresRestart) {
@@ -109,6 +162,72 @@ TEST_F(ArchiveMonitorTest, InvalidExternalReplacementStillRequiresRestart) {
     EXPECT_EQ(result.status, ReloadStatus::failed);
     EXPECT_TRUE(watched.change_detected());
     EXPECT_FALSE(watched.last_error().empty());
+}
+
+TEST_F(ArchiveMonitorTest, InvalidGenerationRemainsFailedUntilItChanges) {
+    auto watched = monitor();
+    ASSERT_EQ(sx::privsep::files::write_file_atomic(
+                  archive_path_, "not a tar archive"), 0);
+    ASSERT_EQ(watched.poll().status, ReloadStatus::failed);
+    const auto first_error = watched.last_error();
+
+    const auto repeated = watched.poll();
+
+    EXPECT_EQ(repeated.status, ReloadStatus::failed);
+    EXPECT_EQ(watched.last_error(), first_error);
+    EXPECT_TRUE(watched.change_detected());
+}
+
+TEST_F(ArchiveMonitorTest, ValidGenerationRecoversFromInvalidObservation) {
+    auto watched = monitor();
+    ASSERT_EQ(sx::privsep::files::write_file_atomic(
+                  archive_path_, "not a tar archive"), 0);
+    ASSERT_EQ(watched.poll().status, ReloadStatus::failed);
+
+    const auto replacement = archive("valid-after-invalid").write();
+    ASSERT_EQ(sx::privsep::files::write_file_atomic(
+                  archive_path_, replacement), 0);
+    const auto recovered = watched.poll();
+
+    EXPECT_EQ(recovered.status, ReloadStatus::published);
+    EXPECT_TRUE(watched.change_detected());
+    EXPECT_TRUE(watched.last_error().empty());
+    EXPECT_EQ(watched.detected_hash().find("sha256:"), 0U);
+}
+
+TEST_F(ArchiveMonitorTest, RestoredAcceptedGenerationClearsMissingFailure) {
+    auto watched = monitor();
+    ASSERT_EQ(::unlink(archive_path_.c_str()), 0);
+    ASSERT_EQ(watched.poll().status, ReloadStatus::failed);
+
+    ASSERT_EQ(sx::privsep::files::write_file_atomic(
+                  archive_path_, initial_payload_), 0);
+    const auto restored = watched.poll();
+
+    EXPECT_EQ(restored.status, ReloadStatus::unchanged);
+    EXPECT_FALSE(watched.change_detected());
+    EXPECT_TRUE(watched.last_error().empty());
+}
+
+TEST_F(ArchiveMonitorTest, RapidReplacementsPublishOnlyLatestGeneration) {
+    auto watched = monitor();
+    const auto first = archive("rapid-first").write();
+    const auto second = archive("rapid-second").write();
+    const auto latest = archive("rapid-latest").write();
+    ASSERT_EQ(sx::privsep::files::write_file_atomic(archive_path_, first), 0);
+    ASSERT_EQ(sx::privsep::files::write_file_atomic(archive_path_, second), 0);
+    ASSERT_EQ(sx::privsep::files::write_file_atomic(archive_path_, latest), 0);
+
+    const auto observed = watched.poll();
+
+    EXPECT_EQ(observed.status, ReloadStatus::published);
+    EXPECT_EQ(observed.version, 1U);
+    EXPECT_TRUE(watched.change_detected());
+    const auto hash = watched.detected_hash();
+    watched.accept(latest);
+    EXPECT_FALSE(watched.change_detected());
+    EXPECT_EQ(watched.poll().status, ReloadStatus::unchanged);
+    EXPECT_FALSE(hash.empty());
 }
 
 TEST_F(ArchiveMonitorTest, MissingArchiveIsAConservativeFailure) {

@@ -7,7 +7,9 @@ namespace {
 
 class TestResourceArchive final : public sx::cfg::CfgResourceArchive {
 public:
-    [[nodiscard]] bool available() const override { return source.has_value(); }
+    [[nodiscard]] bool available() const override {
+        return available_override && source.has_value();
+    }
 
     [[nodiscard]] std::string current() const override {
         return source->archive_payload();
@@ -17,6 +19,7 @@ public:
         std::string path,
         std::optional<std::string> content,
         bool executable) const override {
+        if(throw_from_prepare) throw std::runtime_error("injected prepare failure");
         return source->prepare_resource(
             std::move(path), std::move(content), executable);
     }
@@ -33,6 +36,8 @@ public:
 
     std::optional<sx::cfg::CfgArchive> source;
     bool install_ok = true;
+    bool available_override = true;
+    bool throw_from_prepare = false;
     mutable int installs = 0;
     mutable std::string installed;
 };
@@ -87,6 +92,30 @@ TEST_F(ResourceWriteTest, RejectsAStaleArchiveHash) {
     EXPECT_EQ(archive.installs, 0);
 }
 
+TEST_F(ResourceWriteTest, RejectsBusyLease) {
+    ASSERT_TRUE(gate.acquire(
+        board.revision_current(), "other-admin",
+        [this] { return board.revision_current(); }));
+
+    const auto result = write(board.revision_current(), hash(),
+                              "messages/en/page.html", std::string("page"));
+    EXPECT_EQ(result.status, sx::cfg::ResourceWriteStatus::lease_busy);
+}
+
+TEST_F(ResourceWriteTest, RejectsStaleRunningRevision) {
+    const auto result = write("stale-revision", hash(),
+                              "messages/en/page.html", std::string("page"));
+    EXPECT_EQ(result.status, sx::cfg::ResourceWriteStatus::stale_revision);
+}
+
+TEST_F(ResourceWriteTest, RejectsUnavailableNativeArchive) {
+    archive.available_override = false;
+
+    const auto result = write(board.revision_current(), hash(),
+                              "messages/en/page.html", std::string("page"));
+    EXPECT_EQ(result.status, sx::cfg::ResourceWriteStatus::native_unavailable);
+}
+
 TEST_F(ResourceWriteTest, RejectsUnsavedRunningConfiguration) {
     board.upgrade("cli", "changed", "set value");
     const auto result = write(board.revision_current(), hash(),
@@ -117,6 +146,15 @@ TEST_F(ResourceWriteTest, RejectsControlFileMutation) {
                               "manifest.json", std::string("bad"));
     EXPECT_EQ(result.status, sx::cfg::ResourceWriteStatus::invalid_resource);
     EXPECT_EQ(archive.installs, 0);
+}
+
+TEST_F(ResourceWriteTest, ConvertsUnexpectedPrepareFailure) {
+    archive.throw_from_prepare = true;
+
+    const auto result = write(board.revision_current(), hash(),
+                              "messages/en/page.html", std::string("page"));
+    EXPECT_EQ(result.status, sx::cfg::ResourceWriteStatus::write_failed);
+    EXPECT_EQ(result.detail, "injected prepare failure");
 }
 
 }  // namespace

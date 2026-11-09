@@ -284,6 +284,7 @@ add_executable(smithproxy-cftar
         src/service/cfgapi/cfg_pack.cpp
         src/service/cfgapi/cfg_archive.cpp
         src/service/cfgapi/cfg_archive_session.cpp
+        src/service/cfgapi/cfg_io.cpp
         src/service/cfgapi/cfg_exposure.cpp
         src/service/cfgapi/cfg_file_lock.cpp
         src/service/cfgapi/cfg_runtime_tree.cpp
@@ -503,6 +504,12 @@ if(BUILD_TESTING)
         add_test(NAME unit.cftar_help COMMAND smithproxy-cftar --help)
         set_tests_properties(unit.cftar_help
                 PROPERTIES LABELS "native;unit;config" TIMEOUT 10)
+        add_test(NAME integration.cftar_process
+                COMMAND ${PATCH_RUNNER_PYTHON}
+                ${PROJECT_SOURCE_DIR}/tests/process/cftar_process_e2e.py
+                $<TARGET_FILE:smithproxy-cftar> --source ${PROJECT_SOURCE_DIR})
+        set_tests_properties(integration.cftar_process
+                PROPERTIES LABELS "native;integration;config;security" TIMEOUT 60)
         add_test(NAME unit.sx_network_check
                 COMMAND ${PATCH_RUNNER_PYTHON}
                 ${PROJECT_SOURCE_DIR}/tests/network/sx_network_check_test.py)
@@ -834,6 +841,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 src/service/cfgapi/cfg_tar.cpp
                 src/service/cfgapi/cfg_archive.cpp
                 src/service/cfgapi/cfg_archive_session.cpp
+                src/service/cfgapi/cfg_io.cpp
                 src/service/cfgapi/cfg_exposure.cpp
                 src/service/cfgapi/cfg_file_lock.cpp
                 src/service/cfgapi/cfg_pack.cpp
@@ -847,6 +855,33 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 pthread crypto LibArchive::LibArchive nlohmann_json::nlohmann_json
                 ${LIBCONFIGPP_LIBRARIES})
         add_test(NAME unit.cfg_tar COMMAND sx_gtests_cfg_tar)
+
+        add_executable(sx_gtests_cfg_io_faults
+                src/utils/crypto.cpp
+                src/service/cfgapi/cfg_tar.cpp
+                src/service/cfgapi/cfg_archive.cpp
+                src/service/cfgapi/cfg_pack.cpp
+                tests/unit/service/cfg_io_fault_tests.cpp)
+        target_link_libraries(sx_gtests_cfg_io_faults PRIVATE gtest gtest_main
+                pthread crypto LibArchive::LibArchive nlohmann_json::nlohmann_json)
+        target_link_options(sx_gtests_cfg_io_faults PRIVATE
+                -Wl,--wrap=open -Wl,--wrap=openat
+                -Wl,--wrap=fstat -Wl,--wrap=fstatat -Wl,--wrap=lstat
+                -Wl,--wrap=read -Wl,--wrap=write -Wl,--wrap=fsync
+                -Wl,--wrap=dup -Wl,--wrap=fdopendir -Wl,--wrap=readdir
+                -Wl,--wrap=mkdir -Wl,--wrap=mkdirat
+                -Wl,--wrap=archive_read_new
+                -Wl,--wrap=archive_read_support_format_tar
+                -Wl,--wrap=archive_read_open_memory
+                -Wl,--wrap=archive_read_next_header
+                -Wl,--wrap=archive_errno -Wl,--wrap=archive_entry_pathname
+                -Wl,--wrap=archive_read_data
+                -Wl,--wrap=archive_write_new
+                -Wl,--wrap=archive_write_set_format_pax_restricted
+                -Wl,--wrap=archive_write_open -Wl,--wrap=archive_entry_new
+                -Wl,--wrap=archive_write_header -Wl,--wrap=archive_write_data
+                -Wl,--wrap=archive_write_close)
+        add_test(NAME unit.cfg_io_faults COMMAND sx_gtests_cfg_io_faults)
         set_tests_properties(unit.cfg_tar PROPERTIES LABELS "native;unit")
         if("${USE_PAM}" STREQUAL "Y")
             target_link_libraries(sx_gtests pam)

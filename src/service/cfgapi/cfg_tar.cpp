@@ -236,9 +236,6 @@ std::string CfgTar::checked_path(std::string_view path, const Limits& limits) {
         if (component.empty() || component == "." || component == "..") {
             fail("unsafe CfgTar path: " + std::string(path));
         }
-        if (component.find('\0') != component.npos) {
-            fail("NUL byte in CfgTar path");
-        }
         if (end == path.npos) {
             break;
         }
