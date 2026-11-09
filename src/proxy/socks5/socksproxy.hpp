@@ -40,6 +40,7 @@
 #ifndef SOCKSPROXY_HPP
   #define SOCKSPROXY_HPP
 
+#include <proxy/master_policy.hpp>
 #include <threadedacceptor.hpp>
 
 #include <proxy/explicitproxy.hpp>
@@ -68,6 +69,8 @@ private:
 
 class MitmSocksProxy : public ThreadedAcceptorProxy<SocksProxy>, public SessionListConsumer {
 public:
+    sx::proxy::policy_state_t policy_state;
+
 
     MitmSocksProxy(baseCom* c, int worker_id, proxyType t = proxyType::proxy()) : ThreadedAcceptorProxy<SocksProxy>(c,worker_id, t) {};
     baseHostCX* new_cx(int s) override;
@@ -86,6 +89,8 @@ private:
 
 class MitmSocksUdpProxy : public ThreadedReceiverProxy<SocksProxy>, public SessionListConsumer {
 public:
+    sx::proxy::policy_state_t policy_state;
+
 
     MitmSocksUdpProxy(baseCom* c, int worker_id, proxyType t = proxyType::proxy()) : ThreadedReceiverProxy<SocksProxy>(c,worker_id, t) {};
     baseHostCX* new_cx(int s) override;

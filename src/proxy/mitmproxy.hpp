@@ -41,6 +41,7 @@
 #ifndef MITMPROXY_HPP
  #define MITMPROXY_HPP
 
+#include <proxy/master_policy.hpp>
 #include <atomic>
 #include <memory>
 #include <service/http/webhook_control.hpp>
@@ -439,6 +440,8 @@ private:
 
 class MitmMasterProxy : public ThreadedAcceptorProxy<MitmProxy>, public SessionListConsumer {
 public:
+    sx::proxy::policy_state_t policy_state;
+
     
     MitmMasterProxy(baseCom* c, int worker_id, proxyType t = proxyType::transparent() ) :
         ThreadedAcceptorProxy< MitmProxy >(c,worker_id, t) {};
@@ -459,6 +462,8 @@ private:
 
 class MitmUdpProxy : public ThreadedReceiverProxy<MitmProxy>, public SessionListConsumer {
 public:
+    sx::proxy::policy_state_t policy_state;
+
     MitmUdpProxy(baseCom* c, int worker_id, proxyType t = proxyType::transparent() ):
         ThreadedReceiverProxy< MitmProxy >(c,worker_id, t) {};
     void on_left_new(std::unique_ptr<baseHostCX> accepted_cx) override;

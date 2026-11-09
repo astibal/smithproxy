@@ -1,6 +1,7 @@
 #ifndef SMITHPROXY_HTTPCONNECT_HPP
 #define SMITHPROXY_HTTPCONNECT_HPP
 
+#include <proxy/master_policy.hpp>
 #include <proxy/explicitproxy.hpp>
 #include <proxy/proxy_hooks.hpp>
 #include <proxy/explicitproxycx.hpp>
@@ -73,6 +74,8 @@ private:
 class MitmHttpConnectProxy : public ThreadedAcceptorProxy<HttpConnectProxy>,
                              public SessionListConsumer {
 public:
+    sx::proxy::policy_state_t policy_state;
+
     MitmHttpConnectProxy(baseCom* c, int worker_id,
                          proxyType t = proxyType::proxy())
         : ThreadedAcceptorProxy<HttpConnectProxy>(c, worker_id, t) {}

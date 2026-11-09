@@ -1,3 +1,4 @@
+#include <proxy/master_policy.hpp>
 #include <service/interface_roles.hpp>
 #include <proxy/proxymaker.hpp>
 /*
@@ -2063,6 +2064,9 @@ int CfgFactory::load_db_policy () {
         }
     }
     
+    // Notify every master, including when reload removes all policies.
+    sx::proxy::policy_state_t::generation.fetch_add(1, std::memory_order_release);
+
     return num;
 }
 
