@@ -18,11 +18,14 @@ protected:
 
         [[nodiscard]] bool available() const override { return native; }
         [[nodiscard]] std::string current() const override { return current_archive; }
-        [[nodiscard]] sx::cfg::CfgSaveData prepare(
+        [[nodiscard]] sx::cfg::CfgSaveData prepare_main(std::string) const override {
+            throw std::logic_error("main preparation is not used by restore tests");
+        }
+        [[nodiscard]] sx::cfg::CfgSaveData prepare_resource(
             std::string, std::optional<std::string>, bool) const override {
             throw std::logic_error("resource preparation is not used by restore tests");
         }
-        [[nodiscard]] bool publish(const sx::cfg::CfgSaveData& prepared) override {
+        [[nodiscard]] bool publish(const sx::cfg::CfgSaveData& prepared) const override {
             if(behavior == InstallBehavior::throw_error) {
                 throw std::runtime_error("disk error");
             }
@@ -37,10 +40,10 @@ protected:
         bool native = true;
         InstallBehavior behavior = InstallBehavior::succeed;
         std::string current_archive = "current archive bytes";
-        int writes = 0;
-        std::string current_seen;
-        std::string replacement_seen;
-        std::string accepted;
+        mutable int writes = 0;
+        mutable std::string current_seen;
+        mutable std::string replacement_seen;
+        mutable std::string accepted;
     };
 
     void SetUp() override {

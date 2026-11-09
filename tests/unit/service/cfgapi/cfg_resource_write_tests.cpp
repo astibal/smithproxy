@@ -15,7 +15,11 @@ public:
         return source->archive_payload();
     }
 
-    [[nodiscard]] sx::cfg::CfgSaveData prepare(
+    [[nodiscard]] sx::cfg::CfgSaveData prepare_main(std::string) const override {
+        throw std::logic_error("main preparation is not used by resource tests");
+    }
+
+    [[nodiscard]] sx::cfg::CfgSaveData prepare_resource(
         std::string path,
         std::optional<std::string> content,
         bool executable) const override {
@@ -24,7 +28,7 @@ public:
             std::move(path), std::move(content), executable);
     }
 
-    [[nodiscard]] bool publish(const sx::cfg::CfgSaveData& data) override {
+    [[nodiscard]] bool publish(const sx::cfg::CfgSaveData& data) const override {
         ++installs;
         installed = data.replacement;
         if(!install_ok) return false;
@@ -32,12 +36,12 @@ public:
         return true;
     }
 
-    std::optional<sx::cfg::CfgArchive> source;
+    mutable std::optional<sx::cfg::CfgArchive> source;
     bool install_ok = true;
     bool available_override = true;
     bool throw_from_prepare = false;
-    int installs = 0;
-    std::string installed;
+    mutable int installs = 0;
+    mutable std::string installed;
 };
 
 class ResourceWriteTest : public ::testing::Test {

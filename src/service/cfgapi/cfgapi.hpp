@@ -128,14 +128,17 @@ class CfgFactory : public CfgFactoryBase {
         [[nodiscard]] bool available() const override;
         // Return the exact native archive bytes used as the write base.
         [[nodiscard]] std::string current() const override;
+        // Replace smithproxy.cfg in an isolated archive copy.
+        [[nodiscard]] sx::cfg::CfgSaveData prepare_main(
+            std::string content) const override;
         // Apply one resource edit to an isolated archive copy.
-        [[nodiscard]] sx::cfg::CfgSaveData prepare(
+        [[nodiscard]] sx::cfg::CfgSaveData prepare_resource(
             std::string path,
             std::optional<std::string> content,
             bool executable) const override;
         // Publish and adopt the candidate without exposing a partial state.
         [[nodiscard]] bool publish(
-            const sx::cfg::CfgSaveData& prepared) override;
+            const sx::cfg::CfgSaveData& prepared) const override;
 
     private:
         CfgFactory& owner_;

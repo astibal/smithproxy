@@ -129,7 +129,12 @@ std::string CfgFactory::ArchiveStorage::current() const {
     return owner_.config_archive_->archive_payload();
 }
 
-sx::cfg::CfgSaveData CfgFactory::ArchiveStorage::prepare(
+sx::cfg::CfgSaveData CfgFactory::ArchiveStorage::prepare_main(
+    std::string content) const {
+    return owner_.config_archive_->prepare_save(std::move(content));
+}
+
+sx::cfg::CfgSaveData CfgFactory::ArchiveStorage::prepare_resource(
     std::string path,
     std::optional<std::string> content,
     bool executable) const {
@@ -140,7 +145,7 @@ sx::cfg::CfgSaveData CfgFactory::ArchiveStorage::prepare(
 }
 
 bool CfgFactory::ArchiveStorage::publish(
-    const sx::cfg::CfgSaveData& prepared) {
+    const sx::cfg::CfgSaveData& prepared) const {
     // One privileged operation binds the recovery and replacement writes to
     // the exact archive from which prepare() derived this candidate.
     if(!prepared.previous ||
@@ -6677,25 +6682,12 @@ bool CfgFactory::save_config() const {
         // Native storage also keeps the exact previously accepted archive as
         // a recovery copy. If that write fails, the active archive remains
         // untouched and UpdateBoard continues to report an unsaved revision.
-        std::string main_content;
-        std::optional<std::string> previous;
-        if(config_archive_) {
-            main_content = content;
-            auto save = config_archive_->prepare_save(main_content);
-            content = std::move(save.replacement);
-            previous = std::move(save.previous);
+        if(archive_storage_.available()) {
+            auto prepared = archive_storage_.prepare_main(std::move(content));
+            if(!archive_storage_.publish(prepared)) throw FileIOException();
         }
-        const int write_result = previous
-            ? sx::privsep::files::config_install(
-                CfgFactory::get()->config_file, *previous, content)
-            : sx::privsep::files::config_write(
-                CfgFactory::get()->config_file, content);
-        if(write_result != 0) {
+        else if(sx::privsep::files::config_write(config_file, content) != 0) {
             throw FileIOException();
-        }
-        if(config_archive_) {
-            config_archive_->accept_saved_main(std::move(main_content));
-            accept_archive_monitor(config_archive_->archive_payload());
         }
         log.event(NOT, "Configuration saved");
 

@@ -49,7 +49,7 @@ ResourceWriteResult CfgResourceWriter::write(
     try {
         // prepare() edits a copy. The in-memory archive advances only after the
         // recovery copy and atomic active-file replacement both succeed.
-        auto prepared = context_.archive.prepare(
+        auto prepared = context_.archive.prepare_resource(
             std::move(path), std::move(content), executable);
         if(!context_.archive.publish(prepared)) {
             return {ResourceWriteStatus::write_failed, revision, current_hash, {}};
