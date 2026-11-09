@@ -423,6 +423,12 @@ void MitmProxy::enable_protocol_profiling() {
             }, subject);
         active_protocol_tracer_ = protocol_tracer_.get();
     }
+    if(auto* capture_tracer = dynamic_cast<CaptureProtocolTracer*>(
+           active_protocol_tracer_)) {
+        capture_tracer->set_identity(
+            to_connection_ID(), socle::traflog::traflog_file_key(this, 'L'),
+            protocol_trace_subject_);
+    }
     attach_protocol_tracer();
     trace_protocol({socle::trace_side::proxy,
                     subject ? socle::trace_component::stream
@@ -508,9 +514,13 @@ std::optional<nlohmann::json> MitmProxy::capture_protocol_profile() {
         events.push_back(std::move(item));
     }
 
+    auto const identity = capture_identity();
     return nlohmann::json {
-        {"schema", "smithproxy.protocol-profile.v1"},
+        {"schema", "smithproxy.protocol-profile.v2"},
+        {"session_id", identity["session_id"]},
+        {"proxy_session_key", identity["proxy_session_key"]},
         {"dropped", snapshot.dropped},
+        {"capture_dropped", snapshot.capture_dropped},
         {"events", std::move(events)},
     };
 }
@@ -573,6 +583,7 @@ void MitmProxy::write_capture_block(std::array<uint8_t, 4> name_space,
 
     auto const text = payload.dump();
     socle::pcapng::pcapng_custom_block block;
+    block.copyable = true;
     block.pen = 67005U;
     block.name_space = name_space;
     block.entry_type = 1;

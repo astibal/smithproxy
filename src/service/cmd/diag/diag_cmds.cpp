@@ -1114,11 +1114,11 @@ int cli_diag_capture_schemas(DiagCli *cli, const char *command, char *argv[], in
     return cli_print(cli,
                      "Capture metadata schemas:\n"
                      "  PEN: 67005\n"
-                     "  block: 0x40000BAD (PCAPNG non-copyable Custom Block)\n"
+                     "  block: 0x00000BAD (PCAPNG copyable Custom Block)\n"
                      "  SXME type=1 version=1 schema=smithproxy.metadata.v1\n"
                      "  SXST type=1 version=1 schema=smithproxy.statistics.v1\n"
                      "  SXTL type=1 version=1 schema=smithproxy.tls.v1\n"
-                     "  SXPP type=1 version=1 format=smithproxy.protocol-profile.csv.v1\n");
+                     "  SXPP type=1 version=2 format=smithproxy.protocol-profile.csv.v2\n");
 }
 
 int cli_diag_priv_stats(DiagCli* cli, const char* command, char* argv[], int argc) {

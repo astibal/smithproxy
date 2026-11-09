@@ -425,7 +425,7 @@ auth_profiles = {
             require(cli.command_ok("diag capture status"), "Capture enrichment:")
             schemas = cli.command_ok("diag capture schemas")
             require(schemas, "smithproxy.tls.v1")
-            require(schemas, "smithproxy.protocol-profile.csv.v1")
+            require(schemas, "smithproxy.protocol-profile.csv.v2")
             require(cli.command_ok("diag api info"), "API keys")
             cli.command_ok("diag neighbor stats")
 

@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdint>
 #include <mutex>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -28,11 +29,14 @@ public:
     struct snapshot {
         std::vector<record> records;
         std::uint64_t dropped = 0;
+        std::uint64_t capture_dropped = 0;
     };
 
     using writer_type = void (*)(void*, std::string_view);
     CaptureProtocolTracer(void* context, writer_type writer,
                           std::optional<std::uint64_t> subject_id = {}) noexcept;
+    void set_identity(std::string session_id, std::string proxy_session_key,
+                      std::optional<std::uint64_t> subject_id = {});
     void trace(socle::protocol_trace_event const& event) noexcept final;
     [[nodiscard]] snapshot records(
         std::optional<std::uint64_t> subject_id = {}) const;
@@ -40,15 +44,27 @@ public:
     static std::vector<unsigned char> encode_block(std::string_view csv_row);
 
 private:
-    void write(std::string_view csv_row);
+    struct identity {
+        std::string session_id;
+        std::string proxy_session_key;
+    };
+    void write(record const& entry, identity const& value);
+    [[nodiscard]] identity const* identity_for(record const& entry) const;
     void* writer_context_ = nullptr;
     writer_type writer_ = nullptr;
     std::optional<std::uint64_t> default_subject_;
     static constexpr std::size_t maximum_webhook_records = 1024;
+    static constexpr std::size_t maximum_pending_records = 1024;
+    static constexpr std::size_t maximum_pending_detail_bytes = 1024 * 1024;
+    std::size_t pending_detail_bytes_ = 0;
+    std::uint64_t capture_dropped_ = 0;
     mutable std::mutex mutex_;
     uint64_t sequence_ = 0;
-    std::chrono::steady_clock::time_point previous_;
-    bool has_previous_ = false;
+    std::optional<std::chrono::steady_clock::time_point> previous_session_;
+    std::map<std::uint64_t, std::chrono::steady_clock::time_point> previous_streams_;
+    std::optional<identity> session_identity_;
+    std::map<std::uint64_t, identity> stream_identities_;
+    std::vector<record> pending_capture_records_;
     std::vector<record> records_;
     std::uint64_t dropped_records_ = 0;
 };

@@ -611,6 +611,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/proxy/quic/tests/qpack_vendor_tests.cpp
                 src/proxy/quic/openssl.cpp
                 src/proxy/quic/tests/openssl_tests.cpp
+                src/proxy/capture_protocol_tracer.cpp
                 src/service/quic/quicservice.cpp
                 src/service/quic/tests/quicservice_tests.cpp
                 src/service/quic/testbed/quic_testbed.cpp
@@ -624,6 +625,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/proxy/quic/h3capture.cpp
                 src/proxy/quic/spq1.cpp
                 src/proxy/quic/openssl.cpp
+                src/proxy/capture_protocol_tracer.cpp
                 src/service/quic/quicservice.cpp
                 src/service/quic/testbed/quic_test_node.cpp
         )

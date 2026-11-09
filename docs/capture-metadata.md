@@ -32,7 +32,7 @@ automatically wherever payload capture is active.
 
 ## PCAPNG envelope
 
-All records use the non-copyable PCAPNG Custom Block (`0x40000BAD`) and PEN
+All records use the copyable PCAPNG Custom Block (`0x00000BAD`) and PEN
 `67005`. The payload envelope is:
 
 ```text
@@ -54,7 +54,7 @@ The Lua dissector in `tools/wireshark/smithproxy.lua` exposes the envelope,
 JSON correlation fields and typed SXPP columns as Wireshark display-filter
 fields. See `tools/wireshark/README.md` for installation and examples. A
 deterministic capture containing HTTP, TLS 1.3 and all four custom namespaces
-is available as `artifacts/synthetic-smithproxy-extensions.pcapng` and can be
+is available as `tools/wireshark/samples/smithproxy-reference.pcapng` and can be
 regenerated with `tools/wireshark/generate_sample.py`.
 
 The JSON snapshots (`SXME`, `SXST`, `SXTL`) contain both correlation keys:
@@ -103,15 +103,19 @@ client. Failed or incomplete handshakes do not produce `SXTL v1`.
 
 ### SXPP — protocol profile
 
-An ordered protocol audit trail. Unlike the JSON snapshots above, every SXPP
-block contains one RFC 4180 CSV row with fixed columns:
+An ordered protocol audit trail. SXPP version 2 contains one RFC 4180 CSV row
+with fixed columns:
 
 ```text
-seq,timestamp,timestamp_unix_us,delta_us,side,component,scope,stream_id,event,status,detail
+timestamp,timestamp_unix_us,delta_us,session_id,proxy_session_key,seq,side,component,scope,stream_id,event,status,detail
 ```
 
 `timestamp` is UTC with microsecond precision. `delta_us` uses a monotonic clock
-and measures time since the previous row. `side` is `L`, `R`, or `P` (proxy).
+and measures time since the previous relevant row: session events form the
+shared timeline, while a stream event compares against the newer of the last
+shared event and the last event for that stream. Sibling streams do not affect
+each other's delta. The first event on a timeline has delta zero. `side` is
+`L`, `R`, or `P` (proxy).
 The optional `stream_id` correlates multiplexed QUIC streams. `detail` is a
 CSV-escaped free-form field for small technical facts such as an ALPN, selected
 route, policy, or load-balancer target.
@@ -126,11 +130,10 @@ protocol profiling on.
 Example (header shown for readability; it is not stored in each block):
 
 ```csv
-seq,timestamp,timestamp_unix_us,delta_us,side,component,scope,stream_id,event,status,detail
-1,2026-09-11T12:00:00.000120Z,1789128000000120,0,L,quic,connection,,HANDSHAKE_STARTED,pending,
-2,2026-09-11T12:00:00.018420Z,1789128000018420,18300,R,quic,connection,,HANDSHAKE_READY,ok,h3
-3,2026-09-11T12:00:00.020010Z,1789128000020010,1590,P,stream,stream,6,OPENED,ok,
-4,2026-09-11T12:00:00.020140Z,1789128000020140,130,P,policy,stream,6,MATCHED,ok,policy=3
+timestamp,timestamp_unix_us,delta_us,session_id,proxy_session_key,seq,side,component,scope,stream_id,event,status,detail
+2026-09-11T12:00:00.000120Z,1789128000000120,0,Proxy-DEADBEEF-PTR-1,quic_10.0.0.1:45634-1.1.1.1:443,1,L,quic,connection,,HANDSHAKE_STARTED,pending,
+2026-09-11T12:00:00.018420Z,1789128000018420,18300,Proxy-DEADBEEF-PTR-1,quic_10.0.0.1:45634-1.1.1.1:443,2,R,quic,connection,,HANDSHAKE_READY,ok,h3
+2026-09-11T12:00:00.020010Z,1789128000020010,1590,Proxy-DEADBEEF-PTR-1,quic_10.0.0.1:45634-1.1.1.1:443,3,P,stream,stream,6,OPENED,ok,
 ```
 
 ## Diagnostics
@@ -157,7 +160,9 @@ capture enrichment under `capture`:
     "statistics": { "schema": "smithproxy.statistics.v1" },
     "tls": { "schema": "smithproxy.tls.v1" },
     "protocol_profile": {
-      "schema": "smithproxy.protocol-profile.v1",
+      "schema": "smithproxy.protocol-profile.v2",
+      "session_id": "Proxy-DEADBEEF-PTR-1",
+      "proxy_session_key": "tcp_10.0.0.1:45634-1.1.1.1:443",
       "dropped": 0,
       "events": []
     }
@@ -169,5 +174,10 @@ The JSON objects for metadata, statistics and TLS are the same values written
 to `SXME`, `SXST` and `SXTL`. Protocol events are represented as structured JSON
 instead of CSV. The in-memory webhook journal is bounded to 1024 events; SXPP
 capture remains complete, while `dropped` reports records omitted from the
-webhook payload. For QUIC streams, each webhook receives connection-level
+webhook payload. Before correlation identity is available, capture rows are
+buffered up to 1024 entries and 1 MiB of detail text. Further rows are omitted;
+`capture_dropped` in the protocol-profile webhook reports this separately from
+webhook journal truncation. Once identity is available, capture emission is
+not subject to the pending-buffer limit.
+For QUIC streams, each webhook receives connection-level
 events plus events for its own stream ID, not events from sibling streams.
