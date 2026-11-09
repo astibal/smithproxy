@@ -186,7 +186,7 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
 
                 auto lc_ = std::scoped_lock(CfgFactory::lock());
 
-                matched_policy(CfgFactory::get()->policy_match(l, r));
+                matched_policy(sx::proxymaker::match_policy(l, r));
                 if(matched_policy() < 0 and CfgFactory::get()->policy_fail_open) {
                     matched_policy(PolicyRule::POLICY_IMPLICIT_PASS);
                 }
@@ -253,7 +253,7 @@ void ExplicitProxy::handle_explicit_connect(ExplicitProxyCX* cx) {
         bool verdict = false;
         {
             auto lock = std::scoped_lock(CfgFactory::lock());
-            matched_policy(CfgFactory::get()->policy_match(left, right));
+            matched_policy(sx::proxymaker::match_policy(left, right));
             if(matched_policy() < 0 and CfgFactory::get()->policy_fail_open) {
                 matched_policy(PolicyRule::POLICY_IMPLICIT_PASS);
             }

@@ -41,6 +41,8 @@
 #include <proxy/mitmproxy.hpp>
 
 #include <proxy/proxymaker.hpp>
+#include <proxy/proxymaker_policy.hpp>
+#include <proxy/network_policy.hpp>
 #include <proxy/quic_observer.hpp>
 #include <proxy/proxymaker_utils.hpp>
 #include <proxy/connection_start.hpp>
@@ -56,6 +58,26 @@
 #include <arpa/inet.h>
 
 namespace sx::proxymaker {
+
+    int match_policy(baseProxy* proxy) {
+        if(!proxy) return -1;
+        std::scoped_lock guard(CfgFactory::lock());
+        const auto config = CfgFactory::get();
+        auto left = proxy->ls(); left.insert(left.end(), proxy->lda().begin(), proxy->lda().end());
+        auto right = proxy->rs(); right.insert(right.end(), proxy->rda().begin(), proxy->rda().end());
+        const auto network = sx::net::NetworkCtx::instance().snapshot();
+        if(!sx::proxy::prepare_network_policy(config->db_policy_list, left, right, *network)) return -1;
+        return PolicyMatcher::select(config->db_policy_list, proxy, network.get());
+    }
+
+    int match_policy(std::vector<baseHostCX*>& left, std::vector<baseHostCX*>& right) {
+        std::scoped_lock guard(CfgFactory::lock());
+        const auto config = CfgFactory::get();
+        const auto network = sx::net::NetworkCtx::instance().snapshot();
+        if(!sx::proxy::prepare_network_policy(config->db_policy_list, left, right, *network)) return -1;
+        return PolicyMatcher::select(config->db_policy_list, left, right, network.get());
+    }
+
 
     namespace log {
         logan_lite& proxy() {
@@ -403,7 +425,7 @@ namespace sx::proxymaker {
                 // connection-start webhook remains outside this operation.
                 std::scoped_lock lock(CfgFactory::lock());
                 auto config = CfgFactory::get();
-                const int index = config->policy_match(sources, targets);
+                const int index = match_policy(sources, targets);
                 auto rule = config->lookup_policy(index);
                 if(!rule || config->policy_action(index) != PolicyRule::POLICY_ACTION_PASS) {
                     log::connect().war("QUIC TLS policy rejected target=%s:%s", host.c_str(), port.c_str());

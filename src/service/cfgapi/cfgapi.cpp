@@ -1,5 +1,5 @@
 #include <service/interface_roles.hpp>
-#include <proxy/network_policy.hpp>
+#include <proxy/proxymaker.hpp>
 /*
     Smithproxy- transparent proxy with SSL inspection capabilities.
     Copyright (c) 2014, Ales Stibal <astib@mag0.net>, All rights reserved.
@@ -2066,77 +2066,6 @@ int CfgFactory::load_db_policy () {
     return num;
 }
 
-int CfgFactory::policy_match (baseProxy *proxy) {
-
-    auto const& log = log::policy();
-
-    std::scoped_lock<std::recursive_mutex> l(lock_);
-    
-    if(!proxy) return -1;
-    auto left = proxy->ls(); left.insert(left.end(), proxy->lda().begin(), proxy->lda().end());
-    auto right = proxy->rs(); right.insert(right.end(), proxy->rda().begin(), proxy->rda().end());
-    const auto network = sx::net::NetworkCtx::instance().snapshot();
-    if(!sx::proxy::prepare_network_policy(db_policy_list, left, right, *network)) return -1;
-    int x = 0;
-    for( auto const& rule: db_policy_list) {
-
-        bool r = rule->match(proxy, network.get());
-        
-        if(r) {
-            _deb("policy_match: matched #%d", x);
-
-            {
-                // shadowing own log desired - wanting to log in policy rule context
-                _dia(" => policy #%d matched!", x);
-            }
-
-            return x;
-        } else {
-            // shadowing own log desired - wanting to log in policy rule context
-            _dia(" => policy #%d NOT matched!", x);
-        }
-        
-        x++;
-    }
-
-    _not("policy_match: implicit deny");
-    return -1;
-}
-
-int CfgFactory::policy_match (std::vector<baseHostCX *> &left, std::vector<baseHostCX *> &right) {
-    std::scoped_lock<std::recursive_mutex> l(lock_);
-    
-    const auto network = sx::net::NetworkCtx::instance().snapshot();
-    if(!sx::proxy::prepare_network_policy(db_policy_list, left, right, *network)) return -1;
-    int x = 0;
-    for( auto const& rule: db_policy_list) {
-
-        bool r = rule->match(left, right, network.get());
-        
-        if(r) {
-            _dia("cfgapi_obj_policy_match_lr: matched #%d", x);
-
-            {
-                // shadowing own log desired - wanting to log in policy rule context
-                auto &log = rule->get_log();
-                _dia(" => policy #%d matched!", x);
-            }
-
-            return x;
-        } else {
-            // shadowing own log desired - wanting to log in policy rule context
-            auto &log = rule->get_log();
-            _dia(" => policy #%d NOT matched!", x);
-        }
-
-        
-        x++;
-    }
-
-    _dia("cfgapi_obj_policy_match_lr: implicit deny");
-    return -1;
-}    
-
 int CfgFactory::policy_action (int index) {
     std::scoped_lock<std::recursive_mutex> l(lock_);
     
@@ -3637,7 +3566,7 @@ int CfgFactory::policy_apply (baseHostCX *originator, MitmProxy *proxy, int matc
     }
 
     int policy_num = sx::policy::preserve_explicit_match(
-        matched_policy, [&] { return policy_match(proxy); });
+        matched_policy, [&] { return sx::proxymaker::match_policy(proxy); });
     if(policy_num < 0 and policy_fail_open) {
         _war("Connection %s accepted without a policy match: settings.policy_fail_open=true",
              originator->full_name('L').c_str());

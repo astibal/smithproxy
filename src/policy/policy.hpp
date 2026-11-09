@@ -52,6 +52,8 @@
 #include <policy/addrobj.hpp>
 #include <policy/profiles.hpp>
 
+namespace sx::proxymaker { class PolicyMatcher; }
+
 namespace sx::policy {
 
 template<class Matcher>
@@ -113,11 +115,15 @@ public:
     bool match_roles(const std::vector<baseHostCX*>& left,
                      const std::vector<baseHostCX*>& right,
                      const sx::net::InterfaceSnapshot& network) const;
+private:
+    // Complete policy evaluation belongs exclusively to proxymaker.
+    friend class sx::proxymaker::PolicyMatcher;
     bool match(baseProxy*, const sx::net::InterfaceSnapshot* network = nullptr);
     bool match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r,
                const sx::net::InterfaceSnapshot* network = nullptr);
 
 
+public:
     int sock_2_net(int sock_type) const;
     bool match_proto_cx(int acl_proto, const baseHostCX *cx);
     bool match_proto_vecx(int acl_proto, std::vector<baseHostCX*> const& vec_cx);

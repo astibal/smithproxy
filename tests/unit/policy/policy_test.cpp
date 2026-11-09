@@ -3,6 +3,7 @@
 #include <sslcom.hpp>
 
 #include <policy/policy.hpp>
+#include <proxy/proxymaker_policy.hpp>
 #include <service/cfgapi/cfgapi.hpp>
 #include <service/cfgapi/profile_runtime_options.hpp>
 #include <log/logan.hpp>
@@ -11,6 +12,30 @@
 
 #include <atomic>
 #include <thread>
+
+template<class Rule, class = void>
+struct has_public_rule_match : std::false_type {};
+template<class Rule>
+struct has_public_rule_match<Rule, std::void_t<decltype(std::declval<Rule&>().match(
+    std::declval<std::vector<baseHostCX*>&>(), std::declval<std::vector<baseHostCX*>&>()))>>
+    : std::true_type {};
+static_assert(!has_public_rule_match<PolicyRule>::value,
+              "Complete rule matching must remain private to proxymaker");
+
+template<class Rule, class = void>
+struct has_public_proxy_match : std::false_type {};
+template<class Rule>
+struct has_public_proxy_match<Rule, std::void_t<decltype(std::declval<Rule&>().match(
+    std::declval<baseProxy*>()))>> : std::true_type {};
+static_assert(!has_public_proxy_match<PolicyRule>::value,
+              "Live proxy rule matching must remain private to proxymaker");
+
+// Exercise the same gated selector used by production; no test-only friendship.
+template<class... Context>
+bool selects_rule(PolicyRule& rule, Context&&... context) {
+    auto borrowed = std::shared_ptr<PolicyRule>(&rule, [](PolicyRule*) {});
+    return sx::proxymaker::PolicyMatcher::select({borrowed}, std::forward<Context>(context)...) == 0;
+}
 
 using namespace cidr;
 
@@ -360,7 +385,7 @@ TEST(PolicyTest, MatchCounterIsExactUnderConcurrentTraffic) {
     for(unsigned int i = 0; i < workers; ++i) {
         threads.emplace_back([&] {
             for(unsigned int match = 0; match < matches_per_worker; ++match)
-                if(!policy.match(lefts, rights)) all_matched = false;
+                if(!selects_rule(policy, lefts, rights)) all_matched = false;
         });
     }
     for(auto& thread : threads) thread.join();
@@ -427,10 +452,10 @@ TEST(PolicyTest, DirectMatchRequiresCompleteNonNullEndpointSets) {
     std::vector<baseHostCX*> lefts{&left};
     std::vector<baseHostCX*> rights{&right};
 
-    EXPECT_FALSE(rule.match(empty, rights));
-    EXPECT_FALSE(rule.match(lefts, empty));
+    EXPECT_FALSE(selects_rule(rule, empty, rights));
+    EXPECT_FALSE(selects_rule(rule, lefts, empty));
     lefts.push_back(nullptr);
-    EXPECT_FALSE(rule.match(lefts, rights));
+    EXPECT_FALSE(selects_rule(rule, lefts, rights));
 
     lefts = {&left};
     // The public setter now rejects a null COM. Deliberately corrupt only
@@ -447,7 +472,7 @@ TEST(PolicyTest, DirectMatchRequiresCompleteNonNullEndpointSets) {
     lefts.push_back(&missing_transport);
     // A wildcard protocol used to skip the only com() validation and let
     // this incomplete endpoint participate in an allow-rule match.
-    EXPECT_FALSE(rule.match(lefts, rights));
+    EXPECT_FALSE(selects_rule(rule, lefts, rights));
 }
 
 TEST(PolicyTest, EveryEndpointMustMatchAddressAndPortOnTheSameFlowSet) {
@@ -466,11 +491,11 @@ TEST(PolicyTest, EveryEndpointMustMatchAddressAndPortOnTheSameFlowSet) {
     // The address used to match the first endpoint and the port the second,
     // incorrectly authorizing the whole set although no endpoint matched the
     // complete source predicate.
-    EXPECT_FALSE(rule.match(lefts, rights));
+    EXPECT_FALSE(selects_rule(rule, lefts, rights));
 
     address_only.port("2000");
     lefts.resize(1);
-    EXPECT_TRUE(rule.match(lefts, rights));
+    EXPECT_TRUE(selects_rule(rule, lefts, rights));
 }
 
 TEST(PolicyTest, ProtocolAndMalformedEndpointFailuresAreFailClosed) {
@@ -481,18 +506,18 @@ TEST(PolicyTest, ProtocolAndMalformedEndpointFailuresAreFailClosed) {
     std::vector<baseHostCX*> lefts{&tcp};
     std::vector<baseHostCX*> rights{&udp};
 
-    EXPECT_FALSE(rule.match(lefts, rights));
+    EXPECT_FALSE(selects_rule(rule, lefts, rights));
 
     rule.proto = std::make_shared<CfgUint8>(0);
     rule.src.push_back(std::make_shared<CfgAddress>(
         std::make_shared<CidrAddress>("192.0.2.0/24")));
     tcp.host("not-an-ip-address");
-    EXPECT_NO_THROW(EXPECT_FALSE(rule.match(lefts, rights)));
+    EXPECT_NO_THROW(EXPECT_FALSE(selects_rule(rule, lefts, rights)));
     tcp.host("192.0.2.10");
     tcp.port("invalid");
     rule.src_ports.push_back(std::make_shared<CfgRange>(
         std::pair<int, int>(1, 65535)));
-    EXPECT_FALSE(rule.match(lefts, rights));
+    EXPECT_FALSE(selects_rule(rule, lefts, rights));
 }
 
 TEST(PolicyTest, UserDisabledRulesSkipButConfigurationErrorsStopSelection) {
@@ -503,13 +528,13 @@ TEST(PolicyTest, UserDisabledRulesSkipButConfigurationErrorsStopSelection) {
     std::vector<baseHostCX*> rights{&right};
 
     rule.is_disabled = true;
-    EXPECT_FALSE(rule.match(lefts, rights));
+    EXPECT_FALSE(selects_rule(rule, lefts, rights));
     rule.is_disabled = false;
     rule.cfg_err_is_disabled = true;
-    EXPECT_TRUE(rule.match(lefts, rights));
+    EXPECT_TRUE(selects_rule(rule, lefts, rights));
     rule.cfg_err_is_disabled = false;
     rule.cfg_err_is_degraded = true;
-    EXPECT_TRUE(rule.match(lefts, rights));
+    EXPECT_TRUE(selects_rule(rule, lefts, rights));
 }
 
 #include <proxy/network_policy.hpp>
@@ -526,10 +551,10 @@ TEST(PolicyInterfaces, MatchesBothRolesAndRejectsUnknownMetadata) {
     rule->ingress_role = "Office"; rule->egress_role = "Outside";
     EXPECT_TRUE(rule->match_roles({&left}, {&right}, network));
     std::vector<baseHostCX*> lefts{&left}, rights{&right};
-    EXPECT_TRUE(rule->match(lefts, rights, &network));
+    EXPECT_TRUE(selects_rule(*rule, lefts, rights, &network));
     rule->ingress_role = "Guest";
     EXPECT_FALSE(rule->match_roles({&left}, {&right}, network));
-    EXPECT_FALSE(rule->match(lefts, rights, &network));
+    EXPECT_FALSE(selects_rule(*rule, lefts, rights, &network));
     rule->ingress_role = "Office";
     right.com()->egress_ifindex(0);
     EXPECT_FALSE(rule->match_roles({&left}, {&right}, network));
