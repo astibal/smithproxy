@@ -1,3 +1,5 @@
+#include <service/core/session_interfaces.hpp>
+#include <service/httpd/diag/diag_network.hpp>
 #include <service/network_context.hpp>
 
 #include <gtest/gtest.h>
@@ -296,4 +298,56 @@ TEST(NetworkRoles, InvalidCandidateHasNoRuntimeSideEffects) {
     }
     libconfig::Config omitted;
     EXPECT_TRUE(sx::net::parse_interface_roles(omitted.getRoot()).empty());
+}
+
+
+TEST(NetworkDiagnostics, IncludesUnaddressedInterfacesAndPreservesValidity) {
+    sx::net::InterfaceSnapshot snapshot;
+    snapshot.valid = true;
+    snapshot.roles_valid = false;
+    snapshot.generation = 42;
+    snapshot.interfaces.push_back({2, "office0", 0, "Office"});
+    snapshot.interfaces.push_back({3, "wan0", 0, "Outside"});
+    snapshot.uplinks.insert(3);
+
+    sx::net::InterfaceAddress address;
+    address.interface_index = 2;
+    address.family = AF_INET;
+    address.address_size = 4;
+    address.prefix_length = 24;
+    ASSERT_EQ(::inet_pton(AF_INET, "192.0.2.1", address.address.data()), 1);
+    snapshot.addresses.push_back(address);
+
+    const auto result = sx::net::interface_snapshot_json(snapshot);
+    EXPECT_EQ(result["generation"], 42);
+    EXPECT_EQ(result["snapshot_valid"], true);
+    EXPECT_EQ(result["roles_valid"], false);
+    ASSERT_EQ(result["interfaces"].size(), 2);
+    const auto& office = result["interfaces"][0];
+    EXPECT_EQ(office["role"], "Office");
+    EXPECT_EQ(office["uplink"], false);
+    ASSERT_EQ(office["addresses"].size(), 1);
+    EXPECT_EQ(office["addresses"][0]["address"], "192.0.2.1");
+    EXPECT_EQ(office["addresses"][0]["prefix_length"], 24);
+    const auto& wan = result["interfaces"][1];
+    EXPECT_EQ(wan["ifindex"], 3);
+    EXPECT_EQ(wan["uplink"], true);
+    EXPECT_TRUE(wan["addresses"].empty());
+}
+
+TEST(NetworkDiagnostics, SessionInterfacesHandleUnknownAndInvalidRoles) {
+    sx::net::InterfaceSnapshot snapshot;
+    snapshot.valid = true;
+    snapshot.roles_valid = true;
+    snapshot.interfaces.push_back({2, "lan0", 0, "Office"});
+    EXPECT_TRUE(sx::net::session_interface_json(0, &snapshot).is_null());
+    EXPECT_EQ(sx::net::session_interface_json(2, &snapshot)["role"], "Office");
+    EXPECT_EQ(sx::net::session_interface_text(2, &snapshot), "lan0 (Office)");
+    snapshot.roles_valid = false;
+    EXPECT_TRUE(sx::net::session_interface_json(2, &snapshot)["role"].is_null());
+    EXPECT_EQ(sx::net::session_interface_json(2, &snapshot)["name"], "lan0");
+    snapshot.valid = false;
+    EXPECT_TRUE(sx::net::session_interface_json(2, &snapshot)["name"].is_null());
+    EXPECT_EQ(sx::net::session_interface_text(2, &snapshot), "ifindex 2 (unknown)");
+    EXPECT_TRUE(sx::net::session_interface_json(99, nullptr)["role"].is_null());
 }

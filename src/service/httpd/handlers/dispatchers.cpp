@@ -3,6 +3,7 @@
 #include <service/httpd/handlers/handlers.hpp>
 
 #include <service/httpd/diag/diag_ssl.hpp>
+#include <service/httpd/diag/diag_network.hpp>
 #include <service/httpd/diag/daig_proxy.hpp>
 
 #include <service/httpd/do/do_comands.hpp>
@@ -112,6 +113,20 @@ namespace sx::webserver::dispatchers {
 
 
     void controller_add_diag(lmh::WebServer &server) {
+
+        for(auto const& method: {"GET", "POST"}) {
+            auto* handler = new Http_Responder(
+                method, "/api/diag/network/interfaces",
+                authorized::token_protected<json>(
+                    []([[maybe_unused]] MHD_Connection* connection,
+                       [[maybe_unused]] const std::string& method,
+                       [[maybe_unused]] const std::string& request) -> json {
+                        return sx::net::network_interfaces_json();
+                    })
+            );
+            handler->Content_Type = "application/json";
+            server.addController(std::shared_ptr<lmh::Controller>(handler));
+        }
 
         for(auto const& meth: { "GET", "POST"}) {
             auto* handler = new Http_Responder(meth, "/api/diag/ssl/cache/stats",
