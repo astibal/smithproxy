@@ -9,11 +9,13 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <future>
 #include <vector>
 
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+#include <sys/file.h>
 #include <unistd.h>
 
 #include <service/privileged_file.hpp>
@@ -195,6 +197,45 @@ TEST_F(PrivilegedFileTest, ConfigInstallRefusesStaleExpectedGeneration) {
     EXPECT_EQ(content, "current");
     EXPECT_FALSE(std::filesystem::exists(
         targets_.config + ".previous.bak.cfg"));
+}
+
+TEST_F(PrivilegedFileTest, ConfigInstallSharesOfflineDirectoryLockDomain) {
+    ASSERT_EQ(sx::privsep::files::write_file_atomic(targets_.config, "first"), 0);
+    const int directory = ::open(root_.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    ASSERT_GE(directory, 0);
+    ASSERT_EQ(::flock(directory, LOCK_EX), 0);
+
+    auto install = std::async(std::launch::async, [&] {
+        return sx::privsep::files::config_install(targets_.config, "first", "second");
+    });
+    EXPECT_EQ(install.wait_for(std::chrono::milliseconds(100)),
+              std::future_status::timeout);
+
+    ASSERT_EQ(::flock(directory, LOCK_UN), 0);
+    ASSERT_EQ(::close(directory), 0);
+    EXPECT_EQ(install.get(), 0);
+
+    std::string content;
+    ASSERT_EQ(sx::privsep::files::read_file(targets_.config, content), 0);
+    EXPECT_EQ(content, "second");
+}
+
+TEST_F(PrivilegedFileTest, ConfigInstallTimesOutWithoutDelayedPublication) {
+    ASSERT_EQ(sx::privsep::files::write_file_atomic(targets_.config, "first"), 0);
+    const int directory = ::open(root_.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    ASSERT_GE(directory, 0);
+    ASSERT_EQ(::flock(directory, LOCK_EX), 0);
+
+    errno = 0;
+    EXPECT_EQ(sx::privsep::files::config_install(
+                  targets_.config, "first", "must-not-appear"), -1);
+    EXPECT_EQ(errno, ETIMEDOUT);
+    ASSERT_EQ(::flock(directory, LOCK_UN), 0);
+    ASSERT_EQ(::close(directory), 0);
+
+    std::string content;
+    ASSERT_EQ(sx::privsep::files::read_file(targets_.config, content), 0);
+    EXPECT_EQ(content, "first");
 }
 
 TEST_F(PrivilegedFileTest, ServerReadsWritesAndBacksUpOnlyConfiguredTarget) {

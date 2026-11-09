@@ -8,6 +8,8 @@
 #include <chrono>
 #include <filesystem>
 #include <thread>
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace {
@@ -237,6 +239,31 @@ TEST_F(ArchiveMonitorTest, MissingArchiveIsAConservativeFailure) {
     EXPECT_EQ(watched.poll().status, ReloadStatus::failed);
     EXPECT_TRUE(watched.change_detected());
     EXPECT_NE(watched.last_error().find("cannot stat"), std::string::npos);
+}
+
+TEST_F(ArchiveMonitorTest, PeriodicHashDetectsRewriteWithRestoredMetadata) {
+    auto watched = monitor();
+    ASSERT_EQ(watched.reload_now().status, ReloadStatus::unchanged);
+
+    struct stat original {};
+    ASSERT_EQ(::stat(archive_path_.c_str(), &original), 0);
+    const auto replacement = archive("changed").write();
+    ASSERT_EQ(replacement.size(), initial_payload_.size());
+
+    const int output = ::open(archive_path_.c_str(), O_WRONLY | O_TRUNC);
+    ASSERT_GE(output, 0);
+    ASSERT_EQ(::write(output, replacement.data(), replacement.size()),
+              static_cast<ssize_t>(replacement.size()));
+    ASSERT_EQ(::close(output), 0);
+    const timespec timestamps[2] = {original.st_atim, original.st_mtim};
+    ASSERT_EQ(::utimensat(AT_FDCWD, archive_path_.c_str(), timestamps, 0), 0);
+
+    // Metadata remains a cheap fast path, but it has a finite lifetime.
+    for(unsigned attempt = 0; attempt < 29; ++attempt) {
+        EXPECT_EQ(watched.poll().status, ReloadStatus::unchanged);
+    }
+    EXPECT_EQ(watched.poll().status, ReloadStatus::published);
+    EXPECT_TRUE(watched.change_detected());
 }
 
 TEST_F(ArchiveMonitorTest, SharedReloadWorkerDetectsReplacement) {

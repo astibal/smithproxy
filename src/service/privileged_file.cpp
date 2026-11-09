@@ -16,7 +16,9 @@
 #include <poll.h>
 #include <signal.h>
 #include <string_view>
+#include <thread>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 #include <sys/mman.h>
 #include <sys/file.h>
@@ -28,11 +30,94 @@
 namespace {
 
 constexpr std::size_t max_file_size = sx::privsep::files::max_config_payload;
+constexpr auto config_lock_timeout = std::chrono::seconds(5);
 
 std::mutex state_mutex;
 std::shared_ptr<sx::privsep::files::Client> installed_client;
 sx::privsep::files::Targets installed_targets;
 pid_t helper_pid = -1;
+
+// Own both levels of the CFtar publication lock. The directory inode anchors
+// the lock domain even if an administrator removes and recreates the visible
+// sidecar while another writer is active. This small counterpart deliberately
+// lives inside the privileged helper instead of pulling the wider cfgapi object
+// graph across the privilege boundary; its protocol mirrors CfgFileLock.
+class ConfigPublicationLock final {
+public:
+    static ConfigPublicationLock acquire(const std::string& path) {
+        auto parent = std::filesystem::path(path).parent_path();
+        if(parent.empty()) parent = ".";
+
+        const int directory = ::open(
+            parent.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+        if(directory < 0) return {};
+        if(wait(directory) != 0) {
+            const int saved = errno;
+            ::close(directory);
+            errno = saved;
+            return {};
+        }
+
+        const auto sidecar_path = path + ".lock";
+        const int sidecar = ::open(
+            sidecar_path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
+        if(sidecar < 0 || wait(sidecar) != 0) {
+            const int saved = errno;
+            if(sidecar >= 0) ::close(sidecar);
+            ::flock(directory, LOCK_UN);
+            ::close(directory);
+            errno = saved;
+            return {};
+        }
+        return ConfigPublicationLock(directory, sidecar);
+    }
+
+    ConfigPublicationLock() = default;
+    ConfigPublicationLock(const ConfigPublicationLock&) = delete;
+    ConfigPublicationLock& operator=(const ConfigPublicationLock&) = delete;
+    ConfigPublicationLock(ConfigPublicationLock&& other) noexcept
+        : directory_(std::exchange(other.directory_, -1)),
+          sidecar_(std::exchange(other.sidecar_, -1)) {}
+    ~ConfigPublicationLock() { release(); }
+
+    explicit operator bool() const noexcept { return sidecar_ >= 0; }
+
+private:
+    ConfigPublicationLock(int directory, int sidecar) noexcept
+        : directory_(directory), sidecar_(sidecar) {}
+
+    static int wait(int fd) {
+        const auto deadline = std::chrono::steady_clock::now() + config_lock_timeout;
+        while(::flock(fd, LOCK_EX | LOCK_NB) != 0) {
+            if(errno == EINTR) continue;
+            if(errno != EWOULDBLOCK && errno != EAGAIN) return -1;
+            if(std::chrono::steady_clock::now() >= deadline) {
+                errno = ETIMEDOUT;
+                return -1;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(25));
+        }
+        return 0;
+    }
+
+    void release() noexcept {
+        const int saved = errno;
+        if(sidecar_ >= 0) {
+            ::flock(sidecar_, LOCK_UN);
+            ::close(sidecar_);
+            sidecar_ = -1;
+        }
+        if(directory_ >= 0) {
+            ::flock(directory_, LOCK_UN);
+            ::close(directory_);
+            directory_ = -1;
+        }
+        errno = saved;
+    }
+
+    int directory_ {-1};
+    int sidecar_ {-1};
+};
 
 int write_all(int fd, const char* data, std::size_t size) {
     std::size_t offset = 0;
@@ -175,17 +260,11 @@ std::string content_hash(std::string_view content) {
 // recovery copy and active replacement describe one indivisible generation.
 int install_config_from_fd(
     const std::string& path, std::string_view expected_hash, int replacement) {
-    const auto lock_path = path + ".lock";
-    const int lock = ::open(
-        lock_path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
-    if(lock < 0) return -1;
-    while(::flock(lock, LOCK_EX) != 0) {
-        if(errno == EINTR) continue;
-        const int saved = errno;
-        ::close(lock);
-        errno = saved;
-        return -1;
-    }
+    // Use the same two-level lock domain as smithproxy-cftar. The bounded wait
+    // also finishes before the IPC client's deadline, so a caller can never be
+    // told that save timed out and then observe a delayed publication.
+    auto publication_lock = ConfigPublicationLock::acquire(path);
+    if(!publication_lock) return -1;
 
     std::string current;
     int result = sx::privsep::files::read_file(path, current);
@@ -207,10 +286,6 @@ int install_config_from_fd(
     }
     if(result == 0) result = atomic_replace_from_fd(path, replacement);
 
-    const int saved = errno;
-    ::flock(lock, LOCK_UN);
-    ::close(lock);
-    errno = saved;
     return result;
 }
 

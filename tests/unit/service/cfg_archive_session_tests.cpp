@@ -1360,4 +1360,14 @@ TEST_F(ArchiveSessionTest, ExposureRejectsMissingLogicalPath) {
     EXPECT_TRUE(exposures.entries().empty());
 }
 
+TEST_F(ArchiveSessionTest, ExposureRejectsPathsOutsideRuntimeTree) {
+    auto session = CfgArchiveSession::open(archive_path_);
+    CfgExposureRegistry exposures;
+
+    EXPECT_THROW(exposures.expose(session.archive(), "../outside"), CfgTarError);
+    EXPECT_THROW(exposures.expose(session.archive(), "templates/../../outside"),
+                 CfgTarError);
+    EXPECT_TRUE(exposures.entries().empty());
+}
+
 }  // namespace

@@ -343,7 +343,12 @@ CfgPack::LegacyRetireResult CfgPack::retire_legacy_tree(
     const auto backup_path = (fs::path(root) / backup_name).string();
     const auto archive_prefix = fs::path("etc/smithproxy");
     CfgTar current;
-    std::vector<fs::path> files;
+    struct LegacyFile {
+        fs::path path;
+        dev_t device {0};
+        ino_t inode {0};
+    };
+    std::vector<LegacyFile> files;
     std::vector<fs::path> directories;
     std::error_code error;
 
@@ -379,7 +384,13 @@ CfgPack::LegacyRetireResult CfgPack::retire_legacy_tree(
         const auto archived = (archive_prefix / relative).generic_string();
         current.add(archived, payload,
                     (status.permissions() & fs::perms::owner_exec) != fs::perms::none);
-        files.push_back(iterator->path());
+        struct stat identity {};
+        if(::lstat(iterator->path().c_str(), &identity) != 0 ||
+           !S_ISREG(identity.st_mode)) {
+            fail("legacy configuration entry changed while scanning: " +
+                 iterator->path().string());
+        }
+        files.push_back({iterator->path(), identity.st_dev, identity.st_ino});
     }
     if(error) {
         fail("cannot scan legacy configuration tree " + root + ": " +
@@ -421,20 +432,31 @@ CfgPack::LegacyRetireResult CfgPack::retire_legacy_tree(
     // the next start verifies every survivor against the immutable memento and
     // continues. A changed survivor stops cleanup rather than losing data.
     for(const auto& file : files) {
-        const auto relative = file.lexically_relative(root).generic_string();
+        const auto relative = file.path.lexically_relative(root).generic_string();
         const auto archived = (archive_prefix / relative).generic_string();
         struct stat state {};
-        if(::lstat(file.c_str(), &state) != 0 || !S_ISREG(state.st_mode)) {
+        if(::lstat(file.path.c_str(), &state) != 0 || !S_ISREG(state.st_mode) ||
+           state.st_dev != file.device || state.st_ino != file.inode) {
             fail("legacy configuration entry changed before removal: " +
-                 file.string());
+                 file.path.string());
         }
         const auto& saved = memento.at(archived);
-        if(read_input(file.string()) != saved.data ||
+        if(read_input(file.path.string()) != saved.data ||
            ((state.st_mode & S_IXUSR) != 0) != saved.executable) {
-            fail("legacy configuration changed before removal: " + file.string());
+            fail("legacy configuration changed before removal: " + file.path.string());
         }
-        if(::unlink(file.c_str()) != 0) {
-            fail_errno("cannot remove migrated legacy file " + file.string());
+
+        // Recheck identity after the potentially slow content read. This does
+        // not try to outsmart a malicious root process, but it closes the
+        // practical race where an administrator replaces a file during cleanup.
+        struct stat before_unlink {};
+        if(::lstat(file.path.c_str(), &before_unlink) != 0 ||
+           before_unlink.st_dev != file.device || before_unlink.st_ino != file.inode) {
+            fail("legacy configuration entry changed before removal: " +
+                 file.path.string());
+        }
+        if(::unlink(file.path.c_str()) != 0) {
+            fail_errno("cannot remove migrated legacy file " + file.path.string());
         }
         ++result.files_removed;
     }

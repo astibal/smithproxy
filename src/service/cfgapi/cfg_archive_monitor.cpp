@@ -13,6 +13,8 @@
 namespace sx::cfg {
 namespace {
 
+constexpr unsigned metadata_fast_path_limit = 29;
+
 // Use the same digest representation as archive download and transaction APIs.
 std::string payload_hash(std::string_view payload) {
     const auto digest = sx::crypto::sha256(payload);
@@ -73,6 +75,7 @@ void CfgArchiveMonitor::accept(std::string_view payload) {
     detected_hash_.clear();
     last_error_.clear();
     have_attempted_signature_ = false;
+    metadata_fast_paths_remaining_ = 0;
     change_detected_.store(false, std::memory_order_release);
 }
 
@@ -109,7 +112,9 @@ sx::reload::ReloadResult CfgArchiveMonitor::check(bool force) {
 
     {
         std::lock_guard lock(state_lock_);
-        if(!force && have_attempted_signature_ && attempted_signature_ == before) {
+        if(!force && have_attempted_signature_ && attempted_signature_ == before &&
+           metadata_fast_paths_remaining_ > 0) {
+            --metadata_fast_paths_remaining_;
             // A cached invalid generation remains a failure until the bytes
             // change or an accepted internal publication replaces it. Do not
             // downgrade a persistent archive error to an "unchanged" success.
@@ -124,6 +129,7 @@ sx::reload::ReloadResult CfgArchiveMonitor::check(bool force) {
         }
         attempted_signature_ = before;
         have_attempted_signature_ = true;
+        metadata_fast_paths_remaining_ = metadata_fast_path_limit;
     }
 
     // Read through the privilege-separation facade. It uses the direct path in

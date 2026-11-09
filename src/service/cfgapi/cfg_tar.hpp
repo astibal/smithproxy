@@ -45,6 +45,11 @@ public:
     CfgTar();
     explicit CfgTar(Limits limits);
 
+    // Validate and canonicalize one path under this archive's path policy.
+    [[nodiscard]] std::string checked_path(std::string_view path) const {
+        return checked_path(path, limits_);
+    }
+
     // Both readers accept uncompressed TAR only. Compression, links, devices,
     // sparse files and unsafe paths are rejected before an entry is accepted.
     static CfgTar read_file(const std::string& path);

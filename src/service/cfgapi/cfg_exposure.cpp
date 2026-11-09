@@ -6,12 +6,17 @@ namespace sx::cfg {
 
 CfgExposure CfgExposureRegistry::expose(
     const CfgTar& archive, std::string logical_path) {
+    // Exposure accepts the same canonical relative paths as the archive
+    // itself. In particular, ".." must never turn a session-local snapshot
+    // into a handle for an unrelated host path below /tmp.
+    logical_path = archive.checked_path(logical_path);
+
     // Materialize the complete validated generation so directory exposures
     // preserve their natural layout. The returned path may name either one
     // regular entry or an inferred directory inside that private generation.
     auto tree = CfgRuntimeTree::create(archive);
     auto filesystem_path = tree.root();
-    if(!logical_path.empty()) filesystem_path += "/" + logical_path;
+    filesystem_path += "/" + logical_path;
 
     std::error_code error;
     const auto status = std::filesystem::symlink_status(filesystem_path, error);

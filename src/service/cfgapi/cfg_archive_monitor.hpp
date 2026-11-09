@@ -32,7 +32,7 @@ public:
     // Establish the accepted generation without reporting an initial change.
     explicit CfgArchiveMonitor(Context context);
 
-    // Check metadata and inspect bytes only when the filesystem generation moved.
+    // Check metadata and periodically re-hash even an apparently stable inode.
     sx::reload::ReloadResult poll() override;
     // Inspect current bytes even when their filesystem signature appears equal.
     sx::reload::ReloadResult reload_now() override;
@@ -75,6 +75,10 @@ private:
     std::string last_error_;
     FileSignature attempted_signature_;
     bool have_attempted_signature_ {false};
+    // Metadata is only a fast path. Periodically consume this allowance and
+    // hash the bytes again so an in-place rewrite with restored mtime cannot
+    // remain invisible forever.
+    unsigned metadata_fast_paths_remaining_ {0};
     std::atomic_bool change_detected_ {false};
     std::atomic<sx::reload::version_type> version_ {0};
 };
