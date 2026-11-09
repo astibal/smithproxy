@@ -118,6 +118,148 @@ std::string b64_encode_text(std::string_view bytes) {
         reinterpret_cast<unsigned char const*>(bytes.data()), bytes.size());
 }
 
+// Convert the API-shaped reply once, then reuse the native offer validator.
+bool decode_client_hello_reply(nlohmann::json& body) {
+
+    if(!body.is_object() || !body.contains("schema") ||
+       !body["schema"].is_number_integer() || body["schema"] != 2 ||
+       !body.contains("client_hello") || !body["client_hello"].is_object()) {
+        return false;
+    }
+
+    const auto& draft = body["client_hello"];
+    if(!draft.contains("decision") || !draft["decision"].is_string() ||
+       !draft.contains("alpn_offers") || !draft["alpn_offers"].is_array() ||
+       !draft.contains("sni") || !draft.contains("openssl_cipher_list")) {
+        return false;
+    }
+
+    const auto action = draft["decision"].get<std::string>();
+    if(action != "continue" && action != "bypass" && action != "terminate") return false;
+
+    std::string protocols;
+    for(const auto& encoded : draft["alpn_offers"]) {
+        if(!encoded.is_string() || encoded.get_ref<const std::string&>().size() > 340) return false;
+        const auto value = b64_decode(encoded.get<std::string>());
+        if(value.empty() || value.size() > 255 || b64_encode_text(value) != encoded.get<std::string>()) {
+            return false;
+        }
+
+        protocols.push_back(static_cast<char>(value.size()));
+        protocols += value;
+        if(protocols.size() > 65535) return false;
+    }
+
+    body["proceed"] = action != "terminate";
+    body["ignore_connection"] = action == "bypass";
+    body["upstream"] = {{"sni", draft["sni"]},
+        {"alpn_base64", protocols.empty() ? std::string{} : b64_encode_text(protocols)},
+        {"openssl_cipher_list", draft["openssl_cipher_list"]}};
+    return true;
+}
+
+// Schema 2 mirrors the native API. Conversion stays at the webhook boundary;
+// the existing offer validators and observers continue to receive schema 1.
+nlohmann::json handshake_metadata(const nlohmann::json& observation, bool quic) {
+
+    const auto& envelope = observation.at("envelope");
+    const bool start = envelope.at("event") == "start";
+    nlohmann::json value;
+
+    // Start exposes effective settings; outcomes carry immutable handshake facts.
+    if(start) {
+        value = {{"sni", observation.value("sni", nlohmann::json(""))},
+                 {"alpn_offers", nlohmann::json::array()}, {"decision", "continue"}};
+
+        const auto cipher_key = quic ? "openssl_ciphersuites" : "openssl_cipher_list";
+        value[cipher_key] = nullptr;
+
+        // Only upstream starts have an editable offer. Client-facing starts
+        // retain the defaults above and expose no upstream cipher expression.
+        if(observation.contains("upstream")) {
+            const auto& offer = observation.at("upstream");
+            value["sni"] = offer.at("sni");
+            value[cipher_key] = offer.at(quic ? "ciphers" : "openssl_cipher_list");
+
+            // The API uses individual base64 ALPN values for both transports.
+            // QUIC supplies one protocol; TLS supplies a length-prefixed list.
+            if(quic) {
+                value["alpn_offers"].push_back(b64_encode_text(offer.at("alpn").get<std::string>()));
+            } else {
+                const auto protocols = b64_decode(offer.at("alpn_base64").get<std::string>());
+
+                for(std::size_t offset = 0; offset < protocols.size();) {
+                    const auto length = static_cast<unsigned char>(protocols[offset++]);
+                    if(!length || offset + length > protocols.size()) {
+                        throw std::runtime_error("Invalid native TLS ALPN offer");
+                    }
+
+                    value["alpn_offers"].push_back(b64_encode_text(protocols.substr(offset, length)));
+                    offset += length;
+                }
+            }
+        }
+    } else {
+        value = observation;
+        value.erase("envelope");
+        value.erase("protocol");
+
+        // Normalize the selected protocol without changing the observed facts.
+        value["alpn"] = quic
+            ? nlohmann::json(b64_encode_text(observation.value("alpn", std::string{})))
+            : observation.at("alpn_base64");
+        value.erase("alpn_base64");
+        value["decision"] = "continue";
+    }
+
+    return {{"schema", 2}, {"envelope", envelope}, {start ? "start" : "outcome", std::move(value)}};
+}
+
+bool decode_handshake_reply(nlohmann::json& body, bool start, bool upstream, bool quic) {
+
+    const auto key = start ? "start" : "outcome";
+    if(!body.is_object() || body.value("schema", nlohmann::json()) != 2 ||
+       !body.contains(key) || !body[key].is_object()) return false;
+
+    // Validate the committed decision before considering mutable settings.
+    const auto& draft = body[key];
+    if(!draft.contains("decision") || !draft["decision"].is_string()) return false;
+
+    const auto decision = draft["decision"].get<std::string>();
+    if(decision != "continue" && decision != "terminate") return false;
+
+    body["proceed"] = decision == "continue";
+    if(!start || !upstream || decision == "terminate") return true;
+
+    // Only an accepted upstream start may replace the outgoing offer.
+    if(!draft.contains("sni") || !draft["sni"].is_string()) return false;
+
+    // Reuse ClientHello validation for TCP TLS, then remove its temporary keys.
+    if(!quic) {
+        body["client_hello"] = draft;
+        const bool valid = decode_client_hello_reply(body);
+        body.erase("client_hello");
+        body.erase("ignore_connection");
+        return valid;
+    }
+
+    // QUIC supports one ALPN value. Require canonical base64 and the same
+    // protocol length limit as the native observer before publishing settings.
+    if(!draft.contains("alpn_offers") || !draft["alpn_offers"].is_array() ||
+       draft["alpn_offers"].size() != 1 || !draft["alpn_offers"][0].is_string() ||
+       !draft.contains("openssl_ciphersuites")) return false;
+
+    const auto encoded = draft["alpn_offers"][0].get<std::string>();
+    if(encoded.size() > 340) return false;
+
+    const auto alpn = b64_decode(encoded);
+    if(alpn.empty() || alpn.size() > 255 || b64_encode_text(alpn) != encoded) return false;
+
+    body["upstream"] = {{"sni", draft["sni"]}, {"alpn", alpn},
+                        {"ciphers", draft["openssl_ciphersuites"]}};
+    return true;
+}
+
 // Metadata builders only describe the current payload; they never apply replies.
 void add_content_ranges(nlohmann::json& info, const ProxyHooks::ContentArgs& args,
                         const MitmHostCX* left) {
@@ -437,9 +579,17 @@ bool ProxyHooks::start_reply(MitmProxy& proxy, const StartReplyArgs& args) {
                 proxy.webhook_tls_lifecycle_ = tls != control->end() &&
                     tls->is_number_integer() && *tls == 1;
 
+                const auto schema = control->find("tls_schema");
+                proxy.webhook_tls_meta_ = schema != control->end() &&
+                    schema->is_number_integer() && *schema == 2;
+
                 const auto hello = control->find("tls_clienthello");
                 proxy.webhook_tls_clienthello_ = hello != control->end() &&
                     hello->is_number_integer() && *hello == 1;
+
+                const auto hello_schema = control->find("tls_clienthello_schema");
+                proxy.webhook_tls_clienthello_meta_ = proxy.webhook_tls_clienthello_ &&
+                    hello_schema != control->end() && hello_schema->is_number_integer() && *hello_schema == 2;
 
                 const auto start = control->find("tls_start_server");
                 proxy.webhook_tls_start_server_ = start != control->end() &&
@@ -786,13 +936,17 @@ nlohmann::json ProxyHooks::quic(const QuicArgs& args) {
 
     nlohmann::json decision = {{"proceed", !args.strict}};
     const auto& envelope = args.observation.at("envelope");
+    const auto wire = args.meta ? handshake_metadata(args.observation, true) : args.observation;
 
     sx::http::webhooks::send_action_wait(
-        "quic-lifecycle", args.connection_id, {{"quic", args.observation}},
+        "quic-lifecycle", args.connection_id, {{"quic", wire}},
         [&](const sx::http::expected_reply& reply) {
             if(!reply || reply->response.first != 200) return;
 
             auto body = nlohmann::json::parse(reply->response.second, nullptr, false);
+            if(args.meta && !decode_handshake_reply(body, envelope.at("event") == "start", true, true)) {
+                return;
+            }
             if(!body.is_object() || body.value("action", "") != "quic-lifecycle" ||
                body.value("id", "") != args.connection_id ||
                !body.contains("envelope") || body["envelope"] != envelope ||
@@ -809,18 +963,23 @@ nlohmann::json ProxyHooks::quic(const QuicArgs& args) {
 bool ProxyHooks::tls_exchange(MitmProxy& proxy, const nlohmann::json& observation) {
 
     const auto& envelope = observation.at("envelope");
+    const auto wire = proxy.webhook_tls_meta_ ? handshake_metadata(observation, false) : observation;
 
     // Preserve callback order before application events. As with server hooks,
     // observer unavailability is fail-open unless strict control was negotiated.
     bool proceed = !proxy.webhook_control_->strict();
     sx::http::webhooks::send_action_wait(
-        "tls-lifecycle", proxy.to_connection_ID(), {{"tls", observation}},
+        "tls-lifecycle", proxy.to_connection_ID(), {{"tls", wire}},
         [&](const sx::http::expected_reply& reply) {
             if(!reply || reply->response.first != 200) {
                 return;
             }
 
-            const auto body = nlohmann::json::parse(reply->response.second, nullptr, false);
+            auto body = nlohmann::json::parse(reply->response.second, nullptr, false);
+            if(proxy.webhook_tls_meta_ &&
+               !decode_handshake_reply(body, envelope.at("event") == "start", false, false)) {
+                return;
+            }
             if(!body.is_object() || body.value("action", "") != "tls-lifecycle" ||
                body.value("id", "") != proxy.to_connection_ID() ||
                !body.contains("envelope") || body["envelope"] != envelope) {
@@ -845,7 +1004,7 @@ ProxyHooks::TlsOfferDecision ProxyHooks::client_hello(MitmProxy& proxy,
         {"side", "client"},
         {"event", "client-hello"}
     };
-    const nlohmann::json observation = {
+    nlohmann::json observation = {
         {"envelope", envelope},
         {"client_hello_base64", b64_encode_text(args.body)},
         {"upstream", {
@@ -856,6 +1015,31 @@ ProxyHooks::TlsOfferDecision ProxyHooks::client_hello(MitmProxy& proxy,
         }},
         {"upstream_alpn_blocked", args.alpn_blocked}
     };
+
+    if(proxy.webhook_tls_clienthello_meta_) {
+        // The public draft mirrors this structure. Encode each ALPN bytes
+        // value separately; length-prefixing remains a native TLS detail.
+        nlohmann::json offers = nlohmann::json::array();
+        if(!args.alpn_blocked) {
+            for(std::size_t offset = 0; offset < args.upstream_alpn.size();) {
+                const auto length = static_cast<unsigned char>(args.upstream_alpn[offset++]);
+                if(!length || offset + length > args.upstream_alpn.size()) {
+                    throw std::runtime_error("Invalid native ClientHello ALPN offer");
+                }
+                offers.push_back(b64_encode_text(std::string(args.upstream_alpn.substr(offset, length))));
+                offset += length;
+            }
+        }
+
+        observation = {
+            {"envelope", envelope}, {"schema", 2},
+            {"client_hello", {
+                {"original", {{"body_base64", b64_encode_text(args.body)}}},
+                {"sni", args.upstream_sni}, {"alpn_offers", std::move(offers)},
+                {"openssl_cipher_list", args.upstream_ciphers}, {"decision", "continue"}
+            }}
+        };
+    }
 
     return tls_offer(proxy, args, observation);
 }
@@ -888,19 +1072,28 @@ ProxyHooks::TlsOfferDecision ProxyHooks::tls_offer(MitmProxy& proxy,
 
     const auto& envelope = observation.at("envelope");
     const bool hello = envelope.at("event") == "client-hello";
+    const bool meta_start = !hello && proxy.webhook_tls_meta_;
+    const auto wire = meta_start ? handshake_metadata(observation, false) : observation;
 
     // A malformed or unavailable reply must never partially enable bypass.
     TlsOfferDecision decision;
     decision.proceed = !proxy.webhook_control_->strict();
 
     sx::http::webhooks::send_action_wait(
-        "tls-lifecycle", proxy.to_connection_ID(), {{"tls", observation}},
+        "tls-lifecycle", proxy.to_connection_ID(), {{"tls", wire}},
         [&](const sx::http::expected_reply& reply) {
             if(!reply || reply->response.first != 200) {
                 return;
             }
 
-            const auto body = nlohmann::json::parse(reply->response.second, nullptr, false);
+            auto body = nlohmann::json::parse(reply->response.second, nullptr, false);
+            if(meta_start && !decode_handshake_reply(body, true, true, false)) {
+                return;
+            }
+            if(hello && observation.value("schema", 1) == 2 && !decode_client_hello_reply(body)) {
+                return;
+            }
+
             if(!body.is_object() || body.value("action", "") != "tls-lifecycle" ||
                body.value("id", "") != proxy.to_connection_ID() ||
                !body.contains("envelope") || body["envelope"] != envelope ||
@@ -946,6 +1139,13 @@ ProxyHooks::TlsOfferDecision ProxyHooks::tls_offer(MitmProxy& proxy,
                     const auto ciphers = value.get<std::string>();
                     if(ciphers.size() > 65535 || ciphers.find('\0') != std::string::npos) return;
                     candidate.upstream_cipher_list = ciphers;
+                }
+
+                // Echoing the prefilled expression is not an override. Keep
+                // the default session-cache identity for an unchanged draft.
+                if(hello && observation.value("schema", 1) == 2 &&
+                   candidate.upstream_cipher_list == args.upstream_ciphers) {
+                    candidate.upstream_cipher_list.reset();
                 }
 
                 const bool cipher_changed = hello

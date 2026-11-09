@@ -116,12 +116,14 @@ socle::ProtocolHookResult TlsObserver::client_hello(baseCom& com) noexcept {
 
         // Socle normalizes record fragments before invoking us. Strip the
         // record and handshake headers; the adapter expects only the body.
+        const auto ciphers = tls->upstream_cipher_filter();
         ProxyHooks::ClientHelloArgs args;
         args.attempt = proxy->tls_lifecycle(*client).attempt;
         args.body = std::string_view(reinterpret_cast<const char*>(hello.data()) + 9,
                                      hello.size() - 9);
         args.upstream_sni = tls->get_sni();
         args.upstream_alpn = tls->get_peer_alpn();
+        args.upstream_ciphers = ciphers;
         args.alpn_blocked = tls->opt.alpn_block;
 
         const auto decision = ProxyHooks::client_hello(*proxy, args);

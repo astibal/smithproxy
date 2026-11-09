@@ -22,6 +22,7 @@ public:
     struct StartDetailsArgs {};
     struct StartArgs {};
     struct QuicArgs {
+        bool meta = false;
         std::string connection_id;
         bool strict = false;
         nlohmann::json observation;
@@ -106,6 +107,7 @@ public:
         std::string_view body;
         std::string_view upstream_sni;
         std::string_view upstream_alpn;
+        std::string_view upstream_ciphers;
         bool alpn_blocked = false;
     };
     struct TlsOfferDecision {

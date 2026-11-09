@@ -473,7 +473,8 @@ namespace sx::proxymaker {
                             if(result.action == sx::proxy::setup_action::accept &&
                                control.value("quic_lifecycle", 0) == 1) {
                                 observer_ = std::make_unique<sx::proxy::QuicObserver>(
-                                    id_, control_->strict(), control.value("quic_start_server", 0) == 1);
+                                    id_, control_->strict(), control.value("quic_start_server", 0) == 1,
+                                    control.value("quic_schema", 0) == 2);
                             }
                             valid_reply = result.action != sx::proxy::setup_action::invalid;
                             denied = result.action == sx::proxy::setup_action::drop;
