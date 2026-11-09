@@ -1086,6 +1086,11 @@ fi
 if [[ $CAPTURE_TEST == 1 ]]; then
     python3 "$ROOT/runner/tests/verify-pcap.py" "$ROOT/data" "$CAPTURE_PREFIX" "$CAPTURE_MARKER" "$CAPTURE_MARKER6" \
         > "$ROOT/results/pcap-validation.json"
+    if [[ ${CAPTURE_METADATA_TEST:-0} == 1 ]]; then
+        python3 "$ROOT/runner/tests/verify-capture-metadata.py" "$ROOT/data" "$CAPTURE_PREFIX" "$ROOT/config/certs/origin-cert.pem" \
+            > "$ROOT/results/capture-metadata-validation.json"
+        echo 'PASS capture metadata: correlated SXME/SXST/SXTL/SXPP and TLS fingerprints'
+    fi
     echo 'PASS4 PCAP export: valid pcapng contains IPv4 payload marker'
     echo 'PASS6 PCAP export: valid pcapng contains IPv6 payload marker'
 fi

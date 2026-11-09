@@ -272,6 +272,12 @@ if gre_capture_dst:
     if remote_count != 1 or content_count != 1 or checksum_count != 1 or udp_profile_count != 1:
         raise RuntimeError('cannot enable GRE capture in generated config')
 capture_prefix = os.environ.get('CAPTURE_FILE_PREFIX')
+if os.environ.get('CAPTURE_METADATA_TEST') == '1':
+    for setting in ('capture_auto_metadata', 'capture_auto_statistics'):
+        text, count = re.subn(r'(' + setting + r'\s*=\s*)FALSE', r'\g<1>TRUE',
+                              text, count=1, flags=re.IGNORECASE)
+        if count != 1:
+            raise RuntimeError('cannot enable ' + setting)
 if capture_prefix:
     if not re.fullmatch(r'[A-Za-z0-9_.-]+', capture_prefix):
         raise ValueError('CAPTURE_FILE_PREFIX contains unsafe characters')

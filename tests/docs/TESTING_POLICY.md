@@ -180,6 +180,24 @@ reproduction command and are not written to the successful-run history.
 
 ## Planned research labs
 
+### Capture metadata gate (initial stage)
+
+The focused capture suite can enable `--env CAPTURE_METADATA_TEST=1` to
+require SXME, SXST, SXTL and SXPP v2 from the live proxy. Missing metadata,
+orphan correlation identities, duplicate final summaries or event sequence
+numbers, malformed envelopes, and absent JA4/JA4S for the controlled TLS origin
+fail the run. The JSON validation report remains in the lab results alongside
+the actual captures. The validator has hermetic CTest coverage.
+The live gate also compares the origin certificate SHA-256 with the generated
+origin certificate and checks the expected ALPN, TLS roles and negotiated
+version/cipher presence. These expectations come from the controlled origin,
+not from another metadata block emitted by Smithproxy.
+
+This initial stage does not yet prove exact fingerprint values, packet-to-flow
+association, annotations, failed handshakes or metadata parity over PCAPNG GRE.
+It must not be represented as the complete release gate until those checks
+are implemented. Existing packet/payload GRE checks remain independently active.
+
 - [ ] Add an isolated, explicitly non-production split-engine TLS lab in which
   one running Smithproxy can use a pinned older OpenSSL release on a selected
   TLS leg while retaining the current OpenSSL on the other leg. The preferred

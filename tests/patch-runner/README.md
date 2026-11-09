@@ -77,6 +77,19 @@ tests/patch-runner/test-patch.sh --run --remote root@test-runner-1
 tests/patch-runner/test-patch.sh sanity --suite quic --remote root@test-runner-1
 ```
 
+For the initial live capture-metadata gate, run the following **on the build/test
+host** from a staged checkout (do not build on the interactive workstation):
+
+```sh
+tests/patch-runner/test-patch.sh sanity --local --suite capture --jobs 4 \
+    --dir /path/to/isolated-capture-run --env CAPTURE_METADATA_TEST=1
+```
+
+`capture-metadata-validation.json` is stored in the lab's `results` directory.
+The gate enables automatic metadata/statistics only in the disposable lab
+configuration. See the testing policy for current coverage and explicit gaps;
+this is not yet the complete capture release gate.
+
 For a long foreground run, use `screen` or another terminal multiplexer:
 
 ```bash
