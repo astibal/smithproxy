@@ -120,9 +120,9 @@ class CfgFactory : public CfgFactoryBase {
     // Adapts the factory-owned archive cache and persistence boundary to the
     // narrow interface required by CfgResourceWriter. CfgFactory owns this
     // collaborator; it is not itself a resource archive.
-    class ResourceArchive final : public sx::cfg::CfgResourceArchive {
+    class ArchiveStorage final : public sx::cfg::CfgArchiveStorage {
     public:
-        explicit ResourceArchive(CfgFactory& owner): owner_(owner) {}
+        explicit ArchiveStorage(CfgFactory& owner): owner_(owner) {}
 
         // Report whether the factory currently owns a writable native archive.
         [[nodiscard]] bool available() const override;
@@ -162,7 +162,7 @@ class CfgFactory : public CfgFactoryBase {
     sx::reload::FileReloadService archive_monitor_service_;
     sx::reload::FileReloadService::resource_id archive_monitor_id_ {0};
     std::recursive_mutex lock_;
-    ResourceArchive resource_archive_;
+    ArchiveStorage archive_storage_;
 
     static inline std::shared_ptr<CfgFactory> self;
     static inline std::shared_ptr<UpdateBoard> update_board;
@@ -178,7 +178,7 @@ public:
         "Certificate Transparency is enabled by policy, but the CT log list is "
         "unavailable. CT validation remains FAIL-CLOSED.";
 
-    CfgFactory(): resource_archive_(*this) {}
+    CfgFactory(): archive_storage_(*this) {}
     CfgFactory(CfgFactory const &) = delete;
     void operator=(const CfgFactory&) = delete;
     ~CfgFactory() override {

@@ -50,7 +50,7 @@ ArchiveRestoreResult CfgArchiveRestorer::restore(
         return {ArchiveRestoreStatus::unsaved_running, revision, hash, {}};
 
     // A legacy text file cannot provide the complete backup required here.
-    if(!context_.native_source || !context_.current_archive || !context_.install)
+    if(!context_.archive.available())
         return {ArchiveRestoreStatus::native_unavailable, revision, hash, {}};
 
     // Do not replace a restored archive before it has been activated.
@@ -59,8 +59,10 @@ ArchiveRestoreResult CfgArchiveRestorer::restore(
 
     // The installer backs up the current archive before atomic publication.
     try {
-        if(!context_.install(context_.current_archive(), payload))
+        CfgSaveData prepared {payload, context_.archive.current()};
+        if(!context_.archive.install(prepared))
             return {ArchiveRestoreStatus::write_failed, revision, hash, {}};
+        context_.archive.accept(payload);
     }
     catch(const std::exception& error) {
         return {ArchiveRestoreStatus::write_failed, revision, hash, error.what()};

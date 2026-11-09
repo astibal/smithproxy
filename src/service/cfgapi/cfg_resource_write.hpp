@@ -4,7 +4,7 @@
 #include <optional>
 #include <string>
 
-#include "cfg_archive.hpp"
+#include "cfg_archive_storage.hpp"
 #include "cfg_update.hpp"
 #include "cfg_write_gate.hpp"
 
@@ -23,24 +23,6 @@ struct ResourceWriteResult {
     [[nodiscard]] bool ok() const noexcept { return status == ResourceWriteStatus::written; }
 };
 
-// Provides the archive operations needed by a resource write. The interface
-// keeps persistence and cache ownership outside the transaction coordinator:
-// CfgResourceWriter decides when each operation is safe, while the concrete
-// archive owner decides how it is performed.
-class CfgResourceArchive {
-public:
-    virtual ~CfgResourceArchive() = default;
-
-    [[nodiscard]] virtual bool available() const = 0;
-    [[nodiscard]] virtual std::string current() const = 0;
-    [[nodiscard]] virtual CfgSaveData prepare(
-        std::string path,
-        std::optional<std::string> content,
-        bool executable) const = 0;
-    [[nodiscard]] virtual bool install(const CfgSaveData& prepared) const = 0;
-    virtual void accept(std::string_view bytes) = 0;
-};
-
 // Serializes one resource edit with every other configuration writer. Runtime
 // objects remain unchanged; the resulting CFtar becomes active after restart.
 class CfgResourceWriter {
@@ -49,7 +31,7 @@ public:
         UpdateBoard& board;
         CfgWriteGate& gate;
         std::recursive_mutex& config_mutex;
-        CfgResourceArchive& archive;
+        CfgArchiveStorage& archive;
         bool& restart_pending;
         // Prevent writes on top of a generation changed outside Smithproxy.
         bool external_change = false;

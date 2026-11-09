@@ -5,7 +5,7 @@
 
 namespace {
 
-class TestResourceArchive final : public sx::cfg::CfgResourceArchive {
+class TestResourceArchive final : public sx::cfg::CfgArchiveStorage {
 public:
     [[nodiscard]] bool available() const override {
         return available_override && source.has_value();

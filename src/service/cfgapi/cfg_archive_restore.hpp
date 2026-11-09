@@ -1,9 +1,9 @@
 #pragma once
 
-#include <functional>
 #include <mutex>
 #include <string>
 
+#include "cfg_archive_storage.hpp"
 #include "cfg_update.hpp"
 #include "cfg_write_gate.hpp"
 
@@ -22,9 +22,6 @@ struct ArchiveRestoreResult {
     [[nodiscard]] bool ok() const noexcept { return status == ArchiveRestoreStatus::restored; }
 };
 
-using ArchiveReader = std::function<std::string()>;
-using ArchiveWriter = std::function<bool(const std::string&, const std::string&)>;
-
 // Coordinates replacement of the next-start archive. It deliberately leaves
 // running configuration untouched: resources such as keys and certificates
 // do not all support a safe live reload yet.
@@ -36,12 +33,10 @@ public:
         CfgWriteGate& gate;
         std::recursive_mutex& config_mutex;
 
+        // Storage owns native availability, publication and cached bytes.
+        CfgArchiveStorage& archive;
         // Two archives must not replace each other before either is activated.
-        bool native_source = false;
         bool& restart_pending;
-        // Storage policy remains in CfgFactory and privileged-file code.
-        ArchiveReader current_archive;
-        ArchiveWriter install;
 
         // A separately detected on-disk generation blocks another restore.
         bool external_change = false;

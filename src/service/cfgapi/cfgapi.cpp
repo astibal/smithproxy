@@ -107,47 +107,29 @@ sx::cfg::ArchiveRestoreResult CfgFactory::restore_startup_archive(
     std::string const& payload) {
     auto factory = get();
 
-    const bool native_source = factory->config_archive_ &&
-                               factory->config_archive_->is_cftar();
-
     // CfgFactory supplies storage capabilities; restore orchestration remains
     // isolated in the testable coordinator.
     sx::cfg::CfgArchiveRestorer restorer({
         *board(),
         *write_gate(),
         lock(),
-        native_source,
+        factory->archive_storage_,
         factory->startup_archive_pending_,
-        // Preserve resources not represented by the libconfig tree.
-        [factory] { return factory->config_archive_->archive_payload(); },
-        [factory](const std::string& current, const std::string& replacement) {
-            // The privileged installer verifies current, writes its recovery
-            // copy, and replaces the active archive under one sidecar lock.
-            if(sx::privsep::files::config_install(
-                   factory->config_file, current, replacement) != 0) {
-                return false;
-            }
-            // Subsequent resource edits must start from the restored startup
-            // archive rather than the configuration still running in memory.
-            factory->config_archive_->accept_saved_archive(replacement);
-            factory->accept_archive_monitor(replacement);
-            return true;
-        },
         factory->external_archive_change_locked(),
     });
 
     return restorer.restore(expected_revision, expected_hash, payload);
 }
 
-bool CfgFactory::ResourceArchive::available() const {
+bool CfgFactory::ArchiveStorage::available() const {
     return owner_.config_archive_ && owner_.config_archive_->is_cftar();
 }
 
-std::string CfgFactory::ResourceArchive::current() const {
+std::string CfgFactory::ArchiveStorage::current() const {
     return owner_.config_archive_->archive_payload();
 }
 
-sx::cfg::CfgSaveData CfgFactory::ResourceArchive::prepare(
+sx::cfg::CfgSaveData CfgFactory::ArchiveStorage::prepare(
     std::string path,
     std::optional<std::string> content,
     bool executable) const {
@@ -157,7 +139,7 @@ sx::cfg::CfgSaveData CfgFactory::ResourceArchive::prepare(
         std::move(path), std::move(content), executable);
 }
 
-bool CfgFactory::ResourceArchive::install(
+bool CfgFactory::ArchiveStorage::install(
     const sx::cfg::CfgSaveData& prepared) const {
     // One privileged operation binds the recovery and replacement writes to
     // the exact archive from which prepare() derived this candidate.
@@ -166,7 +148,7 @@ bool CfgFactory::ResourceArchive::install(
                owner_.config_file, *prepared.previous, prepared.replacement) == 0;
 }
 
-void CfgFactory::ResourceArchive::accept(std::string_view bytes) {
+void CfgFactory::ArchiveStorage::accept(std::string_view bytes) {
     // Advance the in-memory startup view only after durable installation.
     owner_.config_archive_->accept_saved_archive(bytes);
     owner_.accept_archive_monitor(bytes);
@@ -180,7 +162,7 @@ sx::cfg::ResourceWriteResult CfgFactory::write_archive_resource(
     bool executable) {
     auto factory = get();
     sx::cfg::CfgResourceWriter writer({
-        *board(), *write_gate(), lock(), factory->resource_archive_,
+        *board(), *write_gate(), lock(), factory->archive_storage_,
         factory->startup_archive_pending_,
         factory->external_archive_change_locked(),
     });
