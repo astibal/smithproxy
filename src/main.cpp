@@ -87,6 +87,8 @@
 #include <service/auth/broker_client.hpp>
 #include <service/webhook/webhook_broker.hpp>
 #include <staticcontent.hpp>
+#include <array>
+#include <openssl/rand.h>
 #include <smithlog.hpp>
 
 #include <service/core/smithproxy.hpp>
@@ -896,6 +898,23 @@ int main(int argc, char *argv[]) {
 
     // prepare templating system
     prepare_html_renderer();
+
+    // Publish the process identity before API, DNS or listener threads can
+    // expose it. Session IDs read this prefix throughout their lifetime; a late
+    // write would give connection-start and connection-stop different IDs.
+    uint32_t boot_random = 0;
+    if(RAND_bytes(reinterpret_cast<unsigned char*>(&boot_random), sizeof(boot_random)) != 1) {
+        _fat("cannot initialize process identity");
+        CfgFactory::get()->cleanup();
+        return EXIT_FAILURE;
+    }
+    SmithProxy::boot_random = boot_random;
+    StaticContent::boot_random = boot_random;
+    SmithProxy::instance().hostname = [] {
+        std::array<char, 64> hostname{};
+        gethostname(hostname.data(), hostname.size() - 1);
+        return std::string(hostname.data());
+    }();
 
     // create utility threads
     SmithProxy::instance().create_log_writer_thread();

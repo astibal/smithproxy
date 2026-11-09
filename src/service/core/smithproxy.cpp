@@ -711,18 +711,6 @@ void SmithProxy::run() {
 
 
 
-    instance().hostname = []() {
-        std::array<char,64> h{0};
-        gethostname(h.data(),63);
-        return std::string(h.data());
-    }();
-
-    // initialize boot-time random
-    auto* boot_random_ptr = &SmithProxy::boot_random;
-    RAND_bytes(reinterpret_cast<unsigned char*>(boot_random_ptr), sizeof(uint32_t));
-    // copy value also to static content, for parts where dependency on smithproxy instance is NOT desirable
-    StaticContent::boot_random = SmithProxy::boot_random;
-
     while(true) {
         if(instance().terminate_flag) {
             if(!cfg_daemonize)
