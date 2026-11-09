@@ -54,7 +54,7 @@
 #include <service/cli/cli_broker.hpp>
 #include <service/httpd/httpd.hpp>
 #include <service/cfgapi/cfgapi.hpp>
-#include <service/interface_monitor.hpp>
+#include <service/network_context.hpp>
 #include "service/http/webhooks.hpp"
 #include "proxy/nbrhood.hpp"
 #include "proxy/multiflow/mfmitmproxy.hpp"
@@ -962,7 +962,7 @@ void SmithProxy::join_all() {
 
     // The monitor owns a blocking rtnetlink reader. Wake and join it while
     // logging is still available and before process-wide cleanup begins.
-    sx::net::InterfaceMonitor::instance().stop();
+    sx::net::NetworkCtx::instance().stop();
 
     auto join_thread_list = [](auto thread_list) {
         for(auto const& t: thread_list) {

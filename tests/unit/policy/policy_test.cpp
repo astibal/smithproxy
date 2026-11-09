@@ -511,3 +511,32 @@ TEST(PolicyTest, UserDisabledRulesSkipButConfigurationErrorsStopSelection) {
     rule.cfg_err_is_degraded = true;
     EXPECT_TRUE(rule.match(lefts, rights));
 }
+
+#include <proxy/network_policy.hpp>
+
+TEST(PolicyInterfaces, MatchesBothRolesAndRejectsUnknownMetadata) {
+    sx::net::InterfaceSnapshot network;
+    network.valid = network.roles_valid = true;
+    network.interfaces = {{2, "lan", 0, "Office"}, {3, "wan", 0, "Outside"}};
+    baseHostCX left(new TCPCom(), "192.0.2.10", "12345");
+    baseHostCX right(new TCPCom(), "198.51.100.20", "443");
+    left.com()->ingress_ifindex(2);
+    right.com()->egress_ifindex(3);
+    auto rule = std::make_shared<PolicyRule>();
+    rule->ingress_role = "Office"; rule->egress_role = "Outside";
+    EXPECT_TRUE(rule->match_roles({&left}, {&right}, network));
+    std::vector<baseHostCX*> lefts{&left}, rights{&right};
+    EXPECT_TRUE(rule->match(lefts, rights, &network));
+    rule->ingress_role = "Guest";
+    EXPECT_FALSE(rule->match_roles({&left}, {&right}, network));
+    EXPECT_FALSE(rule->match(lefts, rights, &network));
+    rule->ingress_role = "Office";
+    right.com()->egress_ifindex(0);
+    EXPECT_FALSE(rule->match_roles({&left}, {&right}, network));
+    rule->egress_role.clear();
+    EXPECT_TRUE(sx::proxy::prepare_network_policy({rule}, {&left}, {&right}, network));
+    left.com()->ingress_ifindex(0);
+    EXPECT_FALSE(sx::proxy::prepare_network_policy({rule}, {&left}, {&right}, network));
+    rule->is_disabled = true;
+    EXPECT_TRUE(sx::proxy::prepare_network_policy({rule}, {&left}, {&right}, network));
+}

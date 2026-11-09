@@ -1,3 +1,4 @@
+#include <service/core/session_interfaces.hpp>
 /*
     Smithproxy- transparent proxy with SSL inspection capabilities.
     Copyright (c) 2014, Ales Stibal <astib@mag0.net>, All rights reserved.
@@ -60,7 +61,7 @@
 
 #include <service/core/smithproxy.hpp>
 #include <service/core/sessionlist.hpp>
-#include <service/interface_monitor.hpp>
+#include <service/network_context.hpp>
 #include <service/cmd/diag/diag_cmds.hpp>
 #include <service/httpd/httpd.hpp>
 #include <service/cfgapi/cfgapi.hpp>
@@ -1145,7 +1146,7 @@ int cli_diag_sys_netlink_info(DiagCli* cli, const char* command,
                               char* argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
 
-    const auto& monitor = sx::net::InterfaceMonitor::instance();
+    const auto& monitor = sx::net::NetworkCtx::instance();
     const auto stats = monitor.stats();
     const auto snapshot = monitor.snapshot();
     if(!snapshot) {
@@ -1164,6 +1165,7 @@ int cli_diag_sys_netlink_info(DiagCli* cli, const char* command,
     output << "Netlink interface monitor:\n"
            << "  running: " << (stats.running ? "yes" : "no") << '\n'
            << "  snapshot valid: " << (snapshot->valid ? "yes" : "no") << '\n'
+           << sx::net::network_generations_text(*snapshot) << '\n'
            << "  generation: " << snapshot->generation << '\n'
            << "  synchronization attempts: " << stats.synchronization_attempts << '\n'
            << "  synchronization successes: " << stats.synchronization_successes << '\n'
@@ -1176,6 +1178,24 @@ int cli_diag_sys_netlink_info(DiagCli* cli, const char* command,
 
     const auto last_error = monitor.last_error();
     if(!last_error.empty()) output << "  last error: " << last_error << '\n';
+
+    output << "  roles valid: " << (snapshot->roles_valid ? "yes" : "no") << '\n';
+
+    output << "\nInterfaces:\n"
+           << "  " << std::left << std::setw(7) << "index"
+           << std::setw(18) << "interface"
+           << std::setw(24) << "role"
+           << std::setw(9) << "uplink" << "flags\n";
+    for(const auto& interface : snapshot->interfaces) {
+        output << "  " << std::left << std::setw(7) << interface.index
+               << std::setw(18) << interface.name
+               << std::setw(24) << interface.role
+               << std::setw(9) << (snapshot->uplinks.count(interface.index) ? "yes" : "no")
+               << "0x" << std::hex << interface.flags << std::dec << '\n';
+    }
+    if(snapshot->interfaces.empty()) {
+        output << "  (none)\n";
+    }
 
     output << "\nIP addresses:\n"
            << "  " << std::left << std::setw(7) << "index"
@@ -2392,6 +2412,9 @@ int cli_diag_proxy_session_list_extra (DiagCli *cli, const char *command, std::v
                 std::stringstream cur_obj_ss;
                 cur_obj_ss << prefix << decor.command(get_proxy_title(curr_proxy, sl_flags, verbosity)) << suffix;
 
+                cur_obj_ss << "\r\n" << sx::net::session_interfaces_text(
+                    lf && lf->com() ? lf->com()->ingress_ifindex() : 0,
+                    rg && rg->com() ? rg->com()->egress_ifindex() : 0) << "\r\n";
                 cur_obj_ss << get_more_info(curr_proxy, lf, rg, verbosity);
                 return cur_obj_ss.str();
     };
@@ -2410,6 +2433,10 @@ int cli_diag_proxy_session_list_extra (DiagCli *cli, const char *command, std::v
     // QUIC workers already publish owned snapshots; never inspect their live
     // sessions from the CLI thread or add another dataplane snapshot request.
     print_quic_sessions(cli, sl_flags, false);
+
+    if(const auto network = sx::net::NetworkCtx::instance().snapshot()) {
+        cli_print(cli, "\n%s", sx::net::network_generations_text(*network).c_str());
+    }
 
     if( sl_flags == SL_NONE ) {
         unsigned long l = MitmProxy::total_mtr_up().get();
@@ -2985,7 +3012,7 @@ void register_diags(libcli2::Cli& native) {
         auto diag_sys_priv = diag_register_command(cli, diag_sys, "priv", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "privileged helper diagnostics");
             diag_register_command(cli, diag_sys_priv, "stats", cli_diag_sys_priv_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display effective identity and privileged helper statistics");
         auto diag_sys_netlink = diag_register_command(cli, diag_sys, "netlink", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "netlink interface monitor diagnostics");
-            diag_register_command(cli, diag_sys_netlink, "info", cli_diag_sys_netlink_info, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display monitor statistics and local IP addresses");
+            diag_register_command(cli, diag_sys_netlink, "info", cli_diag_sys_netlink_info, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display interface roles, addresses and monitor statistics");
         auto diag_sys_gre = diag_register_command(cli, diag_sys, "gre", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "GRE communication broker diagnostics");
             diag_register_command(cli, diag_sys_gre, "stats", cli_diag_sys_gre_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display GRE transport and broker statistics");
         auto diag_sys_cli = diag_register_command(cli, diag_sys, "cli", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "CLI communication broker diagnostics");

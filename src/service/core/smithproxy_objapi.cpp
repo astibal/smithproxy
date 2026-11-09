@@ -1,3 +1,4 @@
+#include <service/core/session_interfaces.hpp>
 #include <optional>
 #include <thread>
 #include <mutex>
@@ -94,6 +95,11 @@ nlohmann::json ObjAPI::proxy_session_list_json(bool active_only, bool tls_info, 
         }
 
         auto proxy_detail = jsonize::from(proxy, verbosity);
+        const auto* left = proxy->first_left();
+        const auto* right = proxy->first_right();
+        proxy_detail["interfaces"] = sx::net::session_interfaces_json(
+            left && left->com() ? left->com()->ingress_ifindex() : 0,
+            right && right->com() ? right->com()->egress_ifindex() : 0);
 
         if(tls_info) {
             nlohmann::json left;

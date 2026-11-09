@@ -150,6 +150,8 @@ namespace sx::proxymaker {
             }
         };
 
+        // CfgFactory prepares NetworkCtx ingress/egress metadata once for this
+        // selection; SOCKS and other vector callers use the same path.
         // apply policy and get result
         int policy_num = -1;
         std::unique_lock config_lock(CfgFactory::lock(), std::defer_lock);
