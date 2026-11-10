@@ -546,6 +546,13 @@ script_profiles = {
                 cli.command_failed(diag_command)
             require(cli.command("configure terminal"), "(config:/)")
 
+            # Scalar settings use the transaction path. This exact sequence
+            # guards against retaining the ordinary writer lock while the
+            # transaction acquires its commit lease.
+            cli.command_ok("edit settings")
+            require(cli.command_ok("set policy_fail_open false"), "(config:/settings)")
+            cli.command_ok("end")
+
             cli.command_ok("edit address_objects")
             require(cli.command_ok("show"), "address_objects")
             cli.command_ok("add libcli2_e2e_net")
