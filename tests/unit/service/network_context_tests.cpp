@@ -411,7 +411,12 @@ TEST(NetworkDiagnostics, GenerationTimesAreUtcAndUnknownIsNull) {
     EXPECT_EQ(result["route_changed_at"], "2024-01-01T00:00:00Z");
     EXPECT_EQ(result["role_changed_at"], "2024-01-01T00:00:01Z");
     EXPECT_NE(sx::net::network_generations_text(snapshot).find("current"), std::string::npos);
-    EXPECT_NE(sx::net::network_generations_text(snapshot).find("2024-01-01T00:00:01Z"), std::string::npos);
+    const auto now = snapshot.route_changed_at + std::chrono::seconds(3661);
+    EXPECT_EQ(sx::net::network_generations_text(snapshot, now),
+        "  network generations (current): route=7 changed=1h 1m 1s ago; role=3 changed=1h 1m 0s ago");
+    EXPECT_EQ(sx::net::network_change_age({}, now), "unknown");
+    EXPECT_EQ(sx::net::network_change_age(now + std::chrono::seconds(1), now), "0s ago");
+    EXPECT_EQ(sx::net::network_change_age(now - std::chrono::seconds(90061), now), "1d 1h 1m 1s ago");
 }
 
 TEST(NetworkEvents, RecordsChangesButNotIdenticalSnapshots) {
