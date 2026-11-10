@@ -173,6 +173,30 @@ def replace_setting(text: str, name: str, value: str) -> str:
     return result
 
 
+def replace_or_add_setting(text: str, name: str, value: str) -> str:
+    """Set a legacy fixture path even after it leaves the stock config."""
+    pattern = rf"(?m)^(\s*{re.escape(name)}\s*=\s*).*$"
+    result, count = re.subn(pattern, rf"\g<1>{value}", text, count=1)
+    if count == 1:
+        return result
+    section = re.search(r"(?m)^\s*settings\s*[:=]\s*\{", text)
+    if section is None:
+        raise AssertionError("settings section not found")
+    return text[:section.end()] + f"\n    {name} = {value}" + text[section.end():]
+
+
+def read_archive_config(cftar: Path, archive: Path) -> str:
+    """Read the persisted main configuration through the public CFtar tool."""
+    completed = subprocess.run(
+        [str(cftar), "get", str(archive), "smithproxy.cfg"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    if completed.returncode != 0:
+        raise AssertionError(
+            f"cannot read saved configuration from {archive}:\n"
+            f"{completed.stderr.decode(errors='replace')}")
+    return completed.stdout.decode()
+
+
 def wait_for_port(process: subprocess.Popen[str], port: int) -> None:
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
@@ -275,6 +299,10 @@ def main() -> None:
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
     source = args.source.resolve()
+    binary = args.binary.resolve()
+    cftar = binary.with_name("smithproxy-cftar")
+    if not cftar.is_file():
+        raise AssertionError(f"CFtar companion tool not found: {cftar}")
 
     webhook = http.server.ThreadingHTTPServer(("127.0.0.1", 0), WebhookHandler)
     webhook_thread = threading.Thread(target=webhook.serve_forever, daemon=True)
@@ -292,8 +320,6 @@ def main() -> None:
             ("accept_redirect", "FALSE;"),
             ("accept_socks", "TRUE;"),
             ("extended_local_destination_protection", "FALSE;"),
-            ("certs_path", f'"{source / "etc/certs/default"}/";'),
-            ("messages_dir", f'"{source / "etc/msg/en"}/";'),
             ("log_file", '"";'),
             ("log_console", "TRUE;"),
             ("sslkeylog_file", f'"{tmp}/sslkeylog.%s.log";'),
@@ -304,6 +330,13 @@ def main() -> None:
             ("enable_password", '"libcli2-test-password";'),
         ):
             text = replace_setting(text, name, value)
+        # These paths are legacy migration inputs, not native runtime settings.
+        # Keep the process fixture self-contained while allowing the stock
+        # configuration to retire the obsolete keys.
+        text = replace_or_add_setting(
+            text, "certs_path", f'"{source / "etc/certs/default"}/";')
+        text = replace_or_add_setting(
+            text, "messages_dir", f'"{source / "etc/msg/en"}/";')
         text = replace_setting(text, "socks_workers", "1;")
         text = text.replace("socks_workers = 1;",
                             f'socks_workers = 1;\n    socks_port = "{socks_port}";', 1)
@@ -672,7 +705,8 @@ script_profiles = {
             cli.command_ok("end")
             cli.command_ok("end")
             require(cli.command_ok("save config"), "config saved successfully")
-            saved_config = config.read_text()
+            archive = config.with_suffix(".cftar")
+            saved_config = read_archive_config(cftar, archive)
             tls_profile = re.search(
                 r"libcli2_e2e_tls\s*=\s*\{(?P<body>.*?)\}\s*;?",
                 saved_config, flags=re.DOTALL)
@@ -712,7 +746,7 @@ script_profiles = {
                 process.stdout.read()
             upgraded_text, replacements = re.subn(
                 r"(?m)^(\s*schema\s*=\s*)\d+(\s*;?\s*)$", r"\g<1>1000\2",
-                config.read_text(), count=1)
+                saved_config, count=1)
             if replacements != 1:
                 raise AssertionError("saved configuration has no schema marker")
             upgraded_text, replacements = re.subn(
@@ -720,7 +754,19 @@ script_profiles = {
                 r'\g<1>"0.9.22"\2', upgraded_text, count=1)
             if replacements != 1:
                 raise AssertionError("saved configuration has no version marker")
+            # Native saves intentionally omit retired filesystem settings.
+            # The following restart is explicitly a legacy-upgrade fixture, so
+            # restore its migration inputs before removing the native archive.
+            upgraded_text = replace_or_add_setting(
+                upgraded_text, "certs_path",
+                f'"{source / "etc/certs/default"}/";')
+            upgraded_text = replace_or_add_setting(
+                upgraded_text, "messages_dir", f'"{source / "etc/msg/en"}/";')
             config.write_text(upgraded_text)
+            # Re-enter through the legacy migration boundary deliberately: the
+            # downgrade fixture validates schema upgrades, while ordinary save
+            # and reload above already validate the native archive path.
+            archive.unlink()
 
             process = subprocess.Popen(
                 [str(args.binary.resolve()), "--config-file", str(config)],
@@ -735,8 +781,9 @@ script_profiles = {
             require(cli.command("libcli2-test-password"), "#")
             require(cli.command_ok("execute shutdown"), "terminating smithproxy")
             process.wait(timeout=10)
+            saved_config = read_archive_config(cftar, archive)
             schema = re.search(
-                r"(?m)^\s*schema\s*=\s*(\d+)\s*;?\s*$", config.read_text())
+                r"(?m)^\s*schema\s*=\s*(\d+)\s*;?\s*$", saved_config)
             if schema is None or int(schema.group(1)) <= 1000:
                 raise AssertionError("schema migration did not persist its result")
             if not (tmp / "smithproxy.cfg.0.9.22.bak.cfg").is_file():
@@ -746,7 +793,8 @@ script_profiles = {
             # compatibility loaders and fail-closed policy diagnostics. The
             # daemon accepts the file but marks unusable rules degraded or
             # disabled; a crash or whole-file rejection is a regression.
-            matrix = config.read_text()
+            config.write_text(saved_config)
+            matrix = saved_config
             matrix, count = re.subn(
                 r"(address_objects\s*=\s*\{)",
                 r"\1\n"
@@ -811,7 +859,7 @@ script_profiles = {
 
             # Settings are process-global, so exercise mutually exclusive
             # fallback branches in independent config-check processes.
-            settings_matrix = config.read_text()
+            settings_matrix = saved_config
             settings_matrix, count = re.subn(
                 r"nameservers\s*=\s*(?:\[[^]]*\]|\([^)]*\))\s*;?",
                 'nameservers = [ "not-an-address", "::1", "127.0.0.1" ];',
@@ -832,7 +880,7 @@ script_profiles = {
             settings_config.write_text(settings_matrix)
             config_check(args.binary.resolve(), settings_config, env)
 
-            empty_dns = config.read_text()
+            empty_dns = saved_config
             empty_dns, count = re.subn(
                 r"nameservers\s*=\s*(?:\[[^]]*\]|\([^)]*\))\s*;?",
                 "nameservers = [ ];", empty_dns, count=1)
