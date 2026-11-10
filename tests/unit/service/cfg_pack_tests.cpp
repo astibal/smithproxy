@@ -201,6 +201,25 @@ TEST_F(PackTest, LeavesNoArchiveWhenMigrationInputIsIncomplete) {
     EXPECT_FALSE(std::filesystem::exists(output));
 }
 
+TEST_F(PackTest, RepresentsAnAbsentOptionalStartupAsAnEmptyNativeEntry) {
+    input_.startup_config = directory_ + "/missing-startup.cfg";
+    input_.allow_missing_startup = true;
+
+    const auto archive = CfgPack::build(input_);
+
+    EXPECT_TRUE(archive.contains("smithproxy.startup.cfg"));
+    EXPECT_TRUE(archive.at("smithproxy.startup.cfg").data.empty());
+}
+
+TEST_F(PackTest, OptionalStartupStillRejectsUnsafeExistingInput) {
+    const auto link = directory_ + "/startup-link.cfg";
+    ASSERT_EQ(::symlink(input_.startup_config.c_str(), link.c_str()), 0);
+    input_.startup_config = link;
+    input_.allow_missing_startup = true;
+
+    EXPECT_THROW(CfgPack::build(input_), CfgTarError);
+}
+
 TEST_F(PackTest, SkipsAbsentOptionalResourceButPacksItWhenPresent) {
     input_.files.push_back({"pki/mitm/ssh/hostkeys/ed25519", directory_ + "/host-key", false, true});
     auto archive = CfgPack::build(input_);

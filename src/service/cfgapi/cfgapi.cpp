@@ -1299,10 +1299,15 @@ bool CfgFactory::load_settings () {
         }
     }
 
-    // Accepted only while importing an old configuration. Native archives
-    // address certificates and templates by logical resource name.
-    configured_certs_path.clear();
-    dir_msg_templates.clear();
+    // Start every load from the historical standalone defaults. A legacy
+    // configuration may legitimately omit these optional settings, and a
+    // failed first migration must remain bootable from its original files.
+    // Native archives override the filesystem paths below with their private
+    // materialized tree.
+    configured_certs_path = "/etc/smithproxy/certs/default/";
+    configured_ca_bundle_path.clear();
+    configured_ca_bundle_file.clear();
+    dir_msg_templates = "/etc/smithproxy/msg/en/";
     load_if_exists(cfgapi.getRoot()["settings"], "certs_path", configured_certs_path);
     SSLFactory::factory().certs_path() = configured_certs_path;
     load_if_exists(cfgapi.getRoot()["settings"], "certs_ca_key_password",SSLFactory::factory().certs_password());
@@ -6330,6 +6335,16 @@ int save_settings(Config& ex) {
     Setting& it_ns  = objects.add("nameservers", Setting::TypeArray);
     for(auto const& ns: CfgFactory::get()->db_nameservers) {
         it_ns.add(Setting::TypeString) = ns.str_host;
+    }
+
+    // Keep path-based resources only while the legacy file remains the
+    // authoritative source. Migration can fail safely and retry on the next
+    // start only if an intervening schema upgrade preserves these locations.
+    if(!CfgFactory::get()->using_native_archive()) {
+        objects.add("certs_path", Setting::TypeString) =
+            CfgFactory::get()->configured_certs_path;
+        objects.add("messages_dir", Setting::TypeString) =
+            CfgFactory::get()->dir_msg_templates;
     }
 
     objects.add("certs_ca_key_password", Setting::TypeString) = SSLFactory::factory().certs_password();

@@ -350,19 +350,23 @@ void prepare_native_pki() {
             SSLFactory::config_t::PO_KEYF, true);
 }
 
-std::vector<sx::cfg::CfgPack::File> legacy_cftar_resources() {
+std::vector<sx::cfg::CfgPack::File> legacy_cftar_resources(
+    std::string message_directory) {
     using File = sx::cfg::CfgPack::File;
+    if(!message_directory.empty() && message_directory.back() != '/') {
+        message_directory += '/';
+    }
     return {
         // The renderer consumes four base templates. Keep the established
         // variants as portable configuration data for later theme selection.
-        File{"templates/replacement/en/test.txt", "/etc/smithproxy/msg/en/test.txt"},
-        File{"templates/replacement/en/html_page.txt", "/etc/smithproxy/msg/en/html_page.txt"},
-        File{"templates/replacement/en/html_img_warning.txt", "/etc/smithproxy/msg/en/html_img_warning.txt"},
-        File{"templates/replacement/en/tls_replacement.txt", "/etc/smithproxy/msg/en/tls_replacement.txt"},
-        File{"templates/replacement/en/tls_replacement_common.txt", "/etc/smithproxy/msg/en/tls_replacement_common.txt"},
-        File{"templates/replacement/en/tls_replacement_light.txt", "/etc/smithproxy/msg/en/tls_replacement_light.txt"},
-        File{"templates/replacement/en/tls_replacement_dark.txt", "/etc/smithproxy/msg/en/tls_replacement_dark.txt"},
-        File{"templates/replacement/en/tls_replacement_branded.txt", "/etc/smithproxy/msg/en/tls_replacement_branded.txt"},
+        File{"templates/replacement/en/test.txt", message_directory + "test.txt"},
+        File{"templates/replacement/en/html_page.txt", message_directory + "html_page.txt"},
+        File{"templates/replacement/en/html_img_warning.txt", message_directory + "html_img_warning.txt"},
+        File{"templates/replacement/en/tls_replacement.txt", message_directory + "tls_replacement.txt"},
+        File{"templates/replacement/en/tls_replacement_common.txt", message_directory + "tls_replacement_common.txt"},
+        File{"templates/replacement/en/tls_replacement_light.txt", message_directory + "tls_replacement_light.txt"},
+        File{"templates/replacement/en/tls_replacement_dark.txt", message_directory + "tls_replacement_dark.txt"},
+        File{"templates/replacement/en/tls_replacement_branded.txt", message_directory + "tls_replacement_branded.txt"},
 
         File{"pki/mitm/ssh/hostkeys/ed25519", "/etc/smithproxy/ssh_host_ed25519_key", false, true},
     };
@@ -806,34 +810,31 @@ int main(int argc, char *argv[]) {
         Log::get()->level(DIA);
     }
     bool CONFIG_LOADED = false;
-    bool migrate_default_legacy = false;
+    bool migrate_legacy = false;
     try {
+        const auto selected_config = CfgFactory::get()->config_file;
+        constexpr std::string_view cftar_suffix = ".cftar";
+        const bool selected_archive =
+            selected_config.size() >= cftar_suffix.size() &&
+            selected_config.compare(
+                selected_config.size() - cftar_suffix.size(),
+                cftar_suffix.size(), cftar_suffix) == 0;
         sx::cfg::CfgArchive::Paths archive_paths {
-            "/etc/smithproxy/smithproxy.cftar",
-            CfgFactory::get()->config_file,
+            selected_archive
+                ? selected_config
+                : sx::cfg::CfgArchive::native_path_for(selected_config),
+            selected_config,
             std::nullopt,
         };
 
-        // A command-line CfgTar remains native and receives full archive
-        // validation. Other command-line and tenant paths are explicit legacy
-        // sources. Only the standalone default path participates in automatic
-        // CfgTar preference and the one-time absent-archive migration entrance.
-        if(is_custom_config_file ||
-           CfgFactory::get()->config_file != "/etc/smithproxy/smithproxy.cfg") {
-            const auto& configured_path = CfgFactory::get()->config_file;
-            constexpr std::string_view cftar_suffix = ".cftar";
-            if(configured_path.size() >= cftar_suffix.size() &&
-               configured_path.compare(
-                   configured_path.size() - cftar_suffix.size(),
-                   cftar_suffix.size(), cftar_suffix) == 0) {
-                archive_paths.explicit_archive = configured_path;
-            }
-            else {
-                archive_paths.explicit_config = configured_path;
-            }
+        // A command-line CfgTar remains native and receives full validation.
+        // Every legacy path, including a custom or tenant path, owns a native
+        // sibling and therefore follows the same one-time migration entrance.
+        if(selected_archive) {
+            archive_paths.explicit_archive = selected_config;
         }
         auto source = sx::cfg::CfgArchive::open(std::move(archive_paths));
-        migrate_default_legacy = !is_custom_config_file && !source.is_cftar();
+        migrate_legacy = !source.is_cftar();
         CONFIG_LOADED = SmithProxy::instance().load_config(std::move(source));
     }
     catch(const std::exception& error) {
@@ -852,20 +853,27 @@ int main(int argc, char *argv[]) {
         }
 
         bool migrated_to_cftar = false;
-        if(migrate_default_legacy && !CfgFactory::get()->config_file_check_only) {
+        if(migrate_legacy && !CfgFactory::get()->config_file_check_only) {
             try {
                 sx::cfg::CfgPack::Migration migration {
                     {
                         CfgFactory::get()->config_file,
-                        "/etc/smithproxy/smithproxy.startup.cfg",
-                        legacy_cftar_resources(),
+                        sx::cfg::CfgArchive::startup_path_for(
+                            CfgFactory::get()->config_file),
+                        legacy_cftar_resources(CfgFactory::get()->dir_msg_templates),
                         {},
+                        true,
                     },
-                    "/etc/smithproxy/smithproxy.cftar",
+                    sx::cfg::CfgArchive::native_path_for(
+                        CfgFactory::get()->config_file),
                 };
                 // Default identities are explicit files. Custom TLS identity
                 // collections move into purpose-oriented server/client and
                 // SNI/IP namespaces instead of preserving legacy cc-* names.
+                auto certificate_directory = CfgFactory::get()->configured_certs_path;
+                if(!certificate_directory.empty() && certificate_directory.back() != '/') {
+                    certificate_directory += '/';
+                }
                 for(const auto* name : {"ca-cert.pem", "ca-key.pem", "srv-cert.pem",
                                         "srv-key.pem", "cl-cert.pem", "cl-key.pem",
                                         "portal-cert.pem", "portal-key.pem",
@@ -874,14 +882,14 @@ int main(int argc, char *argv[]) {
                                           std::string_view(name) == "sslca.json";
                     migration.input.files.push_back({
                         std::string("pki/ca/default/") + name,
-                        std::string("/etc/smithproxy/certs/default/") + name,
+                        certificate_directory + name,
                         false, optional});
                 }
                 for(const auto& directory : std::initializer_list<sx::cfg::CfgPack::Directory>{
-                        {"pki/mitm/tls/server/sni", "/etc/smithproxy/certs/default/sni", true},
-                        {"pki/mitm/tls/server/ip", "/etc/smithproxy/certs/default/ip", true},
-                        {"pki/mitm/tls/client/sni", "/etc/smithproxy/certs/default/cc-sni", true},
-                        {"pki/mitm/tls/client/ip", "/etc/smithproxy/certs/default/cc-ip", true}}) {
+                        {"pki/mitm/tls/server/sni", certificate_directory + "sni", true},
+                        {"pki/mitm/tls/server/ip", certificate_directory + "ip", true},
+                        {"pki/mitm/tls/client/sni", certificate_directory + "cc-sni", true},
+                        {"pki/mitm/tls/client/ip", certificate_directory + "cc-ip", true}}) {
                     migration.input.directories.push_back(directory);
                 }
 

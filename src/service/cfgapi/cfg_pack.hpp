@@ -37,6 +37,10 @@ public:
         std::string startup_config;
         std::vector<File> files;
         std::vector<Directory> directories;
+        // Legacy installations may never have created the optional network
+        // startup file. Only ENOENT becomes an empty native startup entry;
+        // malformed, unreadable and unsafe inputs still fail migration.
+        bool allow_missing_startup = false;
     };
 
     struct Migration {

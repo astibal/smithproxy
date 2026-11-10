@@ -263,7 +263,24 @@ CfgTar CfgPack::build(const Input& input) {
     CfgTar archive;
     archive.add(std::string(CfgManifest::path), CfgManifest::canonical());
     archive.add("smithproxy.cfg", read_input(input.main_config));
-    archive.add("smithproxy.startup.cfg", read_input(input.startup_config));
+    if(input.allow_missing_startup) {
+        struct stat state {};
+        if(::lstat(input.startup_config.c_str(), &state) == 0) {
+            // read_input() keeps the ordinary regular-file and no-symlink
+            // policy for an existing optional startup configuration.
+            archive.add("smithproxy.startup.cfg", read_input(input.startup_config));
+        }
+        else if(errno == ENOENT) {
+            archive.add("smithproxy.startup.cfg", "");
+        }
+        else {
+            fail_errno("cannot inspect optional CfgTar startup input " +
+                       input.startup_config);
+        }
+    }
+    else {
+        archive.add("smithproxy.startup.cfg", read_input(input.startup_config));
+    }
 
     // Extra resources are intentionally explicit. The caller owns legacy path
     // mapping; CfgManifest owns which native archive paths are acceptable.

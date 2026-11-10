@@ -53,6 +53,20 @@ TEST_F(ArchiveTest, CanonicalManifestIsStable) {
               "{\n  \"format\": \"smithproxy-cftar\",\n  \"version\": 1\n}\n");
 }
 
+TEST_F(ArchiveTest, DerivesNativeSiblingsFromTheActiveLegacyPath) {
+    EXPECT_EQ(CfgArchive::native_path_for("/var/lib/smithproxy/lab2.cfg"),
+              "/var/lib/smithproxy/lab2.cftar");
+    EXPECT_EQ(CfgArchive::startup_path_for("/var/lib/smithproxy/lab2.cfg"),
+              "/var/lib/smithproxy/lab2.startup.cfg");
+
+    EXPECT_EQ(CfgArchive::native_path_for("/var/lib/smithproxy/custom"),
+              "/var/lib/smithproxy/custom.cftar");
+    EXPECT_EQ(CfgArchive::startup_path_for("/var/lib/smithproxy/custom"),
+              "/var/lib/smithproxy/custom.startup.cfg");
+    EXPECT_THROW(CfgArchive::native_path_for(""), CfgTarError);
+    EXPECT_THROW(CfgArchive::startup_path_for(""), CfgTarError);
+}
+
 TEST_F(ArchiveTest, ValidatesKnownResourceNamespaces) {
     auto archive = valid_archive();
     archive.add("pki/ca/default/ca-cert.pem", "certificate");

@@ -112,6 +112,11 @@ public:
     // the one-time legacy entrance used to construct the first native archive.
     static CfgArchive open(Paths paths);
 
+    // Derive native and optional startup siblings from an active legacy path.
+    // A terminal .cfg is replaced; other names keep their complete basename.
+    static std::string native_path_for(std::string_view legacy_path);
+    static std::string startup_path_for(std::string_view legacy_path);
+
     // Construct a native archive from bytes supplied by a privileged reader.
     // This is the reload path after Smithproxy has dropped filesystem rights.
     static CfgArchive read_archive(std::string path, std::string_view bytes);

@@ -201,6 +201,30 @@ CfgArchive CfgArchive::open(Paths paths) {
     return CfgArchive(Kind::legacy, std::move(paths.legacy), std::nullopt);
 }
 
+namespace {
+
+std::string sibling_path(std::string_view legacy_path, std::string_view suffix) {
+    if(legacy_path.empty()) fail("legacy configuration path is empty");
+    constexpr std::string_view extension = ".cfg";
+    std::string result(legacy_path);
+    if(result.size() >= extension.size() &&
+       result.compare(result.size() - extension.size(), extension.size(), extension) == 0) {
+        result.resize(result.size() - extension.size());
+    }
+    result += suffix;
+    return result;
+}
+
+}  // namespace
+
+std::string CfgArchive::native_path_for(std::string_view legacy_path) {
+    return sibling_path(legacy_path, ".cftar");
+}
+
+std::string CfgArchive::startup_path_for(std::string_view legacy_path) {
+    return sibling_path(legacy_path, ".startup.cfg");
+}
+
 // Reconstruct the same validated source model as open(), but use archive bytes
 // obtained through the privileged file channel instead of opening the path.
 CfgArchive CfgArchive::read_archive(std::string path, std::string_view bytes) {
