@@ -3,7 +3,7 @@
 #include <utility>
 
 #ifndef SX_CFG_TRANSACTION_CODEC_ONLY
- #include <microhttpd.h>
+ #include <service/httpd/mhd_compat.hpp>
 
  #include <service/cfgapi/cfg_save.hpp>
  #include <service/cfgapi/cfgapi.hpp>
@@ -88,7 +88,7 @@ Http_JsonResponseParams cfg_save(
     }
     catch(nlohmann::json::exception const&) {
         return save_error(
-            "invalid_json", "Request body is not valid JSON", MHD_HTTP_UNPROCESSABLE_ENTITY);
+            "invalid_json", "Request body is not valid JSON", MHD_HTTP_UNPROCESSABLE_CONTENT);
     }
 
     auto decoded = cfg_save_api::decode_request(body);
@@ -96,7 +96,7 @@ Http_JsonResponseParams cfg_save(
         return save_error(
             decoded.error().code,
             decoded.error().detail,
-            MHD_HTTP_UNPROCESSABLE_ENTITY);
+            MHD_HTTP_UNPROCESSABLE_CONTENT);
     }
 
     const std::string source = "api:" + authorized::client_address(connection);
@@ -118,7 +118,7 @@ Http_JsonResponseParams cfg_save(
             return save_error(
                 "partial_config",
                 "Running configuration was loaded with errors and cannot be saved through the API",
-                MHD_HTTP_UNPROCESSABLE_ENTITY);
+                MHD_HTTP_UNPROCESSABLE_CONTENT);
         case SaveStatus::save_failed:
             return save_error(
                 "save_failed",

@@ -1,6 +1,6 @@
 #include "archive.hpp"
 
-#include <microhttpd.h>
+#include <service/httpd/mhd_compat.hpp>
 
 #include <service/cfgapi/cfgapi.hpp>
 #include <service/httpd/handlers/handlers.hpp>
@@ -111,7 +111,7 @@ Http_JsonResponseParams cfg_archive_validate(
         };
     }
     catch (const std::exception& error) {
-        response.response_code = MHD_HTTP_UNPROCESSABLE_ENTITY;
+        response.response_code = MHD_HTTP_UNPROCESSABLE_CONTENT;
         response.response = {
             {"state", "invalid"},
             {"error", {
@@ -174,11 +174,11 @@ Http_JsonResponseParams cfg_archive_restore(
     switch(result.status) {
         case Status::invalid_archive:
             code = "invalid_archive";
-            status = MHD_HTTP_UNPROCESSABLE_ENTITY;
+            status = MHD_HTTP_UNPROCESSABLE_CONTENT;
             break;
         case Status::hash_mismatch:
             code = "archive_hash_mismatch";
-            status = MHD_HTTP_UNPROCESSABLE_ENTITY;
+            status = MHD_HTTP_UNPROCESSABLE_CONTENT;
             break;
         case Status::lease_busy: code = "write_lease_busy"; break;
         case Status::stale_revision: code = "stale_revision"; break;
@@ -292,7 +292,7 @@ Http_JsonResponseParams cfg_archive_resource(
     if(invalid) code = "invalid_resource";
     else if(failed) code = "resource_write_failed";
     return resource_error(std::move(code), result.detail,
-        invalid ? MHD_HTTP_UNPROCESSABLE_ENTITY
+        invalid ? MHD_HTTP_UNPROCESSABLE_CONTENT
                 : failed ? MHD_HTTP_INTERNAL_SERVER_ERROR : MHD_HTTP_CONFLICT);
 }
 

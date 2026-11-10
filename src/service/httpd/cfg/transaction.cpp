@@ -3,7 +3,7 @@
 #include <utility>
 
 #ifndef SX_CFG_TRANSACTION_CODEC_ONLY
- #include <microhttpd.h>
+ #include <service/httpd/mhd_compat.hpp>
 
  #include <service/cfgapi/cfg_tx_basket.hpp>
  #include <service/cfgapi/cfgapi.hpp>
@@ -184,7 +184,7 @@ unsigned int issue_status(tx::Issue const& issue) {
        issue.code == "hash_failed") {
         return MHD_HTTP_INTERNAL_SERVER_ERROR;
     }
-    return MHD_HTTP_UNPROCESSABLE_ENTITY;
+    return MHD_HTTP_UNPROCESSABLE_CONTENT;
 }
 
 Http_JsonResponseParams error_response(tx::Issue const& issue) {

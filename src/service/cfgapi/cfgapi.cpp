@@ -6676,7 +6676,7 @@ bool CfgFactory::replace_config(std::string const& snapshot) {
 
     std::scoped_lock<std::recursive_mutex> lock(CfgFactory::lock());
     try {
-        cfgapi.clear();
+        // readString replaces the previous settings, including on older libconfig.
         cfgapi.readString(snapshot);
         return true;
     }
