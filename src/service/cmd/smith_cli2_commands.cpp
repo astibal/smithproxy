@@ -687,7 +687,6 @@ void register_smithproxy_cli2_commands(libcli2::Cli& cli, std::string subscriber
                 const auto info = CfgFactory::get()->archive_info();
                 context.print(d.key("Format:") + " " +
                               d.value(info.native ? "CFtar" : "legacy config"));
-                context.print(d.key("Path:") + " " + d.value(info.path));
                 if (!info.native) return 0;
 
                 context.print(d.key("Version:") + " " +
