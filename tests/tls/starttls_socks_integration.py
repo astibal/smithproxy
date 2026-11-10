@@ -173,6 +173,11 @@ class StartTlsOrigin:
 
 def make_config(source, destination, worktree, runtime, socks_port, cli_port):
     config = source.read_text()
+    # Legacy startup migrates these fixture resources into CFtar. The stock
+    # native configuration no longer carries filesystem resource paths.
+    config = config.replace('settings = {', 'settings = {\n'
+        f'    certs_path = "{worktree / "etc/certs/default"}/";\n'
+        f'    messages_dir = "{worktree / "etc/msg/en"}/";\n', 1)
     replacements = {
         "accept_tproxy = TRUE;": "accept_tproxy = FALSE;",
         "accept_redirect = TRUE;": "accept_redirect = FALSE;",
@@ -181,10 +186,6 @@ def make_config(source, destination, worktree, runtime, socks_port, cli_port):
             "extended_local_destination_protection = FALSE;",
         "async_dns = TRUE;":
             "async_dns = TRUE;\n        ipver_mixing = TRUE;\n        prefer_ipv6 = TRUE;",
-        'certs_path = "/etc/smithproxy/certs/default/";':
-            f'certs_path = "{worktree / "etc/certs/default"}/";',
-        'messages_dir = "/etc/smithproxy/msg/en/";':
-            f'messages_dir = "{worktree / "etc/msg/en"}/";',
         "socks_workers = 0;": f"socks_workers = 1;\n    socks_port = \"{socks_port}\";",
         "port = 50000;": f"port = {cli_port};",
         'log_file = "/var/log/smithproxy/messages.%s.log";':

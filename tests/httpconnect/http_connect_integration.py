@@ -129,6 +129,11 @@ class TlsEchoOrigin:
 def make_config(source, destination, worktree, runtime, listener_port, cli_port,
                 reject_tcp=False, nat_none=True):
     config = source.read_text()
+    # Legacy startup migrates these fixture resources into CFtar. The stock
+    # native configuration no longer carries filesystem resource paths.
+    config = config.replace('settings = {', 'settings = {\n'
+        f'    certs_path = "{worktree / "etc/certs/default"}/";\n'
+        f'    messages_dir = "{worktree / "etc/msg/en"}/";\n', 1)
     replacements = {
         "accept_tproxy = TRUE;": "accept_tproxy = FALSE;",
         "accept_redirect = TRUE;": "accept_redirect = FALSE;",
@@ -140,10 +145,6 @@ def make_config(source, destination, worktree, runtime, listener_port, cli_port,
             f'nameservers = [ "{system_nameserver()}" ];',
         'http_connect_port = "3128";': f'http_connect_port = "{listener_port}";',
         "http_connect_workers = 0;": "http_connect_workers = 1;",
-        'certs_path = "/etc/smithproxy/certs/default/";':
-            f'certs_path = "{worktree / "etc/certs/default"}/";',
-        'messages_dir = "/etc/smithproxy/msg/en/";':
-            f'messages_dir = "{worktree / "etc/msg/en"}/";',
         "port = 50000;": f"port = {cli_port};",
         'log_file = "/var/log/smithproxy/messages.%s.log";':
             f'log_file = "{runtime}/messages.%s.log";',

@@ -254,6 +254,8 @@ try:
         with Hooks.lock:
             Hooks.events.clear()
         cfg = root / 'config/smithproxy.cfg'; cfg.write_text(text)
+        # Each scenario starts with its own legacy-to-native migration.
+        cfg.with_suffix('.cftar').unlink(missing_ok=True)
         with (root / f'{label}.log').open('w') as log:
             proxy = subprocess.Popen([str(binary), '--no-pidfile', '--diagnose', '-c', str(cfg)], stdout=log, stderr=subprocess.STDOUT)
             eventually(lambda: api('status/ping'))
@@ -297,6 +299,8 @@ try:
                 changed = text.replace('}; role = "Outside";', '}; role = "Blocked";') if label.startswith('role') else text.replace('action = "accept";', 'action = "deny";')
                 assert changed != text
                 cfg.write_text(changed)
+                from cftar_fixture import publish_config
+                publish_config(binary, cfg)
                 proxy.send_signal(signal.SIGUSR1)
             elif label.startswith('unknown'):
                 route(family, 'rv-a', True)
