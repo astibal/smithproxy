@@ -147,15 +147,9 @@ std::optional<tx::Value> transaction_value(
 
 bool transaction_set(
     std::string const& subscriber_id,
-    libconfig::Setting const& setting,
-    std::vector<std::string> const& values,
+    std::string path,
+    tx::Value value,
     std::string& error) {
-    // CLI arguments are text. Convert them to the exact libconfig scalar type
-    // before they enter the transaction layer, so Set never relies on an
-    // ambiguous string conversion.
-    auto value = transaction_value(setting, values, error);
-    if(!value) return false;
-
     // Creating a Transaction captures the current revision and acquires its
     // commit lease. Until this object is destroyed or committed, no other
     // configuration writer can change that revision underneath us.
@@ -168,9 +162,8 @@ bool transaction_set(
     // The single-operation convenience form performs both remaining phases:
     // it prepares and validates an isolated candidate, then atomically applies
     // it to running config and records the resulting revision.
-    const std::string path = setting.getPath();
     auto committed = transaction->commit(
-        tx::Set {path, std::move(*value)}, "set " + path);
+        tx::Set {path, std::move(value)}, "set " + path);
     if(!committed) {
         error = committed.error().detail;
         return false;
@@ -380,7 +373,20 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
         auto& property_setting = setting[name.c_str()];
         if(live_apply == CfgValue::live_apply_t::none &&
            (property_setting.isScalar() || property_setting.isArray())) {
-            return transaction_set(subscriber_id, property_setting, values, error);
+            // CLI arguments are text. Convert them while the referenced
+            // libconfig setting is protected, then release the ordinary
+            // writer guard before acquiring the transaction lease. Keeping
+            // the guard here would recursively acquire the gate's
+            // non-recursive writer mutex and deadlock the CLI session.
+            auto value = transaction_value(property_setting, values, error);
+            if(!value) return false;
+            std::string transaction_path = property_setting.getPath();
+            guard.reset();
+            return transaction_set(
+                subscriber_id,
+                std::move(transaction_path),
+                std::move(*value),
+                error);
         }
         std::string previous_value;
         if (is_worker_action(live_apply))
