@@ -1,0 +1,8 @@
+Initialize the required git submodules, install the Build-Depends listed in
+debian/control, then build the binary package from the repository checkout:
+
+    git submodule update --init --recursive
+    dpkg-buildpackage -b -us -uc
+
+The resulting .deb is written to the parent directory. A normal build keeps
+Debian's clean DESTDIR staging and uses the project's CMake install rules.
