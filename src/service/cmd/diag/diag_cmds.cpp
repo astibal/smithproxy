@@ -2412,9 +2412,11 @@ int cli_diag_proxy_session_list_extra (DiagCli *cli, const char *command, std::v
                 std::stringstream cur_obj_ss;
                 cur_obj_ss << prefix << decor.command(get_proxy_title(curr_proxy, sl_flags, verbosity)) << suffix;
 
-                cur_obj_ss << "\r\n" << sx::net::session_interfaces_text(
-                    lf && lf->com() ? lf->com()->ingress_ifindex() : 0,
-                    rg && rg->com() ? rg->com()->egress_ifindex() : 0) << "\r\n";
+                if (verbosity >= iDIA) {
+                    cur_obj_ss << "\r\n" << sx::net::session_interfaces_text(
+                        lf && lf->com() ? lf->com()->ingress_ifindex() : 0,
+                        rg && rg->com() ? rg->com()->egress_ifindex() : 0) << "\r\n";
+                }
                 cur_obj_ss << get_more_info(curr_proxy, lf, rg, verbosity);
                 return cur_obj_ss.str();
     };
