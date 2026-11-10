@@ -146,9 +146,10 @@ public:
 };
 
 class SocketTransport final : public TransportControl {
-public:
+  public:
     SocketTransport(int fd, std::shared_ptr<SharedStats> counters)
-        : client_(fd, std::chrono::seconds(2)), counters_(std::move(counters)) {
+        : client_(fd, std::chrono::seconds(2), sx::helper_debug::Service::gre),
+          counters_(std::move(counters)) {
         client_.set_nonblocking();
     }
 
@@ -227,10 +228,12 @@ public:
 
     void request_stop() noexcept override {}
 
-private:
+  private:
     static std::shared_ptr<sx::comm::Client> make_client(int fd) {
-        auto client = std::make_shared<sx::comm::Client>(fd, std::chrono::seconds(2));
-        if(client->set_nonblocking() != 0) return {};
+        auto client = std::make_shared<sx::comm::Client>(fd, std::chrono::seconds(2),
+                                                         sx::helper_debug::Service::gre);
+        if (client->set_nonblocking() != 0)
+            return {};
         return client;
     }
 

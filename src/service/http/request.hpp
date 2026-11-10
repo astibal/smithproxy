@@ -48,6 +48,7 @@
 #include <limits>
 #include <thread>
 #include <curl/curl.h>
+#include <service/helper_debug.hpp>
 #include <optional>
 #include <service/core/smithproxy.hpp>
 #include <service/tpool.hpp>
@@ -63,9 +64,18 @@ namespace sx::http {
     };
     using expected_reply = std::optional<expected_reply_t>;
 
-
     class Request {
-    private:
+      private:
+        helper_debug::Service helper_service_ = helper_debug::Service::webhook;
+        std::uint64_t helper_exchange_ = 0;
+        void trace_attempt(std::string_view event, CURLcode code) const {
+            if (!helper_exchange_)
+                return;
+            helper_debug::emit(helper_service_, helper_exchange_, event,
+                               "attempt=" + std::to_string(attempts) +
+                                   " curl=" + std::to_string(code) +
+                                   " reason=" + helper_debug::field(curl_easy_strerror(code)));
+        }
         CURL *curl;
         struct curl_slist *headers;
         std::string responseData;
@@ -78,7 +88,12 @@ namespace sx::http {
             bool overflow = false;
         } write_context {&responseData, max_response_size_, false};
 
-    public:
+      public:
+        void set_helper_diagnostics(helper_debug::Service service, std::uint64_t exchange) {
+            helper_service_ = service;
+            helper_exchange_ = exchange;
+        }
+
         struct Initializator {
             Initializator() {
                 curl_global_init(CURL_GLOBAL_DEFAULT);
@@ -299,25 +314,29 @@ namespace sx::http {
 
         using Reply = sx::http::expected_reply;
 
-        Reply emit(std::string const& url, std::string const& payload) {
+        Reply emit(std::string const &url, std::string const &payload) {
             CURLcode res = CURLE_FAILED_INIT;
 
             auto setup = curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-            if(setup == CURLE_OK) setup = curl_easy_setopt(curl, CURLOPT_POST, 1L);
-            if(setup == CURLE_OK)
+            if (setup == CURLE_OK)
+                setup = curl_easy_setopt(curl, CURLOPT_POST, 1L);
+            if (setup == CURLE_OK)
                 setup = curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload.data());
-            if(setup == CURLE_OK)
+            if (setup == CURLE_OK)
                 setup = curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE,
                                          static_cast<curl_off_t>(payload.size()));
-            if(setup != CURLE_OK)
+            if (setup != CURLE_OK) {
+                trace_attempt("setup-error", setup);
                 return make_reply(url, 600, curl_easy_strerror(setup));
+            }
 
             attempts = 0;
-            const auto deadline = std::chrono::steady_clock::now()
-                                  + std::chrono::seconds(timeout_seconds_);
+            const auto deadline =
+                std::chrono::steady_clock::now() + std::chrono::seconds(timeout_seconds_);
             while (attempts < max_attempts) {
                 const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    deadline - std::chrono::steady_clock::now()).count();
+                                           deadline - std::chrono::steady_clock::now())
+                                           .count();
                 if (remaining <= 0) {
                     res = CURLE_OPERATION_TIMEDOUT;
                     break;
@@ -327,34 +346,37 @@ namespace sx::http {
                 write_context.overflow = false;
                 ++attempts;
                 res = curl_easy_perform(curl);
+                trace_attempt("attempt-result", res);
 
                 auto do_log = (DEBUG and debug_log);
 
-                if(res == CURLE_OK) {
-                    if(do_log) {
+                if (res == CURLE_OK) {
+                    if (do_log) {
                         auto ts = make_ts();
                         auto s = string_format("%s: attempt #%d OK.\r\n", ts.c_str(), attempts);
 
-                        *debug_log <<  s;
+                        *debug_log << s;
                     }
                     break;
-                }
-                else if(do_log){
+                } else if (do_log) {
                     auto ts = make_ts();
                     auto s = string_format("%s: attempt #%d failed.\r\n", ts.c_str(), attempts);
 
-                    *debug_log <<  s;
+                    *debug_log << s;
                 }
 
-                const bool safe_to_retry = res == CURLE_COULDNT_RESOLVE_PROXY
-                                           || res == CURLE_COULDNT_RESOLVE_HOST
-                                           || res == CURLE_COULDNT_CONNECT;
-                if (!safe_to_retry || attempts >= max_attempts) break;
+                const bool safe_to_retry = res == CURLE_COULDNT_RESOLVE_PROXY ||
+                                           res == CURLE_COULDNT_RESOLVE_HOST ||
+                                           res == CURLE_COULDNT_CONNECT;
+                if (!safe_to_retry || attempts >= max_attempts)
+                    break;
+                trace_attempt("retry", res);
                 std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
 
-
             if (res != CURLE_OK) {
+                trace_attempt(write_context.overflow ? "response-too-large" : "transport-error",
+                              res);
                 if (write_context.overflow)
                     return make_reply(url, 600, "webhook response exceeds configured limit");
                 return make_reply(url, 600, curl_easy_strerror(res));
@@ -362,7 +384,7 @@ namespace sx::http {
 
             long responseCode = 0;
             res = curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCode);
-            if(res != CURLE_OK)
+            if (res != CURLE_OK)
                 return make_reply(url, 600, curl_easy_strerror(res));
 
             return make_reply(url, responseCode, responseData);

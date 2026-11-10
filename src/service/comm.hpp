@@ -1,5 +1,6 @@
 #pragma once
 
+#include <service/helper_debug.hpp>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -33,11 +34,11 @@ public:
 };
 
 class Client {
-public:
-    explicit Client(int fd, std::chrono::milliseconds timeout = std::chrono::seconds(90));
+  public:
+    explicit Client(int fd, std::chrono::milliseconds timeout = std::chrono::seconds(90),
+                    helper_debug::Service service = helper_debug::Service::comm);
 
-    int request(std::uint8_t opcode, const std::string& payload, int passed_fd,
-                Reply& response);
+    int request(std::uint8_t opcode, const std::string &payload, int passed_fd, Reply &response);
     // A one-way operation. EAGAIN/ENOBUFS is reported to the caller and never
     // turns the channel into a blocking dataplane dependency.
     int notify(std::uint8_t opcode, const std::string& payload, int passed_fd = -1);
@@ -52,10 +53,11 @@ private:
     std::chrono::milliseconds timeout_;
     std::mutex mutex_;
     bool broken_ = false;
+    helper_debug::Service service_;
 };
 
 class Server {
-public:
+  public:
     explicit Server(int fd);
     virtual ~Server();
 

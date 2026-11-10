@@ -1,3 +1,4 @@
+#include <service/helper_log.hpp>
 /*
     Smithproxy- transparent proxy with SSL inspection capabilities.
     Copyright (c) 2014, Ales Stibal <astib@mag0.net>, All rights reserved.
@@ -35,8 +36,7 @@
     gives permission to release a modified version without this exception;
     this exception also makes it possible to release a modified version
     which carries forward this exception.
-*/    
-
+*/
 
 #include <filesystem>
 
@@ -595,6 +595,7 @@ void print_help() {
 }
 
 int main(int argc, char *argv[]) {
+    sx::helper_debug::install_logging();
 
     sx::proxy::TlsObserver::register_callbacks();
     sx::proxy::QuicObserver::register_callbacks();
@@ -1281,7 +1282,6 @@ int main(int argc, char *argv[]) {
             || api_broker_failed.load(std::memory_order_relaxed))
         ? EXIT_FAILURE : EXIT_SUCCESS;
 }
-
 
 #ifdef MEMPOOL_ALL
 

@@ -1,4 +1,5 @@
 #include "broker_client.hpp"
+#include <service/helper_debug.hpp>
 
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
@@ -81,10 +82,14 @@ std::optional<Result> BrokerPapBackend::verify_pap(
        curl_easy_setopt(handle.get(), CURLOPT_WRITEDATA, &reply) != CURLE_OK) {
         return unavailable();
     }
+    helper_debug::Exchange trace(helper_debug::Service::auth, "transport=http-unix operation=pap");
     const auto status = curl_easy_perform(handle.get());
     long http_status = 0;
     curl_easy_getinfo(handle.get(), CURLINFO_RESPONSE_CODE, &http_status);
-    if(status != CURLE_OK || http_status != 200) {
+    trace.finish("reply", "curl=" + std::to_string(status) +
+                              " status=" + std::to_string(http_status) +
+                              " bytes=" + std::to_string(reply.size()));
+    if (status != CURLE_OK || http_status != 200) {
         return unavailable();
     }
 
@@ -94,10 +99,11 @@ std::optional<Result> BrokerPapBackend::verify_pap(
             return unavailable();
         }
         const auto decision = value.at("status").get<std::string>();
-        if(decision == "rejected") {
+        if (decision == "rejected") {
+            helper_debug::emit(helper_debug::Service::auth, trace.id(), "decision", "rejected");
             return Result{Status::rejected, {}, {}};
         }
-        if(decision != "accepted") {
+        if (decision != "accepted") {
             return unavailable();
         }
         Result result{Status::accepted, value.at("identity").get<std::string>(), {}};
@@ -110,8 +116,10 @@ std::optional<Result> BrokerPapBackend::verify_pap(
                 return unavailable();
             }
         }
+        helper_debug::emit(helper_debug::Service::auth, trace.id(), "decision", "accepted");
         return result;
-    } catch(...) {
+    } catch (...) {
+        helper_debug::emit(helper_debug::Service::auth, trace.id(), "decision", "invalid-response");
         return unavailable();
     }
 }

@@ -487,7 +487,8 @@ int write_backup_atomic(const std::string& path, const std::string& version_text
     return write_file_atomic(backup_path(path, version_text), content);
 }
 
-Client::Client(int fd, std::chrono::milliseconds timeout): sx::comm::Client(fd, timeout) {}
+Client::Client(int fd, std::chrono::milliseconds timeout)
+    : sx::comm::Client(fd, timeout, helper_debug::Service::files) {}
 
 int Client::ping() {
     Reply response;

@@ -434,6 +434,9 @@ bool MitmProxy::apply_sift_reply(nlohmann::json const& reply) {
         }
     }
 
+    sx::helper_debug::emit(sx::helper_debug::Service::sift, 0, "applied",
+                           "session=" + sx::helper_debug::field(to_connection_ID()) +
+                               " changed=" + std::to_string(changed));
     return changed;
 }
 

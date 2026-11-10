@@ -318,18 +318,59 @@ namespace sx::http::webhooks {
             }
         }
 
-        sx::http::AsyncRequest::reply_hook sift_tracked_hook(
-            sx::http::AsyncRequest::reply_hook hook,
-            std::chrono::steady_clock::time_point started) {
-            return [hook = std::move(hook), started](sx::http::expected_reply const& reply) {
+        sx::http::AsyncRequest::reply_hook
+        sift_tracked_hook(sx::http::AsyncRequest::reply_hook hook,
+                          std::chrono::steady_clock::time_point started, std::uint64_t id) {
+            return [hook = std::move(hook), started, id](sx::http::expected_reply const &reply) {
                 // AsyncRequest emits an initialization callback with status -100
                 // before it performs I/O. It is useful to existing hooks, but it
                 // is not a completed request and must not distort Sift RTT/error
                 // diagnostics.
-                const auto initialization = reply.has_value() &&
-                                            reply->response.first == -100;
-                if(!initialization) sift_request_completed(reply, started);
-                if(hook) hook(reply);
+                const auto initialization = reply.has_value() && reply->response.first == -100;
+                if (!initialization) {
+                    sift_request_completed(reply, started);
+
+                    if (reply && sx::helper_debug::enabled(sx::helper_debug::Service::sift)) {
+                        auto body = nlohmann::json::parse(reply->response.second, nullptr, false);
+                        if (!body.is_object()) {
+                            sx::helper_debug::emit(sx::helper_debug::Service::sift, id,
+                                                   "classification", "result=invalid-json-object");
+                        } else {
+                            auto matches = body.find("matches");
+                            const auto count =
+                                matches != body.end() && matches->is_array() ? matches->size() : 0;
+                            sx::helper_debug::emit(sx::helper_debug::Service::sift, id,
+                                                   "classification",
+                                                   "matches=" + std::to_string(count));
+
+                            // Signature names are extra detail; the count is visible at level 8.
+                            if (matches != body.end() && matches->is_array()) {
+                                for (auto const &match : *matches) {
+                                    auto signature = match.find("signature");
+                                    if (signature != match.end() && signature->is_string())
+                                        sx::helper_debug::emit(
+                                            sx::helper_debug::Service::sift, id, "signature",
+                                            sx::helper_debug::field(
+                                                signature->get_ref<std::string const &>()),
+                                            9);
+                                }
+                            }
+
+                            auto lored = body.find("lored");
+                            if (lored != body.end() && lored->is_object()) {
+                                auto status = lored->find("status");
+                                if (status != lored->end() && status->is_string())
+                                    sx::helper_debug::emit(
+                                        sx::helper_debug::Service::sift, id, "lored",
+                                        "status=" + sx::helper_debug::field(
+                                                        status->get_ref<std::string const &>()));
+                            }
+                        }
+                    }
+                }
+
+                if (hook)
+                    hook(reply);
             };
         }
     }
@@ -436,7 +477,9 @@ namespace sx::http::webhooks {
     static sx::http::AsyncRequest::request_settings sift_settings() {
         sx::http::AsyncRequest::request_settings settings;
         auto lock = std::scoped_lock(CfgFactory::lock());
-        auto const& factory = CfgFactory::get();
+        auto const &factory = CfgFactory::get();
+        settings.service = sx::helper_debug::Service::sift;
+        settings.exchange_id = sx::helper_debug::next_id();
         settings.enabled = factory->settings_webhook.sift;
         settings.url = factory->settings_webhook.sift_url;
         settings.verify_tls = true;
@@ -494,48 +537,55 @@ namespace sx::http::webhooks {
         return url;
     }
 
-    bool send_sift_dns_observation(DNS_Inspector::dns_observation const& observation) {
+    bool send_sift_dns_observation(DNS_Inspector::dns_observation const &observation) {
         auto settings = sift_settings();
-        if(not settings.enabled or settings.url.empty()) return false;
+        if (not settings.enabled or settings.url.empty()) {
+            sx::helper_debug::emit(settings.service, settings.exchange_id, "skipped",
+                                   "reason=sift-disabled-or-url-empty");
+            return false;
+        }
         settings.url = with_path(std::move(settings.url), "/api/dns-observation");
 
-        nlohmann::json message = {
-            {"format", "sift-dns-observation/1"},
-            {"identity", sift_identity()},
-            {"client_address", observation.client_address},
-            {"hostname", observation.hostname},
-            {"addresses", observation.addresses},
-            {"cname_chain", observation.cname_chain},
-            {"ttl_seconds", observation.ttl_seconds}
-        };
+        nlohmann::json message = {{"format", "sift-dns-observation/1"},
+                                  {"identity", sift_identity()},
+                                  {"client_address", observation.client_address},
+                                  {"hostname", observation.hostname},
+                                  {"addresses", observation.addresses},
+                                  {"cname_chain", observation.cname_chain},
+                                  {"ttl_seconds", observation.ttl_seconds}};
         return sx::http::AsyncRequest::enqueue(
             std::move(settings), to_string(message), [](auto const&) {});
     }
 
-    bool send_sift_action(
-        std::string const& action, std::string const& action_id,
-        nlohmann::json const& details) {
+    bool send_sift_action(std::string const &action, std::string const &action_id,
+                          nlohmann::json const &details) {
         auto settings = sift_settings();
-        if(not settings.enabled or settings.url.empty()) return false;
-        nlohmann::json message = {
-            {"action", action}, {"id", action_id}, {"source", get_hostid()},
-            {"identity", sift_identity()}, {"type", "proxy"}, {"details", details}
-        };
-        if(auto requirements = sift_requirements(); !requirements.empty())
+        if (not settings.enabled or settings.url.empty()) {
+            sx::helper_debug::emit(settings.service, settings.exchange_id, "skipped",
+                                   "reason=sift-disabled-or-url-empty");
+            return false;
+        }
+        nlohmann::json message = {{"action", action},       {"id", action_id},
+                                  {"source", get_hostid()}, {"identity", sift_identity()},
+                                  {"type", "proxy"},        {"details", details}};
+        if (auto requirements = sift_requirements(); !requirements.empty())
             message["requirements"] = std::move(requirements);
+        sx::helper_debug::emit(settings.service, settings.exchange_id, "action",
+                               "name=" + sx::helper_debug::field(action) +
+                                   " session=" + sx::helper_debug::field(action_id));
         auto encoded = action == "connection-stop"
-            ? message.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace)
-            : to_string(message);
+                           ? message.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace)
+                           : to_string(message);
         sift_request_started(encoded.size(), false);
         const auto started = std::chrono::steady_clock::now();
-        if(action == "connection-stop") {
-            sx::http::AsyncRequest::emit_terminal(settings, encoded, sift_tracked_hook({}, started));
+        if (action == "connection-stop") {
+            sx::http::AsyncRequest::emit_terminal(
+                settings, encoded, sift_tracked_hook({}, started, settings.exchange_id));
             sift_request_accepted(true);
             return true;
         }
         const auto accepted = sx::http::AsyncRequest::enqueue(
-            std::move(settings), std::move(encoded),
-            sift_tracked_hook({}, started));
+            settings, std::move(encoded), sift_tracked_hook({}, started, settings.exchange_id));
         sift_request_accepted(accepted);
         return accepted;
     }
@@ -567,19 +617,35 @@ namespace sx::http::webhooks {
         return message;
     }
 
-    bool send_sift_content_wait(
-        std::string const& action_id, nlohmann::json details,
-        std::string_view payload, sx::http::AsyncRequest::reply_hook hook) {
+    bool send_sift_content_wait(std::string const &action_id, nlohmann::json details,
+                                std::string_view payload, sx::http::AsyncRequest::reply_hook hook) {
         auto settings = sift_settings();
-        if(not settings.enabled or settings.url.empty() or not hook) return false;
+        if (not settings.enabled or settings.url.empty() or not hook) {
+            sx::helper_debug::emit(settings.service, settings.exchange_id, "skipped",
+                                   "reason=sift-disabled-url-empty-or-no-hook");
+            return false;
+        }
+        sx::helper_debug::emit(settings.service, settings.exchange_id, "content",
+                               "session=" + sx::helper_debug::field(action_id) +
+                                   " bytes=" + std::to_string(payload.size()));
+        if (auto info = details.find("info"); info != details.end() && info->is_object()) {
+            for (auto key : {"payload_layer", "side", "stream_id"}) {
+                auto value = info->find(key);
+                if (value != info->end())
+                    sx::helper_debug::emit(settings.service, settings.exchange_id, key,
+                                           sx::helper_debug::field(value->dump()));
+            }
+        }
         auto message = encode_content(action_id, std::move(details), payload);
-        if(message.empty()) return false;
+        if (message.empty())
+            return false;
         sift_request_started(message.size(), true);
         sift_request_accepted(true);
         const auto started = std::chrono::steady_clock::now();
         std::stringstream log;
         sx::http::AsyncRequest::emit_url_wait_log(
-            settings, message, log, sift_tracked_hook(std::move(hook), started));
+            settings, message, log,
+            sift_tracked_hook(std::move(hook), started, settings.exchange_id));
         return true;
     }
 

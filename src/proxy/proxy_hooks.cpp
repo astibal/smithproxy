@@ -1362,11 +1362,18 @@ bool ProxyHooks::content(MitmProxy& proxy, const ContentArgs& args) {
             sent_bytes += buffer.size();
             sx::http::webhooks::send_sift_content_wait(
                 proxy.to_connection_ID(), j,
-                std::string_view(reinterpret_cast<const char*>(buffer.data()), buffer.size()),
+                std::string_view(reinterpret_cast<const char *>(buffer.data()), buffer.size()),
                 response_hook);
+        } else {
+            sx::helper_debug::emit(sx::helper_debug::Service::sift, 0, "skipped",
+                                   "reason=payload-limit session=" +
+                                       sx::helper_debug::field(proxy.to_connection_ID()) +
+                                       " side=" + (right_side ? "R" : "L") +
+                                       " sent=" + std::to_string(sent_bytes) +
+                                       " limit=" + std::to_string(payload_limit));
         }
     }
-    if(args.regular_webhook) {
+    if (args.regular_webhook) {
         const auto binary_sent = sx::http::webhooks::send_content_wait(
             proxy.to_connection_ID(), j,
             std::string_view(reinterpret_cast<const char*>(buffer.data()), buffer.size()), response_hook);

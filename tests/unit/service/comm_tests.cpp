@@ -165,3 +165,75 @@ TEST(CommTest, DeterministicMalformedFrameCorpusDoesNotPoisonChannel) {
 }
 
 } // namespace
+
+namespace {
+struct DebugRecord {
+    sx::helper_debug::Service service;
+    std::uint64_t id;
+    std::string event;
+    std::string detail;
+};
+std::vector<DebugRecord> debug_records;
+struct CaptureHelperDebug {
+    sx::helper_debug::Sink previous;
+    CaptureHelperDebug() {
+        debug_records.clear();
+        previous = sx::helper_debug::sink.exchange(+[](sx::helper_debug::Service service, int,
+                std::uint64_t id, std::string_view event, std::string_view detail) {
+            debug_records.push_back({service, id, std::string(event), std::string(detail)});
+            errno = EACCES; // The sink must not corrupt a transport failure.
+        });
+    }
+    ~CaptureHelperDebug() { sx::helper_debug::sink.store(previous); }
+};
+
+TEST(HelperDebug, CorrelatesTimeoutAndPreservesErrnoWithoutPayload) {
+    int channels[2];
+    ASSERT_EQ(socle::privsep::make_channel_pair(channels), 0);
+    sx::comm::Client client(channels[0], std::chrono::milliseconds(10), sx::helper_debug::Service::files);
+    ::close(channels[0]);
+    CaptureHelperDebug capture;
+    sx::comm::Reply reply;
+    EXPECT_EQ(client.request(42, "secret-payload", -1, reply), -1);
+    EXPECT_EQ(errno, ETIMEDOUT);
+    ASSERT_EQ(debug_records.size(), 3U);
+    EXPECT_EQ(debug_records[0].service, sx::helper_debug::Service::files);
+    EXPECT_EQ(debug_records[1].event, "send");
+    EXPECT_EQ(debug_records[2].event, "receive-error");
+    EXPECT_NE(debug_records[2].detail.find("errno=" + std::to_string(ETIMEDOUT)), std::string::npos);
+    for(auto const& record : debug_records) {
+        EXPECT_EQ(record.id, debug_records[0].id);
+        EXPECT_NE(record.id, 0U);
+        EXPECT_EQ(record.detail.find("secret"), std::string::npos);
+    }
+    ::close(channels[1]);
+}
+
+TEST(HelperDebug, NotificationReportsSendWithoutInventingReply) {
+    int channels[2];
+    ASSERT_EQ(socle::privsep::make_channel_pair(channels), 0);
+    sx::comm::Client client(channels[0], std::chrono::milliseconds(10), sx::helper_debug::Service::gre);
+    ::close(channels[0]);
+    CaptureHelperDebug capture;
+    EXPECT_EQ(client.notify(42, "secret-frame"), 0);
+    ASSERT_EQ(debug_records.size(), 2U);
+    EXPECT_EQ(debug_records[1].event, "notified");
+    EXPECT_EQ(debug_records[0].id, debug_records[1].id);
+    EXPECT_EQ(debug_records[1].detail.find("secret"), std::string::npos);
+    ::close(channels[1]);
+}
+
+TEST(HelperDebug, EscapesTerminalControlAndBoundsFields) {
+    EXPECT_EQ(sx::helper_debug::field("hello\n\033[31m"), "hello__[31m");
+    EXPECT_EQ(sx::helper_debug::field(std::string(1000, 'x')).size(), 163U);
+}
+
+TEST(HelperDebug, ThrowingSinkCannotBreakCaller) {
+    auto old = sx::helper_debug::sink.exchange(+[](sx::helper_debug::Service, int,
+            std::uint64_t, std::string_view, std::string_view) { errno = EINVAL; throw 1; });
+    errno = ETIMEDOUT;
+    sx::helper_debug::emit(sx::helper_debug::Service::sift, 1, "send");
+    EXPECT_EQ(errno, ETIMEDOUT);
+    sx::helper_debug::sink.store(old);
+}
+} // namespace
