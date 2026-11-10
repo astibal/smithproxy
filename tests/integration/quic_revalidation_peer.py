@@ -48,6 +48,8 @@ def run_case(root, proxy, hooks, config, eventually, run, sessions, cli):
             revoked = original.replace('action = "accept"', 'action = "deny"')
         assert revoked != original, 'policy revocation did not change configuration'
         config.write_text(revoked)
+        from cftar_fixture import publish_config
+        publish_config(Path(proxy.args[0]), config)
         proxy.send_signal(signal.SIGUSR1)
         eventually(lambda: (root / 'quic-closed').exists(), timeout=15)
         eventually(lambda: set(streams) <= {e['id'] for e in hooks.snapshot()

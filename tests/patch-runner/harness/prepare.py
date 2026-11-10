@@ -37,6 +37,11 @@ internal_api_port = os.environ.get('SMITHPROXY_API_PORT', '55555')
 if not internal_api_port.isdigit() or not 1025 <= int(internal_api_port) < 65535:
     raise ValueError('SMITHPROXY_API_PORT must be an unprivileged TCP port')
 text = (source/'etc/smithproxy.cfg').read_text()
+# Explicit legacy migration inputs keep the lab independent of /etc resources.
+text = text.replace('settings = {', 'settings = {\n'
+    f'    certs_path = "{certs}/";\n'
+    f'    messages_dir = "{source / "etc/msg/en"}/";\n', 1)
+
 # The base dataplane probes isolate MITM trust and transport behavior. Their
 # disposable origin certificate intentionally has neither public SCTs nor an
 # OCSP responder; dedicated TLS tests cover those policies separately.

@@ -1630,8 +1630,8 @@ TEST_F(TLSIntegration, CustomCertificatesLoadFromFullchainAndSplitLayouts) {
     ASSERT_NE(certificate, nullptr);
     ASSERT_NE(key, nullptr);
 
-    const auto fullchain_dir = fixture_path_ / "sni" / "fullchain.test";
-    const auto split_dir = fixture_path_ / "ip" / "192.0.2.44";
+    const auto fullchain_dir = fixture_path_ / "server" / "sni" / "fullchain.test";
+    const auto split_dir = fixture_path_ / "server" / "ip" / "192.0.2.44";
     std::filesystem::create_directories(fullchain_dir);
     std::filesystem::create_directories(split_dir);
     ASSERT_TRUE(write_certificate_file(fullchain_dir / "fullchain.pem",

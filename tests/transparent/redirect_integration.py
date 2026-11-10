@@ -159,6 +159,9 @@ class PortBindRace(RuntimeError):
 def replace_setting(text: str, name: str, value: str) -> str:
     result, count = re.subn(
         rf"(?m)^(\s*{re.escape(name)}\s*=\s*).*$", rf"\g<1>{value}", text, count=1)
+    # Only retired resource paths may be absent from the native stock config.
+    if count == 0 and name in ("certs_path", "messages_dir"):
+        return text.replace('settings = {', f'settings = {{\n    {name} = {value}', 1)
     if count != 1:
         raise AssertionError(f"setting not found: {name}")
     return result
