@@ -726,7 +726,10 @@ void listener_service::progress_handshake(
         start_draining(value, now);
         return;
     }
-    if (!value.upstream->handshake_complete()) return;
+    // ALPN can be selected before TLS completes. Keep the handshake deadline
+    // and defer bridge creation until both transports have finished TLS.
+    if (!value.upstream->handshake_complete()
+        || !value.downstream->handshake_complete()) return;
 
     // The certificate probe authenticated the identity used to mint the
     // downstream certificate. Independently verify the worker-affine

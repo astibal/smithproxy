@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "proxy/quic/openssl.hpp"
+#include "proxy/quic/wire.hpp"
 #include "service/quic/quicservice.hpp"
 
 #include <sslcertstore.hpp>
@@ -397,6 +398,7 @@ public:
         std::size_t reorder_every = 0;
         std::size_t mtu = 65535;
         std::chrono::milliseconds delay {};
+        bool block_client_finished = false;
     };
 
     udp_fault_relay(std::uint16_t target_port, profile faults)
@@ -426,6 +428,7 @@ public:
     std::size_t duplicated() const { return duplicated_; }
     std::size_t reordered() const { return reordered_; }
     std::size_t mtu_dropped() const { return mtu_dropped_; }
+    void release_client_finished() { client_finished_released_ = true; }
 
 private:
     struct queued_datagram {
@@ -466,6 +469,21 @@ private:
         if (faults_.drop_every != 0 && received_ % faults_.drop_every == 0) {
             ++dropped_;
             return;
+        }
+        // Inspect coalesced packets too: withhold the client's TLS Finished
+        // while allowing Initials and the complete server flight through.
+        if (!from_target && faults_.block_client_finished && !client_finished_released_) {
+            for (std::size_t offset = 0; offset < size;) {
+                auto const parsed = quic::parse_header(buffer + offset, size - offset);
+                if (!parsed) break;
+                if (parsed.value.type == quic::packet_type::handshake
+                    || parsed.value.form == quic::packet_form::short_header) {
+                    ++dropped_;
+                    return;
+                }
+                if (parsed.value.packet_end == 0) break;
+                offset += parsed.value.packet_end;
+            }
         }
         std::vector<unsigned char> data(buffer, buffer + size);
         if (faults_.reorder_every != 0 && received_ % faults_.reorder_every == 0) {
@@ -508,6 +526,7 @@ private:
         flush_due();
     }
 
+    std::atomic_bool client_finished_released_ = false;
     profile faults_;
     int fd_ = -1;
     std::uint16_t port_ = 0;
@@ -991,6 +1010,73 @@ TEST(QuicTestbed, ClientRejectsMitmCertificateWithoutTestCaTrust) {
     EXPECT_FALSE(await_handshake(*client));
     EXPECT_NE(SSL_get_verify_result(client->native_handle()), X509_V_OK);
     client->close();
+}
+
+static void exercise_pending_downstream(bool release_finished) {
+    origin_server origin;
+    ASSERT_TRUE(origin.ready());
+    quic::lifecycle_options lifecycle;
+    lifecycle.handshake_timeout = 1500ms;
+    lifecycle.drain_timeout = 50ms;
+    quic::listener_service proxy(0, pki_file("srv-cert.pem"), pki_file("srv-key.pem"), false,
+                                 origin.port(), true, lifecycle, {}, "127.0.0.1");
+    ASSERT_TRUE(proxy.prepare()) << proxy.last_error();
+    running_service runner(proxy);
+    udp_fault_relay::profile faults;
+    faults.block_client_finished = true;
+    udp_fault_relay relay(proxy.bound_port(), faults);
+    ASSERT_TRUE(relay.ready());
+    auto context = make_verified_client_context();
+    ASSERT_NE(context, nullptr);
+    auto const address = loopback(relay.port());
+    std::string error;
+    auto client = quic::connect_openssl_quic(
+        context.get(), reinterpret_cast<sockaddr const*>(&address), sizeof(address),
+        test_sni, &error);
+    ASSERT_NE(client, nullptr) << error;
+    bool saw_pending_downstream = false;
+    bool saw_active = false;
+    bool saw_completed_downstream = false;
+    auto const deadline = std::chrono::steady_clock::now() + 4s;
+    while (std::chrono::steady_clock::now() < deadline) {
+        client->drain_events();
+        for (auto const& snapshot : proxy.session_diagnostics()) {
+            if (snapshot.state == "active") {
+                saw_active = true;
+                saw_completed_downstream = snapshot.downstream_tls.established;
+            }
+            if (snapshot.upstream_tls.established && !snapshot.downstream_tls.established
+                && snapshot.state != "draining") {
+                saw_pending_downstream = true;
+                EXPECT_EQ(snapshot.state, "handshake");
+                EXPECT_EQ(snapshot.streams, 0U);
+                if (release_finished && relay.dropped() != 0) relay.release_client_finished();
+            }
+        }
+        if (proxy.diagnostics().completed_sessions != 0 || (release_finished && saw_active)) break;
+        std::this_thread::sleep_for(1ms);
+    }
+    EXPECT_GT(relay.dropped(), 0U);
+    EXPECT_TRUE(saw_pending_downstream);
+    if (release_finished) {
+        EXPECT_TRUE(saw_active);
+        EXPECT_TRUE(saw_completed_downstream);
+        EXPECT_EQ(proxy.diagnostics().handshake_timeouts, 0U);
+        return;
+    }
+    EXPECT_FALSE(saw_active);
+    EXPECT_EQ(proxy.diagnostics().handshake_timeouts, 1U);
+    EXPECT_EQ(proxy.diagnostics().idle_timeouts, 0U);
+    EXPECT_EQ(proxy.diagnostics().completed_sessions, 1U);
+    EXPECT_EQ(proxy.connection_count(), 0U);
+}
+
+TEST(QuicTestbed, CompletedUpstreamCannotActivatePendingDownstream) {
+    exercise_pending_downstream(false);
+}
+
+TEST(QuicTestbed, ActivatesAfterDelayedDownstreamFinished) {
+    exercise_pending_downstream(true);
 }
 
 TEST(QuicTestbed, CleansUpClientClosedDuringVerifiedHandshake) {
