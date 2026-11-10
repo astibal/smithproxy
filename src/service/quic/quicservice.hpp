@@ -70,6 +70,12 @@ struct diagnostics_snapshot {
 struct tls_snapshot {
     bool available = false;
     bool established = false;
+    bool ended = false; ///< Session is draining; no further handshake progress is possible.
+    const char* handshake_status() const noexcept {
+        if (!available) return "not started";
+        if (established) return "completed";
+        return ended ? "ended before completion" : "pending";
+    }
     std::string version;
     std::string cipher;
     std::string server_name;

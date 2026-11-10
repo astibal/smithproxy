@@ -964,6 +964,10 @@ void listener_service::publish_session_snapshots(
         item.id = linked.id;
         item.state = linked.state == session_state::handshake ? "handshake"
                    : linked.state == session_state::active ? "active" : "draining";
+        if (linked.state == session_state::draining) {
+            item.downstream_tls = linked.draining_downstream_tls;
+            item.upstream_tls = linked.draining_upstream_tls;
+        }
         item.client = endpoint_text(linked.client_endpoint);
         item.target = endpoint_text(linked.target_endpoint);
         if (linked.downstream) {
@@ -1009,6 +1013,9 @@ void listener_service::start_draining(session& value,
         value.draining_downstream_tls = snapshot_tls(value.downstream->native_handle());
     if(value.upstream)
         value.draining_upstream_tls = snapshot_tls(value.upstream->native_handle());
+
+    value.draining_downstream_tls.ended = true;
+    value.draining_upstream_tls.ended = true;
 
     // Sample outcomes before close retires the handshake evidence.
     if(value.downstream) hook_outcome(value.setup.get(), value.downstream->native_handle(),

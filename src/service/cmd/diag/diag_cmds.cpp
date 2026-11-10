@@ -1759,7 +1759,8 @@ static void print_quic_tls(DiagCli* cli, const char* label,
                            std::string const& alpn,
                            int verbosity) {
     if (!tls.available) {
-        cli_print(cli, "  %s: TLS over QUIC, not connected", label);
+        cli_print(cli, "  %s: TLS over QUIC, handshake %s%s", label,
+                  tls.handshake_status(), tls.ended ? " (session ended)" : "");
         return;
     }
     if (tls.established) {
@@ -1769,13 +1770,15 @@ static void print_quic_tls(DiagCli* cli, const char* label,
         if (tls.has_ticket)
             cli_print(cli, "    ticket_hint: %lus", tls.ticket_lifetime_hint);
     } else {
-        cli_print(cli, "  %s: TLS over QUIC, handshake pending", label);
+        cli_print(cli, "  %s: TLS over QUIC, handshake %s", label, tls.handshake_status());
     }
+    if (tls.ended)
+        cli_print(cli, "    transport: draining (last TLS snapshot)");
     // SSL_VERIFY_NONE with X509_V_OK is not evidence of peer verification.
     if (!tls.verify_peer)
         cli_print(cli, "    verify: disabled");
-    else if (!tls.established)
-        cli_print(cli, "    verify: pending (%s)", tls.verify_error.c_str());
+    else if (!tls.established && tls.verify_result == X509_V_OK)
+        cli_print(cli, "    verify: %s", tls.ended ? "not completed" : "pending");
     else
         cli_print(cli, "    verify: %s", tls.verify_error.c_str());
     cli_print(cli, "    sni: %s", tls.server_name.empty() ? "-" : tls.server_name.c_str());

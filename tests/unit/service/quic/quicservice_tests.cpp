@@ -326,14 +326,26 @@ TEST_F(QuicListenerService, CleansUpHandshakeTimeout) {
     ASSERT_NE(external, nullptr) << error;
 
     bool accepted = false;
+    bool saw_ended_handshake = false;
     auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (std::chrono::steady_clock::now() < deadline
            && (!accepted || proxy.connection_count() != 0)) {
         external->drain_events();
         accepted = accepted || proxy.connection_count() != 0;
+        for(const auto& snapshot : proxy.session_diagnostics()) {
+            EXPECT_NE(snapshot.state, "active");
+            if(snapshot.state != "draining") continue;
+            saw_ended_handshake = true;
+            EXPECT_TRUE(snapshot.upstream_tls.ended);
+            EXPECT_FALSE(snapshot.upstream_tls.established);
+            EXPECT_STREQ(snapshot.upstream_tls.handshake_status(), snapshot.upstream_tls.available
+                ? "ended before completion" : "not started");
+            EXPECT_TRUE(snapshot.downstream_tls.ended);
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     EXPECT_TRUE(accepted);
+    EXPECT_TRUE(saw_ended_handshake);
     EXPECT_EQ(proxy.connection_count(), 0U);
     auto const diagnostics = proxy.diagnostics();
     EXPECT_EQ(diagnostics.accepted_sessions, 1U);
@@ -544,6 +556,8 @@ TEST_F(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
     for(const auto* tls : {&snapshots.front().downstream_tls, &snapshots.front().upstream_tls}) {
         EXPECT_TRUE(tls->available);
         EXPECT_TRUE(tls->established);
+        EXPECT_FALSE(tls->ended);
+        EXPECT_STREQ(tls->handshake_status(), "completed");
         EXPECT_EQ(tls->version, "TLSv1.3");
         EXPECT_EQ(tls->server_name, "Smithproxy-Server-Certificate");
         EXPECT_FALSE(tls->cipher.empty());
@@ -585,6 +599,9 @@ TEST_F(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
             EXPECT_TRUE(snapshot.stream_summary.traffic_available);
             EXPECT_EQ(snapshot.stream_summary.upload_bps, 0U);
             EXPECT_EQ(snapshot.stream_summary.download_bps, 0U);
+            EXPECT_TRUE(snapshot.downstream_tls.ended);
+            EXPECT_TRUE(snapshot.upstream_tls.ended);
+            EXPECT_STREQ(snapshot.downstream_tls.handshake_status(), "completed");
             EXPECT_TRUE(snapshot.downstream_tls.established);
             EXPECT_TRUE(snapshot.upstream_tls.established);
             EXPECT_EQ(snapshot.downstream_tls.cipher, snapshots.front().downstream_tls.cipher);
@@ -685,3 +702,18 @@ TEST_F(QuicHookTest, ProbeDoesNotDispatchAndInvalidCipherFailsClosed) {
 } // namespace
 
 #endif
+
+TEST(QuicTlsSnapshot, DistinguishesAbsentPendingCompletedAndEndedHandshakes) {
+    quic::tls_snapshot tls;
+    EXPECT_STREQ(tls.handshake_status(), "not started");
+    tls.ended = true;
+    EXPECT_STREQ(tls.handshake_status(), "not started");
+    tls.available = true;
+    EXPECT_STREQ(tls.handshake_status(), "ended before completion");
+    tls.ended = false;
+    EXPECT_STREQ(tls.handshake_status(), "pending");
+    tls.established = true;
+    EXPECT_STREQ(tls.handshake_status(), "completed");
+    tls.ended = true;
+    EXPECT_STREQ(tls.handshake_status(), "completed");
+}
