@@ -56,6 +56,7 @@
 
 #include "cfg_update.hpp"
 #include "cfg_archive.hpp"
+#include "cfg_log.hpp"
 #include "cfg_archive_monitor.hpp"
 #include "cfg_archive_restore.hpp"
 #include "cfg_resource_write.hpp"
@@ -81,8 +82,7 @@ public:
 
     struct log { ;
         static logan_lite &config() {
-            static logan_lite l("config");
-            return l;
+            return sx::cfg::config_log();
         }
         static logan_lite &policy() {
             static logan_lite l("policy");

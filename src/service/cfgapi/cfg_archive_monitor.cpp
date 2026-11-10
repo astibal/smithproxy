@@ -1,6 +1,7 @@
 #include "cfg_archive_monitor.hpp"
 
 #include "cfg_archive.hpp"
+#include "cfg_log.hpp"
 
 #include <service/privileged_file.hpp>
 #include <utils/crypto.hpp>
@@ -33,6 +34,7 @@ CfgArchiveMonitor::CfgArchiveMonitor(Context context)
             }),
       accepted_hash_(payload_hash(context.accepted_payload)) {
     if(path_.empty()) throw CfgTarError("archive monitor path is empty");
+    config_log().inf("configuration archive monitor initialized");
 }
 
 bool CfgArchiveMonitor::FileSignature::operator==(
@@ -77,6 +79,7 @@ void CfgArchiveMonitor::accept(std::string_view payload) {
     have_attempted_signature_ = false;
     metadata_fast_paths_remaining_ = 0;
     change_detected_.store(false, std::memory_order_release);
+    config_log().dia("configuration archive monitor accepted internal publication");
 }
 
 bool CfgArchiveMonitor::change_detected() const noexcept {
@@ -94,6 +97,7 @@ std::string CfgArchiveMonitor::last_error() const {
 }
 
 sx::reload::ReloadResult CfgArchiveMonitor::fail(std::string detail) {
+    config_log().err("configuration archive monitor failed: %s", detail.c_str());
     std::lock_guard lock(state_lock_);
     detected_hash_.clear();
     last_error_ = std::move(detail);
@@ -170,6 +174,8 @@ sx::reload::ReloadResult CfgArchiveMonitor::check(bool force) {
             last_error_.clear();
             change_detected_.store(true, std::memory_order_release);
         }
+        config_log().noti("external configuration archive change detected: version=%llu",
+                          static_cast<unsigned long long>(next_version));
         return {sx::reload::ReloadStatus::published, next_version, {}};
     }
     catch(const std::exception& error) {

@@ -144,17 +144,21 @@ sx::cfg::CfgSaveData CfgFactory::ArchiveStorage::prepare_resource(
 
 bool CfgFactory::ArchiveStorage::publish(
     const sx::cfg::CfgSaveData& prepared) const {
+    owner_.log.inf("publishing native configuration archive: bytes=%zu",
+                   prepared.replacement.size());
     // One privileged operation binds the recovery and replacement writes to
     // the exact archive from which prepare() derived this candidate.
     if(!prepared.previous ||
        sx::privsep::files::config_install(
            owner_.config_file, *prepared.previous, prepared.replacement) != 0) {
+        owner_.log.err("native configuration archive publication failed");
         return false;
     }
 
     // Advance cache and monitor only after durable installation succeeds.
     owner_.config_archive_->accept_saved_archive(prepared.replacement);
     owner_.accept_archive_monitor(prepared.replacement);
+    owner_.log.noti("native configuration archive publication completed");
     return true;
 }
 
@@ -165,6 +169,7 @@ bool CfgFactory::ArchiveStorage::restart_required() const {
 
 void CfgFactory::ArchiveStorage::require_restart() {
     owner_.startup_archive_pending_ = true;
+    owner_.log.noti("configuration archive activation deferred until restart");
 }
 
 sx::cfg::ResourceWriteResult CfgFactory::write_archive_resource(
@@ -246,7 +251,7 @@ bool CfgFactory::cfgapi_init(sx::cfg::CfgArchive source) {
 
     std::scoped_lock<std::recursive_mutex> l(lock_);
 
-    _dia("Reading configuration source %s", source.path().c_str());
+    _inf("loading configuration source: native=%d", source.is_cftar());
     
     // Native archives are already held and validated by CfgArchive. Legacy
     // files keep using the privileged reader so reload works after uid drop.
@@ -275,6 +280,8 @@ bool CfgFactory::cfgapi_init(sx::cfg::CfgArchive source) {
     config_file = source.path();
     config_archive_ = std::move(source);
     configure_archive_monitor_locked();
+    _not("configuration source loaded successfully: native=%d",
+         config_archive_->is_cftar());
     return true;
 }
 
@@ -391,6 +398,7 @@ std::string CfgFactory::materialize_runtime_archive() {
     std::scoped_lock<std::recursive_mutex> guard(CfgFactory::lock());
     if(!config_archive_ || !config_archive_->is_cftar()) return {};
     if(!runtime_tree_) {
+        log.inf("creating runtime view of archived configuration resources");
         runtime_tree_.emplace(
             sx::cfg::CfgRuntimeTree::create(config_archive_->archive()));
     }
@@ -404,7 +412,10 @@ void CfgFactory::apply_runtime_resource_paths() {
     ssl.ca_path() = configured_ca_bundle_path;
 
     const auto runtime = materialize_runtime_archive();
-    if(runtime.empty()) return;
+    if(runtime.empty()) {
+        log.dia("runtime archive resources are unavailable; configured legacy paths remain active");
+        return;
+    }
 
     // Socle still discovers custom identities and OpenSSL trust directories
     // through paths. Only this compatibility edge sees the private tree.
@@ -421,6 +432,7 @@ void CfgFactory::apply_runtime_resource_paths() {
         ssl.ca_file().clear();
         ssl.ca_path() = runtime + "/pki/trust/directory";
     }
+    log.noti("archived runtime resource paths applied");
 }
 
 bool CfgFactory::startup_archive_pending() const {
@@ -435,7 +447,10 @@ void CfgFactory::configure_archive_monitor_locked() {
     }
     archive_monitor_.reset();
 
-    if(!config_archive_ || !config_archive_->is_cftar()) return;
+    if(!config_archive_ || !config_archive_->is_cftar()) {
+        log.dia("configuration archive monitor disabled for legacy source");
+        return;
+    }
 
     archive_monitor_ = std::make_shared<sx::cfg::CfgArchiveMonitor>(
         sx::cfg::CfgArchiveMonitor::Context{
@@ -446,11 +461,15 @@ void CfgFactory::configure_archive_monitor_locked() {
         archive_monitor_.reset();
         throw sx::cfg::CfgTarError("cannot register configuration archive monitor");
     }
+    log.inf("configuration archive monitor registered");
 }
 
 void CfgFactory::start_archive_monitor() {
     std::scoped_lock<std::recursive_mutex> guard(CfgFactory::lock());
-    if(archive_monitor_) archive_monitor_service_.start();
+    if(archive_monitor_) {
+        archive_monitor_service_.start();
+        log.inf("configuration archive monitor started");
+    }
 }
 
 void CfgFactory::accept_archive_monitor(std::string_view payload) const {
