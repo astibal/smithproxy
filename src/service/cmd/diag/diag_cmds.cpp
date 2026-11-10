@@ -1731,13 +1731,74 @@ int cli_diag_proxy_session_list(DiagCli *cli, const char *command, char *argv[],
     return cli_diag_proxy_session_list_extra(cli, command, args, flags);
 }
 
-static void print_quic_sessions(DiagCli* cli, int flags, bool listener_summary) {
+template<class Decor>
+static std::string session_inspection_suffix(
+    Decor const& decor, std::string_view protocol,
+    std::vector<std::string> const& filters,
+    std::vector<std::string> const& sift,
+    std::vector<std::string> const& lored) {
+    std::string result;
+    if (!protocol.empty()) result += " (" + decor.muted(std::string(protocol)) + ")";
+    for (const auto& filter : filters) result += " " + decor.warning("!" + filter);
+    auto append = [&](const char* label, auto const& values) {
+        if (values.empty()) return;
+        result += " " + decor.muted(std::string("[") + label + ":");
+        for (std::size_t i = 0; i < values.size(); ++i) {
+            if (i != 0) result += decor.muted(",");
+            result += decor.muted(values[i]);
+        }
+        result += decor.muted("]");
+    };
+    append("sift", sift);
+    append("lored", lored);
+    return result;
+}
+
+static void print_quic_tls(DiagCli* cli, const char* label,
+                           sx::quic::tls_snapshot const& tls,
+                           std::string const& alpn,
+                           int verbosity) {
+    if (!tls.available) {
+        cli_print(cli, "  %s: TLS over QUIC, not connected", label);
+        return;
+    }
+    if (tls.established) {
+        cli_print(cli, "  %s: version: %s, cipher: %s, resumed/ticket: %d/%d",
+                  label, tls.version.c_str(), tls.cipher.c_str(),
+                  tls.resumed, tls.has_ticket);
+        if (tls.has_ticket)
+            cli_print(cli, "    ticket_hint: %lus", tls.ticket_lifetime_hint);
+    } else {
+        cli_print(cli, "  %s: TLS over QUIC, handshake pending", label);
+    }
+    // SSL_VERIFY_NONE with X509_V_OK is not evidence of peer verification.
+    if (!tls.verify_peer)
+        cli_print(cli, "    verify: disabled");
+    else if (!tls.established)
+        cli_print(cli, "    verify: pending (%s)", tls.verify_error.c_str());
+    else
+        cli_print(cli, "    verify: %s", tls.verify_error.c_str());
+    cli_print(cli, "    sni: %s", tls.server_name.empty() ? "-" : tls.server_name.c_str());
+    cli_print(cli, "    alpn: %s", alpn.empty() ? "-" : alpn.c_str());
+    if (verbosity >= iDUM) {
+        cli_print(cli, "    TLS state: %s", tls.state.c_str());
+        cli_print(cli, "    verify result: %ld", tls.verify_result);
+    }
+}
+
+static void print_quic_sessions(DiagCli* cli, int flags, bool listener_summary, int verbosity,
+                                SessionList::text_renderer renderer = {}) {
 
     // QUIC snapshots describe the transport, not an SSLCom or TCP OS buffer.
     // Keep protocol-specific filters honest rather than inventing those fields.
-    if(flag_check<int>(flags, SL_SSH_DETAILS)) return;
-    if((flags & (SL_IO_EMPTY | SL_IO_OSBUF_NZ)) &&
+    if (flag_check<int>(flags, SL_SSH_DETAILS)) return;
+    if ((flags & (SL_IO_EMPTY | SL_IO_OSBUF_NZ)) &&
        !flag_check<int>(flags, SL_IO_ALL)) return;
+
+    const bool transport_details = listener_summary || verbosity >= iDIA ||
+                                   flag_check<int>(flags, SL_IO_ALL);
+    const bool tls_details = listener_summary || verbosity >= iDEB ||
+                             flag_check<int>(flags, SL_TLS_DETAILS);
 
     const auto decor = cli->context.decor();
     auto const& services = SmithProxy::instance().quic_services;
@@ -1745,8 +1806,22 @@ static void print_quic_sessions(DiagCli* cli, int flags, bool listener_summary) 
     for (std::size_t listener = 0; listener < services.size(); ++listener) {
         auto const& service = services[listener];
         auto const sessions = service->session_diagnostics();
+        sx::quic::listener_service::session_details stream_details;
+        if (verbosity >= iDIA && renderer) {
+            auto pending = service->request_session_details(renderer);
+            if (pending.wait_for(std::chrono::seconds(5)) == std::future_status::ready) {
+                try {
+                    stream_details = pending.get();
+                }
+                catch (const std::exception& error) {
+                    cli->context.print(decor.error(std::string("QUIC stream details: ") + error.what()));
+                }
+            } else {
+                cli->context.print(decor.error("QUIC stream details timed out"));
+            }
+        }
 
-        if(listener_summary) {
+        if (listener_summary) {
             auto const counters = service->diagnostics();
             cli_print(cli, "QUIC listener[%zu]: udp/*:%u, sessions: %zu, accepted: %llu, completed: %llu",
                       listener, service->bound_port(), sessions.size(),
@@ -1755,31 +1830,81 @@ static void print_quic_sessions(DiagCli* cli, int flags, bool listener_summary) 
         }
 
         for (auto const& session : sessions) {
-            if(flag_check<int>(flags, SL_ACTIVE) &&
-               (session.forwarded_bytes == 0 || session.idle_ms >= 5000)) continue;
+            if (flag_check<int>(flags, SL_ACTIVE) &&
+                session.stream_summary.upload_bps + session.stream_summary.download_bps == 0) continue;
 
-            // Match the ordinary list's decorated title and indented details.
-            cli->context.print(decor.command(string_format(
-                "QUIC|MitM|l:<udp_%s> <+> r:<udp_%s>",
-                session.client.c_str(), session.target.c_str())));
-            cli_print(cli, "    listener: %zu  id: %llu  state: %s  age: %llums  idle: %llums",
-                      listener, static_cast<unsigned long long>(session.id), session.state.c_str(),
-                      static_cast<unsigned long long>(session.age_ms),
-                      static_cast<unsigned long long>(session.idle_ms));
-            cli_print(cli, "    SNI: %s", session.server_name.empty()
-                      ? "-" : session.server_name.c_str());
-            cli_print(cli, "    ALPN: downstream=%s upstream=%s",
-                      session.downstream_alpn.empty() ? "-" : session.downstream_alpn.c_str(),
-                      session.upstream_alpn.empty() ? "-" : session.upstream_alpn.c_str());
-            cli_print(cli, "    streams: %zu  queued: %zuB  forwarded: %lluB  rejected: %zu",
-                      session.streams, session.queued_bytes,
-                      static_cast<unsigned long long>(session.forwarded_bytes),
-                      session.stream_limit_rejections);
+            auto target = "quic_" + session.target;
+            if (!flag_check<int>(flags, SL_NO_NAMES) && !session.server_name.empty()) {
+                const auto port = session.target.rfind(':');
+                target = (verbosity > iINF ? "[sni]" : "") + session.server_name;
+                if (flag_check<int>(flags, SL_IPS)) {
+                    target += "(" + session.target.substr(0, port) + ")";
+                }
+                if (port != std::string::npos) target += session.target.substr(port);
+            }
+
+            const auto alpn = session.downstream_alpn.empty() ? "quic" : session.downstream_alpn;
+            std::string policies;
+            for (const auto policy : session.stream_summary.policies) {
+                if (!policies.empty()) policies += ',';
+                policies += std::to_string(policy);
+            }
+            if (policies.empty()) policies = "-";
+
+            const auto& traffic = session.stream_summary;
+            const auto rates = number_suffixed(traffic.upload_bps) + "/" +
+                               number_suffixed(traffic.download_bps);
+            const auto speed = !traffic.traffic_available ? "n/a"
+                             : rates == "0.0/0.0" ? "--" : rates;
+            auto title_text = string_format("MitM|l:<quic_%s> <+> r:<%s> policy: %s ",
+                session.client.c_str(), target.c_str(), policies.c_str());
+            if (verbosity > iINF) title_text += "\n    ";
+            title_text += "up/dw: " + speed;
+            if (verbosity > iINF) {
+                for (const auto policy : traffic.policies) {
+                    title_text += MitmProxy::policy_diagnostics(policy);
+                }
+            }
+            auto title = decor.command(title_text) + session_inspection_suffix(
+                decor, alpn, traffic.filters, session.sift_classifications,
+                traffic.lored_classifications);
+            cli->context.print(title);
+
+            if (tls_details) {
+                print_quic_tls(cli, "Left ", session.downstream_tls,
+                               session.downstream_alpn, verbosity);
+                print_quic_tls(cli, "Right", session.upstream_tls,
+                               session.upstream_alpn, verbosity);
+            }
+
+            if (const auto found = stream_details.find(session.id); found != stream_details.end()) {
+                for (const auto& text : found->second) {
+                    cli_print(cli, "%s", text.c_str());
+                }
+            }
+
+            if (transport_details) {
+                cli_print(cli, "    session: listener: %zu  id: %llu  state: %s  age: %llums  idle: %llums",
+                          listener, static_cast<unsigned long long>(session.id), session.state.c_str(),
+                          static_cast<unsigned long long>(session.age_ms),
+                          static_cast<unsigned long long>(session.idle_ms));
+                cli_print(cli, "    streams: %zu  queued: %zuB  forwarded: %lluB  rejected: %zu",
+                          session.streams, session.queued_bytes,
+                          static_cast<unsigned long long>(session.forwarded_bytes),
+                          session.stream_limit_rejections);
+                cli_print(cli, "    ALPN: downstream=%s upstream=%s",
+                          session.downstream_alpn.empty() ? "-" : session.downstream_alpn.c_str(),
+                          session.upstream_alpn.empty() ? "-" : session.upstream_alpn.c_str());
+            }
+            if (verbosity >= iDEB) {
+                cli_print(cli, "    transport: QUIC/UDP  client: %s  target: %s",
+                          session.client.c_str(), session.target.c_str());
+            }
         }
         total += sessions.size();
     }
-    if(listener_summary) {
-        if(services.empty()) cli_print(cli, "No QUIC listeners configured.");
+    if (listener_summary) {
+        if (services.empty()) cli_print(cli, "No QUIC listeners configured.");
         cli_print(cli, "QUIC sessions total: %zu", total);
     }
 }
@@ -1788,7 +1913,7 @@ static void print_quic_sessions(DiagCli* cli, int flags, bool listener_summary) 
 int cli_diag_proxy_quic_list(DiagCli* cli, [[maybe_unused]] const char *command,
                              [[maybe_unused]] char *argv[], [[maybe_unused]] int argc) {
 
-    print_quic_sessions(cli, SL_NONE, true);
+    print_quic_sessions(cli, SL_NONE, true, iINF);
     return CLI_OK;
 }
 
@@ -1859,8 +1984,12 @@ void print_queue_stats(std::stringstream &ss, int verbosity, MitmHostCX *cx, con
     out_buf = cx->writebuf()->size();
     out_cap  = cx->writebuf()->capacity();
 
-    ss << "     " << sm << "_os_recv-q: " << in_pending << " " << sm << "_os_send-q: "
-       << out_pending << "\n";
+    if (dynamic_cast<sx::multiflow::MFFlowCom*>(cx->com())) {
+        ss << "     " << sm << "_os_recv-q: n/a " << sm << "_os_send-q: n/a\n";
+    } else {
+        ss << "     " << sm << "_os_recv-q: " << in_pending << " " << sm << "_os_send-q: "
+           << out_pending << "\n";
+    }
     ss << "     " << sm << "_sx_recv-q[" << in_cap << "]: " << in_buf << " " << sm << "_sx_send-q[" << out_cap << "]: " << out_buf
        << "\n";
 
@@ -2299,10 +2428,10 @@ auto get_more_info(MitmProxy const* curr_proxy, MitmHostCX* lf, MitmHostCX* rg, 
         }
 
         if (verbosity > INF) {
-            if(lf and lf->socket() > 0) {
+            if(lf && (lf->socket() > 0 || dynamic_cast<sx::multiflow::MFFlowCom*>(lf->com()))) {
                 print_queue_stats(info_ss, verbosity, lf, "lf", "Left");
             }
-            if(rg and rg->socket() > 0) {
+            if(rg && (rg->socket() > 0 || dynamic_cast<sx::multiflow::MFFlowCom*>(rg->com()))) {
                 print_queue_stats(info_ss, verbosity, rg, "rg", "Right");
             }
         }
@@ -2329,99 +2458,85 @@ int cli_diag_proxy_session_list_extra (DiagCli *cli, const char *command, std::v
 
     const auto decor = cli->context.decor();
     auto renderer = [sl_flags, verbosity, decor](MitmProxy* curr_proxy) -> std::optional<std::string> {
-                std::string prefix;
-                std::string suffix;
-                auto* lf = curr_proxy->first_left();
-                auto* rg = curr_proxy->first_right();
+        std::string prefix;
+        std::string suffix;
+        auto* lf = curr_proxy->first_left();
+        auto* rg = curr_proxy->first_right();
 
-                /* apply filters */
+        bool do_print = false;
 
-                bool do_print = false;
+        if (flag_check<int>(sl_flags, SL_ACTIVE)) {
+            if(curr_proxy->stats().mtr_down.get() + curr_proxy->stats().mtr_up.get() == 0) {
+                return std::nullopt;
+            }
+            do_print = true;
+        }
 
-                if (flag_check<int>(sl_flags, SL_ACTIVE)) {
-                    if(curr_proxy->stats().mtr_down.get() + curr_proxy->stats().mtr_up.get() == 0) {
-                        return std::nullopt;
-                    }
-                    do_print = true;
-                }
+        std::vector<std::string> filters;
+        for (const auto& [name, filter] : curr_proxy->filters_) {
+            filters.push_back(name);
+        }
 
-                if(lf and lf->engine().application_data) {
-                    suffix += " (" + decor.muted(lf->engine().application_data->protocol()) + ")";
-                }
-                if(curr_proxy and not curr_proxy->filters_.empty()) {
-                    for(auto const& fi: curr_proxy->filters_) {
-                        suffix += " " + decor.warning("!" + fi.first);
-                    }
-                }
-                if(auto classifications = curr_proxy->sift_classifications();
-                   !classifications.empty()) {
-                    suffix += " " + decor.muted("[sift:");
-                    for(std::size_t i = 0; i < classifications.size(); ++i) {
-                        if(i != 0) suffix += decor.muted(",");
-                        suffix += decor.muted(classifications[i]);
-                    }
-                    suffix += decor.muted("]");
-                }
-                if(auto classifications = curr_proxy->lored_classifications();
-                   !classifications.empty()) {
-                    suffix += " " + decor.muted("[lored:");
-                    for(std::size_t i = 0; i < classifications.size(); ++i) {
-                        if(i != 0) suffix += decor.muted(",");
-                        suffix += decor.muted(classifications[i]);
-                    }
-                    suffix += decor.muted("]");
-                }
-                auto const& io_info = get_io_info(lf, rg, sl_flags);
+        const auto protocol = lf && lf->engine().application_data
+            ? lf->engine().application_data->protocol() : std::string{};
+        suffix += session_inspection_suffix(decor, protocol, filters,
+            curr_proxy->sift_classifications(), curr_proxy->lored_classifications());
 
-                do_print |= std::get<0>(io_info);
-                prefix += std::get<1>(io_info);
-                suffix += std::get<2>(io_info);
+        auto const& io_info = get_io_info(lf, rg, sl_flags);
 
+        do_print |= std::get<0>(io_info);
+        prefix += std::get<1>(io_info);
+        suffix += std::get<2>(io_info);
 
-                auto tls_info = get_tls_info(lf, rg, sl_flags, verbosity);
+        // Multiplexed streams inherit TLS from their parent connection.
+        const bool quic_stream = lf && dynamic_cast<sx::multiflow::MFFlowCom*>(lf->com());
+        auto tls_info = get_tls_info(lf, rg,
+            quic_stream ? (sl_flags & ~SL_TLS_DETAILS) : sl_flags, verbosity);
+        if (quic_stream && flag_check<int>(sl_flags, SL_TLS_DETAILS)) do_print = true;
 
-                do_print |= std::get<0>(tls_info);
-                prefix += std::get<1>(tls_info);
-                suffix += std::get<2>(tls_info);
+        do_print |= std::get<0>(tls_info);
+        prefix += std::get<1>(tls_info);
+        suffix += std::get<2>(tls_info);
 
-                if (flag_check<int>(sl_flags, SL_SSH_DETAILS)) {
-                    auto const protocol = curr_proxy->session_protocol();
-                    if (protocol != "ssh") return std::nullopt;
-                    do_print = true;
-                }
+        if (flag_check<int>(sl_flags, SL_SSH_DETAILS)) {
+            auto const protocol = curr_proxy->session_protocol();
+            if (protocol != "ssh") return std::nullopt;
+            do_print = true;
+        }
 
+        if (sl_flags == SL_NONE) { do_print = true;  }
+        if (sl_flags == SL_NO_NAMES) { do_print = true;  }
+        if (sl_flags == SL_IPS) { do_print = true;  }
 
-                if (sl_flags == SL_NONE) { do_print = true;  }
-                if (sl_flags == SL_NO_NAMES) { do_print = true;  }
-                if (sl_flags == SL_IPS) { do_print = true;  }
+        if (!do_print) {
+            return std::nullopt;
+        }
 
-                if (!do_print) {
-                    return std::nullopt;
-                }
+        // adjust prefix spacing
+        if (!prefix.empty()) {
 
-                // adjust prefix spacing
-                if (!prefix.empty()) {
+            if (prefix[prefix.size() - 1] != ' ')
+                prefix += " "; // separate IO flags
 
-                    if (prefix[prefix.size() - 1] != ' ')
-                        prefix += " "; // separate IO flags
+            prefix += "\r\n";
+        }
 
+        std::stringstream cur_obj_ss;
+        if (quic_stream && curr_proxy->webhook_stream) {
+            cur_obj_ss << "    stream: " << curr_proxy->webhook_stream->stream_id << "\n";
+        }
+        cur_obj_ss << prefix << decor.command(get_proxy_title(curr_proxy, sl_flags, verbosity)) << suffix;
 
-                    prefix += "\r\n";
-                }
-
-                std::stringstream cur_obj_ss;
-                cur_obj_ss << prefix << decor.command(get_proxy_title(curr_proxy, sl_flags, verbosity)) << suffix;
-
-                if (verbosity >= iDIA) {
-                    cur_obj_ss << "\r\n" << sx::net::session_interfaces_text(
-                        lf && lf->com() ? lf->com()->ingress_ifindex() : 0,
-                        rg && rg->com() ? rg->com()->egress_ifindex() : 0) << "\r\n";
-                }
-                cur_obj_ss << get_more_info(curr_proxy, lf, rg, verbosity);
-                return cur_obj_ss.str();
+        if (verbosity >= iDIA) {
+            cur_obj_ss << "\r\n" << sx::net::session_interfaces_text(
+                lf && lf->com() ? lf->com()->ingress_ifindex() : 0,
+                rg && rg->com() ? rg->com()->egress_ifindex() : 0) << "\r\n";
+        }
+        cur_obj_ss << get_more_info(curr_proxy, lf, rg, verbosity);
+        return cur_obj_ss.str();
     };
 
-    auto request = SessionList::text(session_list_worker_count(), std::move(renderer));
+    auto request = SessionList::text(session_list_worker_count(), renderer);
     dispatch_session_list(request);
     if (!request->wait_for(std::chrono::seconds(5))) {
         cli->context.print(decor.error(string_format("Session snapshot %llu timed out; pending: %s",
@@ -2430,11 +2545,18 @@ int cli_diag_proxy_session_list_extra (DiagCli *cli, const char *command, std::v
         return CLI_OK;
     }
 
-    cli_print(cli, "%s", request->text_result().c_str());
+    // Snapshot fragments already end in a newline; cli_print adds its own.
+    // Avoid an empty separator before QUIC, including an empty ordinary list.
+    auto session_text = request->text_result();
+    const auto last_content = session_text.find_last_not_of("\r\n");
+    if(last_content != std::string::npos) {
+        session_text.resize(last_content + 1);
+        cli_print(cli, "%s", session_text.c_str());
+    }
 
-    // QUIC workers already publish owned snapshots; never inspect their live
-    // sessions from the CLI thread or add another dataplane snapshot request.
-    print_quic_sessions(cli, sl_flags, false);
+    // Basic QUIC summaries are published snapshots. Detailed stream rendering
+    // uses the same renderer, dispatched onto the owning QUIC worker.
+    print_quic_sessions(cli, sl_flags, false, verbosity, renderer);
 
     if(const auto network = sx::net::NetworkCtx::instance().snapshot()) {
         cli_print(cli, "\n%s", sx::net::network_generations_text(*network).c_str());

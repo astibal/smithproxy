@@ -66,6 +66,22 @@ struct diagnostics_snapshot {
     std::uint64_t certificate_job_limit_rejections = 0;
 };
 
+/** TLS evidence copied on the owning QUIC worker; never expose SSL handles to CLI. */
+struct tls_snapshot {
+    bool available = false;
+    bool established = false;
+    std::string version;
+    std::string cipher;
+    std::string server_name;
+    std::string state;
+    bool resumed = false;
+    bool has_ticket = false;
+    unsigned long ticket_lifetime_hint = 0;
+    bool verify_peer = false;
+    long verify_result = 0;
+    std::string verify_error;
+};
+
 /** Value-only session data published for management-plane diagnostics. */
 struct session_snapshot {
     std::uint64_t id = 0;              ///< Listener-local monotonic identifier.
@@ -75,6 +91,10 @@ struct session_snapshot {
     std::string server_name;           ///< SNI presented by the downstream client.
     std::string downstream_alpn;       ///< Protocol negotiated with the client.
     std::string upstream_alpn;         ///< Protocol negotiated with the origin.
+    multiflow::flow_summary stream_summary;
+    std::vector<std::string> sift_classifications;
+    tls_snapshot downstream_tls;
+    tls_snapshot upstream_tls;
     std::uint64_t age_ms = 0;          ///< Milliseconds since the session was accepted.
     std::uint64_t idle_ms = 0;         ///< Milliseconds since bytes were last forwarded.
     std::uint64_t forwarded_bytes = 0; ///< Bytes moved across all paired streams.
@@ -132,8 +152,18 @@ public:
     diagnostics_snapshot diagnostics() const;
     /** Return a copy without exposing worker-affine OpenSSL/MF objects. */
     std::vector<session_snapshot> session_diagnostics() const;
+    using session_details = std::map<std::uint64_t, std::vector<std::string>>;
+    // Render live stream details on their owner, only when explicitly requested.
+    std::future<session_details> request_session_details(multiflow::flow_proxy::detail_renderer renderer);
 
 private:
+    struct detail_request {
+        multiflow::flow_proxy::detail_renderer renderer;
+        std::promise<session_details> result;
+    };
+    std::mutex detail_requests_lock_;
+    std::vector<detail_request> detail_requests_;
+    void process_detail_requests();
     /** Create, configure, and bind the nonblocking UDP listener socket. */
     bool open_socket();
 #if SMITHPROXY_OPENSSL_QUIC
@@ -220,6 +250,10 @@ private:
         std::chrono::steady_clock::time_point draining_since {};
         std::shared_ptr<openssl_connection> downstream;
         std::shared_ptr<openssl_connection> upstream;
+        multiflow::flow_summary stream_summary;
+        std::vector<std::string> sift_classifications; ///< Retained after the stream bridge closes.
+        tls_snapshot draining_downstream_tls; ///< Evidence retained before shutdown.
+        tls_snapshot draining_upstream_tls;
         std::shared_ptr<keylog_store> keylog; ///< Downstream secrets for capture export.
         std::shared_ptr<sx::session_traffic_log> capture_log; ///< Policy-bound wire journal.
         std::uint64_t capture_association = 0; ///< Downstream dispatcher CID family.

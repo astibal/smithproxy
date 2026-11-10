@@ -86,6 +86,15 @@ TEST_F(QuicListenerService, PreparesAndStopsLoopbackListener) {
     EXPECT_EQ(service.connection_count(), 0U);
 }
 
+TEST_F(QuicListenerService, DetailsWithoutRunningListenerCompleteImmediately) {
+    quic::listener_service service(0, "", "", false, 443, false);
+    auto details = service.request_session_details([](MitmProxy*) {
+        return std::optional<std::string>{"unexpected"};
+    });
+    ASSERT_EQ(details.wait_for(std::chrono::milliseconds(0)), std::future_status::ready);
+    EXPECT_TRUE(details.get().empty());
+}
+
 TEST_F(QuicListenerService, IdleListenerDrainsWithoutForcedStop) {
     quic::listener_service service(0,
                                    "etc/certs/default/srv-cert.pem",
@@ -386,6 +395,38 @@ TEST_F(QuicListenerService, RejectsSessionsBeyondConfiguredLimit) {
     if(external) external->close();
 }
 
+// The listener must retain bridge diagnostics independently of bridge lifetime.
+class classified_test_bridge final : public sx::multiflow::flow_proxy {
+public:
+    classified_test_bridge(std::shared_ptr<sx::multiflow::connection> left,
+                           std::shared_ptr<sx::multiflow::connection> right,
+                           sx::multiflow::proxy_limits limits)
+        : bridge_(std::move(left), std::move(right), limits) {}
+    std::size_t pump_once(std::size_t size) override { return bridge_.pump_once(size); }
+    std::size_t pair_count() const override { return bridge_.pair_count(); }
+    std::size_t queued_bytes() const override { return bridge_.queued_bytes(); }
+    std::size_t limit_rejections() const override { return bridge_.limit_rejections(); }
+    std::vector<std::string> sift_classifications() const override {
+        return {"app.test", "protocol.http3"};
+    }
+    std::vector<std::string> render_details(detail_renderer const& render) const override {
+        if (auto text = render(nullptr)) return {*text};
+        return {};
+    }
+    sx::multiflow::flow_summary summary() const override {
+        sx::multiflow::flow_summary result;
+        result.policies = {2, 3};
+        result.filters = {"test-filter"};
+        result.lored_classifications = {"test-service"};
+        result.upload_bps = 1024;
+        result.download_bps = 2048;
+        result.traffic_available = true;
+        return result;
+    }
+private:
+    sx::multiflow::MFProxy bridge_;
+};
+
 TEST_F(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
     auto origin_context = quic::make_openssl_quic_context(true);
     auto client_context = quic::make_openssl_quic_context(false);
@@ -418,7 +459,11 @@ TEST_F(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
     quic::listener_service proxy(0, "etc/certs/default/srv-cert.pem",
                                  "etc/certs/default/srv-key.pem", false,
                                  ntohs(origin_address.sin_port), false, lifecycle,
-                                 {}, "127.0.0.1");
+                                 {}, "127.0.0.1",
+                                 [](auto left, auto right, auto limits, auto) {
+                                     return std::make_unique<classified_test_bridge>(
+                                         std::move(left), std::move(right), limits);
+                                 });
     ASSERT_TRUE(proxy.prepare()) << proxy.last_error();
     std::thread proxy_thread([&proxy]() { proxy.run(); });
     struct thread_guard {
@@ -496,15 +541,58 @@ TEST_F(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
     EXPECT_EQ(snapshots.front().server_name, "Smithproxy-Server-Certificate");
     EXPECT_EQ(snapshots.front().downstream_alpn, "h3");
     EXPECT_EQ(snapshots.front().upstream_alpn, "h3");
+    for(const auto* tls : {&snapshots.front().downstream_tls, &snapshots.front().upstream_tls}) {
+        EXPECT_TRUE(tls->available);
+        EXPECT_TRUE(tls->established);
+        EXPECT_EQ(tls->version, "TLSv1.3");
+        EXPECT_EQ(tls->server_name, "Smithproxy-Server-Certificate");
+        EXPECT_FALSE(tls->cipher.empty());
+        EXPECT_FALSE(tls->state.empty());
+        EXPECT_FALSE(tls->verify_peer); // This test explicitly disables peer verification.
+    }
+    EXPECT_EQ(snapshots.front().sift_classifications,
+              (std::vector<std::string>{"app.test", "protocol.http3"}));
+    EXPECT_EQ(snapshots.front().stream_summary.policies, (std::vector<int>{2, 3}));
+    EXPECT_EQ(snapshots.front().stream_summary.filters, (std::vector<std::string>{"test-filter"}));
+    EXPECT_EQ(snapshots.front().stream_summary.lored_classifications,
+              (std::vector<std::string>{"test-service"}));
+    EXPECT_TRUE(snapshots.front().stream_summary.traffic_available);
+    EXPECT_EQ(snapshots.front().stream_summary.upload_bps, 1024U);
+    EXPECT_EQ(snapshots.front().stream_summary.download_bps, 2048U);
+    auto details = proxy.request_session_details([owner = proxy_thread.get_id()](MitmProxy*) {
+        return std::optional<std::string>(std::this_thread::get_id() == owner
+            ? "rendered on owner" : "wrong thread");
+    });
+    ASSERT_EQ(details.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+    EXPECT_EQ(details.get().at(snapshots.front().id),
+              (std::vector<std::string>{"rendered on owner"}));
+
     EXPECT_EQ(snapshots.front().streams, 1U);
     EXPECT_GT(snapshots.front().forwarded_bytes, 0U);
     EXPECT_NE(snapshots.front().target, "-");
 
     auto const close_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    bool saw_draining = false;
     while (std::chrono::steady_clock::now() < close_deadline
            && proxy.connection_count() != 0) {
+        for(const auto& snapshot : proxy.session_diagnostics()) {
+            if(snapshot.state != "draining") continue;
+            saw_draining = true;
+            EXPECT_EQ(snapshot.sift_classifications, snapshots.front().sift_classifications);
+            EXPECT_EQ(snapshot.stream_summary.policies, snapshots.front().stream_summary.policies);
+            EXPECT_EQ(snapshot.stream_summary.lored_classifications,
+                      snapshots.front().stream_summary.lored_classifications);
+            EXPECT_TRUE(snapshot.stream_summary.traffic_available);
+            EXPECT_EQ(snapshot.stream_summary.upload_bps, 0U);
+            EXPECT_EQ(snapshot.stream_summary.download_bps, 0U);
+            EXPECT_TRUE(snapshot.downstream_tls.established);
+            EXPECT_TRUE(snapshot.upstream_tls.established);
+            EXPECT_EQ(snapshot.downstream_tls.cipher, snapshots.front().downstream_tls.cipher);
+            EXPECT_EQ(snapshot.upstream_tls.cipher, snapshots.front().upstream_tls.cipher);
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
+    EXPECT_TRUE(saw_draining);
     EXPECT_EQ(proxy.connection_count(), 0U);
     auto const diagnostics = proxy.diagnostics();
     EXPECT_EQ(diagnostics.accepted_sessions, 1U);

@@ -282,10 +282,14 @@ public:
     virtual bool handle_cached_response(MitmHostCX* cx);
     
     std::string to_string(int verbosity) const override;
+    static std::string policy_diagnostics(int policy);
     std::string to_connection_label(bool force_resolve = false) const;
     std::string to_connection_ID() const;
     [[nodiscard]] std::string_view session_protocol() const noexcept;
     std::optional<std::string> get_application() const;
+    // Installed before stream admission; the callback must not capture this proxy.
+    std::function<void(std::string const&)> on_sift_classification;
+    std::function<void(std::string const&)> on_lored_classification;
     bool add_sift_classification(std::string classification);
     bool add_lored_classification(std::string classification);
     [[nodiscard]] std::vector<std::string> sift_classifications() const;

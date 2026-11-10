@@ -82,6 +82,12 @@ public:
     void pump() { handle_sockets_once(com()); }
 };
 
+struct sift_summary {
+    std::mutex lock;
+    std::set<std::string> classifications;
+    std::set<std::string> lored_classifications;
+};
+
 class mitm_flow_proxy final : public flow_proxy {
 public:
     mitm_flow_proxy(std::shared_ptr<connection> downstream,
@@ -130,6 +136,67 @@ public:
         return result;
     }
     std::size_t limit_rejections() const override { return limit_rejections_; }
+    std::vector<std::string> render_details(detail_renderer const& render) const override {
+        std::vector<std::string> result;
+
+        // The caller runs on the owning QUIC worker; child locks protect rendering.
+        for (const auto& [id, current] : pairs_) {
+            auto lock = std::scoped_lock(current.master->proxy_lock());
+            for (const auto& proxy : current.master->proxies()) {
+                if (auto* mitm = dynamic_cast<MitmProxy*>(proxy.get())) {
+                    if (auto text = render(mitm)) {
+                        result.push_back(std::move(*text));
+                    }
+                }
+            }
+        }
+
+        return result;
+    }
+
+    flow_summary summary() const override {
+        flow_summary result;
+        auto policies = policies_;
+        std::set<std::string> filters;
+
+        // Retained classifications survive the retirement of individual streams.
+        {
+            auto lock = std::scoped_lock(sift_summary_->lock);
+            result.lored_classifications.assign(sift_summary_->lored_classifications.begin(),
+                                               sift_summary_->lored_classifications.end());
+        }
+
+        // Policies include retired streams; rates and filters describe live children.
+        result.traffic_available = true;
+        for (const auto& [id, current] : pairs_) {
+            auto lock = std::scoped_lock(current.master->proxy_lock());
+            for (const auto& proxy : current.master->proxies()) {
+                const auto* mitm = dynamic_cast<MitmProxy const*>(proxy.get());
+                if (!mitm) {
+                    continue;
+                }
+
+                policies.insert(mitm->matched_policy());
+                for (const auto& [name, filter] : mitm->filters_) {
+                    filters.insert(name);
+                }
+
+                // Child meters use bytes per second; the CLI displays bits per second.
+                result.upload_bps += mitm->stats().mtr_up.get() * 8;
+                result.download_bps += mitm->stats().mtr_down.get() * 8;
+            }
+        }
+
+        result.policies.assign(policies.begin(), policies.end());
+        result.filters.assign(filters.begin(), filters.end());
+
+        return result;
+    }
+
+    std::vector<std::string> sift_classifications() const override {
+        auto lock = std::scoped_lock(sift_summary_->lock);
+        return {sift_summary_->classifications.begin(), sift_summary_->classifications.end()};
+    }
 
 private:
     struct pair {
@@ -218,6 +285,8 @@ private:
         // A multiplexed flow is independently half-closed in each direction. The
         // stock MitmProxy treats read()==0 as the end of a TCP session, so the
         // multiflow owner must translate FIN without exposing that EOF early.
+        left_com->diagnostic_name(context_.transport_name);
+        right_com->diagnostic_name(context_.transport_name);
         left_com->defer_read_eof(true);
         right_com->defer_read_eof(true);
         left_com->master(scheduler);
@@ -238,6 +307,17 @@ private:
         right->opening(false);
 
         auto proxy = proxymaker::make(std::move(left), std::move(right));
+        if (proxy) {
+            // Retain results as they arrive: the master can destroy a child in pump().
+            proxy->on_sift_classification = [summary = sift_summary_](std::string const& value) {
+                auto lock = std::scoped_lock(summary->lock);
+                summary->classifications.insert(value);
+            };
+            proxy->on_lored_classification = [summary = sift_summary_](std::string const& value) {
+                auto lock = std::scoped_lock(summary->lock);
+                summary->lored_classifications.insert(value);
+            };
+        }
         if (proxy && !context_.parent_connection_id.empty()) {
             const auto stream_id = downstream_->wire_flow_id(left_handle).value_or(left_handle.id);
             proxy->webhook_stream = MitmProxy::WebhookStream {
@@ -263,6 +343,8 @@ private:
             source_connection->reset(source, 0x10c);
             return;
         }
+
+        policies_.insert(proxy->matched_policy());
 
         if (!proxymaker::setup_snat(proxy, context_.source_host, context_.source_port)) {
             source_connection->reset(source, 0x102);
@@ -350,12 +432,14 @@ private:
         retired_.clear();
     }
 
+    std::shared_ptr<sift_summary> sift_summary_ = std::make_shared<sift_summary>();
     std::shared_ptr<connection> downstream_;
     std::shared_ptr<connection> upstream_;
     proxy_limits limits_;
     flow_proxy_context context_;
     std::map<flow_id, pair> pairs_;
     std::set<flow_id> retired_;
+    std::set<int> policies_;
     std::size_t limit_rejections_ = 0;
     bool closed_ = false;
 };

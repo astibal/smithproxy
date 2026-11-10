@@ -64,12 +64,14 @@ public:
      */
     void defer_read_eof(bool enabled) { defer_read_eof_ = enabled; }
 
-    std::string shortname() const override { return "mf"; }
+    void diagnostic_name(std::string name) { diagnostic_name_ = std::move(name); }
+    std::string shortname() const override { return diagnostic_name_; }
     std::string to_string(int verbosity) const override;
 
     TYPENAME_OVERRIDE("MFFlowCom")
 
 private:
+    std::string diagnostic_name_ = "mf";
     /** Translate transport-neutral results to baseCom/errno conventions. */
     ssize_t map_result(io_result result);
     /** Lock the non-owning connection reference for one operation. */

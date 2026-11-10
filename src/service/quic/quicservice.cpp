@@ -168,6 +168,48 @@ std::vector<session_snapshot> listener_service::session_diagnostics() const {
     return snapshots_;
 }
 
+std::future<listener_service::session_details> listener_service::request_session_details(
+    multiflow::flow_proxy::detail_renderer renderer) {
+    detail_request request {std::move(renderer), {}};
+    auto result = request.result.get_future();
+    {
+        auto lock = std::scoped_lock(detail_requests_lock_);
+        if (!ready_ || stopping_) {
+            request.result.set_value({});
+            return result;
+        }
+        detail_requests_.push_back(std::move(request));
+    }
+#if SMITHPROXY_OPENSSL_QUIC
+    if (wake_fd_ >= 0) (void)::eventfd_write(wake_fd_, 1);
+#else
+    process_detail_requests();
+#endif
+    return result;
+}
+
+void listener_service::process_detail_requests() {
+    std::vector<detail_request> requests;
+    {
+        auto lock = std::scoped_lock(detail_requests_lock_);
+        requests.swap(detail_requests_);
+    }
+    for (auto& request : requests) {
+        try {
+            session_details result;
+#if SMITHPROXY_OPENSSL_QUIC
+            for (const auto& session : sessions_) {
+                if (session.proxy) result.emplace(
+                    session.id, session.proxy->render_details(request.renderer));
+            }
+#endif
+            request.result.set_value(std::move(result));
+        } catch (...) {
+            request.result.set_exception(std::current_exception());
+        }
+    }
+}
+
 listener_service::~listener_service() {
     stop();
 #if SMITHPROXY_OPENSSL_QUIC
@@ -400,11 +442,13 @@ void listener_service::run() {
         // Publish only after removing objects whose grace period has elapsed.
         reap_expired(now);
         publish_session_snapshots(now);
+        process_detail_requests();
         if (draining_ && sessions_.empty() && certificate_jobs_.empty() &&
             staged_upstreams_.empty() && pending_captures_.empty() &&
             dispatcher_bindings_.empty()) stopping_ = true;
     }
     cleanup_sessions();
+    process_detail_requests();
     log().inf("listener loop stopped on udp/*:%u", bound_port_);
 #endif
 }
@@ -728,6 +772,7 @@ void listener_service::progress_handshake(
             },
         };
         flow_context.ingress_ifindex = value.ingress_ifindex;
+        flow_context.transport_name = "quic";
         if (value.setup) flow_context.parent_connection_id = value.setup->connection_id();
 
         value.proxy = proxy_factory_(
@@ -870,6 +915,46 @@ void listener_service::reap_expired(std::chrono::steady_clock::time_point now) {
     }
 }
 
+// Read on the owning worker; publish only copied values to the management plane.
+static tls_snapshot snapshot_tls(SSL* ssl) {
+    tls_snapshot result;
+    if (!ssl) return result;
+
+    result.available = true;
+    result.established = SSL_is_init_finished(ssl) != 0;
+    result.state = SSL_state_string_long(ssl);
+    if (const auto* name = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name)) {
+        result.server_name = name;
+    }
+
+    result.verify_peer = (SSL_get_verify_mode(ssl) & SSL_VERIFY_PEER) != 0;
+    result.verify_result = SSL_get_verify_result(ssl);
+    result.verify_error = X509_verify_cert_error_string(result.verify_result);
+
+    // Before completion, OpenSSL may report a version that was not negotiated.
+    if (!result.established) return result;
+
+    result.resumed = SSL_session_reused(ssl) != 0;
+    if (const auto* cipher = SSL_get_current_cipher(ssl)) {
+        result.cipher = SSL_CIPHER_get_name(cipher);
+    }
+
+    result.version = "unknown";
+    const auto* session = SSL_get_session(ssl);
+    if (!session) return result;
+
+    // SSL_get_version() describes the QUIC transport, not its TLS handshake.
+    const auto version = SSL_SESSION_get_protocol_version(session);
+    result.version = version == TLS1_3_VERSION
+        ? "TLSv1.3" : "unknown (" + std::to_string(version) + ")";
+
+    result.has_ticket = SSL_SESSION_has_ticket(session) != 0;
+    if (result.has_ticket) {
+        result.ticket_lifetime_hint = SSL_SESSION_get_ticket_lifetime_hint(session);
+    }
+    return result;
+}
+
 void listener_service::publish_session_snapshots(
     std::chrono::steady_clock::time_point now) {
     std::vector<session_snapshot> result;
@@ -884,17 +969,26 @@ void listener_service::publish_session_snapshots(
         if (linked.downstream) {
             item.server_name = linked.downstream->server_name();
             item.downstream_alpn = linked.downstream->negotiated_alpn();
+            item.downstream_tls = linked.state == session_state::draining
+                ? linked.draining_downstream_tls : snapshot_tls(linked.downstream->native_handle());
         }
         if (item.target == "-") {
             auto const& host = upstream_host_.empty() ? item.server_name : upstream_host_;
             if (!host.empty()) item.target = host + ":" + std::to_string(upstream_port_);
         }
-        if (linked.upstream) item.upstream_alpn = linked.upstream->negotiated_alpn();
+        if (linked.upstream) {
+            item.upstream_alpn = linked.upstream->negotiated_alpn();
+            item.upstream_tls = linked.state == session_state::draining
+                ? linked.draining_upstream_tls : snapshot_tls(linked.upstream->native_handle());
+        }
         item.age_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - linked.created).count();
         item.idle_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - linked.last_activity).count();
         item.forwarded_bytes = linked.forwarded_bytes;
+        item.stream_summary = linked.proxy ? linked.proxy->summary() : linked.stream_summary;
+        item.sift_classifications = linked.proxy
+            ? linked.proxy->sift_classifications() : linked.sift_classifications;
         if (linked.proxy) {
             item.streams = linked.proxy->pair_count();
             item.queued_bytes = linked.proxy->queued_bytes();
@@ -911,6 +1005,11 @@ void listener_service::start_draining(session& value,
                                       std::uint64_t protocol_error) {
     if (value.state == session_state::draining) return;
 
+    if(value.downstream)
+        value.draining_downstream_tls = snapshot_tls(value.downstream->native_handle());
+    if(value.upstream)
+        value.draining_upstream_tls = snapshot_tls(value.upstream->native_handle());
+
     // Sample outcomes before close retires the handshake evidence.
     if(value.downstream) hook_outcome(value.setup.get(), value.downstream->native_handle(),
                                       true, "QUIC handshake ended before completion");
@@ -922,7 +1021,14 @@ void listener_service::start_draining(session& value,
               static_cast<unsigned long long>(value.forwarded_bytes));
     value.state = session_state::draining;
     value.draining_since = now;
-    if(value.proxy) value.proxy->shutdown();
+    if (value.proxy) {
+        value.stream_summary = value.proxy->summary();
+        // No streams forward data once the bridge has shut down.
+        value.stream_summary.upload_bps = 0;
+        value.stream_summary.download_bps = 0;
+        value.proxy->shutdown();
+        value.sift_classifications = value.proxy->sift_classifications();
+    }
     value.proxy.reset();
     if (value.downstream) value.downstream->close(protocol_error);
     if (value.upstream) value.upstream->close(protocol_error);

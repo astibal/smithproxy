@@ -363,15 +363,23 @@ std::string_view MitmProxy::session_protocol() const noexcept {
 bool MitmProxy::add_sift_classification(std::string classification) {
     if(classification.empty()) return false;
 
-    auto lock = std::scoped_lock(sift_classifications_lock_);
-    return sift_classifications_.insert(std::move(classification)).second;
+    {
+        auto lock = std::scoped_lock(sift_classifications_lock_);
+        if (!sift_classifications_.insert(classification).second) return false;
+    }
+    if (on_sift_classification) on_sift_classification(classification);
+    return true;
 }
 
 bool MitmProxy::add_lored_classification(std::string classification) {
     if(classification.empty()) return false;
 
-    auto lock = std::scoped_lock(sift_classifications_lock_);
-    return lored_classifications_.insert(std::move(classification)).second;
+    {
+        auto lock = std::scoped_lock(sift_classifications_lock_);
+        if (!lored_classifications_.insert(classification).second) return false;
+    }
+    if (on_lored_classification) on_lored_classification(classification);
+    return true;
 }
 
 std::vector<std::string> MitmProxy::sift_classifications() const {
@@ -592,6 +600,19 @@ void MitmProxy::finalize() noexcept {
 }
 
 
+std::string MitmProxy::policy_diagnostics(int policy) {
+    std::string result = string_format("\n    Policy  index: %d", policy);
+    if (policy >= 0) {
+        auto lock = std::scoped_lock(CfgFactory::lock());
+        const auto rule = CfgFactory::get()->lookup_policy(static_cast<std::size_t>(policy));
+        if (rule) result += "\n    Policy: " + rule->element_name();
+        else if (policy == PolicyRule::POLICY_IMPLICIT_PASS)
+            result += "\n    Policy: implicit pass (fail-open)";
+        else result += "\n    Policy: unavailable";
+    }
+    return result;
+}
+
 std::string MitmProxy::to_string(int verbosity) const {
     std::stringstream r;
     if(verbosity >= INF) r <<  "MitM|";
@@ -619,22 +640,7 @@ std::string MitmProxy::to_string(int verbosity) const {
         r << speed_str;
         
         if(verbosity > INF) { 
-            r << string_format("\n    Policy  index: %d", matched_policy());
-
-
-            if(matched_policy() >= 0) {
-                auto lock = std::scoped_lock(CfgFactory::lock());
-                auto p = CfgFactory::get()->lookup_policy(
-                    static_cast<std::size_t>(matched_policy()));
-                if(p) {
-                    r << string_format("\n    Policy: %s", p->element_name().c_str());
-                } else if(matched_policy() == PolicyRule::POLICY_IMPLICIT_PASS) {
-                    r << "\n    Policy: implicit pass (fail-open)";
-                } else {
-                    r << "\n    Policy: unavailable";
-                }
-            }
-
+            r << policy_diagnostics(matched_policy());
 
         }        
     }

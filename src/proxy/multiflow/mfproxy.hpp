@@ -2,11 +2,17 @@
 #define SMITHPROXY_MFPROXY_HPP
 
 #include <deque>
+#include <functional>
+#include <optional>
 #include <map>
 #include <memory>
 #include <set>
+#include <string>
+#include <vector>
 
 #include "proxy/multiflow/mfflowcom.hpp"
+
+class MitmProxy;
 
 namespace sx::multiflow {
 
@@ -16,15 +22,30 @@ struct proxy_limits {
     std::size_t buffer_per_direction = 16 * 1024; ///< Maximum queued chunk per direction.
 };
 
+/** Management summary of the child streams, sampled by their owner. */
+struct flow_summary {
+    std::vector<int> policies;
+    std::vector<std::string> filters;
+    std::vector<std::string> lored_classifications;
+    std::uint64_t upload_bps = 0;
+    std::uint64_t download_bps = 0;
+    bool traffic_available = false;
+};
+
 /** Common lifecycle surface for direct and Smithproxy-aware flow bridges. */
 class flow_proxy {
 public:
+    using detail_renderer = std::function<std::optional<std::string>(MitmProxy*)>;
     virtual ~flow_proxy() = default;
     virtual void shutdown() {}
     virtual std::size_t pump_once(std::size_t chunk_size = 16 * 1024) = 0;
     virtual std::size_t pair_count() const = 0;
     virtual std::size_t queued_bytes() const = 0;
     virtual std::size_t limit_rejections() const = 0;
+    // Cumulative classifications, including streams which have already retired.
+    virtual std::vector<std::string> sift_classifications() const { return {}; }
+    virtual flow_summary summary() const { return {}; }
+    virtual std::vector<std::string> render_details(detail_renderer const&) const { return {}; }
 };
 
 /**
