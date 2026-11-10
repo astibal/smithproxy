@@ -1,3 +1,4 @@
+#include <ancillary_ifindex.hpp>
 #include "proxy/quic/openssl.hpp"
 #include "proxy/quic/socket_io_detail.hpp"
 #include "proxy/quic/wire.hpp"
@@ -177,6 +178,7 @@ struct openssl_listener::dispatcher_state {
         datagram_endpoint peer;
         datagram_endpoint local;
         std::uint64_t association = 0;
+        unsigned ingress_ifindex = 0;
     };
     ~dispatcher_state() { BIO_free(application_bio); }
 
@@ -185,6 +187,7 @@ struct openssl_listener::dispatcher_state {
     std::deque<packet> pending_input;     // Waiting for capacity in the OpenSSL BIO.
     std::deque<packet> pending_output;    // Waiting for socket writability.
     detail::datagram_route_table routes;  // Bounded CID-to-transparent-tuple map.
+    unsigned active_ingress_ifindex = 0;
     datagram_endpoint active_peer;        // Tuple scoped to one synchronous operation.
     datagram_endpoint active_local;       // Local half paired with active_peer.
     std::uint64_t active_association = 0; // CID family scoped to the same operation.
@@ -371,6 +374,7 @@ bool receive_socket_datagram(int fd, openssl_listener::dispatcher_state::packet&
         errno = EPROTO;
         return false;
     }
+    packet.ingress_ifindex = socle::ancillary_ifindex(message);
     packet.peer.size = packet.peer.address.ss_family == AF_INET
         ? sizeof(sockaddr_in) : sizeof(sockaddr_in6);
     for (auto* item = CMSG_FIRSTHDR(&message); item; item = CMSG_NXTHDR(&message, item)) {
@@ -1060,6 +1064,18 @@ std::unique_ptr<openssl_listener> openssl_listener::create(SSL_CTX* context, int
             }) != 0) return nullptr;
     }
 
+    // Interface identity belongs to the received datagram, not its destination
+    // address. Request pktinfo alongside original-destination ancillary data.
+    if(enable_local_address) {
+        sockaddr_storage bound {};
+        socklen_t size = sizeof(bound);
+        if(::getsockname(udp_fd, reinterpret_cast<sockaddr*>(&bound), &size) != 0) return nullptr;
+        const int enabled = 1;
+        const int level = bound.ss_family == AF_INET ? SOL_IP : SOL_IPV6;
+        const int option = bound.ss_family == AF_INET ? IP_PKTINFO : IPV6_RECVPKTINFO;
+        if(::setsockopt(udp_fd, level, option, &enabled, sizeof(enabled)) != 0) return nullptr;
+    }
+
     BIO* network_bio = nullptr;
     auto dispatcher = std::unique_ptr<openssl_listener::dispatcher_state> {};
     bool local_address_enabled = false;
@@ -1167,6 +1183,7 @@ bool openssl_listener::progress_input_packet() {
     // omit addresses on synchronously generated Retry packets when the client
     // Initial has a zero-length source CID. A process-global "last peer" would
     // leak output across sessions; this narrow scope cannot cross a packet.
+    dispatcher.active_ingress_ifindex = packet.ingress_ifindex;
     dispatcher.active_peer = packet.peer;
     dispatcher.active_local = packet.local;
     dispatcher.active_association = packet.association;
@@ -1285,6 +1302,11 @@ datagram_endpoint openssl_listener::current_peer() const {
 
 datagram_endpoint openssl_listener::current_local() const {
     return dispatcher_state_ ? dispatcher_state_->active_local : datagram_endpoint {};
+}
+
+unsigned openssl_listener::current_ingress_ifindex() const {
+    return dispatcher_state_ && dispatcher_state_->input_active
+        ? dispatcher_state_->active_ingress_ifindex : 0;
 }
 
 std::uint64_t openssl_listener::current_association() const {

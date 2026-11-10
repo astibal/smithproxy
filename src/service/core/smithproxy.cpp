@@ -147,7 +147,10 @@ bool SmithProxy::create_tproxy_listeners() {
                 certs_path + SSLFactory::config_t::SR_KEYF,
                 true, 443, true, sx::quic::lifecycle_options {}, sx::quic::resource_limits {},
                 std::string {}, sx::multiflow::make_mitm_flow_proxy,
-                CfgFactory::get()->capture_local.enabled || CfgFactory::get()->capture_remote.enabled,
+                // Capture can be enabled after this listener starts. Keep the
+                // bounded pre-policy wire journal ready; only an approved
+                // stream logger may attach it to local or remote output.
+                true,
                 sx::proxymaker::make_quic_session_setup);
             if (!service->prepare()) {
                 _err("Failed to setup QUIC listener: %s", service->last_error().c_str());
@@ -449,8 +452,11 @@ bool SmithProxy::create_listeners() {
                         true, 443, true, sx::quic::lifecycle_options {},
                         sx::quic::resource_limits {}, std::string {},
                         sx::multiflow::make_mitm_flow_proxy,
-                        CfgFactory::get()->capture_local.enabled
-                            || CfgFactory::get()->capture_remote.enabled,
+                        // Do not freeze the capture switch at listener creation:
+                        // later activation still needs handshake packets/secrets.
+                        // The bounded journal remains private until policy attaches
+                        // a logger (MitmProxy::toggle_tlog enforces the switch).
+                        true,
                         sx::proxymaker::make_quic_session_setup);
                     if (!service->prepare()) {
                         _fat("Failed to setup QUIC listener: %s", service->last_error().c_str());
@@ -710,18 +716,6 @@ void SmithProxy::run() {
     bool wh_hostname_snapshot_sent = false;
 
 
-
-    instance().hostname = []() {
-        std::array<char,64> h{0};
-        gethostname(h.data(),63);
-        return std::string(h.data());
-    }();
-
-    // initialize boot-time random
-    auto* boot_random_ptr = &SmithProxy::boot_random;
-    RAND_bytes(reinterpret_cast<unsigned char*>(boot_random_ptr), sizeof(uint32_t));
-    // copy value also to static content, for parts where dependency on smithproxy instance is NOT desirable
-    StaticContent::boot_random = SmithProxy::boot_random;
 
     while(true) {
         if(instance().terminate_flag) {

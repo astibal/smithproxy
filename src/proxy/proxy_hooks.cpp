@@ -1,4 +1,5 @@
 #include <proxy/proxy_hooks.hpp>
+#include <proxy/retirement.hpp>
 #include <proxy/mitmproxy.hpp>
 #include <proxy/content_webhook_metadata.hpp>
 #include <proxy/connection_start.hpp>
@@ -670,32 +671,10 @@ ProxyHooks::Epitaph ProxyHooks::prepare_stop(const MitmProxy& proxy, const StopA
 
     uint64_t uB = 0L;
     uint64_t dB = 0L;
-    std::optional<nlohmann::json> l7;
-    std::optional<nlohmann::json> tls;
-
     auto const* l = proxy.first_left();
     if(l) {
         uB = l->meter_read_bytes;
         dB = l->meter_write_bytes;
-
-        if(auto app = l->engine().application_data; app) {
-            l7 =  { { "app", app->protocol() },
-                    { "details", app->requests_all() },
-                    { "signatures", l->matched_signatures() }
-            };
-            if(! app->custom_list_name().empty()) {
-                l7.value()[app->custom_list_name()] = app->custom_list();
-            }
-        }
-    }
-    auto const* r = proxy.first_right();
-    if(r){
-
-        if(auto* scom = dynamic_cast<SSLCom*>(r->com()); scom) {
-            nlohmann::json x;
-            x["sni"] = scom->get_sni();
-            tls = x;
-        }
     }
 
     j["info"] = { {"session", cl },
@@ -708,33 +687,53 @@ ProxyHooks::Epitaph ProxyHooks::prepare_stop(const MitmProxy& proxy, const StopA
     };
 
     proxy.add_webhook_stream_details(j["info"]);
-    if(tls.has_value())  j["info"]["tls"] = tls.value();
-    if(l7.has_value())  j["info"]["l7"] = l7.value();
-    if(auto classifications = proxy.sift_classifications(); !classifications.empty()) {
-        j["info"]["classification"]["sift"] = std::move(classifications);
-    }
-    if(auto classifications = proxy.lored_classifications(); !classifications.empty()) {
-        j["info"]["classification"]["lored"] = std::move(classifications);
-    }
-
     return {proxy.to_connection_ID(), std::move(j), nullptr};
+}
+
+void ProxyHooks::enrich_stop(Epitaph& epitaph, const MitmProxy& proxy) {
+    // Optional application metadata must never prevent the basic terminal event.
+    auto& info = epitaph.details["info"];
+    if(auto const* l = proxy.first_left(); l && l->engine().application_data) {
+        auto app = l->engine().application_data;
+        nlohmann::json l7 = {{"app", app->protocol()},
+                            {"details", app->requests_all()},
+                            {"signatures", l->matched_signatures()}};
+        if(!app->custom_list_name().empty()) l7[app->custom_list_name()] = app->custom_list();
+        info["l7"] = std::move(l7);
+    }
+    if(auto const* r = proxy.first_right(); r) {
+        if(auto* ssl = dynamic_cast<SSLCom*>(r->com()); ssl)
+            info["tls"]["sni"] = ssl->get_sni();
+    }
+    if(auto classifications = proxy.sift_classifications(); !classifications.empty())
+        info["classification"]["sift"] = std::move(classifications);
+    if(auto classifications = proxy.lored_classifications(); !classifications.empty())
+        info["classification"]["lored"] = std::move(classifications);
 }
 
 void ProxyHooks::stop(const Epitaph& epitaph, const StopArgs&) {
 
-    // Terminal notifications cannot change the retired session's control state.
-    // Each enqueue copies the serialized payload into its own request task.
+    // Each sink is independent. Failure to serialize filter data or submit one
+    // sink must not suppress the terminal notification to the other sink.
+    const auto attempt = [](const char* stage, auto&& operation) noexcept {
+        retirement_step(operation, [&] { Log::get()->events().insert(ERR, "ProxyHooks::stop: failed %s", stage); });
+    };
     if(sx::http::webhooks::is_enabled()) {
         if(!epitaph.filter_info.is_null()) {
-            sx::http::webhooks::send_action(
-                "connection-info", epitaph.connection_id, epitaph.filter_info);
+            attempt("filter notification", [&] {
+                sx::http::webhooks::send_action(
+                    "connection-info", epitaph.connection_id, epitaph.filter_info);
+            });
         }
-        sx::http::webhooks::send_action(
-            "connection-stop", epitaph.connection_id, epitaph.details);
+        attempt("webhook stop", [&] {
+            sx::http::webhooks::send_action(
+                "connection-stop", epitaph.connection_id, epitaph.details);
+        });
     }
-
-    sx::http::webhooks::send_sift_action(
-        "connection-stop", epitaph.connection_id, epitaph.details);
+    attempt("Sift stop", [&] {
+        sx::http::webhooks::send_sift_action(
+            "connection-stop", epitaph.connection_id, epitaph.details);
+    });
 }
 
 sx::auth::Result ProxyHooks::authentication(const baseHostCX& client,

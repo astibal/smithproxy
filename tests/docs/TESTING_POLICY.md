@@ -115,6 +115,33 @@ raise infrastructure limits or reduce concurrency only when evidence shows the
 failure belongs to the execution environment. Never hide a load-sensitive
 product failure behind a flaky classification.
 
+## Capture output matrix
+
+`--suite capture` schedules `capture-traffic`, `capture-pcapng`, `quic` and
+`quic-pcapng`. The same four sections are mandatory in `traffic` and `full`.
+Each leg retains a local PCAPNG plus an independent GRE wire capture. No leg
+may pass merely because the other output works. Empty captures, missing
+records, mismatched payload hashes and undecodable required content fail.
+
+The TCP/UDP inventory consists of the 30 deterministic capture corpus cases
+(HTTP/1, HTTP/2, Redis-style, SMTP-style, WebSocket-style, binary TCP and
+DNS/syslog/STUN/binary UDP conversations), plus real HTTPS exchanges over TLS
+1.2 and TLS 1.3. Both address families are required. Per-case, per-direction
+SHA-256 checks cover all 32 cases; HTTP/2 additionally requires twelve live
+requests and responses. Protocol-shaped replays prove byte preservation, not
+full interoperability with production implementations of those protocols.
+
+The QUIC legs use a real HTTP/3 client and origin with four concurrent requests.
+Local and remote PCAPNG must decode from embedded DSB secrets with external
+keylogs disabled and contain no SPQ1. Remote `traffic` must instead preserve
+SPQ1 identity, payload and semantic records. QUIC currently covers IPv4 only;
+this matrix must not be described as covering every protocol or IPv6 QUIC.
+New capture traffic types must add expectations for all three output paths.
+
+GRE/PCAPNG reconstruction validates block lengths and preserves received block
+order; only the receiver's section/interface preamble is synthesized. It must
+not import secrets or packets from the local output to make remote decoding pass.
+
 ## Protocol fuzz sections
 
 Fuzzing is partitioned by protocol or parser area, for example `fuzz.socks5`,

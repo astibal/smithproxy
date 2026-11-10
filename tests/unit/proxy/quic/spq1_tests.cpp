@@ -322,6 +322,22 @@ TEST(Spq1, AdapterConfiguresAndWrapsPacketLogger) {
     EXPECT_EQ(0x55667788U, *pcap->details.gre_key);
 }
 
+TEST(Spq1, LocalPacketLoggerDoesNotWriteSyntheticPlaintext) {
+    auto output = std::make_unique<socle::traflog::PcapLog>(
+        nullptr, "/tmp", "spq1-no-local-test", ".pcapng", false);
+    auto* pcap = output.get();
+    auto connection = std::make_shared<sx::quic::spq1::connection_context>(8, "h3");
+    sx::quic::spq1::stream_log_adapter adapter({connection, 4});
+    auto wrapped = adapter.wrap(std::move(output));
+    buffer plaintext("hello", 5);
+
+    wrapped->write(socle::side_t::LEFT, plaintext);
+
+    EXPECT_EQ(nullptr, pcap->writer_);
+    EXPECT_EQ(0, pcap->stat_bytes_written);
+    EXPECT_EQ(1U, connection->next_packet_number.load());
+}
+
 TEST(Spq1, AdapterDescribesHttp3DataFrames) {
     auto connection = std::make_shared<sx::quic::spq1::connection_context>(9, "h3");
     sx::quic::spq1::stream_log_adapter adapter({connection, 0});

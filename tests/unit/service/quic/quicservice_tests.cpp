@@ -366,12 +366,14 @@ TEST_F(QuicListenerService, RejectsSessionsBeyondConfiguredLimit) {
     auto external = quic::connect_openssl_quic(
         client_context.get(), reinterpret_cast<sockaddr*>(&address),
         sizeof(address), "Smithproxy-Server-Certificate", &error);
-    ASSERT_NE(external, nullptr) << error;
+    // With a zero session limit, rejection may arrive during the initial
+    // connect call. A live client object is not an invariant of this test;
+    // the server's counters below prove that admission rejected the attempt.
 
     auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (std::chrono::steady_clock::now() < deadline
            && proxy.diagnostics().session_limit_rejections == 0) {
-        external->drain_events();
+        if(external) external->drain_events();
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     auto const diagnostics = proxy.diagnostics();
@@ -381,7 +383,7 @@ TEST_F(QuicListenerService, RejectsSessionsBeyondConfiguredLimit) {
     // before the client observes rejection. The invariant is that none enter
     // the bounded session table and at least one rejection is accounted.
     EXPECT_GE(diagnostics.session_limit_rejections, 1U);
-    external->close();
+    if(external) external->close();
 }
 
 TEST_F(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {

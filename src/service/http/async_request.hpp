@@ -324,6 +324,17 @@ namespace sx::http {
             return ret > 0;
         };
 
+        // Retirement cannot retain the proxy until a later queue retry: its owner
+        // destroys it immediately after finalize(). If the bounded queue rejects
+        // a terminal notification, perform one direct, timeout-bounded request.
+        // Accepted jobs are never repeated here (enqueue is not HTTP delivery).
+        static void emit_terminal(request_settings const& settings, std::string const& pay,
+                                  reply_hook const& hook) {
+            if(enqueue(settings, pay, hook)) return;
+            std::stringstream log;
+            emit_url_wait_log(settings, pay, log, hook);
+        }
+
         static bool emit_url(std::string const& url, std::string const& pay, reply_hook const& hook) {
             auto settings = settings_snapshot();
             settings.url = url;

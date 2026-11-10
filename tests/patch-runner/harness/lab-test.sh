@@ -222,7 +222,7 @@ python3 "$ROOT/runner/tests/prepare.py" "$ROOT"
 if [[ ${EMPTY_NEIGHBOR_STATE_TEST:-0} == 1 ]]; then
     : > "$ROOT/data/nbr-default.json"
 fi
-if [[ $CAPTURE_TEST == 1 ]]; then
+if [[ $CAPTURE_TEST == 1 && ${CAPTURE_GRE_FORMAT:-traffic} == traffic ]]; then
     rm -f "$ROOT/results/gre-ready" "$ROOT/results/gre-capture.json"
     ip netns exec "$SERVER" python3 "$ROOT/runner/tests/gre-collector.py" \
         "$ROOT/results/gre-capture.json" "$ROOT/results/gre-ready" "$CAPTURE_MARKER" \
@@ -293,6 +293,15 @@ if [[ ${SKIP_API_READY:-0} != 1 ]]; then
     done
     python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["status"] == "ok"' "$ROOT/results/api.json"
     echo 'PASS API: authenticated HTTPS request from host namespace'
+fi
+if [[ ${QUIC_LATE_CAPTURE_TEST:-0} == 1 ]]; then
+    # Exercise runtime activation on the original listener, not a restart.
+    cp "$ROOT/config/capture-enabled.cfg" "$ROOT/config/smithproxy.cfg"
+    { printf 'enable\r\nexecute reload\r\n'; sleep 1; printf 'quit\r\n'; } | \
+        timeout 8 ip netns exec "$NS" nc 127.0.0.1 50000 \
+        > "$ROOT/results/late-capture-reload.txt" 2>&1
+    grep -q 'Configuration file reloaded' "$ROOT/results/late-capture-reload.txt"
+    echo 'PASS capture activated after listener startup'
 fi
 if [[ $QUIC_TEST == 1 ]]; then
     ip netns exec "$NS" python3 "$ROOT/runner/tests/quic-webhook-contract.py" serve \
@@ -476,12 +485,14 @@ if [[ $CAPTURE_TEST == 1 ]]; then
     ip netns exec "$CLIENT" curl --noproxy '*' -gfsS --max-time 15 \
         -H "X-Capture-Marker: $CAPTURE_MARKER6" 'http://[fd00:20::2]:8080/' \
         > "$ROOT/results/capture-http6.txt"
-    wait "$GRE_COLLECTOR_PID"
-    GRE_COLLECTOR_PID=
-    python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["marker_found"] and set(d["inner_protocols"].values()) == {"0x0800", "0x86dd"}' \
-        "$ROOT/results/gre-capture.json"
-    echo 'PASS4 GRE export: received IPv4 inner flow with expected payload marker'
-    echo 'PASS6 GRE export: received IPv6 inner flow with expected payload marker'
+    if [[ ${CAPTURE_GRE_FORMAT:-traffic} == traffic ]]; then
+        wait "$GRE_COLLECTOR_PID"
+        GRE_COLLECTOR_PID=
+        python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["marker_found"] and set(d["inner_protocols"].values()) == {"0x0800", "0x86dd"}' \
+            "$ROOT/results/gre-capture.json"
+        echo 'PASS4 GRE export: received IPv4 inner flow with expected payload marker'
+        echo 'PASS6 GRE export: received IPv6 inner flow with expected payload marker'
+    fi
 fi
 ip netns exec "$CLIENT" curl --noproxy '*' --fail-with-body -sS --max-time 20 \
     --cacert "$ROOT/config/certs/ca-cert.pem" --resolve origin.runner.lab:443:198.18.20.2 \
@@ -1018,7 +1029,9 @@ if [[ $CAPTURE_MATRIX_TEST == 1 ]]; then
     env PYTHONPATH="$PPLAY_SUITE${PYTHONPATH:+:$PYTHONPATH}" \
         python3 "$ROOT/runner/tests/build-capture-manifest.py" \
         "$PPLAY_SUITE" "$CAPTURE_MATRIX_MANIFEST"
-    ip netns exec "$NS" tcpdump -i "$OUT_IF" -U -s 0 -w "$CAPTURE_MATRIX_GRE4" 'ip proto 47' \
+    # Do not leave the last short TLS exchanges in libpcap's timed buffer when
+    # stopping the collector. A capture gate must not manufacture packet loss.
+    ip netns exec "$NS" tcpdump --immediate-mode -i "$OUT_IF" -U -s 0 -w "$CAPTURE_MATRIX_GRE4" 'ip proto 47' \
         > "$CAPTURE_MATRIX_RESULT/tcpdump4.log" 2>&1 &
     CAPTURE_MATRIX_GRE_PID=$!
     sleep 0.5
@@ -1027,11 +1040,14 @@ if [[ $CAPTURE_MATRIX_TEST == 1 ]]; then
         SMITHPROXY_PID_FILE="$ROOT/data/proxy.pid" \
         CLIENT_NS="$CLIENT" SERVER_NS="$SERVER" \
         "$PPLAY_SUITE/run-suite.sh" all
+    ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/capture_tls_cases.py" \
+        198.18.20.2 "$ROOT/config/certs/ca-cert.pem"
+    sleep 0.2
     kill "$CAPTURE_MATRIX_GRE_PID" 2>/dev/null || true
     wait "$CAPTURE_MATRIX_GRE_PID" 2>/dev/null || true
     CAPTURE_MATRIX_GRE_PID=
-    echo 'PASS4 capture matrix traffic: 30 corpus flows exported to local PCAPNG and GRE'
-    ip netns exec "$NS" tcpdump -i "$OUT_IF" -U -s 0 -w "$CAPTURE_MATRIX_GRE6" 'ip proto 47' \
+    echo 'PASS4 capture matrix traffic: 30 corpus flows and TLS 1.2/1.3 exchanges completed'
+    ip netns exec "$NS" tcpdump --immediate-mode -i "$OUT_IF" -U -s 0 -w "$CAPTURE_MATRIX_GRE6" 'ip proto 47' \
         > "$CAPTURE_MATRIX_RESULT/tcpdump6.log" 2>&1 &
     CAPTURE_MATRIX_GRE_PID=$!
     sleep 0.5
@@ -1040,10 +1056,13 @@ if [[ $CAPTURE_MATRIX_TEST == 1 ]]; then
         SMITHPROXY_PID_FILE="$ROOT/data/proxy.pid" \
         CLIENT_NS="$CLIENT" SERVER_NS="$SERVER" \
         "$PPLAY_SUITE/run-suite.sh" all
+    ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/capture_tls_cases.py" \
+        fd00:20::2 "$ROOT/config/certs/ca-cert.pem"
+    sleep 0.2
     kill "$CAPTURE_MATRIX_GRE_PID" 2>/dev/null || true
     wait "$CAPTURE_MATRIX_GRE_PID" 2>/dev/null || true
     CAPTURE_MATRIX_GRE_PID=
-    echo 'PASS6 capture matrix traffic: 30 corpus flows exported to local PCAPNG and GRE'
+    echo 'PASS6 capture matrix traffic: 30 corpus flows and TLS 1.2/1.3 exchanges completed'
 fi
 if [[ ${HTTP2_OBSERVABILITY_TEST:-0} == 1 ]]; then
     [[ ${CAPTURE_TEST:-0} == 1 ]] || { echo 'FAIL: HTTP2_OBSERVABILITY_TEST requires CAPTURE_TEST=1' >&2; exit 1; }
@@ -1193,18 +1212,16 @@ fi
 if [[ $CAPTURE_MATRIX_TEST == 1 ]]; then
     mkdir -p "$ROOT/results/capture-matrix/local-pcap"
     cp "$ROOT/data/$CAPTURE_PREFIX"*.pcapng "$ROOT/results/capture-matrix/local-pcap/"
-    python3 "$ROOT/runner/tests/verify-capture-matrix.py" \
-        "$ROOT/results/capture-matrix/manifest.json" "$ROOT/data" "$CAPTURE_PREFIX" \
-        "$ROOT/results/capture-matrix/gre4.pcap" 4 \
-        > "$ROOT/results/capture-matrix/validation4.json"
-    python3 "$ROOT/runner/tests/suites/capture-report.py" "$ROOT/results/capture-matrix/validation4.json"
-    echo 'PASS4 capture matrix: PCAPNG and GRE payload hashes match; simulated TCP is formally valid'
-    python3 "$ROOT/runner/tests/verify-capture-matrix.py" \
-        "$ROOT/results/capture-matrix/manifest.json" "$ROOT/data" "$CAPTURE_PREFIX" \
-        "$ROOT/results/capture-matrix/gre6.pcap" 6 \
-        > "$ROOT/results/capture-matrix/validation6.json"
-    python3 "$ROOT/runner/tests/suites/capture-report.py" "$ROOT/results/capture-matrix/validation6.json"
-    echo 'PASS6 capture matrix: PCAPNG and GRE payload hashes match; simulated TCP is formally valid'
+    capture_validation_rc=0
+    for family in 4 6; do
+        validation="$ROOT/results/capture-matrix/validation$family.json"
+        python3 "$ROOT/runner/tests/verify-capture-matrix.py" \
+            "$ROOT/results/capture-matrix/manifest.json" "$ROOT/data" "$CAPTURE_PREFIX" \
+            "$ROOT/results/capture-matrix/gre$family.pcap" "$family" \
+            > "$validation" || capture_validation_rc=1
+        python3 "$ROOT/runner/tests/suites/capture-report.py" "$validation"
+    done
+    ((capture_validation_rc == 0)) || { echo 'FAIL capture output matrix'; exit 1; }
 fi
 if [[ ${HTTP2_OBSERVABILITY_TEST:-0} == 1 ]]; then
     for family in 4 6; do
@@ -1235,8 +1252,12 @@ if [[ $QUIC_TEST == 1 ]]; then
         --url 'https://origin.runner.lab/hold?stream=4' \
         > "$ROOT/results/quic-observability/validation.json"
     echo 'PASS4 QUIC policy: UDP-only content profile selected for multiplexed streams'
-    echo 'PASS4 QUIC local PCAP: SPQ1 session, stream, ALPN, FIN, payload and H3 fields validated'
-    echo 'PASS4 QUIC GRE: RFC 2890 key matches SPQ1 session and local capture semantics'
+    echo 'PASS4 QUIC local PCAP: embedded secrets decrypt H3; no legacy SPQ1 records'
+    if [[ ${QUIC_REMOTE_PCAPNG_TEST:-0} == 1 ]]; then
+        echo 'PASS4 QUIC GRE PCAPNG: received DSB decrypts H3; no SPQ1 records'
+    else
+        echo 'PASS4 QUIC GRE traffic: SPQ1 session, stream, ALPN, FIN and H3 fields validated'
+    fi
     echo 'PASS4 QUIC native PCAP: SSLKEYLOGFILE decrypts requests, responses and independent streams'
     echo 'PASS4 QUIC Wireshark: methods, statuses and composite URLs are filterable'
 fi
