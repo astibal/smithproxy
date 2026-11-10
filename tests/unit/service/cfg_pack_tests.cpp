@@ -355,3 +355,39 @@ TEST_F(PackTest, RejectsRetirementWithoutValidNativeArchive) {
 }
 
 } // namespace
+
+TEST_F(PackTest, RetiresOnlyTheNativeSiblingAndPreservesPreviousBackup) {
+    const auto native = directory_ + "/main.cftar";
+    const auto old = write("main.cfg.old", "previous backup");
+    EXPECT_EQ(CfgPack::retire_legacy_config(native), input_.main_config + ".old.1");
+    EXPECT_FALSE(std::filesystem::exists(input_.main_config));
+    std::ifstream saved(old);
+    std::string contents;
+    std::getline(saved, contents);
+    EXPECT_EQ(contents, "previous backup");
+    EXPECT_TRUE(std::filesystem::exists(input_.startup_config));
+    EXPECT_TRUE(CfgPack::retire_legacy_config(native).empty());
+}
+
+TEST_F(PackTest, RetiresLegacyConfigWithoutChangingItsPermissions) {
+    ASSERT_EQ(::chmod(input_.main_config.c_str(), 0600), 0);
+    const auto backup = CfgPack::retire_legacy_config(directory_ + "/main.cftar");
+    EXPECT_EQ(backup, input_.main_config + ".old");
+    struct stat state {};
+    ASSERT_EQ(::stat(backup.c_str(), &state), 0);
+    EXPECT_EQ(state.st_mode & 0777, 0600);
+}
+
+TEST_F(PackTest, RefusesToRetireSymlinkOrNonNativePath) {
+    ASSERT_EQ(::symlink(input_.main_config.c_str(), (directory_ + "/linked.cfg").c_str()), 0);
+    EXPECT_THROW(CfgPack::retire_legacy_config(directory_ + "/linked.cftar"), CfgTarError);
+    EXPECT_THROW(CfgPack::retire_legacy_config(input_.main_config), CfgTarError);
+    EXPECT_TRUE(std::filesystem::exists(input_.main_config));
+}
+
+TEST_F(PackTest, LegacyTreeCleanupKeepsRetiredConfigBackups) {
+    write_native_archive();
+    const auto backup = write("smithproxy.cfg.old", "original configuration");
+    CfgPack::retire_legacy_tree(directory_, "smithproxy.cftar", "smithproxy.pre-cftar.tar");
+    EXPECT_TRUE(std::filesystem::exists(backup));
+}

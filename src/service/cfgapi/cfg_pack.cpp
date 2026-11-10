@@ -10,6 +10,8 @@
 #include <filesystem>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
+#include <linux/fs.h>
 #include <unistd.h>
 
 namespace sx::cfg {
@@ -314,6 +316,64 @@ CfgTar CfgPack::build(const Input& input) {
     return archive;
 }
 
+std::string CfgPack::retire_legacy_config(const std::string& archive_path) {
+    namespace fs = std::filesystem;
+
+    fs::path source(archive_path);
+    if(source.extension() != ".cftar") {
+        fail("native configuration path must end in .cftar");
+    }
+
+    source.replace_extension(".cfg");
+
+    struct stat state {};
+    if(::lstat(source.c_str(), &state) != 0) {
+        if(errno == ENOENT) {
+            return {};
+        }
+
+        fail_errno("cannot inspect legacy configuration " + source.string());
+    }
+
+    if(!S_ISREG(state.st_mode)) {
+        fail("legacy configuration is not a regular file: " + source.string());
+    }
+
+    // RENAME_NOREPLACE closes the check/rename race and preserves old backups.
+    // A numbered suffix also handles a new legacy file left by a later upgrade.
+    for(unsigned index = 0; index < 1000; ++index) {
+        auto backup = source.string() + ".old";
+        if(index) {
+            backup += "." + std::to_string(index);
+        }
+
+        if(::syscall(SYS_renameat2, AT_FDCWD, source.c_str(),
+                     AT_FDCWD, backup.c_str(), RENAME_NOREPLACE) == 0) {
+            auto parent = source.parent_path();
+            if(parent.empty()) {
+                parent = ".";
+            }
+
+            Fd directory(::open(parent.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+            if(directory.get() < 0 || ::fsync(directory.get()) != 0) {
+                fail_errno("cannot persist legacy configuration retirement " + backup);
+            }
+
+            return backup;
+        }
+
+        if(errno == ENOENT) {
+            return {}; // Another startup already retired it.
+        }
+
+        if(errno != EEXIST) {
+            fail_errno("cannot retire legacy configuration " + source.string());
+        }
+    }
+
+    fail("too many legacy configuration backups: " + source.string());
+}
+
 bool CfgPack::migrate(const Migration& migration) {
     if (migration.archive_path.empty()) {
         fail("CfgTar migration output path is required");
@@ -377,7 +437,12 @@ CfgPack::LegacyRetireResult CfgPack::retire_legacy_tree(
         const auto relative = iterator->path().lexically_relative(root);
         const auto first = *relative.begin();
         const auto first_name = first.string();
-        const bool native_sidecar = first_name == active_archive ||
+        auto retired_config = fs::path(active_archive);
+        retired_config.replace_extension(".cfg.old");
+        const auto retired_name = retired_config.string();
+        const bool native_sidecar = first_name == retired_name ||
+            first_name.rfind(retired_name + ".", 0) == 0 ||
+            first_name == active_archive ||
             first_name == backup_name ||
             first_name.rfind(active_archive + ".", 0) == 0;
         if(native_sidecar) {

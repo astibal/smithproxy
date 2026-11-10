@@ -951,6 +951,40 @@ int main(int argc, char *argv[]) {
             "Privileged configuration archive API key rejected: expected 32-256 bytes");
     }
 
+    // Prove that required native runtime resources load before retiring any
+    // legacy input. Check-only mode performs the same validation without writes.
+    if(CONFIG_LOADED && CfgFactory::get()->using_native_archive()) {
+        try {
+            prepare_native_pki();
+            CONFIG_LOADED = prepare_html_renderer() &&
+                            SSLFactory::factory().load_from_files() &&
+                            SSLFactory::factory().load_trust_store();
+        }
+        catch(const std::exception& error) {
+            CONFIG_LOADED = false;
+            _err("native configuration resources failed to load: %s", error.what());
+        }
+    }
+
+    // Startup only: once native configuration has loaded successfully, remove
+    // its legacy sibling from source selection. Reload/check never retire it.
+    // In particular, loss of CFtar on a later boot must not revive stale policy.
+    if(CONFIG_LOADED && !CfgFactory::get()->config_file_check_only &&
+       CfgFactory::get()->using_native_archive()) {
+        try {
+            const auto backup = sx::cfg::CfgPack::retire_legacy_config(
+                CfgFactory::get()->config_file);
+
+            if(!backup.empty()) {
+                log.event(INF, "Legacy configuration renamed to %s", backup.c_str());
+            }
+        }
+        catch(const std::exception& error) {
+            _err("legacy configuration retirement failed: %s", error.what());
+            log.event(ERR, "Legacy configuration retirement failed: %s", error.what());
+        }
+    }
+
     // Once the default native archive is authoritative, preserve the original
     // /etc layout exactly once and remove its individual files. A failed or
     // interrupted cleanup is retried on the next start against the immutable
@@ -973,17 +1007,6 @@ int main(int argc, char *argv[]) {
             log.event(ERR, "Legacy configuration retirement deferred: %s",
                       error.what());
         }
-    }
-
-    // A native check also opens the resources required by the runtime. This
-    // proves that the archive is self-contained rather than merely parseable
-    // while legacy /etc files happen to exist on the build host.
-    if(CfgFactory::get()->config_file_check_only && CONFIG_LOADED &&
-       CfgFactory::get()->using_native_archive()) {
-        prepare_native_pki();
-        CONFIG_LOADED = prepare_html_renderer() &&
-                        SSLFactory::factory().load_from_files() &&
-                        SSLFactory::factory().load_trust_store();
     }
 
     // exit if that's only about config check - we should not proceed

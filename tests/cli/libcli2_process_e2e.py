@@ -96,7 +96,8 @@ class HoldingTlsOrigin:
     def close(self) -> None:
         self.release.set()
         self.listener.close()
-        self.thread.join(timeout=5)
+        if self.thread.ident is not None:
+            self.thread.join(timeout=5)
         if self.error is not None:
             raise self.error
 
@@ -405,6 +406,11 @@ script_profiles = {
         try:
             wait_for_port(process, args.port)
             wait_for_port(process, socks_port)
+            assert not config.exists(), "startup left the legacy config active"
+            # The schema upgrader may normalize legacy text before migration.
+            # The backup must retain exactly the configuration that was packed.
+            assert config.with_name(config.name + '.old').read_text() == read_archive_config(
+                cftar, config.with_suffix('.cftar'))
             require_oversized_cli_line_disconnect(args.port)
             require_oversized_cli_password_disconnect(args.port)
             cli = Cli(args.port, args.verbose)
