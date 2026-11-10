@@ -38,6 +38,8 @@
 */    
 
 
+#include <filesystem>
+
 //#define MEM_DEBUG 1
 #ifdef MEM_DEBUG
     #include <mcheck.h>
@@ -811,6 +813,14 @@ int main(int argc, char *argv[]) {
     if(CfgFactory::get()->config_file_check_only) {
         Log::get()->level(DIA);
     }
+
+    // Keep the selected legacy name before activation changes config_file to
+    // the native path. Custom -c inputs may be extensionless or use another suffix.
+    const auto startup_config_path = CfgFactory::get()->config_file;
+    const auto startup_legacy_path =
+        std::filesystem::path(startup_config_path).extension() == ".cftar"
+            ? std::string{} : startup_config_path;
+
     bool CONFIG_LOADED = false;
     bool migrate_legacy = false;
     try {
@@ -973,7 +983,7 @@ int main(int argc, char *argv[]) {
        CfgFactory::get()->using_native_archive()) {
         try {
             const auto backup = sx::cfg::CfgPack::retire_legacy_config(
-                CfgFactory::get()->config_file);
+                CfgFactory::get()->config_file, startup_legacy_path);
 
             if(!backup.empty()) {
                 log.event(INF, "Legacy configuration renamed to %s", backup.c_str());

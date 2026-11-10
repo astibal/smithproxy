@@ -391,3 +391,11 @@ TEST_F(PackTest, LegacyTreeCleanupKeepsRetiredConfigBackups) {
     CfgPack::retire_legacy_tree(directory_, "smithproxy.cftar", "smithproxy.pre-cftar.tar");
     EXPECT_TRUE(std::filesystem::exists(backup));
 }
+
+TEST_F(PackTest, RetiresActualExtensionlessInputOnlyForItsOwnArchive) {
+    const auto source = write("tenant-office", "settings : {};\n");
+    EXPECT_THROW(CfgPack::retire_legacy_config(directory_ + "/other.cftar", source), CfgTarError);
+    EXPECT_TRUE(std::filesystem::exists(source));
+    EXPECT_EQ(CfgPack::retire_legacy_config(source + ".cftar", source), source + ".old");
+    EXPECT_FALSE(std::filesystem::exists(source));
+}

@@ -62,9 +62,11 @@ public:
     // the destination; all other failures remain explicit exceptions.
     static bool migrate(const Migration& migration);
 
-    // Startup-only caller: retire the sibling .cfg after native activation.
-    // Never overwrite a backup; return its path, or empty when no .cfg exists.
-    static std::string retire_legacy_config(const std::string& archive_path);
+    // Startup-only caller: retire the selected legacy input after native activation.
+    // An omitted legacy path selects the sibling .cfg of an explicit CFtar.
+    // Never overwrite a backup; return its path, or empty when the source is absent.
+    static std::string retire_legacy_config(
+        const std::string& archive_path, const std::string& legacy_path = {});
 
     // Preserve the pre-CFtar /etc tree in one plain TAR and remove the
     // individual files only after both native and legacy archives validate.

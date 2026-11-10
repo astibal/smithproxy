@@ -316,7 +316,8 @@ CfgTar CfgPack::build(const Input& input) {
     return archive;
 }
 
-std::string CfgPack::retire_legacy_config(const std::string& archive_path) {
+std::string CfgPack::retire_legacy_config(
+    const std::string& archive_path, const std::string& legacy_path) {
     namespace fs = std::filesystem;
 
     fs::path source(archive_path);
@@ -324,7 +325,17 @@ std::string CfgPack::retire_legacy_config(const std::string& archive_path) {
         fail("native configuration path must end in .cftar");
     }
 
-    source.replace_extension(".cfg");
+    if(legacy_path.empty()) {
+        source.replace_extension(".cfg");
+    }
+    else {
+        // A caller-selected legacy filename need not have a .cfg extension.
+        // Bind retirement to its actual native sibling before touching it.
+        if(CfgArchive::native_path_for(legacy_path) != archive_path) {
+            fail("legacy configuration does not belong to the active archive");
+        }
+        source = legacy_path;
+    }
 
     struct stat state {};
     if(::lstat(source.c_str(), &state) != 0) {
