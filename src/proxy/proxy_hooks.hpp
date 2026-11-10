@@ -155,6 +155,7 @@ public:
     static nlohmann::json start_details(const MitmProxy& proxy, const StartDetailsArgs& args);
     static bool start(MitmProxy& proxy, const StartArgs& args);
     static Epitaph prepare_stop(const MitmProxy& proxy, const StopArgs& args);
+    static void enrich_stop(Epitaph& epitaph, const MitmProxy& proxy);
     static void stop(const Epitaph& epitaph, const StopArgs& args);
     static void readiness(const MitmProxy& proxy, const ReadinessArgs& args);
     static bool content(MitmProxy& proxy, const ContentArgs& args);

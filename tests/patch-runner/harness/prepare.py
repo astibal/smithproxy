@@ -317,6 +317,11 @@ if gre_capture_dst:
     if remote_count != 1 or content_count != 1 or checksum_count != 1 or udp_profile_count != 1:
         raise RuntimeError('cannot enable GRE capture in generated config')
 capture_prefix = os.environ.get('CAPTURE_FILE_PREFIX')
+if os.environ.get('CAPTURE_GRE_FORMAT') == 'pcapng' or os.environ.get('QUIC_REMOTE_PCAPNG_TEST') == '1':
+    text, count = re.subn(r'(gre_format\s*=\s*)"traffic"',
+                          r'\g<1>"pcapng"', text, count=1)
+    if count != 1:
+        raise RuntimeError('cannot enable remote PCAPNG capture')
 if capture_prefix:
     if not re.fullmatch(r'[A-Za-z0-9_.-]+', capture_prefix):
         raise ValueError('CAPTURE_FILE_PREFIX contains unsafe characters')
@@ -336,6 +341,17 @@ text = text.replace('settings = {', f'''settings = {{
         port = {internal_api_port};
     }};
 ''', 1)
+if os.environ.get('QUIC_LATE_CAPTURE_TEST') == '1':
+    # Preserve the normal policy, but start both capture sinks disabled.
+    # The live gate reloads this configuration without restarting listeners.
+    (config/'capture-enabled.cfg').write_text(text)
+    for sink in ('local', 'remote'):
+        text, count = re.subn(
+            r'(' + sink + r'\s*=\s*\{\s*enabled\s*=\s*)true',
+            r'\g<1>false', text, count=1, flags=re.IGNORECASE,
+        )
+        if count != 1:
+            raise RuntimeError('cannot disable initial capture sink: ' + sink)
 (config/'smithproxy.cfg').write_text(text)
 input_if = os.environ.get('LAB_IN_IF', 'di0')
 (config/'network.conf').write_text(f'''INPUT_CIDRS[{input_if}]=198.18.10.1/24

@@ -47,6 +47,7 @@
 
 #include <proxy/mitmproxy.hpp>
 #include <proxy/proxy_hooks.hpp>
+#include <proxy/retirement.hpp>
 #include <proxy/content_webhook_metadata.hpp>
 #include <proxy/connection_start.hpp>
 #include <proxy/directional_content.hpp>
@@ -540,31 +541,34 @@ void MitmProxy::prepare_session_stop() {
     if(!wh_start || wh_stop || (!sx::http::webhooks::is_enabled() &&
                                !sx::http::webhooks::sift_enabled())) return;
 
-    // A failed snapshot must not prevent transport teardown or run again.
-    wh_stop = true;
+    // Commit the minimal owned snapshot first. Hooks and optional metadata may
+    // fail, but must not take the terminal notification with them. wh_stop guards
+    // reentrant shutdown from retirement hooks only after that snapshot exists.
     try {
-        // Every retirement path must finish server callbacks before Spider releases
-        // the session. This only orders observations; transport teardown stays put.
-        if(observe_tls(true) == ObserverStatus::Terminate) {
-            state().dead(true);
-        }
-        finish_server_hooks();
-
-        auto snapshot = std::make_unique<sx::proxy::ProxyHooks::Epitaph>(
+        epitaph_ = std::make_unique<sx::proxy::ProxyHooks::Epitaph>(
             sx::proxy::ProxyHooks::prepare_stop(*this, sx::proxy::ProxyHooks::StopArgs{}));
-
-        // Filters must be sampled while their session context is still alive.
-        for(auto& [name, filter] : filters_) {
-            if(filter->update_states()) {
-                snapshot->filter_info[name] = filter->to_json(iINF);
-            }
-        }
-
-        epitaph_ = std::move(snapshot);
     }
     catch(...) {
         try { _err("MitmProxy::prepare_session_stop: failed to prepare session epitaph"); }
         catch(...) {}
+        return;
+    }
+    wh_stop = true;
+
+    const auto attempt = [this](const char* stage, auto&& operation) noexcept {
+        sx::proxy::retirement_step(operation, [&] {
+            _err("MitmProxy::prepare_session_stop: failed %s", stage);
+        });
+    };
+    attempt("TLS retirement", [&] {
+        if(observe_tls(true) == ObserverStatus::Terminate) state().dead(true);
+    });
+    attempt("server retirement", [&] { finish_server_hooks(); });
+    attempt("stop metadata", [&] { sx::proxy::ProxyHooks::enrich_stop(*epitaph_, *this); });
+    for(auto& [name, filter] : filters_) {
+        attempt("filter snapshot", [&] {
+            if(filter->update_states()) epitaph_->filter_info[name] = filter->to_json(iINF);
+        });
     }
 }
 
@@ -2889,9 +2893,21 @@ void MitmMasterProxy::on_left_new(std::unique_ptr<baseHostCX> accepted_cx) {
     _deb("MitmMasterProxy::on_left_new: finished");
 }
 
+bool MitmMasterProxy::run_timers() {
+    const bool tick = MasterProxy::run_timers();
+    if(tick) policy_state.validate(*this);
+    return tick;
+}
+
 int MitmMasterProxy::handle_sockets_once(baseCom* c) {
     process_session_lists(*this);
     return ThreadedAcceptorProxy<MitmProxy>::handle_sockets_once(c);
+}
+
+bool MitmUdpProxy::run_timers() {
+    const bool tick = MasterProxy::run_timers();
+    if(tick) policy_state.validate(*this);
+    return tick;
 }
 
 int MitmUdpProxy::handle_sockets_once(baseCom* c) {

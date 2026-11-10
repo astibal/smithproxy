@@ -41,6 +41,9 @@
 #include <proxy/mitmproxy.hpp>
 
 #include <proxy/proxymaker.hpp>
+#include <proxy/proxymaker_policy.hpp>
+#include <proxy/network_policy.hpp>
+#include <proxy/revalidation_result.hpp>
 #include <proxy/quic_observer.hpp>
 #include <proxy/proxymaker_utils.hpp>
 #include <proxy/connection_start.hpp>
@@ -56,6 +59,33 @@
 #include <arpa/inet.h>
 
 namespace sx::proxymaker {
+
+    int match_policy(baseProxy* proxy) {
+        if(!proxy) return -1;
+        std::scoped_lock guard(CfgFactory::lock());
+        const auto config = CfgFactory::get();
+        auto left = proxy->ls(); left.insert(left.end(), proxy->lda().begin(), proxy->lda().end());
+        auto right = proxy->rs(); right.insert(right.end(), proxy->rda().begin(), proxy->rda().end());
+        const auto network = sx::net::NetworkCtx::instance().snapshot();
+        const bool ready = sx::proxy::prepare_network_policy(config->db_policy_list, left, right, *network);
+        const int selected = ready ? PolicyMatcher::select(config->db_policy_list, proxy, network.get()) : -1;
+        if(auto* observer = dynamic_cast<MitmProxy*>(proxy); observer &&
+           (selected >= 0 || config->policy_fail_open))
+            observer->policy_input = sx::proxy::policy_input_t::capture(left, right);
+        return selected;
+    }
+
+    int match_policy(std::vector<baseHostCX*>& left, std::vector<baseHostCX*>& right, MitmProxy* observer) {
+        std::scoped_lock guard(CfgFactory::lock());
+        const auto config = CfgFactory::get();
+        const auto network = sx::net::NetworkCtx::instance().snapshot();
+        const bool ready = sx::proxy::prepare_network_policy(config->db_policy_list, left, right, *network);
+        const int selected = ready ? PolicyMatcher::select(config->db_policy_list, left, right, network.get()) : -1;
+        if(observer && (selected >= 0 || config->policy_fail_open))
+            observer->policy_input = sx::proxy::policy_input_t::capture(left, right);
+        return selected;
+    }
+
 
     namespace log {
         logan_lite& proxy() {
@@ -381,6 +411,7 @@ namespace sx::proxymaker {
                 };
             }
 
+            void ingress_ifindex(unsigned index) override { ingress_ifindex_ = index; }
             std::string connection_id() const override { return id_; }
             sx::proxy::QuicObserver* quic_observer() override { return observer_.get(); }
 
@@ -394,6 +425,7 @@ namespace sx::proxymaker {
                 auto const source_port = source["port"].get<std::string>();
                 baseHostCX left(new UDPCom, source_host.c_str(), source_port.c_str());
                 baseHostCX right(new UDPCom, host.c_str(), port.c_str());
+                left.com()->ingress_ifindex(ingress_ifindex_);
                 left.com()->l3_proto(source_host.find(':') == std::string::npos ? AF_INET : AF_INET6);
                 right.com()->l3_proto(host.find(':') == std::string::npos ? AF_INET : AF_INET6);
                 std::vector<baseHostCX*> sources {&left};
@@ -403,7 +435,7 @@ namespace sx::proxymaker {
                 // connection-start webhook remains outside this operation.
                 std::scoped_lock lock(CfgFactory::lock());
                 auto config = CfgFactory::get();
-                const int index = config->policy_match(sources, targets);
+                const int index = match_policy(sources, targets);
                 auto rule = config->lookup_policy(index);
                 if(!rule || config->policy_action(index) != PolicyRule::POLICY_ACTION_PASS) {
                     log::connect().war("QUIC TLS policy rejected target=%s:%s", host.c_str(), port.c_str());
@@ -494,6 +526,7 @@ namespace sx::proxymaker {
             }
 
         private:
+            unsigned ingress_ifindex_ = 0;
             std::string id_;
             std::string host_;
             std::string port_;
@@ -559,4 +592,76 @@ namespace sx::proxymaker {
     }
 
 
+}
+
+// Keep policy evaluation in proxymaker. The master owns traversal and teardown;
+// configuration is held only while selecting and checking a single decision.
+namespace sx::proxymaker {
+sx::proxy::revalidation_result_t revalidate(MasterProxy& master, const sx::proxy::policy_state_t::generations_t& expected) {
+    using State = sx::proxy::policy_state_t;
+    sx::proxy::revalidation_result_t result;
+    std::scoped_lock workers(master.proxy_lock());
+    for(const auto& child : master.proxies()) {
+        auto* proxy = dynamic_cast<MitmProxy*>(child.get());
+        // Pending handshakes and intentional internal bypasses have no admitted
+        // ACL inputs. Their normal admission path still handles new traffic.
+        if(!proxy || proxy->state().dead() || proxy->matched_policy() < 0 || !proxy->policy_input) continue;
+        bool deny = false;
+        {
+            std::scoped_lock configuration(CfgFactory::lock());
+            if(!(State::current_generations() == expected)) {
+                ++result.superseded;
+                return result;
+            }
+            const auto config = CfgFactory::get();
+            const auto network = sx::net::NetworkCtx::instance().snapshot();
+            auto input = proxy->policy_input->view();
+            if(!sx::proxy::prepare_network_policy(config->db_policy_list, input.left, input.right, *network)) {
+                ++result.deferred; // unavailable metadata: retry on the next tick
+                continue;
+            }
+            const int selected = PolicyMatcher::select(config->db_policy_list,
+                input.left, input.right, network.get(), false);
+            deny = config->policy_action(selected) != PolicyRule::POLICY_ACTION_PASS;
+            // A decision made across a network change must not kill a session.
+            if(!(State::current_generations() == expected)) {
+                ++result.superseded;
+                return result;
+            }
+        }
+        if(deny) {
+            proxy->state().dead(true);
+            proxy->shutdown(); // close now; master retires the object normally
+            ++result.terminated;
+        } else {
+            ++result.allowed;
+        }
+    }
+    if(!(State::current_generations() == expected)) ++result.superseded;
+    return result;
+}
+} // namespace sx::proxymaker
+
+bool sx::proxy::policy_state_t::validate(MasterProxy& master) {
+    const auto previous = observed;
+    const bool was_pending = revalidation_required;
+    revalidation_result_t report;
+    if(!validate()) {
+        const auto result = sx::proxymaker::revalidate(master, observed);
+        revalidation_required = !result.complete();
+        if(result.report(!was_pending || !(previous == observed))) report = result;
+    }
+
+    // One summary per master pass, outside the list and configuration locks.
+    // Counts are checks, not unique sessions: recovery can inspect them again.
+    if(!report.empty()) {
+        Log::get()->events().insert(INF,
+            "Policy revalidation checks: allowed=%llu terminated=%llu deferred=%llu superseded_passes=%llu master=%s",
+            static_cast<unsigned long long>(report.allowed),
+            static_cast<unsigned long long>(report.terminated),
+            static_cast<unsigned long long>(report.deferred),
+            static_cast<unsigned long long>(report.superseded),
+            master.to_string(iNOT).c_str());
+    }
+    return !revalidation_required;
 }

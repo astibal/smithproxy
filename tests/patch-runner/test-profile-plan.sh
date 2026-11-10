@@ -30,4 +30,9 @@ mapfile -t traffic < <(patch_runner_profile_sections traffic)
 [[ $(patch_runner_section_profile corpus-edge.3) == corpus ]]
 [[ $(patch_runner_section_profile fuzz.tls) == fuzz ]]
 [[ $(patch_runner_section_profile policy) == sanity ]]
+[[ ${PATCH_RUNNER_CAPTURE_SECTIONS[*]} == 'capture-traffic capture-pcapng quic quic-pcapng' ]]
+for section in "${PATCH_RUNNER_CAPTURE_SECTIONS[@]}"; do
+    [[ " ${full[*]} " == *" $section "* ]]
+    [[ $(patch_runner_section_profile "$section") == traffic ]]
+done
 echo "PASS: full is the ordered union of native, sanity, traffic, lifecycle, corpus and fuzz"

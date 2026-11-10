@@ -3,10 +3,12 @@
 import collections
 import hashlib
 import json
+import os
 import pathlib
 import socket
 import struct
 import sys
+from gre_pcapng import restore
 
 
 def checksum(data):
@@ -287,18 +289,38 @@ def main(manifest_name, data_dir_name, prefix, gre_name, family_name="4"):
     local_packets = []; local_blocks = 0
     for path in files:
         packets, blocks = pcapng_packets(path); local_packets.extend(packets); local_blocks += blocks
-    gre_packets = pcap_packets(pathlib.Path(gre_name))
+    gre_format = os.environ.get('CAPTURE_GRE_FORMAT', 'traffic')
+    transport_errors = []
+    if gre_format == 'pcapng':
+        try:
+            restored, _ = restore(gre_name)
+            gre_packets, _ = pcapng_packets(restored)
+        except AssertionError as error:
+            # Still report every missing case; do not turn empty export into
+            # an absent JSON report or silently skip its payload checks.
+            gre_packets = []
+            transport_errors.append(str(error))
+        unwrap = local_inner
+    else:
+        gre_packets = pcap_packets(pathlib.Path(gre_name))
+        unwrap = gre_inner
     local_streams, local_parsed, local_flows, local_issues = collect(local_packets, local_inner, "PCAPNG", family)
-    gre_streams, gre_parsed, gre_flows, gre_issues = collect(gre_packets, gre_inner, "GRE", family)
+    gre_streams, gre_parsed, gre_flows, gre_issues = collect(gre_packets, unwrap, "GRE", family)
     local, local_errors = compare("PCAPNG", local_streams, expected)
     gre, gre_errors = compare("GRE", gre_streams, expected)
-    content_errors = local_errors + gre_errors
+    content_errors = transport_errors + local_errors + gre_errors
     if local != gre:
         content_errors.append("PCAPNG and GRE directional stream summaries differ")
     formal_counts = collections.Counter(local_issues + gre_issues)
     result = {
         "cases": len({entry["case"] for entry in expected}),
         "ip_family": family,
+        "gre_format": gre_format,
+        "coverage": [{"case": entry["case"], "name": entry["name"],
+                      "protocol": entry["protocol"], "direction": entry["direction"],
+                      "local_pcapng": entry["marker"] in local,
+                      "remote_" + gre_format: entry["marker"] in gre}
+                     for entry in expected],
         "directional_streams": len(expected),
         "local_files": len(files), "local_blocks": local_blocks,
         "local_packets": len(local_parsed), "local_matrix_flows": len(local_flows),

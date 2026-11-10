@@ -41,6 +41,8 @@
 #ifndef MITMPROXY_HPP
  #define MITMPROXY_HPP
 
+#include <proxy/master_policy.hpp>
+#include <proxy/policy_input.hpp>
 #include <atomic>
 #include <memory>
 #include <service/http/webhook_control.hpp>
@@ -117,6 +119,8 @@ class MitmProxy : public baseProxy, public IOController {
     std::time_t created_at_ = std::time(nullptr);
     std::uint64_t session_id_ = 0;
 public:
+    std::optional<sx::proxy::policy_input_t> policy_input;
+
     using whitelist_verify_entry_t = expiring<whitelist_verify_entry> ;
     using whitelist_map_t = ptr_cache<std::string,whitelist_verify_entry_t>;
 
@@ -439,6 +443,8 @@ private:
 
 class MitmMasterProxy : public ThreadedAcceptorProxy<MitmProxy>, public SessionListConsumer {
 public:
+    sx::proxy::policy_state_t policy_state;
+
     
     MitmMasterProxy(baseCom* c, int worker_id, proxyType t = proxyType::transparent() ) :
         ThreadedAcceptorProxy< MitmProxy >(c,worker_id, t) {};
@@ -446,6 +452,7 @@ public:
     baseHostCX* new_cx(int s) override;
     void on_left_new(std::unique_ptr<baseHostCX> accepted_cx) override;
     int handle_sockets_once(baseCom* c) override;
+    bool run_timers() override;
     
     static inline bool ssl_autodetect = false;
     static inline bool ssl_autodetect_harder = true;
@@ -459,11 +466,14 @@ private:
 
 class MitmUdpProxy : public ThreadedReceiverProxy<MitmProxy>, public SessionListConsumer {
 public:
+    sx::proxy::policy_state_t policy_state;
+
     MitmUdpProxy(baseCom* c, int worker_id, proxyType t = proxyType::transparent() ):
         ThreadedReceiverProxy< MitmProxy >(c,worker_id, t) {};
     void on_left_new(std::unique_ptr<baseHostCX> accepted_cx) override;
     baseHostCX* new_cx(int s) override;
     int handle_sockets_once(baseCom* c) override;
+    bool run_timers() override;
 
 private:
     logan_lite log {"com.udp.acceptor"};
