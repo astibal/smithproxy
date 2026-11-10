@@ -9,7 +9,6 @@
 #include <cerrno>
 #include <climits>
 #include <cstring>
-#include <thread>
 #include <utility>
 
 #if SMITHPROXY_OPENSSL_QUIC
@@ -214,12 +213,6 @@ listener_service::~listener_service() {
     stop();
 #if SMITHPROXY_OPENSSL_QUIC
     sessions_.clear();
-    for (auto& job : certificate_jobs_) {
-        try {
-            (void)job.second.result.get();
-        } catch (...) {
-        }
-    }
     certificate_jobs_.clear();
     staged_upstreams_.clear();
     connection_count_ = 0;
@@ -368,7 +361,7 @@ void listener_service::run() {
     while (!stopping_) {
         // With no retained work, wait solely for network input or stop().
         // Active connections still need a bounded tick because OpenSSL QUIC
-        // timers and asynchronous certificate futures are not pollable fds.
+        // timers still require deadline-based wakeups.
         auto const application_timeout = sessions_.empty() && certificate_jobs_.empty()
                 && staged_upstreams_.empty() && pending_captures_.empty()
                 && dispatcher_bindings_.empty()
@@ -393,6 +386,16 @@ void listener_service::run() {
             auto const fd = SSL_get_fd(connection);
             auto const events = connection_poll_events(connection);
             if (fd >= 0 && events != 0) descriptors.push_back({ fd, events, 0 });
+        }
+
+        // Certificate preparation owns the final upstream even before accept.
+        for (auto const& [downstream, job] : certificate_jobs_) {
+            if (!job.upstream) continue;
+            auto* connection = job.upstream->native_handle();
+            timeout = listener_poll_timeout(connection, timeout);
+            auto const fd = SSL_get_fd(connection);
+            auto const events = connection_poll_events(connection);
+            if (fd >= 0 && events != 0) descriptors.push_back({fd, events, 0});
         }
 
         log().dum("poll listener-events=0x%x fds=%zu timeout=%d sessions=%zu cert-jobs=%zu",
@@ -427,6 +430,7 @@ void listener_service::run() {
 
         // During live reconfiguration, keep servicing established sessions but
         // stop admitting new ones until the listener can leave naturally.
+        progress_certificate_jobs();
         if (!draining_) accept_connections();
         auto const now = std::chrono::steady_clock::now();
         for (auto& linked : sessions_) {
@@ -520,6 +524,7 @@ void listener_service::attach_staged_upstream(session& value) {
     // publishes the accepted connection object. Preserve it across that gap.
     auto* key = value.downstream->native_handle();
     if (auto pending = certificate_jobs_.find(key); pending != certificate_jobs_.end()) {
+        value.created = std::min(value.created, pending->second.created);
         value.client_endpoint = pending->second.client;
         value.target_endpoint = pending->second.destination;
     }
@@ -531,14 +536,12 @@ void listener_service::attach_staged_upstream(session& value) {
     value.target_endpoint = found->second.destination;
     value.setup = found->second.setup;
     // OpenSSL may publish the accepted connection before a suspended
-    // certificate callback has collected its asynchronous result. Keep the
+    // certificate callback has collected its prepared certificate. Keep the
     // generation binding until that result has been installed and staged;
     // otherwise the resumed callback observes generation zero and rejects the
     // very handshake which owns this session.
     dispatcher_bindings_.erase(key);
-    value.upstream = transparent_
-        ? connect_upstream(value.target_endpoint, found->second.server_name, value.setup.get())
-        : connect_upstream(found->second.server_name, value.setup.get());
+    value.upstream = std::move(found->second.connection);
     staged_upstreams_.erase(found);
     if (!value.upstream) {
         ++upstream_failures_;
@@ -661,6 +664,14 @@ void listener_service::progress_handshake(
     session& value, std::chrono::steady_clock::time_point now) {
     attach_staged_upstream(value);
 
+    if (now - value.created >= lifecycle_.handshake_timeout) {
+        ++handshake_timeouts_;
+        log().war("session %llu handshake timed out",
+                  static_cast<unsigned long long>(value.id));
+        start_draining(value, now, 0, "handshake timeout");
+        return;
+    }
+
     // Keep progressing ACKs, final handshake flight, and timers under this
     // session's tuple. progress_transport() deliberately does not dequeue
     // flow_open, so early application streams remain available to the bridge.
@@ -671,13 +682,13 @@ void listener_service::progress_handshake(
     if(verify_upstream_ && !value.upstream && value.downstream->handshake_complete()
        && SSL_session_reused(value.downstream->native_handle())) {
         if(!prepare_resumed_upstream(value)) {
-            start_draining(value, now);
+            start_draining(value, now, 0, "upstream connect failed");
             return;
         }
     }
 
     if(!hook_outcome(value.setup.get(), value.downstream->native_handle(), true)) {
-        start_draining(value, now);
+        start_draining(value, now, 0, "downstream hook rejected");
         return;
     }
 
@@ -685,14 +696,7 @@ void listener_service::progress_handshake(
         ++handshake_failures_;
         log().war("session %llu downstream handshake failed",
                   static_cast<unsigned long long>(value.id));
-        start_draining(value, now);
-        return;
-    }
-    if (now - value.created >= lifecycle_.handshake_timeout) {
-        ++handshake_timeouts_;
-        log().war("session %llu handshake timed out",
-                  static_cast<unsigned long long>(value.id));
-        start_draining(value, now);
+        start_draining(value, now, 0, "downstream handshake failed");
         return;
     }
 
@@ -708,22 +712,22 @@ void listener_service::progress_handshake(
             ++upstream_failures_;
             log().war("session %llu cannot create upstream connection",
                       static_cast<unsigned long long>(value.id));
-            start_draining(value, now);
+            start_draining(value, now, 0, "upstream connect failed");
         }
         return;
     }
     if (!value.upstream) return;
 
-    value.upstream->drain_events();
+    value.upstream->progress_transport();
     if(!hook_outcome(value.setup.get(), value.upstream->native_handle(), false)) {
-        start_draining(value, now);
+        start_draining(value, now, 0, "upstream hook rejected");
         return;
     }
     if (value.upstream->closed()) {
         ++upstream_failures_;
         log().war("session %llu upstream handshake failed",
                   static_cast<unsigned long long>(value.id));
-        start_draining(value, now);
+        start_draining(value, now, 0, "upstream handshake failed");
         return;
     }
     // ALPN can be selected before TLS completes. Keep the handshake deadline
@@ -731,15 +735,14 @@ void listener_service::progress_handshake(
     if (!value.upstream->handshake_complete()
         || !value.downstream->handshake_complete()) return;
 
-    // The certificate probe authenticated the identity used to mint the
-    // downstream certificate. Independently verify the worker-affine
-    // forwarding connection as well; it is a distinct QUIC handshake.
+    // The same upstream supplies the certificate and carries application data.
+    // Keep this guard for resumed downstreams, which skip certificate callbacks.
     if (verify_upstream_
         && SSL_get_verify_result(value.upstream->native_handle()) != X509_V_OK) {
         ++upstream_failures_;
         log().war("session %llu forwarding upstream verification failed",
                   static_cast<unsigned long long>(value.id));
-        start_draining(value, now, 1);
+        start_draining(value, now, 1, "upstream verification failed");
         return;
     }
 
@@ -752,7 +755,7 @@ void listener_service::progress_handshake(
         log().war("session %llu ALPN mismatch downstream='%s' upstream='%s'",
                   static_cast<unsigned long long>(value.id),
                   downstream_alpn.c_str(), upstream_alpn.c_str());
-        start_draining(value, now, 1);
+        start_draining(value, now, 1, "ALPN mismatch");
         return;
     }
 
@@ -787,7 +790,7 @@ void listener_service::progress_handshake(
     }
     if (!value.proxy) {
         ++upstream_failures_;
-        start_draining(value, now);
+        start_draining(value, now, 0, "bridge creation failed");
         return;
     }
 
@@ -833,7 +836,8 @@ void listener_service::progress_active(
         ++idle_timeouts_;
         log().dia("session %llu idle timeout", static_cast<unsigned long long>(value.id));
     }
-    start_draining(value, now);
+    start_draining(value, now, 0,
+        value.downstream->closed() || value.upstream->closed() ? "transport closed" : "idle timeout");
 }
 
 bool listener_service::flush_session_output(session& value) {
@@ -867,22 +871,22 @@ void listener_service::reap_expired(std::chrono::steady_clock::time_point now) {
             ++iterator;
             continue;
         }
-        ++upstream_failures_;
+        ++handshake_timeouts_;
+        dispatcher_bindings_.erase(iterator->first);
+        if (iterator->second.connection) iterator->second.connection->close(1);
         iterator = staged_upstreams_.erase(iterator);
     }
 
-    // OpenSSL need not invoke the suspended certificate callback again after
-    // its connection disappears. Completed futures are safe to destroy here;
-    // retain running jobs because std::future destruction could block the loop.
+    // A disconnected downstream may never resume its certificate callback.
+    // All pending transport state is worker-owned and can be released here.
     for (auto iterator = certificate_jobs_.begin(); iterator != certificate_jobs_.end();) {
-        auto const expired = now - iterator->second.created >= lifecycle_.handshake_timeout;
-        auto const ready = iterator->second.result.wait_for(std::chrono::milliseconds(0))
-            == std::future_status::ready;
-        if (!expired || !ready) {
+        if (now - iterator->second.created < lifecycle_.handshake_timeout) {
             ++iterator;
             continue;
         }
-        ++upstream_failures_;
+        ++handshake_timeouts_;
+        dispatcher_bindings_.erase(iterator->first);
+        if (iterator->second.upstream) iterator->second.upstream->close(1);
         iterator = certificate_jobs_.erase(iterator);
     }
 
@@ -958,6 +962,25 @@ static tls_snapshot snapshot_tls(SSL* ssl) {
     return result;
 }
 
+std::string listener_service::handshake_phase(session const& value) const {
+    if (value.state == session_state::draining) return value.last_handshake_phase;
+    if (value.state == session_state::active) return "complete";
+    if (value.downstream) {
+        auto const job = certificate_jobs_.find(value.downstream->native_handle());
+        if (job != certificate_jobs_.end()) {
+            switch (job->second.state) {
+            case certificate_state::queued: return "upstream-connect";
+            case certificate_state::upstream_handshake: return "upstream-handshake";
+            case certificate_state::certificate_ready: return "certificate-install";
+            case certificate_state::failed: return "upstream-failed";
+            }
+        }
+    }
+    if (value.upstream && !value.upstream->handshake_complete()) return "upstream-handshake";
+    if (value.downstream && !value.downstream->handshake_complete()) return "downstream-handshake";
+    return value.upstream ? "bridge-setup" : "upstream-connect";
+}
+
 void listener_service::publish_session_snapshots(
     std::chrono::steady_clock::time_point now) {
     std::vector<session_snapshot> result;
@@ -965,6 +988,8 @@ void listener_service::publish_session_snapshots(
     for (auto const& linked : sessions_) {
         session_snapshot item;
         item.id = linked.id;
+        item.handshake_phase = handshake_phase(linked);
+        item.end_reason = linked.end_reason;
         item.state = linked.state == session_state::handshake ? "handshake"
                    : linked.state == session_state::active ? "active" : "draining";
         if (linked.state == session_state::draining) {
@@ -983,10 +1008,15 @@ void listener_service::publish_session_snapshots(
             auto const& host = upstream_host_.empty() ? item.server_name : upstream_host_;
             if (!host.empty()) item.target = host + ":" + std::to_string(upstream_port_);
         }
-        if (linked.upstream) {
-            item.upstream_alpn = linked.upstream->negotiated_alpn();
+        auto upstream = linked.upstream;
+        if (!upstream && linked.downstream) {
+            auto const job = certificate_jobs_.find(linked.downstream->native_handle());
+            if (job != certificate_jobs_.end()) upstream = job->second.upstream;
+        }
+        if (upstream) {
+            item.upstream_alpn = upstream->negotiated_alpn();
             item.upstream_tls = linked.state == session_state::draining
-                ? linked.draining_upstream_tls : snapshot_tls(linked.upstream->native_handle());
+                ? linked.draining_upstream_tls : snapshot_tls(upstream->native_handle());
         }
         item.age_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - linked.created).count();
@@ -1009,8 +1039,24 @@ void listener_service::publish_session_snapshots(
 
 void listener_service::start_draining(session& value,
                                       std::chrono::steady_clock::time_point now,
-                                      std::uint64_t protocol_error) {
+                                      std::uint64_t protocol_error, const char* reason) {
     if (value.state == session_state::draining) return;
+
+    value.last_handshake_phase = handshake_phase(value);
+    value.end_reason = reason;
+    if (value.downstream) {
+        auto const key = value.downstream->native_handle();
+        if (auto pending = certificate_jobs_.find(key); pending != certificate_jobs_.end()) {
+            if (pending->second.state == certificate_state::failed) value.end_reason = "upstream certificate preparation failed";
+            if (!value.upstream) value.upstream = std::move(pending->second.upstream);
+            certificate_jobs_.erase(pending);
+        }
+        if (auto staged = staged_upstreams_.find(key); staged != staged_upstreams_.end()) {
+            if (!value.upstream) value.upstream = std::move(staged->second.connection);
+            staged_upstreams_.erase(staged);
+        }
+        dispatcher_bindings_.erase(key);
+    }
 
     if(value.downstream)
         value.draining_downstream_tls = snapshot_tls(value.downstream->native_handle());
@@ -1053,12 +1099,6 @@ void listener_service::cleanup_sessions() {
     }
     sessions_.clear();
     staged_upstreams_.clear();
-    for (auto& job : certificate_jobs_) {
-        try {
-            (void)job.second.result.get();
-        } catch (...) {
-        }
-    }
     certificate_jobs_.clear();
     pending_captures_.clear();
     capture_routes_.clear();
@@ -1145,7 +1185,7 @@ int listener_service::bind_capture_session(SSL* downstream) {
     if (existing != dispatcher_bindings_.end() &&
         detail::same_dispatcher_callback_association(
             existing->second.association, association)) {
-        // OpenSSL may report ClientHello more than once while the asynchronous
+        // OpenSSL may report ClientHello more than once while the pending
         // certificate callback is suspended. It is still the same handshake;
         // changing its generation here makes the resumed callback look like
         // allocator reuse and fails every otherwise valid connection closed.
@@ -1193,51 +1233,38 @@ int listener_service::prepare_verified_certificate(SSL* downstream) {
 
     if (auto found = certificate_jobs_.find(downstream);
         found != certificate_jobs_.end()) {
+        auto& job = found->second;
         if (!detail::same_certificate_callback_identity(
-                found->second.server_name, found->second.callback_generation,
+                job.server_name, job.callback_generation,
                 server_name, generation)) {
-            // Destroying a running std::future may block. Fail the new
-            // handshake closed and let reap_expired() collect the old job.
-            if (found->second.result.wait_for(std::chrono::milliseconds(0))
-                != std::future_status::ready) {
-                log().war("certificate job belongs to a reused OpenSSL handle");
-                return 0;
-            }
+            if (job.upstream) job.upstream->close(1);
             certificate_jobs_.erase(found);
-        } else {
-            if (found->second.result.wait_for(std::chrono::milliseconds(0))
-                != std::future_status::ready) {
-                log().deb("certificate job still pending");
-                return -1;
-            }
-            verified_certificate verified;
-            try {
-                verified = found->second.result.get();
-            } catch (...) {
-                log().err("certificate job raised an exception");
-                certificate_jobs_.erase(found);
-                return 0;
-            }
-            auto setup = found->second.setup;
-            auto const client = found->second.client;
-            auto const destination = found->second.destination;
-            certificate_jobs_.erase(found);
-            if (!install_verified_certificate(downstream, verified)) {
-                ++upstream_failures_;
-                log().war("verified certificate preparation failed for peer=%s target=%s",
-                          endpoint_text(client).c_str(), endpoint_text(destination).c_str());
-                return 0;
-            }
-
-            // Do not create another OpenSSL object reentrantly from this certificate
-            // callback. Save only immutable routing data; accept_connections()
-            // creates the forwarding connection in a normal listener-loop pass.
-            staged_upstreams_.emplace(downstream, staged_upstream {
-                std::move(setup), client, destination, server_name, generation });
-            return 1;
+            return 0;
         }
+
+        if (job.state == certificate_state::queued
+            || job.state == certificate_state::upstream_handshake) return -1;
+        if (job.state == certificate_state::failed) return 0;
+        if (!install_verified_certificate(downstream, job.result)) {
+            ++upstream_failures_;
+            job.state = certificate_state::failed;
+            return 0;
+        }
+        auto upstream = std::move(job.upstream);
+        auto setup = job.setup;
+        auto const client = job.client;
+        auto const destination = job.destination;
+        certificate_jobs_.erase(found);
+
+        // Only transfer ownership here; never drive another SSL object
+        // reentrantly from the downstream certificate callback.
+        staged_upstreams_.emplace(downstream, staged_upstream {
+            std::move(setup), client, destination, server_name, generation,
+            std::chrono::steady_clock::now(), std::move(upstream) });
+        return 1;
     }
 
+    if (generation == 0) return 0; // Closed or unbound downstream: never restart B.
     if (!raw_name || *raw_name == '\0') {
         log().war("downstream handshake rejected: SNI is missing");
         return 0;
@@ -1301,39 +1328,59 @@ int listener_service::prepare_verified_certificate(SSL* downstream) {
         setup = setup_factory_(host, port);
     }
 
-    try {
-        certificate_jobs_.emplace(
-            downstream,
-            certificate_job { setup, std::async(std::launch::async,
-                [this, destination, server_name, setup]() mutable {
-                    return verify_and_spoof(std::move(destination), std::move(server_name), setup);
-                }), peer_endpoint, destination, server_name, generation });
-    } catch (...) {
-        log().err("cannot start certificate job sni='%s'", server_name.c_str());
-        return 0;
-    }
+    certificate_jobs_.emplace(downstream, certificate_job {
+        std::move(setup), {}, peer_endpoint, destination, server_name, generation,
+        std::chrono::steady_clock::now(), {}, certificate_state::queued });
     return -1;
 }
 
-listener_service::verified_certificate listener_service::verify_and_spoof(
-    datagram_endpoint destination, std::string server_name,
-    std::shared_ptr<proxymaker::SessionSetup> setup) {
-    verified_certificate verified;
-    auto upstream = transparent_
-        ? connect_upstream(destination, server_name, setup.get(), true)
-        : connect_upstream(server_name, setup.get(), true);
-    if (!upstream) {
-        log().war("upstream connect failed sni='%s' target=%s", server_name.c_str(),
-                  endpoint_text(destination).c_str());
-        return verified;
-    }
+void listener_service::progress_certificate_jobs() {
+    for (auto& [downstream, job] : certificate_jobs_) {
+        if (job.state == certificate_state::certificate_ready
+            || job.state == certificate_state::failed) {
+            // Preserve early streams in OpenSSL until the bridge takes over.
+            if (job.upstream) job.upstream->progress_transport();
+            continue;
+        }
+        if (std::chrono::steady_clock::now() - job.created >= lifecycle_.handshake_timeout) {
+            // The session timeout owns the transition and its counter.
+            // Unaccepted jobs are expired by reap_expired().
+            continue;
+        }
+        if (!job.upstream) {
+            job.upstream = transparent_
+                ? connect_upstream(job.destination, job.server_name, job.setup.get())
+                : connect_upstream(job.server_name, job.setup.get());
+        }
+        if (!job.upstream) {
+            ++upstream_failures_;
+            job.state = certificate_state::failed;
+            continue;
+        }
 
-    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (!upstream->handshake_complete() && !upstream->closed()
-           && std::chrono::steady_clock::now() < deadline) {
-        upstream->drain_events();
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        job.state = certificate_state::upstream_handshake;
+        job.upstream->progress_transport();
+        if (job.upstream->closed()) {
+            hook_outcome(job.setup.get(), job.upstream->native_handle(), false,
+                         "QUIC upstream handshake failed");
+            ++upstream_failures_;
+            job.state = certificate_state::failed;
+            continue;
+        }
+        if (!job.upstream->handshake_complete()) continue;
+        if (hook_outcome(job.setup.get(), job.upstream->native_handle(), false)) {
+            job.result = verify_and_spoof(job.upstream, job.destination, job.server_name);
+        }
+        if (!job.result.certificate) ++upstream_failures_;
+        job.state = job.result.certificate ? certificate_state::certificate_ready
+                                           : certificate_state::failed;
     }
+}
+
+listener_service::verified_certificate listener_service::verify_and_spoof(
+    std::shared_ptr<openssl_connection> const& upstream,
+    datagram_endpoint destination, std::string const& server_name) {
+    verified_certificate verified;
     if (!upstream->handshake_complete()
         || SSL_get_verify_result(upstream->native_handle()) != X509_V_OK) {
         log().war("upstream verification failed sni='%s' target=%s verify=%ld",
@@ -1390,10 +1437,8 @@ listener_service::verified_certificate listener_service::verify_and_spoof(
         if (forged && forged->chain.cert && forged->chain.key) {
             ready = retain(forged->chain.cert, forged->chain.key);
             // ptr_cache uses allocator state tied to the allocating thread.
-            // Certificate jobs run asynchronously, so publishing a new cache
-            // node here would leave teardown to free it from another thread.
-            // Keep the retained result session-local; existing cache entries
-            // remain readable until cache publication is moved to its owner.
+            // Keep the retained result session-local: shared cache teardown
+            // can still occur on a different worker from its allocation.
             X509_free(forged->chain.cert);
             forged->nullify(); // SSLFactory::spoof() returns def_sr_key as borrowed.
         }
@@ -1406,9 +1451,7 @@ listener_service::verified_certificate listener_service::verify_and_spoof(
     }
     log().deb("certificate ready sni='%s' target=%s", server_name.c_str(),
               endpoint_text(destination).c_str());
-    // Do not publish this live QUIC object across the async boundary. Its only
-    // purpose was origin authentication and certificate discovery.
-    upstream->close();
+    // The worker retains this authenticated connection for application data.
     return verified;
 }
 
@@ -1421,7 +1464,7 @@ bool listener_service::install_verified_certificate(
 }
 
 std::shared_ptr<openssl_connection> listener_service::connect_upstream(
-    std::string const& host, proxymaker::SessionSetup* setup, bool probe) {
+    std::string const& host, proxymaker::SessionSetup* setup) {
     if (host.empty() || !client_context_) return nullptr;
     addrinfo hints {};
     hints.ai_family = AF_UNSPEC;
@@ -1443,7 +1486,7 @@ std::shared_ptr<openssl_connection> listener_service::connect_upstream(
         auto const [target_host, target_port] = endpoint_parts(target);
         auto connection = proxymaker::connect(setup, target_host, target_port, [&] {
             return connect_with_hooks(client_context_.get(), current->ai_addr,
-                                      current->ai_addrlen, host, &error, probe ? nullptr : setup);
+                                      current->ai_addrlen, host, &error, setup);
         });
         if (connection) result = std::shared_ptr<openssl_connection>(std::move(connection));
     }
@@ -1453,14 +1496,14 @@ std::shared_ptr<openssl_connection> listener_service::connect_upstream(
 
 std::shared_ptr<openssl_connection> listener_service::connect_upstream(
     datagram_endpoint const& target, std::string const& server_name,
-    proxymaker::SessionSetup* setup, bool probe) {
+    proxymaker::SessionSetup* setup) {
     if (!target.valid() || server_name.empty() || !client_context_) return nullptr;
     std::string error;
     auto const [host, port] = endpoint_parts(target);
     auto connection = proxymaker::connect(setup, host, port, [&] {
         return connect_with_hooks(
             client_context_.get(), reinterpret_cast<sockaddr const*>(&target.address),
-            target.size, server_name, &error, probe ? nullptr : setup);
+            target.size, server_name, &error, setup);
     });
     return connection
         ? std::shared_ptr<openssl_connection>(std::move(connection))
