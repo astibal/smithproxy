@@ -237,8 +237,10 @@ if [[ $CAPTURE_TEST == 1 && ${CAPTURE_GRE_FORMAT:-traffic} == traffic ]]; then
     done
     [[ -f $ROOT/results/gre-ready ]]
 fi
-ip netns exec "$SERVER" python3 -u "$ROOT/runner/tests/origin.py" "$ROOT/config/certs" > "$ROOT/results/origin.log" 2>&1 &
-ORIGIN_PID=$!
+if [[ $QUIC_THROUGHPUT_TEST != 1 ]]; then
+    ip netns exec "$SERVER" python3 -u "$ROOT/runner/tests/origin.py" "$ROOT/config/certs" > "$ROOT/results/origin.log" 2>&1 &
+    ORIGIN_PID=$!
+fi
 if [[ $QUIC_TEST == 1 ]]; then
     [[ -x ${QUIC_CURL_BIN:-} ]] || {
         echo "FAIL: QUIC_CURL_BIN is not executable: ${QUIC_CURL_BIN:-<unset>}" >&2
@@ -248,10 +250,12 @@ if [[ $QUIC_TEST == 1 ]]; then
         echo "FAIL: QUIC_CURL_BIN lacks HTTP/3 support" >&2
         exit 1
     }
-    python3 -c 'import aioquic' || {
-        echo 'FAIL: QUIC runner requires the aioquic Python package' >&2
-        exit 1
-    }
+    if [[ $QUIC_THROUGHPUT_TEST != 1 ]]; then
+        python3 -c 'import aioquic' || {
+            echo 'FAIL: QUIC runner requires the aioquic Python package' >&2
+            exit 1
+        }
+    fi
     command -v tshark >/dev/null
     command -v tcpdump >/dev/null
     [[ -r ${SPQ1_DISSECTOR:-} ]] || {
@@ -265,13 +269,29 @@ if [[ $QUIC_TEST == 1 ]]; then
         future_*) QUIC_ORIGIN_IDENTITY=future ;;
         untrusted_*) QUIC_ORIGIN_IDENTITY=untrusted ;;
     esac
-    QUIC_ORIGIN_ARGS=()
-    [[ $QUIC_THROUGHPUT_TEST != 1 ]] || QUIC_ORIGIN_ARGS+=(--bulk)
-    ip netns exec "$SERVER" python3 -u "$ROOT/runner/tests/h3-origin.py" "${QUIC_ORIGIN_ARGS[@]}" \
-        --host6 fd00:20::2 \
-        --certificate "$ROOT/config/certs/$QUIC_ORIGIN_IDENTITY-cert.pem" \
-        --key "$ROOT/config/certs/$QUIC_ORIGIN_IDENTITY-key.pem" \
-        > "$ROOT/results/h3-origin.log" 2>&1 &
+    if [[ $QUIC_THROUGHPUT_TEST == 1 ]]; then
+        [[ -x ${NATIVE_H3_SERVER_BIN:-} && -x ${NATIVE_H3_CLIENT_BIN:-} ]] || {
+            echo 'FAIL: prepare the native HTTP/3 benchmark runtime first' >&2
+            exit 1
+        }
+        # Preserve the endpoint versions and hashes with the measured results.
+        native_prefix=$(dirname -- "$(dirname -- "$NATIVE_H3_SERVER_BIN")")
+        cp -a "$native_prefix/share/native-h3" "$ROOT/results/native-h3-runtime"
+        ip netns exec "$SERVER" python3 -u "$ROOT/runner/tests/native-h3-origin.py" \
+            --server "$NATIVE_H3_SERVER_BIN" \
+            --workers "${QUIC_THROUGHPUT_ORIGIN_WORKERS:-4}" \
+            --bytes "${QUIC_THROUGHPUT_BYTES:-67108864}" \
+            --directory "$ROOT/data/native-h3-www" --pid-file "$ROOT/data/native-h3-pids.json" \
+            --certificate "$ROOT/config/certs/origin-cert.pem" \
+            --key "$ROOT/config/certs/origin-key.pem" \
+            > "$ROOT/results/h3-origin.log" 2>&1 &
+    else
+        ip netns exec "$SERVER" python3 -u "$ROOT/runner/tests/h3-origin.py" \
+            --host6 fd00:20::2 \
+            --certificate "$ROOT/config/certs/$QUIC_ORIGIN_IDENTITY-cert.pem" \
+            --key "$ROOT/config/certs/$QUIC_ORIGIN_IDENTITY-key.pem" \
+            > "$ROOT/results/h3-origin.log" 2>&1 &
+    fi
     H3_ORIGIN_PID=$!
     for attempt in $(seq 1 100); do
         grep -q '^READY h3-origin ' "$ROOT/results/h3-origin.log" && break
@@ -454,27 +474,35 @@ if [[ $PRIVSEP_TEST == 1 ]]; then
     echo 'PASS6 privsep TCP/HTTP: unprivileged core uses transparent listener'
 fi
 if [[ $QUIC_THROUGHPUT_TEST == 1 ]]; then
+    # Both endpoints process QUIC/H3 natively. Curl remains a selectable C
+    # cross-check; neither option moves application data through this driver.
+    QUIC_TRANSFER_ARGS=(--origin-pid-file "$ROOT/data/native-h3-pids.json")
+    case ${QUIC_THROUGHPUT_CLIENT:-native} in
+        native) QUIC_TRANSFER_ARGS+=(--h3-client "$NATIVE_H3_CLIENT_BIN") ;;
+        curl) ;;
+        *) echo 'QUIC_THROUGHPUT_CLIENT must be native or curl' >&2; exit 2 ;;
+    esac
     for family in 4 6; do
         host=198.18.20.2
         [[ $family != 6 ]] || host=fd00:20::2
         ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/tls-transfer.py" \
-            --protocol h3 --curl "$QUIC_CURL_BIN" --host "$host" \
+            --protocol h3 --curl "$QUIC_CURL_BIN" --host "$host" "${QUIC_TRANSFER_ARGS[@]}" \
             --ca-file "$ROOT/config/certs/ca-cert.pem" --pid "$(cat "$ROOT/data/proxy.pid")" \
-            --bytes "${QUIC_THROUGHPUT_BYTES:-8388608}" \
+            --bytes "${QUIC_THROUGHPUT_BYTES:-67108864}" \
             --repeats "${QUIC_THROUGHPUT_REPEATS:-3}" \
             --cooldown-seconds "${QUIC_THROUGHPUT_COOLDOWN_SECONDS:-0}" \
             --concurrency "${QUIC_THROUGHPUT_CONCURRENCY:-1,4,16}" \
             --output "$ROOT/results/quic-throughput-v$family.json" > /dev/null
         python3 "$ROOT/runner/tests/tls-transfer-report.py" --label 'QUIC throughput' \
             "$ROOT/results/quic-throughput-v$family.json"
-        # The same curl/origin pair bounds what this fixture can deliver.
+        # The same native client/origin pair bounds what this fixture can deliver.
         # Starting in the proxy namespace reaches the origin directly, without
         # changing transparent interception rules or trusting the MITM CA.
         if [[ ${QUIC_THROUGHPUT_DIRECT_BASELINE:-1} == 1 ]]; then
             ip netns exec "$NS" python3 "$ROOT/runner/tests/tls-transfer.py" \
-                --protocol h3 --curl "$QUIC_CURL_BIN" --host "$host" \
+                --protocol h3 --curl "$QUIC_CURL_BIN" --host "$host" "${QUIC_TRANSFER_ARGS[@]}" \
                 --ca-file "$ROOT/config/certs/origin-ca.pem" \
-                --bytes "${QUIC_THROUGHPUT_BYTES:-8388608}" \
+                --bytes "${QUIC_THROUGHPUT_BYTES:-67108864}" \
                 --repeats "${QUIC_THROUGHPUT_REPEATS:-3}" \
                 --cooldown-seconds "${QUIC_THROUGHPUT_COOLDOWN_SECONDS:-0}" \
                 --concurrency "${QUIC_THROUGHPUT_CONCURRENCY:-1,4,16}" \

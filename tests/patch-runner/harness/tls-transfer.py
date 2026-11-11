@@ -3,7 +3,9 @@ import argparse
 import concurrent.futures
 import json
 import math
+import os
 import pathlib
+import resource
 import statistics
 import subprocess
 import sys
@@ -12,14 +14,31 @@ import time
 
 
 def process_cpu_seconds(pid):
+    """Read process CPU, excluding wall time and allowing spaces in comm."""
     if pid is None:
         return None
-    fields = pathlib.Path(f"/proc/{pid}/stat").read_text().split()
-    ticks = int(fields[13]) + int(fields[14])
-    return ticks / float(__import__("os").sysconf("SC_CLK_TCK"))
+    fields = pathlib.Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
+    return (int(fields[11]) + int(fields[12])) / os.sysconf("SC_CLK_TCK")
+
+
+def child_cpu_seconds():
+    """Account for the reaped native clients, including all concurrent flows."""
+    usage = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return usage.ru_utime + usage.ru_stime
+
+
+def native_command(args, mode, payload_file):
+    """Use the independent C++ endpoint; the driver never handles payload data."""
+    command = [args.h3_client, "-q", "--exit-on-all-streams-close",
+               "--handshake-timeout=10s", f"--timeout={args.timeout}s",
+               "--sni=origin.runner.lab"]
+    if mode == "upload":
+        command += ["--http-method=POST", "-d", str(payload_file)]
+    return command + [args.host, "443", f"https://origin.runner.lab/bulk/{args.bytes}"]
 
 
 def curl_command(args, mode, payload_file, run):
+    """Keep curl as the TLS client and an independent native H3 cross-check."""
     url = f"https://origin.runner.lab/bulk/{args.bytes}?run={run}"
     resolved_host = f"[{args.host}]" if ":" in args.host else args.host
     command = [
@@ -41,36 +60,72 @@ def curl_command(args, mode, payload_file, run):
 
 
 def transfer_once(args, mode, concurrency, payload_file, run):
-    command = curl_command(args, mode, payload_file, run)
+    """Time a checked transfer batch and report CPU at each measured endpoint."""
+    command = (native_command(args, mode, payload_file) if args.h3_client
+               else curl_command(args, mode, payload_file, run))
+    environment = dict(os.environ)
+    if args.h3_client:
+        environment["SSL_CERT_FILE"] = args.ca_file
+    server_pids = (json.loads(args.origin_pid_file.read_text())["pids"]
+                   if args.origin_pid_file else [])
+    server_before = {pid: process_cpu_seconds(pid) for pid in server_pids}
+    client_before = child_cpu_seconds()
     cpu_started = process_cpu_seconds(args.pid)
     started = time.monotonic()
     with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
         results = list(pool.map(
             lambda _: subprocess.run(command, stdout=subprocess.PIPE,
-                                     stderr=subprocess.PIPE, text=True),
+                                     stderr=subprocess.PIPE, text=True,
+                                     env=environment, timeout=args.timeout),
             range(concurrency)))
     elapsed = time.monotonic() - started
     cpu_elapsed = (process_cpu_seconds(args.pid) - cpu_started
                    if cpu_started is not None else None)
+    client_elapsed = child_cpu_seconds() - client_before
+    server_elapsed = {pid: process_cpu_seconds(pid) - before
+                      for pid, before in server_before.items()}
     failures = [f"flow={index}: {result.stderr.strip()}"
                 for index, result in enumerate(results) if result.returncode]
     if failures:
         raise RuntimeError(
             f"mode={mode} concurrency={concurrency} run={run}: "
             + "; ".join(failures))
+    flows = []
     for index, response in enumerate(results):
-        measured = json.loads(response.stdout)
+        if args.h3_client:
+            records = [json.loads(line) for line in response.stdout.splitlines()
+                       if line.startswith('{"h3_benchmark":')]
+            if len(records) != 1:
+                raise RuntimeError(f"flow={index}: missing H3 completion: {response.stderr.strip()}")
+            measured = records[0]
+            # A demo program's exit status alone does not prove a completed
+            # transfer. Require HTTP success, clean stream close and payload.
+            if (measured["error_code"] not in (0, 256) or measured["nonzero"]
+                    or measured["http_code"] != 200):
+                raise RuntimeError(f"flow={index}: invalid H3 completion: {measured}")
+        else:
+            measured = json.loads(response.stdout)
         # The TLS fixture can answer HTTP/1.0 even when curl offers HTTP/1.1.
         expected_versions = {"3"} if args.protocol == "h3" else {"1", "1.0", "1.1"}
         direction = "size_download" if mode == "download" else "size_upload"
         if str(measured["http_version"]) not in expected_versions or int(measured[direction]) != args.bytes:
             raise RuntimeError(f"flow={index}: HTTP/{measured['http_version']}, "
                                f"{direction}={measured[direction]}, expected={args.bytes} ({args.protocol})")
+        flows.append({key: measured[key] for key in
+                      ("http_version", "http_code", "size_download", "size_upload")})
     mib = args.bytes * concurrency / (1024 * 1024)
-    result = {"seconds": elapsed, "mib_per_second": mib / elapsed}
+    result = {"seconds": elapsed, "mib_per_second": mib / elapsed, "flows": flows,
+              "client_cpu_seconds": client_elapsed,
+              "client_cpu_percent": client_elapsed / elapsed * 100}
     if cpu_elapsed is not None:
         result["proxy_cpu_seconds"] = cpu_elapsed
         result["proxy_cpu_seconds_per_gib"] = cpu_elapsed / (mib / 1024)
+    if server_elapsed:
+        result["origin_cpu_seconds"] = sum(server_elapsed.values())
+        result["origin_cpu_percent"] = result["origin_cpu_seconds"] / elapsed * 100
+        result["origin_worker_cpu_percent"] = {
+            str(pid): used / elapsed * 100 for pid, used in server_elapsed.items()}
+        result["origin_busiest_cpu_percent"] = max(result["origin_worker_cpu_percent"].values())
     return result
 
 
@@ -78,6 +133,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--protocol", choices=("h1", "h3"), default="h1")
     parser.add_argument("--curl", default="curl")
+    parser.add_argument("--h3-client", help="Native ngtcp2 benchmark client; H3 only")
+    parser.add_argument("--origin-pid-file", type=pathlib.Path,
+                        help="Native origin worker PID manifest for CPU accounting")
     parser.add_argument("--host", default="198.18.20.2")
     parser.add_argument("--ca-file", required=True)
     parser.add_argument("--bytes", type=int, default=64 * 1024 * 1024)
@@ -95,6 +153,8 @@ def main():
     args = parser.parse_args()
     if args.protocol == "h3" and (args.tls_version or args.cipher):
         parser.error("H3 uses QUIC TLS configuration, not TCP TLS cipher switches")
+    if args.h3_client and args.protocol != "h3":
+        parser.error("--h3-client requires --protocol h3")
     concurrencies = [int(value) for value in args.concurrency.split(",")]
 
     if not math.isfinite(args.cooldown_seconds) or args.cooldown_seconds < 0:
@@ -114,6 +174,9 @@ def main():
         transfer_once(args, "upload", 1, payload_file, "warmup-upload")
 
         output = {"host": args.host, "protocol": args.protocol, "curl": args.curl,
+                  "client": args.h3_client or args.curl,
+                  "origin": (json.loads(args.origin_pid_file.read_text())
+                             if args.origin_pid_file else None),
                   "address_family": "IPv6" if ":" in args.host else "IPv4",
                   "cooldown_seconds": args.cooldown_seconds,
                   "bytes_per_flow": args.bytes, "repeats": args.repeats,
@@ -150,6 +213,11 @@ def main():
                     result["median_proxy_cpu_seconds_per_gib"] = statistics.median(cpu_rates)
                     result["min_proxy_cpu_seconds_per_gib"] = min(cpu_rates)
                     result["max_proxy_cpu_seconds_per_gib"] = max(cpu_rates)
+                for endpoint in ("client", "origin", "origin_busiest"):
+                    percentages = [sample[f"{endpoint}_cpu_percent"] for sample in samples
+                                   if f"{endpoint}_cpu_percent" in sample]
+                    if percentages:
+                        result[f"median_{endpoint}_cpu_percent"] = statistics.median(percentages)
                 output["results"].append(result)
                 checkpoint()
                 print(f"Measured {args.protocol} {output['address_family']} {mode} "

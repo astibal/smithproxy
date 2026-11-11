@@ -1,0 +1,2 @@
+# Unified patches retain the context prefix on empty source lines.
+*.patch -whitespace

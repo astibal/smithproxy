@@ -90,6 +90,7 @@ run_section() {
             PATCH_TEST_DIRTY_OVERRIDE="$PATCH_RUN_DIRTY" \
             CURL_HTTP3_PREFIX="$BUNDLE/curl-http3" \
             QUIC_PYTHON_PREFIX="$BUNDLE/quic-python" \
+            NATIVE_H3_PREFIX="$BUNDLE/native-h3" \
             "$BUNDLE/tests/patch-runner/test-patch.sh" sanity \
             --skip-build --build-dir "$BUNDLE/build" --shared-binary "$BUNDLE/build/smithproxy" \
             --quiet --worker --local --suite "$section" --dir "$WORK_ROOT/sections/$job" \

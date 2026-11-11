@@ -676,6 +676,42 @@ tests/patch-runner/prepare-quic-runtime.sh
 
 Override the locations with `CURL_HTTP3_PREFIX` and `QUIC_PYTHON_PREFIX`.
 
+`quic-throughput` instead uses native C++ client/server endpoints based on
+ngtcp2 1.16.0 and nghttp3 1.12.0. Python only launches processes and collects
+measurements; it does not handle QUIC datagrams or HTTP bodies. Prepare this
+separate runtime with a C++20 toolchain, CMake, pkg-config, libev development
+files and OpenSSL 3.5 or newer:
+
+```bash
+tests/patch-runner/prepare-native-h3.sh
+python3 tests/patch-runner/test-native-h3.py --runtime ../native-h3
+```
+
+The builder verifies release archive hashes, applies the small benchmark
+adapters in `native-h3/`, and records runtime hashes and linkage. It never
+installs system packages or changes Smithproxy's build. Extra arguments after
+the output directory are ordinary CMake options. Protocol libraries and libev
+are bundled for remote labs; OpenSSL remains a host dependency. Override the
+runtime location with `NATIVE_H3_PREFIX`.
+
+The native client verifies the CA, hostname, response status, stream completion,
+download length and every payload byte. The server acknowledges an upload only
+after receiving and checking its complete zero-filled body. The contract test
+also checks corrupt/short uploads and wrong CA/hostname rejection on both IP
+families. `QUIC_THROUGHPUT_CLIENT=curl` selects the independent C client for a
+cross-check against the same native server.
+
+Four origin processes share the destination IP/port using `SO_REUSEPORT` by
+default; `QUIC_THROUGHPUT_ORIGIN_WORKERS` changes their count. This fixture uses
+stable connection tuples, not client migration. Hash distribution can be uneven,
+so the report includes per-origin-process CPU as well as aggregate client,
+origin and proxy CPU. The direct baseline uses the same endpoints and workload
+without interception. Compare it with each proxied result before attributing a
+limit to Smithproxy. Rates are aggregate MiB/s across concurrent flows, with no
+numeric performance gate. A failed or incomplete transfer still fails the suite.
+The default payload is 64 MiB per flow (`QUIC_THROUGHPUT_BYTES`); increase it for
+longer steady-state samples when the direct reference completes too quickly.
+
 The runner creates disposable namespaces and veth pairs but does not install
 host iptables/nftables traffic-redirection rules. Cleanup verifies that its own
 namespaces, API/CLI listeners and interfaces are gone and that ordinary host

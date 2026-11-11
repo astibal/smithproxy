@@ -99,7 +99,9 @@ Common environment variables:
   RTT_MAX_LIMIT_MS               General RTT maximum gate (default: 250).
   RTT_HANDSHAKE_P95_LIMIT_MS     Handshake P95 gate (default: 500).
   RTT_HANDSHAKE_MAX_LIMIT_MS     Handshake maximum gate (default: 2000).
-  QUIC_THROUGHPUT_BYTES          Bytes per H3 flow (default: 8 MiB).
+  QUIC_THROUGHPUT_BYTES          Bytes per H3 flow (default: 64 MiB).
+  QUIC_THROUGHPUT_CLIENT         Native ngtcp2 client (default: native) or curl.
+  QUIC_THROUGHPUT_ORIGIN_WORKERS Native server processes sharing UDP 443 (default: 4).
   QUIC_THROUGHPUT_REPEATS        Samples per direction/concurrency (default: 3).
   QUIC_THROUGHPUT_CONCURRENCY    Independent H3 connections (default: 1,4,16).
   QUIC_WORKERS                  QUIC workers per address family (default: 1).
@@ -112,6 +114,7 @@ Common environment variables:
   TCP_CHURN_SYNCHRONIZED         Release every TCP wave from one barrier (default: 0).
   CURL_HTTP3_PREFIX              curl installation whose bin/curl-h3 supports HTTP/3.
   QUIC_PYTHON_PREFIX             Prepared aioquic runtime copied to test targets.
+  NATIVE_H3_PREFIX               Native ngtcp2/nghttp3 benchmark runtime.
   FUZZ_RECENT_SEEDS              Recent seeds per fuzz area (default: 4).
   FUZZ_ARCHIVE_SEEDS             Rotating archived seeds per area (default: 4).
   FUZZ_ROTATION_DAYS             Archive rotation period (default: 7).
@@ -624,15 +627,29 @@ run_distributed_sections() {
             STATUS=FAIL; TEST_RC=2
             return
         }
-        [[ -f $quic_python_prefix/aioquic/__init__.py ]] || {
-            echo "Missing QUIC Python runtime: $quic_python_prefix (run $HERE/prepare-quic-runtime.sh)" >&2
+        cp -a "$quic_curl_prefix" "$bundle_local/curl-http3"
+        for section in "${sections[@]}"; do
+            if [[ $section == quic || $section == quic-pcapng || $section == quic-cert.* ]]; then
+                [[ -f $quic_python_prefix/aioquic/__init__.py ]] || {
+                    echo "Missing QUIC Python runtime: $quic_python_prefix (run $HERE/prepare-quic-runtime.sh)" >&2
+                    STATUS=FAIL; TEST_RC=2
+                    return
+                }
+                cp -a "$quic_python_prefix" "$bundle_local/quic-python"
+                break
+            fi
+        done
+    else
+        mkdir -p "$bundle_local/curl-http3"
+    fi
+    if [[ " ${sections[*]} " == *" quic-throughput "* ]]; then
+        native_h3_prefix=${NATIVE_H3_PREFIX:-$ROOT/../native-h3}
+        [[ -x $native_h3_prefix/bin/h3-client && -x $native_h3_prefix/bin/h3-server ]] || {
+            echo "Missing native H3 runtime: $native_h3_prefix (run $HERE/prepare-native-h3.sh)" >&2
             STATUS=FAIL; TEST_RC=2
             return
         }
-        cp -a "$quic_curl_prefix" "$bundle_local/curl-http3"
-        cp -a "$quic_python_prefix" "$bundle_local/quic-python"
-    else
-        mkdir -p "$bundle_local/curl-http3"
+        cp -a "$native_h3_prefix" "$bundle_local/native-h3"
     fi
     {
         printf 'PATCH_RUN_COMMIT=%q\n' "$COMMIT"
@@ -1003,6 +1020,7 @@ print(*(x.getsockname()[1] for x in s))'
     LAB_ROOT=$WORK_DIR/labs/$RUN_ID-$TAG
     QUIC_CURL_PREFIX=${CURL_HTTP3_PREFIX:-$ROOT/../curl-http3}
     QUIC_PYTHON_PREFIX=${QUIC_PYTHON_PREFIX:-$ROOT/../quic-python}
+    NATIVE_H3_PREFIX=${NATIVE_H3_PREFIX:-$ROOT/../native-h3}
     QUIC_PYTHONPATH=$QUIC_PYTHON_PREFIX
     [[ -z $REMOTE ]] || QUIC_PYTHONPATH=$LAB_ROOT/quic-python
 
@@ -1024,13 +1042,15 @@ print(*(x.getsockname()[1] for x in s))'
                 echo "Missing HTTP/3 curl: $QUIC_CURL_PREFIX/bin/curl-h3" >&2
                 exit 2
             }
-            [[ -f $QUIC_PYTHON_PREFIX/aioquic/__init__.py ]] || {
+            [[ $ONLY_SUITE == quic-throughput || -f $QUIC_PYTHON_PREFIX/aioquic/__init__.py ]] || {
                 echo "Missing QUIC Python runtime: $QUIC_PYTHON_PREFIX (run $HERE/prepare-quic-runtime.sh)" >&2
                 exit 2
             }
             ssh "${SSH_OPTIONS[@]}" "$REMOTE" "mkdir -p '$LAB_ROOT/curl-http3' '$LAB_ROOT/quic-python' '$LAB_ROOT/runner/tools'"
             scp "${SCP_OPTIONS[@]}" -r "$QUIC_CURL_PREFIX/." "$REMOTE:$LAB_ROOT/curl-http3/" >/dev/null
-            scp "${SCP_OPTIONS[@]}" -r "$QUIC_PYTHON_PREFIX/." "$REMOTE:$LAB_ROOT/quic-python/" >/dev/null
+            if [[ $ONLY_SUITE != quic-throughput ]]; then
+                scp "${SCP_OPTIONS[@]}" -r "$QUIC_PYTHON_PREFIX/." "$REMOTE:$LAB_ROOT/quic-python/" >/dev/null
+            fi
             scp "${SCP_OPTIONS[@]}" "$ROOT/tools/wireshark/spquic.lua" \
                 "$REMOTE:$LAB_ROOT/runner/tools/spquic.lua" >/dev/null
         fi
@@ -1053,13 +1073,27 @@ print(*(x.getsockname()[1] for x in s))'
                 echo "Missing HTTP/3 curl: $QUIC_CURL_PREFIX/bin/curl-h3" >&2
                 exit 2
             }
-            [[ -f $QUIC_PYTHON_PREFIX/aioquic/__init__.py ]] || {
+            [[ $ONLY_SUITE == quic-throughput || -f $QUIC_PYTHON_PREFIX/aioquic/__init__.py ]] || {
                 echo "Missing QUIC Python runtime: $QUIC_PYTHON_PREFIX (run $HERE/prepare-quic-runtime.sh)" >&2
                 exit 2
             }
             mkdir -p "$LAB_ROOT/curl-http3" "$LAB_ROOT/runner/tools"
             cp -a "$QUIC_CURL_PREFIX/." "$LAB_ROOT/curl-http3/"
             cp "$ROOT/tools/wireshark/spquic.lua" "$LAB_ROOT/runner/tools/spquic.lua"
+        fi
+    fi
+
+    if [[ $ONLY_SUITE == quic-throughput ]]; then
+        [[ -x $NATIVE_H3_PREFIX/bin/h3-client && -x $NATIVE_H3_PREFIX/bin/h3-server ]] || {
+            echo "Missing native H3 runtime: $NATIVE_H3_PREFIX (run $HERE/prepare-native-h3.sh)" >&2
+            exit 2
+        }
+        if [[ -n $REMOTE ]]; then
+            ssh "${SSH_OPTIONS[@]}" "$REMOTE" "mkdir -p '$LAB_ROOT/native-h3'"
+            scp "${SCP_OPTIONS[@]}" -r "$NATIVE_H3_PREFIX/." "$REMOTE:$LAB_ROOT/native-h3/" >/dev/null
+        else
+            mkdir -p "$LAB_ROOT/native-h3"
+            cp -a "$NATIVE_H3_PREFIX/." "$LAB_ROOT/native-h3/"
         fi
     fi
 
@@ -1082,6 +1116,7 @@ print(*(x.getsockname()[1] for x in s))'
         TLS_THROUGHPUT_BYTES TLS_THROUGHPUT_REPEATS TLS_THROUGHPUT_CONCURRENCY \
         QUIC_THROUGHPUT_BYTES QUIC_THROUGHPUT_REPEATS QUIC_THROUGHPUT_CONCURRENCY QUIC_WORKERS \
         QUIC_THROUGHPUT_DIRECT_BASELINE QUIC_THROUGHPUT_COOLDOWN_SECONDS \
+        QUIC_THROUGHPUT_CLIENT QUIC_THROUGHPUT_ORIGIN_WORKERS \
         CHURN_MIN_PORT CHURN_MAX_PORT; do
         [[ -z ${!variable:-} ]] || LAB_ENV+=("$variable=${!variable}")
     done
@@ -1156,7 +1191,9 @@ print(*(x.getsockname()[1] for x in s))'
         capture-pcapng|quic-pcapng) LAB_ENV+=("CAPTURE_GRE_FORMAT=pcapng") ;;
         capture-traffic|quic) LAB_ENV+=("CAPTURE_GRE_FORMAT=traffic") ;;
     esac
-    [[ $ONLY_SUITE != quic-throughput ]] || LAB_ENV+=("BASE_TRAFFIC_TEST=0" "QUIC_THROUGHPUT_TEST=1" "QUIC_KEYLOG_TEST=0")
+    [[ $ONLY_SUITE != quic-throughput ]] || LAB_ENV+=("BASE_TRAFFIC_TEST=0" "QUIC_THROUGHPUT_TEST=1" "QUIC_KEYLOG_TEST=0"
+        "NATIVE_H3_CLIENT_BIN=$LAB_ROOT/native-h3/bin/h3-client"
+        "NATIVE_H3_SERVER_BIN=$LAB_ROOT/native-h3/bin/h3-server")
     [[ $ONLY_SUITE != quic-cert.* ]] || LAB_ENV+=("BASE_TRAFFIC_TEST=0" "QUIC_TLS_PROFILE_TEST=${ONLY_SUITE#quic-cert.}")
     [[ $ONLY_SUITE != quic-pcapng ]] || LAB_ENV+=("QUIC_REMOTE_PCAPNG_TEST=1")
 
