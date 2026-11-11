@@ -829,6 +829,44 @@ bool inbox_readable(quic::worker_dispatcher const& receiver, std::size_t worker)
 }
 }
 
+// Receive two batches through the same storage. Alternating local addresses
+// expose stale ancillary metadata; the final probe must return without waiting.
+TEST(QuicDatagramBatch, PreservesPayloadAndDestinationAcrossReusedSlots) {
+    int fd = ::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    ASSERT_GE(fd, 0);
+    struct socket_guard { int fd; ~socket_guard() { ::close(fd); } } guard {fd};
+    int enabled = 1;
+    ASSERT_EQ(::setsockopt(fd, SOL_IP, IP_RECVORIGDSTADDR, &enabled, sizeof(enabled)), 0);
+    sockaddr_in bound {};
+    bound.sin_family = AF_INET;
+    ASSERT_EQ(::bind(fd, reinterpret_cast<sockaddr*>(&bound), sizeof(bound)), 0);
+    socklen_t length = sizeof(bound);
+    ASSERT_EQ(::getsockname(fd, reinterpret_cast<sockaddr*>(&bound), &length), 0);
+    quic::datagram_receiver receiver;
+    for (unsigned round = 0; round < 2; ++round) {
+        for (unsigned i = 0; i < quic::datagram_receiver::capacity; ++i) {
+            auto target = worker_test_address((i + round) % 2 ? "127.0.0.1" : "127.0.0.2",
+                                               ntohs(bound.sin_port));
+            std::vector<unsigned char> payload(100 + i, static_cast<unsigned char>(i + round));
+            ASSERT_EQ(::sendto(fd, payload.data(), payload.size(), 0,
+                reinterpret_cast<sockaddr*>(&target.address), target.size), payload.size());
+        }
+        unsigned received = 0;
+        EXPECT_EQ(receiver.receive(fd, [&](quic::datagram_packet&& packet) {
+            auto expected = worker_test_address((received + round) % 2 ? "127.0.0.1" : "127.0.0.2",
+                                                 ntohs(bound.sin_port));
+            EXPECT_EQ(packet.data, std::vector<unsigned char>(100 + received,
+                       static_cast<unsigned char>(received + round)));
+            EXPECT_EQ(std::memcmp(&packet.local.address, &expected.address, expected.size), 0);
+            EXPECT_TRUE(packet.peer.valid());
+            ++received;
+        }), quic::datagram_receiver::capacity);
+        EXPECT_EQ(received, quic::datagram_receiver::capacity);
+    }
+    EXPECT_EQ(receiver.receive(fd, [](quic::datagram_packet&&) { ADD_FAILURE(); }), -1);
+    EXPECT_TRUE(errno == EAGAIN || errno == EWOULDBLOCK);
+}
+
 TEST(QuicWorkerDispatcher, PreservesOwnerAndMetadataAcrossClientAndPortChanges) {
     quic::worker_dispatcher receiver(4);
     auto first = worker_test_address("198.18.20.1");

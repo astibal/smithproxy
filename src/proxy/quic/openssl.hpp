@@ -59,6 +59,24 @@ using datagram_source = std::function<bool(datagram_packet&)>;
 /** Read one UDP datagram with original destination/interface metadata. */
 bool receive_datagram(int fd, datagram_packet& packet);
 
+/** Reusable QUIC socket receive storage; never shared between receiver threads.
+ * Read up to capacity datagrams without waiting for a batch to fill. Each valid
+ * packet retains its own original destination and ingress interface metadata.
+ */
+class datagram_receiver {
+public:
+    static constexpr size_t capacity = 16;
+    datagram_receiver();
+    ~datagram_receiver();
+    datagram_receiver(datagram_receiver const&) = delete;
+    datagram_receiver& operator=(datagram_receiver const&) = delete;
+    // Return consumed datagrams (including malformed ones), or -1 with errno.
+    int receive(int fd, std::function<void(datagram_packet&&)> const& consume);
+private:
+    struct storage;
+    std::unique_ptr<storage> storage_;
+};
+
 /**
  * Thread-safe collection of NSS key-log records belonging to one QUIC connection.
  *

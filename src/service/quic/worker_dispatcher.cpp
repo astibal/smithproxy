@@ -147,6 +147,7 @@ void worker_dispatcher::fail(int error) {
 
 void worker_dispatcher::run() {
     pthread_setname_np(pthread_self(), "sxy_quic_rx");
+    datagram_receiver receiver;
     while (!stopping_) {
         pollfd descriptors[] {{socket_fd_, POLLIN, 0}, {stop_fd_, POLLIN, 0}};
         auto const ready = ::poll(descriptors, 2, -1);
@@ -160,16 +161,18 @@ void worker_dispatcher::run() {
             fail(EIO);
             break;
         }
-        for (std::size_t i = 0; i < 64 && !stopping_; ++i) {
-            datagram_packet packet;
-            if (!receive_datagram(socket_fd_, packet)) {
+        for (std::size_t i = 0; i < 64 && !stopping_;) {
+            auto count = receiver.receive(socket_fd_, [this](datagram_packet&& packet) {
+                if (packet.peer.valid() && packet.local.valid()) enqueue(std::move(packet));
+            });
+            if (count < 0) {
                 if (detail::datagram_receive_would_block(errno)) break;
-                if (errno == EMSGSIZE || errno == EPROTO) continue;
                 fail(errno);
                 return;
             }
-            if (!packet.peer.valid() || !packet.local.valid()) continue;
-            enqueue(std::move(packet));
+            if (!count) break;
+            i += count;
+            if (static_cast<size_t>(count) < datagram_receiver::capacity) break;
         }
     }
 }

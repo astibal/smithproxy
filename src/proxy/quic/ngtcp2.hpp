@@ -38,7 +38,7 @@ public:
     timestamp deadline() const;
     /** Produce bounded output; EAGAIN retains the exact encrypted packet. */
     size_t transmit(int fd, timestamp ts);
-    bool send_blocked() const { return pending_size_ != 0; }
+    bool send_blocked() const { return !pending_output_.empty(); }
     bool established() const;
     bool ended() const { return closed_; }
     ngtcp2_conn* native() const { return conn_; }
@@ -102,7 +102,16 @@ private:
     static constexpr size_t stream_buffer_limit = 1024 * 1024;
     void initialize_tls(SSL_CTX* tls, std::function<bool(SSL*)> const& configure);
     transmit_selection select_transmit_stream();
-    ngtcp2_ssize write_stream_packet(ngtcp2_pkt_info& info, timestamp ts);
+    ngtcp2_ssize write_stream_packet(ngtcp2_path_storage& path, unsigned char* output,
+                                     ngtcp2_pkt_info& info, timestamp ts);
+    // Packet storage is normally stack-local to transmit(). Only an unsent
+    // suffix occupies connection-owned memory while waiting for POLLOUT.
+    struct output_packet {
+        std::array<unsigned char, 1500> bytes;
+        size_t size;
+        datagram_endpoint local, remote;
+    };
+    size_t send_packets(int fd, output_packet* const* packets, size_t count);
     stream& ensure_stream(int64_t id, bool incoming);
     void notify_fin(int64_t id, stream& value);
     void fail(int error, char const* operation);
@@ -139,9 +148,7 @@ private:
     std::map<int64_t, stream> streams_;
     std::vector<multiflow::event> events_;
     int64_t next_tx_ = 0;
-    std::array<unsigned char, 1500> pending_ {};
-    size_t pending_size_ = 0;
-    ngtcp2_path_storage pending_path_ {};
+    std::deque<output_packet> pending_output_;
 };
 
 } // namespace sx::quic::ng

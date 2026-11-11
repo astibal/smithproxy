@@ -287,16 +287,20 @@ private:
 
     // Bound ingress work so a busy socket cannot starve timers or the bridge.
     void receive_batch(bool downstream, ng::timestamp ts) {
-        datagram_packet packet;
-        for (size_t n = 0; n < ng::packet_batch_limit; ++n) {
-            bool received;
-            if (downstream) {
-                received = source_ ? source_(packet) : receive_datagram(fd_, packet);
-            } else {
-                received = receive_datagram(output_.fd, packet);
-            }
-            if (!received) break;
-            receive(packet, downstream, ts);
+        if (downstream && source_) {
+            datagram_packet packet;
+            for (size_t n = 0; n < ng::packet_batch_limit && source_(packet); ++n)
+                receive(packet, downstream, ts);
+            return;
+        }
+        int fd = downstream ? fd_ : output_.fd;
+        for (size_t n = 0; n < ng::packet_batch_limit;) {
+            auto count = receiver_.receive(fd, [&](datagram_packet&& packet) {
+                receive(packet, downstream, ts);
+            });
+            if (count <= 0) break;
+            n += count;
+            if (static_cast<size_t>(count) < datagram_receiver::capacity) break;
         }
     }
 
@@ -366,6 +370,7 @@ private:
     SSL_CTX* server_;
     int fd_;
     socket_owner output_;
+    datagram_receiver receiver_;
     datagram_source source_;
     datagram_observer observer_;
     size_t limit_;

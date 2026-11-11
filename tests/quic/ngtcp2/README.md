@@ -174,3 +174,33 @@ rough node, the production adapter retires abandoned connections and their CID
 routes after a bounded close-delivery period. Certificate rejection, lifecycle,
 capture and policy behavior are verified by the shared service tests rather
 than reimplemented in the adapter.
+
+### Datagram batching regression checks
+
+The QUIC receiver reads at most 16 datagrams per nonblocking `recvmmsg` call.
+Each slot has room for a full UDP payload and separate original-destination and
+interface metadata. The shared QUIC dispatcher uses this receiver for either
+backend; ngtcp2 also uses it on B. Ordinary socle UDP transport is unchanged.
+Receive storage costs about 1 MiB per receiver, allocated once rather than on
+each packet. No call waits for a batch to fill.
+
+ngtcp2 generates at most 64 packets per connection turn and submits them with
+`sendmmsg`. Only the unsent suffix is retained on socket pressure. Packet bytes
+and paths remain intact until sent; capture observes only successful sends.
+Normal TX batch storage is temporary, not a permanent 64-packet allocation per
+connection. The single-worker A:B ownership and existing pacing are unchanged.
+
+To exercise partial batch completion and EAGAIN deterministically, build the
+optional test interposer outside the daemon build:
+
+```sh
+cc -shared -fPIC -o /path/to/batch-send-faults.so \
+  tests/quic/ngtcp2/batch-send-faults.c -ldl -pthread
+SMITHPROXY_QUIC_BACKEND=ngtcp2 LD_PRELOAD=/path/to/batch-send-faults.so \
+  /path/to/build/quic_testbed
+```
+
+Check that the final fault counters include both blocked and shortened sends.
+Keep the interposer out of throughput runs. Also run the ordinary testbed with
+both backends and the namespace harness's `quic` and `quic-pcapng` suites to
+verify transparent tuples, IPv4/IPv6, payload integrity and decrypted captures.
