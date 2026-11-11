@@ -212,6 +212,7 @@ protected:
         toggled_values = {"one", "keep"};
         state.reset(new ConfigCli2Session(access));
         context.user_data = state.get();
+        context.privilege = 15;
         state->register_commands(cli);
     }
 
@@ -245,6 +246,47 @@ TEST_F(ConfigCli2Test, NavigatesLiveConfigurationWithoutNumericModes) {
     EXPECT_EQ(state->path(), "policy.[1]");
     ASSERT_TRUE(cli.execute("set proto tcp", context));
     EXPECT_EQ(last_set, "policy.[1]:proto=tcp");
+}
+
+TEST_F(ConfigCli2Test, UnprivilegedSessionCanInspectButCannotMutateConfiguration) {
+    context.privilege = 0;
+    ASSERT_TRUE(cli.execute("configure terminal", context));
+    ASSERT_TRUE(cli.execute("edit policy first", context));
+    EXPECT_EQ(state->path(), "policy.[0]");
+    EXPECT_TRUE(cli.execute("where", context));
+
+    EXPECT_FALSE(cli.execute("set proto udp", context));
+    EXPECT_FALSE(cli.execute("toggle src any", context));
+    ASSERT_TRUE(cli.execute("end", context));
+    EXPECT_FALSE(cli.execute("add third", context));
+    EXPECT_FALSE(cli.execute("remove [0]", context));
+    EXPECT_FALSE(cli.execute("move [0] bottom", context));
+
+    EXPECT_TRUE(last_set.empty());
+    EXPECT_TRUE(last_move.empty());
+    EXPECT_EQ(config.lookup("policy").getLength(), 2);
+}
+
+TEST_F(ConfigCli2Test, MutationAuthorizationReceivesTheCanonicalTargetAndOperation) {
+    std::vector<std::string> requests;
+    access.authorize_mutation = [&](std::string_view path, std::string_view member,
+                                    ConfigMutation mutation, int privilege) {
+        requests.push_back(std::string(path) + ":" + std::string(member) + ":" +
+                           std::to_string(static_cast<int>(mutation)) + ":" + std::to_string(privilege));
+        return path == "policy.[0]" && (member.empty() || member == "proto") &&
+               mutation == ConfigMutation::set && privilege == 7;
+    };
+    state.reset(new ConfigCli2Session(access));
+    context.user_data = state.get();
+    context.privilege = 7;
+    libcli2::Cli authorized_cli;
+    state->register_commands(authorized_cli);
+
+    ASSERT_TRUE(authorized_cli.execute("configure terminal", context));
+    ASSERT_TRUE(authorized_cli.execute("edit policy first", context));
+    ASSERT_TRUE(authorized_cli.execute("set proto udp", context));
+    EXPECT_EQ(last_set, "policy.[0]:proto=udp");
+    EXPECT_TRUE(std::find(requests.begin(), requests.end(), "policy.[0]:proto:0:7") != requests.end());
 }
 
 TEST_F(ConfigCli2Test, PolicyCanBeEditedByNamePlainIndexOrExplicitIndex) {
