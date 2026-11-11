@@ -62,10 +62,20 @@ public:
         }
 
         auto* value = verifier.release();
+        value->owner_ = ssl;
         if (SSL_set_ex_data(ssl, SSLCom::extdata_index(), value) != 1) {
             return false;
         }
         SSL_set_verify(ssl, SSL_VERIFY_PEER, SSLCom::ssl_client_vrfy_callback);
+
+        // OpenSSL 3.5's SSL_new_from_listener() exposes its inner TLS object
+        // to verification callbacks, unlike SSL_new(). Bind the borrowed
+        // SSLCom state when TLS first reports a message, before chain checks.
+        // The outer QUIC SSL remains the sole owner of this verifier.
+        if (SSL_get0_listener(ssl)) {
+            SSL_set_msg_callback_arg(ssl, value);
+            SSL_set_msg_callback(ssl, bind_callback_state);
+        }
 
         if (policy.ocsp_stapling || policy.ocsp_mode > 0) {
             if (SSL_set_tlsext_status_type(ssl, TLSEXT_STATUSTYPE_ocsp) != 1) {
@@ -93,6 +103,13 @@ public:
         }
 
         started_ = true;
+        if (SSL_get0_listener(ssl)) {
+            // The handshake has bound its TLS callback state. Do not retain
+            // a per-frame observer in the application's steady-state path.
+            SSL_set_msg_callback(ssl, nullptr);
+            SSL_set_msg_callback_arg(ssl, nullptr);
+        }
+        if (callback_binding_failed_) return finish(-1);
         exception_ = SSL_get_verify_result(ssl) != X509_V_OK;
         if (!is_verify_status_opt_allowed()) {
             return finish(-1);
@@ -109,6 +126,20 @@ public:
     }
 
 private:
+    // Attach only the non-owning SSLCom slot on the inner TLS object. Its
+    // lifetime is nested inside owner_; duplicating our owning slot would
+    // double-delete the verifier. Failure keeps admission closed.
+    static void bind_callback_state(int, int, int, const void*, std::size_t,
+                                    SSL* callback_ssl, void* argument) {
+        auto* verifier = static_cast<certificate_verifier*>(argument);
+        if (callback_ssl != verifier->owner_
+            && SSL_set_ex_data(callback_ssl, SSLCom::extdata_index(), verifier) != 1)
+            verifier->callback_binding_failed_ = true;
+    }
+
+    SSL* owner_ = nullptr;
+    bool callback_binding_failed_ = false;
+
     // Share immutable X509 material with a snapshot using a separate reference.
     // A missing issuer is preserved as missing for SSLCom to evaluate later.
     static bool retain_certificate(X509* source, X509*& target) {

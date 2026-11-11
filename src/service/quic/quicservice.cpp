@@ -355,6 +355,7 @@ bool listener_service::open_socket() {
 bool listener_service::prepare() {
 #if SMITHPROXY_OPENSSL_QUIC
     if (ready_) return true;
+    upstream_engine_.reset();
     // A previous prepare may have opened the transport successfully and then
     // failed while constructing the OpenSSL listener. Do not retain or
     // overwrite those descriptors on a retry.
@@ -392,8 +393,15 @@ bool listener_service::prepare() {
     } else {
         SSL_CTX_set_verify(client_context_.get(), SSL_VERIFY_NONE, nullptr);
     }
-
     if (!open_socket()) return false;
+    // Both sides of every A:B pair stay on this worker. OpenSSL demultiplexes
+    // all B connections by CID on one shared outgoing engine and UDP socket.
+    auto upstream_engine = make_openssl_quic_client_engine(client_context_.get(), address_family_);
+    if (!upstream_engine) {
+        fail("cannot create QUIC upstream engine: " + openssl_error_stack());
+        return false;
+    }
+
     datagram_source source;
     if (dispatcher_) {
         if (!dispatcher_->attach_socket(udp_fd_)) {
@@ -412,6 +420,7 @@ bool listener_service::prepare() {
         fail("cannot create OpenSSL QUIC listener: " + openssl_error_stack());
         return false;
     }
+    upstream_engine_ = std::move(upstream_engine);
     ready_ = true;
     last_error_.clear();
     log().inf("listener ready on udp/*:%u verify-upstream=%d", bound_port_, verify_upstream_);
@@ -449,37 +458,18 @@ void listener_service::run() {
             : 50;
         auto* native_listener = listener_->native_handle();
         auto timeout = listener_poll_timeout(native_listener, application_timeout);
+        timeout = listener_poll_timeout(upstream_engine_.get(), timeout);
 
-        // Outgoing legs own separate UDP sockets. In particular, WANT_READ
-        // from SSL_write_ex() must wake on an inbound flow-control update;
-        // polling only the shared downstream listener would defer that update
-        // to the coarse application tick and can stall a full QUIC window.
+        // Both engines expose one socket each. Pending certificate jobs and
+        // accepted sessions share the same upstream readiness and deadline.
         std::vector<pollfd> descriptors {
             { udp_fd_, static_cast<short>(listener_->desired_socket_events()
                 & (dispatcher_ ? ~POLLIN : ~0)), 0 },
             { wake_fd_, POLLIN, 0 },
+            { SSL_get_fd(upstream_engine_.get()), connection_poll_events(upstream_engine_.get()), 0 },
         };
-        descriptors.reserve(3 + sessions_.size());
         if (dispatcher_) descriptors.push_back(
             {dispatcher_->wake_fd(worker_index_), POLLIN, 0});
-        for (auto const& value : sessions_) {
-            if (!value.upstream) continue;
-            auto* connection = value.upstream->native_handle();
-            timeout = listener_poll_timeout(connection, timeout);
-            auto const fd = SSL_get_fd(connection);
-            auto const events = connection_poll_events(connection);
-            if (fd >= 0 && events != 0) descriptors.push_back({ fd, events, 0 });
-        }
-
-        // Certificate preparation owns the final upstream even before accept.
-        for (auto const& [downstream, job] : certificate_jobs_) {
-            if (!job.upstream) continue;
-            auto* connection = job.upstream->native_handle();
-            timeout = listener_poll_timeout(connection, timeout);
-            auto const fd = SSL_get_fd(connection);
-            auto const events = connection_poll_events(connection);
-            if (fd >= 0 && events != 0) descriptors.push_back({fd, events, 0});
-        }
 
         log().dum("poll listener-events=0x%x fds=%zu timeout=%d sessions=%zu cert-jobs=%zu",
                   descriptors[0].events, descriptors.size(), timeout,
@@ -510,6 +500,9 @@ void listener_service::run() {
             fail("OpenSSL QUIC listener event failure: " + detail);
             break;
         }
+        // One receive/timer pass for all B connections, including certificate
+        // jobs and connections waiting to be attached to an accepted A.
+        if (!progress_upstream_engine()) break;
 
         // During live reconfiguration, keep servicing established sessions but
         // stop admitting new ones until the listener can leave naturally.
@@ -537,6 +530,8 @@ void listener_service::run() {
             fail("OpenSSL QUIC listener output failure: " + listener_->last_error());
             break;
         }
+        // Flush all upstream writes together after every session had a turn.
+        if (!progress_upstream_engine()) break;
 
         // Publish only after removing objects whose grace period has elapsed.
         reap_expired(now);
@@ -934,15 +929,18 @@ void listener_service::progress_active(
 }
 
 bool listener_service::flush_session_output(session& value) {
-    // Explicit stream writes enqueue data without running the upstream engine.
-    // Flush after the application pass, before poll() can put this worker to
-    // sleep waiting for a peer that has not received our newly queued bytes.
-    if (value.upstream) value.upstream->progress_transport();
     if (!value.client_endpoint.valid() || !value.target_endpoint.valid()) return true;
     if (listener_->flush_output(value.client_endpoint, value.target_endpoint,
                                 value.capture_association)) return true;
 
     fail("OpenSSL QUIC connection output failure: " + listener_->last_error());
+    return false;
+}
+
+bool listener_service::progress_upstream_engine() {
+    ERR_clear_error();
+    if (SSL_handle_events(upstream_engine_.get()) == 1) return true;
+    fail("OpenSSL QUIC upstream engine failure: " + openssl_error_stack());
     return false;
 }
 
@@ -1073,7 +1071,11 @@ std::string listener_service::handshake_phase(session const& value) const {
         if (job != certificate_jobs_.end()) {
             switch (job->second.state) {
             case certificate_state::queued: return "upstream-connect";
-            case certificate_state::upstream_handshake: return "upstream-handshake";
+            case certificate_state::upstream_handshake:
+                // The shared engine can finish TLS in the output pass, after
+                // this job ran. Admission still waits for its next worker turn.
+                return job->second.upstream && job->second.upstream->handshake_complete()
+                    ? "upstream-certificate-check" : "upstream-handshake";
             case certificate_state::certificate_check: return "upstream-certificate-check";
             case certificate_state::certificate_ready: return "certificate-install";
             case certificate_state::failed: return "upstream-failed";
@@ -1693,7 +1695,7 @@ std::shared_ptr<openssl_connection> listener_service::connect_upstream(
     std::string const& host, proxymaker::SessionSetup* setup) {
     if (host.empty() || !client_context_) return nullptr;
     addrinfo hints {};
-    hints.ai_family = AF_UNSPEC;
+    hints.ai_family = address_family_;
     hints.ai_socktype = SOCK_DGRAM;
     hints.ai_protocol = IPPROTO_UDP;
     addrinfo* addresses = nullptr;
@@ -1716,7 +1718,7 @@ std::shared_ptr<openssl_connection> listener_service::connect_upstream(
                 auto policy = setup ? setup->tls_policy(target_host, target_port)
                     : std::optional {proxymaker::QuicTlsPolicy {}};
                 return policy && (!verify_upstream_ || certificate_verifier::install(ssl, *policy));
-            });
+            }, upstream_engine_.get());
         });
         if (connection) result = std::shared_ptr<openssl_connection>(std::move(connection));
     }
@@ -1737,7 +1739,7 @@ std::shared_ptr<openssl_connection> listener_service::connect_upstream(
                 auto policy = setup ? setup->tls_policy(host, port)
                     : std::optional {proxymaker::QuicTlsPolicy {}};
                 return policy && (!verify_upstream_ || certificate_verifier::install(ssl, *policy));
-            });
+            }, upstream_engine_.get());
     });
     return connection
         ? std::shared_ptr<openssl_connection>(std::move(connection))

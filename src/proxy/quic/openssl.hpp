@@ -165,6 +165,9 @@ unique_ssl_ctx make_openssl_quic_context(bool server);
 
 #if SMITHPROXY_OPENSSL_QUIC
 
+/** Create one outgoing engine/socket for a worker; caller alone drives events. */
+unique_ssl make_openssl_quic_client_engine(SSL_CTX* context, int family);
+
 /**
  * Multiflow adapter for one accepted or connected OpenSSL QUIC connection.
  * It assumes single-thread worker affinity, as required by the initial MF
@@ -173,9 +176,10 @@ unique_ssl_ctx make_openssl_quic_context(bool server);
 class openssl_connection final : public multiflow::connection {
 public:
     /** Take ownership of a QUIC connection SSL and, optionally, its UDP fd. */
-    enum class event_driver { connection, listener };
+    enum class event_driver { connection, owner };
     explicit openssl_connection(unique_ssl connection, int owned_udp_fd = -1,
-                                event_driver driver = event_driver::connection);
+                                event_driver driver = event_driver::connection,
+                                datagram_endpoint peer = {});
     ~openssl_connection() override;
 
     openssl_connection(openssl_connection const&) = delete;
@@ -254,6 +258,7 @@ private:
 
     unique_ssl connection_;                     ///< Owned OpenSSL QUIC connection.
     int owned_udp_fd_ = -1;                     ///< Outgoing socket, or -1 for listener-owned.
+    datagram_endpoint peer_;                    ///< Explicit outgoing peer; shared BIO peer is not per connection.
     std::map<multiflow::flow_id, std::unique_ptr<stream_state>> streams_; ///< Live streams.
     std::map<event_key, multiflow::event> events_; ///< Pending coalesced notifications.
     multiflow::flow_id next_internal_id_ = 1;
@@ -265,7 +270,8 @@ private:
 
 /**
  * Create a nonblocking outgoing QUIC connection over a newly owned UDP socket.
- * The returned adapter progresses its handshake from drain_events().
+ * Without a port, the returned adapter owns its socket and drives its engine.
+ * With a port, it shares the worker's socket/engine, which the caller ticks.
  */
 std::unique_ptr<openssl_connection> connect_openssl_quic(
     SSL_CTX* context, const sockaddr* peer, socklen_t peer_size,
@@ -275,7 +281,7 @@ std::unique_ptr<openssl_connection> connect_openssl_quic(
     SSL_CTX* context, const sockaddr* peer, socklen_t peer_size,
     std::string const& server_name, std::string const& alpn, std::string* error = nullptr,
     HookEvent const* offer = nullptr,
-    std::function<bool(SSL*)> const& configure = {});
+    std::function<bool(SSL*)> const& configure = {}, SSL* port = nullptr);
 
 /**
  * Nonblocking OpenSSL QUIC listener over a caller-owned UDP socket.

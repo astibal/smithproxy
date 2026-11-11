@@ -17,6 +17,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -594,6 +595,113 @@ TEST_F(OpenSslQuic, OutgoingAdapterCompletesHandshake) {
     client->close();
     server->close();
     close(server_fd);
+}
+
+TEST_F(OpenSslQuic, WorkerDomainOwnsIndependentOutgoingConnections) {
+    auto server_context = quic::make_openssl_quic_context(true);
+    auto client_context = quic::make_openssl_quic_context(false);
+    ASSERT_NE(server_context, nullptr);
+    ASSERT_NE(client_context, nullptr);
+    ASSERT_EQ(SSL_CTX_use_certificate_chain_file(server_context.get(),
+                                                "etc/certs/default/srv-cert.pem"), 1);
+    ASSERT_EQ(SSL_CTX_use_PrivateKey_file(server_context.get(),
+                                        "etc/certs/default/srv-key.pem", SSL_FILETYPE_PEM), 1);
+    SSL_CTX_set_alpn_select_cb(server_context.get(), select_h3, nullptr);
+    SSL_CTX_set_verify(client_context.get(), SSL_VERIFY_NONE, nullptr);
+    auto const fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    ASSERT_GE(fd, 0);
+    auto close_fd = std::shared_ptr<int>(new int(fd), [](int* value) { close(*value); delete value; });
+    ASSERT_TRUE(make_nonblocking(fd));
+    sockaddr_in address {};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ASSERT_EQ(bind(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
+    socklen_t size = sizeof(address);
+    ASSERT_EQ(getsockname(fd, reinterpret_cast<sockaddr*>(&address), &size), 0);
+    auto listener = quic::openssl_listener::create(server_context.get(), fd);
+    ASSERT_NE(listener, nullptr);
+
+    std::size_t network_calls = 0;
+    auto engine = quic::make_openssl_quic_client_engine(client_context.get(), AF_INET);
+    ASSERT_NE(engine, nullptr);
+    auto* domain = SSL_get0_domain(engine.get());
+    ASSERT_NE(domain, nullptr);
+    std::array<std::unique_ptr<quic::openssl_connection>, 2> clients;
+    for (auto& client : clients) {
+        std::string error;
+        client = quic::connect_openssl_quic(client_context.get(),
+            reinterpret_cast<sockaddr*>(&address), size, "localhost", "h3", &error,
+            nullptr, {}, engine.get());
+        ASSERT_NE(client, nullptr) << error;
+        // OpenSSL 3.5 exposes the domain through the port; the outgoing child
+        // does not populate the direct SSL_get0_domain() backlink.
+        EXPECT_EQ(SSL_get0_domain(SSL_get0_listener(client->native_handle())), domain);
+    }
+    auto* first_port = SSL_get0_listener(clients[0]->native_handle());
+    auto* second_port = SSL_get0_listener(clients[1]->native_handle());
+    ASSERT_NE(first_port, nullptr);
+    ASSERT_NE(second_port, nullptr);
+    EXPECT_EQ(first_port, engine.get());
+    EXPECT_EQ(second_port, engine.get());
+    EXPECT_EQ(SSL_get_fd(first_port), SSL_get_fd(second_port));
+
+    // Starting a channel bootstraps its Initial. Afterwards session polling
+    // must not secretly run the shared engine or touch its network BIO.
+    auto* bio = SSL_get_rbio(engine.get());
+    BIO_set_callback_arg(bio, reinterpret_cast<char*>(&network_calls));
+    BIO_set_callback_ex(bio, [](BIO* observed, int operation, const char*, std::size_t,
+                                int, long, int result, std::size_t*) -> long {
+        if (operation == BIO_CB_READ || operation == BIO_CB_WRITE
+            || operation == BIO_CB_RECVMMSG || operation == BIO_CB_SENDMMSG)
+            ++*reinterpret_cast<std::size_t*>(BIO_get_callback_arg(observed));
+        return result;
+    });
+    for (int i = 0; i < 8; ++i) for (auto& client : clients) client->drain_events();
+    EXPECT_EQ(network_calls, 0U);
+
+    std::vector<std::unique_ptr<quic::openssl_connection>> servers;
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (std::chrono::steady_clock::now() < deadline) {
+        ASSERT_EQ(SSL_handle_events(engine.get()), 1);
+        ASSERT_TRUE(listener->handle_events());
+        while (auto accepted = listener->accept()) servers.push_back(std::move(accepted));
+        for (auto& client : clients) client->drain_events();
+        for (auto& server : servers) server->drain_events();
+        if (servers.size() == 2 && clients[0]->handshake_complete()
+            && clients[1]->handshake_complete()
+            && servers[0]->handshake_complete() && servers[1]->handshake_complete()) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    ASSERT_EQ(servers.size(), 2U);
+    for (auto const& client : clients) ASSERT_TRUE(client->handshake_complete());
+
+    // Destroy one B, then exercise application I/O on its sibling. Its socket,
+    // domain and stream state must survive the other connection's destruction.
+    clients[0]->close();
+    clients[0].reset();
+    EXPECT_EQ(SSL_get0_domain(SSL_get0_listener(clients[1]->native_handle())), domain);
+    auto flow = clients[1]->open_flow(mf::direction::bidirectional);
+    std::string const payload = "the sibling still owns its connection";
+    auto const calls_before_write = network_calls;
+    ASSERT_EQ(clients[1]->write(flow, payload.data(), payload.size()).size, payload.size());
+    clients[1]->drain_events();
+    EXPECT_EQ(network_calls, calls_before_write);
+    std::string received;
+    auto const data_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (received.empty() && std::chrono::steady_clock::now() < data_deadline) {
+        ASSERT_EQ(SSL_handle_events(engine.get()), 1);
+        ASSERT_TRUE(listener->handle_events());
+        for (auto& server : servers) {
+            for (auto const& event : server->drain_events()) {
+                if (!event.flow) continue;
+                char buffer[128];
+                auto read = server->read(*event.flow, buffer, sizeof(buffer));
+                received.append(buffer, read.size);
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    EXPECT_EQ(received, payload);
 }
 
 TEST_F(OpenSslQuic, TransparentDispatcherKeepsConcurrentHandshakesIsolated) {

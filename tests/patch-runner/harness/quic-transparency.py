@@ -169,9 +169,10 @@ def background(command, log, capture=False):
                 process.wait()
 
 
-def wire_tuples(capture):
-    """Read network headers only; successful decryption cannot hide a bad tuple."""
-    fields = ("ip.src", "ipv6.src", "udp.srcport", "ip.dst", "ipv6.dst", "udp.dstport")
+def wire_packets(capture):
+    """Read tuples and Initial SCIDs; shared UDP ports are not connection IDs."""
+    fields = ("ip.src", "ipv6.src", "udp.srcport", "ip.dst", "ipv6.dst", "udp.dstport",
+              "quic.long.packet_type", "quic.scid")
     # The lab directories may be root-only; tshark drops privileges. Decode a
     # disposable readable copy under an isolated profile, as the capture suite does.
     with tempfile.TemporaryDirectory(prefix="quic-wire-") as temporary:
@@ -181,7 +182,7 @@ def wire_tuples(capture):
         shutil.copyfile(capture, staged)
         staged.chmod(0o644)
         command = ["tshark", "-o", "tls.keylog_file:", "-r", str(staged),
-                   "-Y", "udp", "-T", "fields"]
+                   "-Y", "udp", "-T", "fields", "-E", "occurrence=f"]
         for field in fields:
             command += ["-e", field]
         if os.geteuid() == 0:
@@ -194,17 +195,18 @@ def wire_tuples(capture):
             raise RuntimeError(result.stderr)
     packets = []
     for line in result.stdout.splitlines():
-        src4, src6, sport, dst4, dst6, dport = line.split("\t")
-        packets.append((str(ipaddress.ip_address(src4 or src6)), int(sport),
-                        str(ipaddress.ip_address(dst4 or dst6)), int(dport)))
+        src4, src6, sport, dst4, dst6, dport, packet_type, scid = line.split("\t")
+        endpoint = (str(ipaddress.ip_address(src4 or src6)), int(sport),
+                    str(ipaddress.ip_address(dst4 or dst6)), int(dport))
+        packets.append((endpoint, scid if packet_type == "0" else ""))
     assert packets, f"empty capture: {capture}"
     return packets
 
 
 def verify_wire(result):
     """Check both mirrored downstream tuples and separately terminated upstreams."""
-    downstream = wire_tuples(result / "downstream.pcap")
-    upstream = wire_tuples(result / "upstream.pcap")
+    downstream = wire_packets(result / "downstream.pcap")
+    upstream = wire_packets(result / "upstream.pcap")
     report = {}
     for family in (4, 6):
         client, proxy, first, second = (("198.18.10.2", "198.18.20.1", "198.18.20.2", "198.18.20.3")
@@ -212,19 +214,21 @@ def verify_wire(result):
         expected = {(client, 41001, first, 443), (client, 41001, second, 443),
                     (client, 41002, first, 443)}
         reverse = {(d, dp, s, sp) for s, sp, d, dp in expected}
-        observed = {row for row in downstream if client in (row[0], row[2])}
+        observed = {row for row, _ in downstream if client in (row[0], row[2])}
         assert observed == expected | reverse, (family, "downstream tuples", observed)
-        uplink = {row for row in upstream if row[0] == proxy}
-        replies = {row for row in upstream if row[2] == proxy}
+        uplink = {row for row, _ in upstream if row[0] == proxy}
+        replies = {row for row, _ in upstream if row[2] == proxy}
         assert all(sport > 0 and dst in (first, second) and dport == 443
                    for src, sport, dst, dport in uplink), uplink
         assert replies == {(d, dp, s, sp) for s, sp, d, dp in uplink}, replies
-        # There are three downstream connections per wave. An extra certificate
-        # probe would create more upstream tuples, violating the A/B contract.
-        counts = collections.Counter(dst for _, _, dst, _ in uplink)
+        # Initial source CIDs identify the six B connections even when their
+        # worker shares one socket. Retransmitted/Retry Initials count once.
+        # An extra certificate probe still violates this exact A/B count.
+        initials = {(row, scid) for row, scid in upstream if row[0] == proxy and scid}
+        counts = collections.Counter(row[2] for row, _ in initials)
         assert counts == {first: 4, second: 2}, (family, "upstream connection count", counts)
         report[str(family)] = {"downstream": sorted(observed), "upstream": sorted(uplink),
-                               "upstream_replies": sorted(replies)}
+                               "upstream_replies": sorted(replies), "upstream_initials": sorted(initials)}
         print(f"PASS{family} QUIC wire: exact original reply IP:port, isolated destinations, six A/B connections", flush=True)
     (result / "wire-tuples.json").write_text(json.dumps(report, indent=2) + "\n")
 

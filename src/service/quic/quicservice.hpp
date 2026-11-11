@@ -260,6 +260,7 @@ private:
 #if SMITHPROXY_OPENSSL_QUIC
     unique_ssl_ctx context_;                     ///< Downstream QUIC server context.
     unique_ssl_ctx client_context_;              ///< Verified upstream QUIC client context.
+    unique_ssl upstream_engine_;                 ///< One outgoing listener/engine/socket per worker.
     std::unique_ptr<openssl_listener> listener_; ///< Adapter over udp_fd_.
     /** Session phases are explicit so shutdown resources remain bounded. */
     enum class session_state { handshake, active, draining };
@@ -359,6 +360,8 @@ private:
     void progress_active(session& value, std::chrono::steady_clock::time_point now);
     /** Flush OpenSSL output with this session's unambiguous UDP tuple. */
     bool flush_session_output(session& value);
+    /** Tick the shared outgoing engine once; false stops the worker on failure. */
+    bool progress_upstream_engine();
     /** Release expired draining sessions and abandoned staged upstream legs. */
     void reap_expired(std::chrono::steady_clock::time_point now);
     /** Stop proxying and begin bounded nonblocking shutdown of both legs. */

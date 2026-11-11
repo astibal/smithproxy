@@ -155,6 +155,26 @@ unique_ssl_ctx make_openssl_quic_context(bool server) {
 
 #if SMITHPROXY_OPENSSL_QUIC
 
+unique_ssl make_openssl_quic_client_engine(SSL_CTX* context, int family) {
+    if (!context || (family != AF_INET && family != AF_INET6)) return {};
+    unique_ssl domain(SSL_new_domain(context, SSL_DOMAIN_FLAG_SINGLE_THREAD));
+    if (!domain) return {};
+    unique_ssl port(SSL_new_listener_from(domain.get(), 0));
+    if (!port) return {};
+
+    // OpenSSL 3.5 supports one port per engine. Use an unconnected datagram
+    // socket: the port demultiplexes replies by CID, each child sets its peer.
+    auto const fd = ::socket(family, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, IPPROTO_UDP);
+    if (fd < 0) return {};
+    BIO* bio = BIO_new_dgram(fd, BIO_CLOSE);
+    if (!bio) { ::close(fd); return {}; }
+    SSL_set_bio(port.get(), bio, bio);
+    if (SSL_set_blocking_mode(port.get(), 0) != 1) return {};
+    // No SSL_listen/accept: this port creates outgoing children only. Each
+    // child retains the port, which retains the domain and owns the socket.
+    return port;
+}
+
 struct openssl_connection::stream_state {
     stream_state(multiflow::flow_handle flow_handle, unique_ssl ssl_stream,
                  multiflow::direction stream_direction)
@@ -647,13 +667,13 @@ datagram_endpoint endpoint_from_bio_address(const BIO_ADDR* address) {
 }
 
 openssl_connection::openssl_connection(unique_ssl connection, int owned_udp_fd,
-                                       event_driver driver)
-    : connection_(std::move(connection)), owned_udp_fd_(owned_udp_fd), driver_(driver) {
+                                       event_driver driver, datagram_endpoint peer)
+    : connection_(std::move(connection)), owned_udp_fd_(owned_udp_fd), peer_(peer), driver_(driver) {
     if (connection_) {
         ERR_clear_error();
         // Stream I/O only consumes or queues application bytes. Transport ticks
-        // belong to the owner: the listener for accepted connections, or the
-        // connection's receive/send phases for an independent upstream engine.
+        // belong to the worker's downstream listener or upstream domain.
+        // Standalone adapters retain their own explicit transport driver.
         if(SSL_set_event_handling_mode(connection_.get(),
                 SSL_VALUE_EVENT_HANDLING_MODE_EXPLICIT) != 1 ||
            SSL_set_blocking_mode(connection_.get(), 0) != 1 ||
@@ -698,6 +718,7 @@ std::shared_ptr<keylog_store> openssl_connection::keylog() const {
 }
 
 datagram_endpoint openssl_connection::peer_endpoint() const {
+    if (peer_.valid()) return peer_;
     if (!connection_) return {};
     BIO_ADDR* address = BIO_ADDR_new();
     if (!address) return {};
@@ -909,7 +930,7 @@ void openssl_connection::progress_transport() {
                             &args, sizeof(args)) == 1) {
             closing_ = false;
             closed_ = true;
-        } else {
+        } else if (driver_ == event_driver::connection) {
             SSL_handle_events(connection_.get());
         }
         return;
@@ -1030,7 +1051,7 @@ std::unique_ptr<openssl_connection> connect_openssl_quic(
 std::unique_ptr<openssl_connection> connect_openssl_quic(
     SSL_CTX* context, const sockaddr* peer, socklen_t peer_size,
     std::string const& server_name, std::string const& alpn, std::string* error,
-    HookEvent const* offer, std::function<bool(SSL*)> const& configure) {
+    HookEvent const* offer, std::function<bool(SSL*)> const& configure, SSL* port) {
     auto fail = [error](std::string message) {
         if (error) *error = std::move(message);
         return std::unique_ptr<openssl_connection> {};
@@ -1039,32 +1060,35 @@ std::unique_ptr<openssl_connection> connect_openssl_quic(
         return fail("invalid QUIC peer or ALPN");
     }
 
-    auto const fd = ::socket(peer->sa_family, SOCK_DGRAM | SOCK_CLOEXEC,
-                             IPPROTO_UDP);
-    if (fd < 0) return fail(std::string("socket: ") + std::strerror(errno));
-    auto close_and_fail = [fd, &fail](std::string message) {
-        ::close(fd);
+    // Production children share the worker's outgoing port/socket. Standalone
+    // adapters keep their own connected socket for tests and independent use.
+    int fd = -1;
+    auto close_and_fail = [&fd, &fail](std::string message) {
+        if (fd >= 0) ::close(fd);
         return fail(std::move(message));
     };
-    auto const flags = sx::quic::detail::retry_on_eintr(
-        [&] { return ::fcntl(fd, F_GETFL, 0); });
-    if (flags < 0 || sx::quic::detail::retry_on_eintr(
-            [&] { return ::fcntl(fd, F_SETFL,
-                                 static_cast<int>(flags) | O_NONBLOCK); }) != 0) {
-        return close_and_fail(std::string("O_NONBLOCK: ") + std::strerror(errno));
+    if (port) {
+        if (!SSL_is_listener(port) || SSL_get_SSL_CTX(port) != context)
+            return fail("QUIC port/context mismatch");
+    } else {
+        fd = ::socket(peer->sa_family, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, IPPROTO_UDP);
+        if (fd < 0) return fail(std::string("socket: ") + std::strerror(errno));
+        if (detail::retry_on_eintr([&] { return ::connect(fd, peer, peer_size); }) != 0)
+            return close_and_fail(std::string("connect: ") + std::strerror(errno));
     }
-    if (sx::quic::detail::retry_on_eintr(
-            [&] { return ::connect(fd, peer, peer_size); }) != 0) {
-        return close_and_fail(std::string("connect: ") + std::strerror(errno));
-    }
-
-    unique_ssl ssl(SSL_new(context));
+    unique_ssl ssl(port ? SSL_new_from_listener(port, 0) : SSL_new(context));
     if (!ssl) return close_and_fail("SSL_new: " + openssl_error_stack());
+    datagram_endpoint endpoint;
+    if (peer_size > sizeof(endpoint.address)) return close_and_fail("invalid QUIC peer size");
+    std::memcpy(&endpoint.address, peer, peer_size);
+    endpoint.size = peer_size;
+    auto initial_peer = endpoint_to_bio(endpoint);
     std::array<unsigned char, sizeof(in6_addr)> binary_address {};
     auto const numeric_identity = !server_name.empty()
         && (::inet_pton(AF_INET, server_name.c_str(), binary_address.data()) == 1
             || ::inet_pton(AF_INET6, server_name.c_str(), binary_address.data()) == 1);
-    if (SSL_set_fd(ssl.get(), fd) != 1
+    if ((!port && SSL_set_fd(ssl.get(), fd) != 1)
+        || !initial_peer || SSL_set1_initial_peer_addr(ssl.get(), initial_peer.get()) != 1
         || SSL_set_blocking_mode(ssl.get(), 0) != 1
         || (!server_name.empty() && numeric_identity
             && X509_VERIFY_PARAM_set1_ip_asc(
@@ -1088,7 +1112,21 @@ std::unique_ptr<openssl_connection> connect_openssl_quic(
 
     if (configure && !configure(ssl.get())) return close_and_fail("QUIC certificate policy setup failed");
 
-    auto connection = std::make_unique<openssl_connection>(std::move(ssl), fd);
+    auto connection = std::make_unique<openssl_connection>(std::move(ssl), fd,
+        port ? openssl_connection::event_driver::owner
+               : openssl_connection::event_driver::connection, endpoint);
+    if (port && !connection->closed()) {
+        // Bootstrap once after policy/hooks are installed. OpenSSL starts the
+        // channel here; subsequent transport ticks belong to the worker.
+        ERR_clear_error();
+        auto const result = SSL_do_handshake(connection->native_handle());
+        if (result != 1) {
+            auto const reason = SSL_get_error(connection->native_handle(), result);
+            if (reason != SSL_ERROR_WANT_READ && reason != SSL_ERROR_WANT_WRITE
+                && reason != SSL_ERROR_WANT_X509_LOOKUP)
+                return fail("start shared QUIC handshake: " + openssl_error_stack());
+        }
+    }
     connection->drain_events();
     if (connection->closed()) return fail("start QUIC handshake: " + openssl_error_stack());
     if (error) error->clear();
@@ -1247,7 +1285,7 @@ std::unique_ptr<openssl_connection> openssl_listener::accept() {
                                                 SSL_ACCEPT_CONNECTION_NO_BLOCK));
     if (!connection) return nullptr;
     return std::make_unique<openssl_connection>(std::move(connection), -1,
-        openssl_connection::event_driver::listener);
+        openssl_connection::event_driver::owner);
 }
 
 bool openssl_listener::handle_events() {
