@@ -88,6 +88,49 @@ TEST_F(QuicListenerService, PreparesAndStopsLoopbackListener) {
     EXPECT_EQ(service.connection_count(), 0U);
 }
 
+// Compare with a real kernel socket: neither clamping nor Linux's doubled
+// accounting should turn this into a test of the host's sysctl configuration.
+TEST_F(QuicListenerService, ReceiveBufferMatchesKernelAndSharedWorkers) {
+#if SMITHPROXY_OPENSSL_QUIC
+    if (!quic::openssl_quic_available()) GTEST_SKIP();
+    for (int family : {AF_INET, AF_INET6}) {
+        for (int requested : {0, 65536, 1048576}) {
+            SCOPED_TRACE(std::to_string(family) + ":" + std::to_string(requested));
+            int reference = ::socket(family, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
+            ASSERT_GE(reference, 0);
+            int set_result = requested == 0 ? 0 : ::setsockopt(
+                reference, SOL_SOCKET, SO_RCVBUF, &requested, sizeof(requested));
+            int expected = 0;
+            socklen_t size = sizeof(expected);
+            int get_result = ::getsockopt(reference, SOL_SOCKET, SO_RCVBUF, &expected, &size);
+            ::close(reference);
+            ASSERT_EQ(set_result, 0);
+            ASSERT_EQ(get_result, 0);
+
+            auto receiver = std::make_shared<quic::worker_dispatcher>(2);
+            auto make_service = [&]() {
+                return std::make_unique<quic::listener_service>(0,
+                    "etc/certs/default/srv-cert.pem", "etc/certs/default/srv-key.pem",
+                    false, 443, false, quic::lifecycle_options {}, quic::resource_limits {},
+                    std::string {}, quic::flow_proxy_factory {}, false,
+                    sx::proxymaker::SessionSetupFactory {}, std::nullopt, std::nullopt,
+                    family, requested);
+            };
+            auto first = make_service();
+            first->assign_worker(receiver, 0);
+            ASSERT_TRUE(first->prepare()) << first->last_error();
+            auto second = make_service();
+            second->assign_worker(receiver, 1);
+            ASSERT_TRUE(second->prepare()) << second->last_error();
+            EXPECT_EQ(first->receive_buffer_requested(), requested);
+            EXPECT_EQ(first->receive_buffer(), expected);
+            EXPECT_EQ(second->receive_buffer(), expected);
+            EXPECT_EQ(first->bound_port(), second->bound_port());
+        }
+    }
+#endif
+}
+
 TEST_F(QuicListenerService, DetailsWithoutRunningListenerCompleteImmediately) {
     quic::listener_service service(0, "", "", false, 443, false);
     auto details = service.request_session_details([](MitmProxy*) {

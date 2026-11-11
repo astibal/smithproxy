@@ -134,3 +134,15 @@ TEST(CfgValue, QuicInboxTuningHasBoundedSizesAndRestartHelp) {
     EXPECT_TRUE(packets->get().value_filter().back()("1").accepted());
     EXPECT_FALSE(packets->get().value_filter().back()("1048577").accepted());
 }
+
+// Zero deliberately opts out; all positive requests remain bounded before setsockopt.
+TEST(CfgValue, QuicListenerReceiveBufferAllowsSystemDefault) {
+    auto value = CfgValueHelp::get().find("settings.tuning.quic_listener_rcvbuf");
+    ASSERT_TRUE(value);
+    auto const& validate = value->get().value_filter().back();
+    for (auto input : {"0", "1", "1048576", "1073741824"})
+        EXPECT_TRUE(validate(input).accepted()) << input;
+    for (auto input : {"-1", "1073741825", "2147483647"})
+        EXPECT_FALSE(validate(input).accepted()) << input;
+    EXPECT_NE(value->get().help_quick().find("restart"), std::string::npos);
+}

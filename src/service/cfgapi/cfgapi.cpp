@@ -1442,6 +1442,12 @@ bool CfgFactory::load_settings () {
 
         // Match CLI validation for file-loaded settings as well. Existing
         // listeners retain their capacities until recreated (normally restart).
+        int listener_rcvbuf = quic_listener_rcvbuf;
+        if (load_if_exists(tuning, "quic_listener_rcvbuf", listener_rcvbuf)) {
+            if (listener_rcvbuf >= 0 && listener_rcvbuf <= 1073741824)
+                quic_listener_rcvbuf = listener_rcvbuf;
+            else _war("ignoring invalid settings.tuning.quic_listener_rcvbuf (expected 0..1073741824)");
+        }
         int inbox_packets = quic_inbox_packets;
         if (load_if_exists(tuning, "quic_inbox_packets", inbox_packets)) {
             if (inbox_packets >= 1 && inbox_packets <= 1048576)
@@ -6401,6 +6407,7 @@ int save_settings(Config& ex) {
     tuning_objects.add("host_write_full", Setting::TypeInt) = (int) baseHostCX::params.write_full;
     tuning_objects.add("host_io_batch", Setting::TypeInt) = (int) baseHostCX::params.io_batch;
     tuning_objects.add("tls_write_chunk", Setting::TypeInt) = (int) SSLComOptions::write_chunk.load();
+    tuning_objects.add("quic_listener_rcvbuf", Setting::TypeInt) = CfgFactory::get()->quic_listener_rcvbuf;
     tuning_objects.add("quic_inbox_packets", Setting::TypeInt) = CfgFactory::get()->quic_inbox_packets;
     tuning_objects.add("quic_inbox_bytes", Setting::TypeInt) = CfgFactory::get()->quic_inbox_bytes;
     tuning_objects.add("host_open_timeout", Setting::TypeInt) = (unsigned short) baseHostCX::params.open_timeout;

@@ -405,6 +405,10 @@ void CfgValueHelp::init() {
     add("settings.tuning.host_io_batch", "maximum bytes drained by one host I/O dispatch")
             .may_be_empty(false)
             .value_filter(VALUE_UINT_RANGE<16384,16777216>);
+    add("settings.tuning.quic_listener_rcvbuf", "QUIC A-side socket receive buffer request")
+            .help_quick("<bytes>: 0..1073741824; default 1048576; 0 keeps OS default; shared per address family; restart required")
+            .may_be_empty(false)
+            .value_filter(VALUE_UINT_RANGE<0,1073741824>);
     add("settings.tuning.quic_inbox_packets", "QUIC ingress packet limit per worker")
             .help_quick("<number>: 1..1048576 packets per worker; restart required; multi-worker listeners only")
             .may_be_empty(false)

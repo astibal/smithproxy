@@ -242,3 +242,10 @@ directly and has no dispatcher inbox. Restart after changing them: an existing
 receiver retains its original limits. Four workers per IPv4/IPv6 family can
 therefore queue up to 128 MiB of payload with the defaults. Socket receive
 buffers are separate and are not changed by these settings.
+
+The A-side listener socket uses `settings.tuning.quic_listener_rcvbuf` (default
+1048576 bytes, range 0..1073741824). Zero keeps the OS default. Restart after
+changing it. Workers of the same address family share this socket and its receive
+buffer; B-side sockets are unaffected. Listener diagnostics show both the request
+and the kernel-reported size, which may be clamped and includes doubled accounting
+on Linux. This kernel memory is separate from the worker inbox budget.

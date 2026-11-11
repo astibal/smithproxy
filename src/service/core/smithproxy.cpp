@@ -185,7 +185,8 @@ bool SmithProxy::create_quic_listeners() {
                 // policy still decides whether any logger receives the journal.
                 true, sx::proxymaker::make_quic_session_setup,
                 std::move(credentials.certificate_pem),
-                std::move(credentials.private_key_pem), family);
+                std::move(credentials.private_key_pem), family,
+                CfgFactory::get()->quic_listener_rcvbuf);
             if (receiver) service->assign_worker(receiver, worker);
             if (!service->prepare()) {
                 _err("Failed to setup QUIC worker %u: %s", worker, service->last_error().c_str());
