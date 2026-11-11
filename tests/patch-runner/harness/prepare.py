@@ -294,10 +294,15 @@ text = re.sub(r'(plaintext_workers|ssl_workers|udp_workers) = 0',r'\1 = 1',text)
 if 'dtls_workers' not in text:
     text = text.replace('ssl_workers = 1;', 'ssl_workers = 1;\n    dtls_workers = 1;', 1)
 if os.environ.get('QUIC_LAB') == '1':
-    # QUIC has no main-thread fallback: zero workers leaves the configured
-    # port without a listener. Keep the isolated H3 lab deterministic with a
-    # single worker; production deployments can scale this independently.
-    text = text.replace('quic_workers = -1', 'quic_workers = 1')
+    # Default to the direct single-worker path; allow explicit receiver/worker
+    # coverage without changing the shipped production configuration.
+    quic_workers = int(os.environ.get('QUIC_WORKERS', '1'))
+    if quic_workers < 1:
+        raise ValueError('QUIC_WORKERS must be positive')
+    text, worker_count = re.subn(r'quic_workers\s*=\s*-?\d+',
+                                f'quic_workers = {quic_workers}', text, count=1)
+    if worker_count != 1:
+        raise RuntimeError('cannot configure QUIC workers in lab configuration')
 text = re.sub(r'\s*auth_profile = "resolve";', '', text)
 text = text.replace('nameservers = [ "8.8.8.8", "8.8.4.4" ]','nameservers = [ "198.18.20.2" ]')
 gre_capture_dst = os.environ.get('GRE_CAPTURE_DST')

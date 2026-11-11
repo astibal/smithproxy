@@ -176,13 +176,8 @@ struct openssl_listener::observer_state {
 };
 
 struct openssl_listener::dispatcher_state {
-    struct packet {
-        std::vector<unsigned char> data;
-        datagram_endpoint peer;
-        datagram_endpoint local;
-        std::uint64_t association = 0;
-        unsigned ingress_ifindex = 0;
-    };
+    using packet = datagram_packet;
+    datagram_source source;              // Optional receiver-to-worker inbox.
     ~dispatcher_state() { BIO_free(application_bio); }
 
     BIO* application_bio = nullptr;       // Owned application half of the datagram pair.
@@ -196,10 +191,11 @@ struct openssl_listener::dispatcher_state {
     std::uint64_t active_association = 0; // CID family scoped to the same operation.
     std::uint64_t next_association = 1;   // Zero means unknown/unroutable.
     bool input_active = false;            // The active tuple is currently safe to use.
+    bool route_failed = false;            // Callback allocation failure must not cross C frames.
 };
 
 openssl_listener::openssl_listener(std::unique_ptr<observer_state> observer,
-                                   std::unique_ptr<dispatcher_state> dispatcher,
+                                   std::shared_ptr<dispatcher_state> dispatcher,
                                    unique_ssl listener, bool local_address_enabled)
     : observer_state_(std::move(observer)), dispatcher_state_(std::move(dispatcher)),
       listener_(std::move(listener)),
@@ -267,7 +263,12 @@ void detail::datagram_route_table::remember(
 
     auto [entry, inserted] = routes_.emplace(connection_id, route);
     if (!inserted) {
-        entry->second = route;
+        // A CID is not globally unique across independent clients. Retain an
+        // unroutable tombstone on a collision rather than redirecting the old
+        // connection. Its entry still obeys the ordinary bounded eviction.
+        if (!same_endpoint(entry->second.peer, route.peer)
+            || !same_endpoint(entry->second.local, route.local)
+            || entry->second.association != route.association) entry->second = {};
         return;
     }
 
@@ -301,6 +302,28 @@ bool detail::datagram_route_table::learn(
     return true;
 }
 
+bool detail::datagram_route_table::learn_new_connection_id(
+    unsigned char const* data, std::size_t size, datagram_route const& route) {
+    // Only OpenSSL's authenticated frame callback feeds this parser. Frame
+    // type, sequence and retire_prior_to are varints; CID length is one byte.
+    if (!data || !route.peer.valid() || !route.local.valid()) return false;
+    std::uint64_t values[3] {};
+    for (auto& value : values) {
+        auto const decoded = parse_varint(data, size);
+        if (!decoded) return false;
+        value = decoded.value;
+        data += decoded.encoded_size;
+        size -= decoded.encoded_size;
+    }
+    if (values[0] != 0x18 || values[2] > values[1] || size == 0) return false;
+    auto const length = *data++;
+    --size;
+    // The remaining bytes are the CID and its 16-byte stateless-reset token.
+    if (length == 0 || length > 20 || size != std::size_t(length) + 16) return false;
+    remember(std::vector<std::uint8_t>(data, data + length), route);
+    return true;
+}
+
 std::optional<detail::datagram_route> detail::datagram_route_table::resolve(
     unsigned char const* data, std::size_t size) const {
     auto const parsed = parse_header(data, size);
@@ -329,7 +352,56 @@ std::optional<detail::datagram_route> detail::datagram_route_table::resolve(
     return result;
 }
 
+std::optional<detail::datagram_route> detail::datagram_route_table::resolve_peer(
+    datagram_endpoint const& peer) const {
+    std::optional<datagram_route> result;
+    if (!peer.valid()) return result;
+    for (auto const& [cid, route] : routes_) {
+        if (!same_endpoint(peer, route.peer)) continue;
+        if (result) {
+            if (!same_endpoint(result->local, route.local)) return std::nullopt;
+            // Reused UDP tuples can retain old CID families. The wire route
+            // remains unambiguous, but its capture association does not.
+            if (result->association != route.association) result->association = 0;
+        } else {
+            result = route;
+        }
+    }
+    return result;
+}
+
 namespace {
+
+struct connection_route_observer {
+    std::weak_ptr<openssl_listener::dispatcher_state> dispatcher;
+    detail::datagram_route route;
+};
+
+/** The SSL owns the callback argument, even if it outlives its listener adapter. */
+int connection_route_index() {
+    static int const index = SSL_get_ex_new_index(0, nullptr, nullptr, nullptr,
+        [](void*, void* pointer, CRYPTO_EX_DATA*, int, long, void*) {
+            delete static_cast<connection_route_observer*>(pointer);
+        });
+    return index;
+}
+
+/** Keep CID routing exact after either side rotates its connection ID. */
+void observe_connection_id(int, int, int content_type, void const* data,
+                           std::size_t size, SSL*, void* argument) noexcept {
+    if (content_type != SSL3_RT_QUIC_FRAME_FULL || !data || size == 0) return;
+    auto const type = parse_varint(static_cast<unsigned char const*>(data), size);
+    if (!type || type.value != 0x18) return;
+    auto* observer = static_cast<connection_route_observer*>(argument);
+    if (auto state = observer->dispatcher.lock()) {
+        try {
+            state->routes.learn_new_connection_id(
+                static_cast<unsigned char const*>(data), size, observer->route);
+        } catch (...) {
+            state->route_failed = true;
+        }
+    }
+}
 
 void learn_packet_route(openssl_listener::dispatcher_state& state,
                         openssl_listener::dispatcher_state::packet const& packet) {
@@ -353,10 +425,12 @@ bool associate_input_packet(openssl_listener::dispatcher_state& state,
 }
 
 bool receive_socket_datagram(int fd, openssl_listener::dispatcher_state::packet& packet) {
-    packet.data.resize(65536);
+    // Allocate only the received payload when handing a packet to a worker.
+    // Initialising a fresh 64KiB vector per 1200-byte datagram wastes bandwidth.
+    std::array<unsigned char, 65536> payload;
     std::array<unsigned char, 256> control {};
     sockaddr_storage peer {};
-    iovec vector { packet.data.data(), packet.data.size() };
+    iovec vector { payload.data(), payload.size() };
     msghdr message {};
     message.msg_name = &peer;
     message.msg_namelen = sizeof(peer);
@@ -371,7 +445,7 @@ bool receive_socket_datagram(int fd, openssl_listener::dispatcher_state::packet&
         errno = EMSGSIZE;
         return false;
     }
-    packet.data.resize(static_cast<std::size_t>(received));
+    packet.data.assign(payload.begin(), payload.begin() + received);
     if (!socle_detail::copy_socket_address(
             packet.peer.address, &peer, message.msg_namelen)) {
         errno = EPROTO;
@@ -423,8 +497,10 @@ bool inject_bio_datagram(BIO* bio, openssl_listener::dispatcher_state::packet co
     auto peer = endpoint_to_bio(packet.peer);
     auto local = endpoint_to_bio(packet.local);
     if (!peer || !local) return false;
+    // A BIO pair models two endpoints: send.local becomes receive.peer.
+    // We inject a packet sent by the client to the intercepted destination.
     BIO_MSG message { const_cast<unsigned char*>(packet.data.data()), packet.data.size(),
-                      peer.get(), local.get(), 0 };
+                      local.get(), peer.get(), 0 };
     std::size_t processed = 0;
     ERR_clear_error();
     if (BIO_sendmmsg(bio, &message, sizeof(message), 1, 0, &processed) == 1
@@ -493,6 +569,7 @@ send_result send_socket_datagram(int fd,
 }
 
 bool drain_bio_output(openssl_listener::dispatcher_state& state) {
+    if (state.route_failed) return false;
     while (state.pending_output.size() < 1024) {
         openssl_listener::dispatcher_state::packet packet;
         packet.data.resize(65536);
@@ -511,21 +588,28 @@ bool drain_bio_output(openssl_listener::dispatcher_state& state) {
             break;
         }
         packet.data.resize(message.data_len);
-        packet.peer = endpoint_from_bio(peer.get());
-        packet.local = endpoint_from_bio(local.get());
-        // OpenSSL 3.5 may omit the peer on listener-generated packets. A global
-        // last-peer fallback is unsafe with concurrent connections, so recover
-        // the tuple from the destination Connection ID learned on input.
-        auto const route = state.routes.resolve(packet.data.data(), packet.data.size());
+        // Reading the application half reverses the sender's BIO addresses.
+        packet.peer = endpoint_from_bio(local.get());
+        packet.local = endpoint_from_bio(peer.get());
+        // OpenSSL may leave the outgoing source address unspecified. Recover
+        // the intercepted local address from the route, not the last session
+        // serviced: one engine tick can produce packets for several clients.
+        auto route = state.routes.resolve(packet.data.data(), packet.data.size());
+        // OpenSSL may rotate the destination CID without exposing the encrypted
+        // NEW_CONNECTION_ID frame. Its output peer still identifies the route
+        // when unique; never infer a destination from the last active session.
+        if (!route) route = state.routes.resolve_peer(packet.peer);
         if (!packet.peer.valid() && route) packet.peer = route->peer;
         if (!packet.local.valid() && route) packet.local = route->local;
         if (route) packet.association = route->association;
         // A client's first Initial may have an empty source CID, leaving a
         // Retry with no routable destination CID. While processing exactly
         // that input datagram, its tuple is unambiguous and safe to use.
-        if (!packet.peer.valid() && state.input_active) packet.peer = state.active_peer;
-        if (!packet.local.valid() && state.input_active) packet.local = state.active_local;
-        if (packet.association == 0 && state.input_active) {
+        auto const header = parse_header(packet.data.data(), packet.data.size());
+        bool const retry = state.input_active && header && header.value.type == packet_type::retry;
+        if (!packet.peer.valid() && retry) packet.peer = state.active_peer;
+        if (!packet.local.valid() && retry) packet.local = state.active_local;
+        if (packet.association == 0 && !route && retry) {
             packet.association = state.active_association;
         }
         if (!packet.peer.valid() || !packet.local.valid()) {
@@ -554,15 +638,25 @@ bool flush_socket_output(openssl_listener::dispatcher_state& state,
 
 } // namespace
 
+bool receive_datagram(int fd, datagram_packet& packet) {
+    return receive_socket_datagram(fd, packet);
+}
+
 datagram_endpoint endpoint_from_bio_address(const BIO_ADDR* address) {
     return endpoint_from_bio(address);
 }
 
-openssl_connection::openssl_connection(unique_ssl connection, int owned_udp_fd)
-    : connection_(std::move(connection)), owned_udp_fd_(owned_udp_fd) {
+openssl_connection::openssl_connection(unique_ssl connection, int owned_udp_fd,
+                                       event_driver driver)
+    : connection_(std::move(connection)), owned_udp_fd_(owned_udp_fd), driver_(driver) {
     if (connection_) {
         ERR_clear_error();
-        if(SSL_set_blocking_mode(connection_.get(), 0) != 1 ||
+        // Stream I/O only consumes or queues application bytes. Transport ticks
+        // belong to the owner: the listener for accepted connections, or the
+        // connection's receive/send phases for an independent upstream engine.
+        if(SSL_set_event_handling_mode(connection_.get(),
+                SSL_VALUE_EVENT_HANDLING_MODE_EXPLICIT) != 1 ||
+           SSL_set_blocking_mode(connection_.get(), 0) != 1 ||
            SSL_set_default_stream_mode(
                connection_.get(), SSL_DEFAULT_STREAM_MODE_NONE) != 1 ||
            SSL_set_incoming_stream_policy(
@@ -819,7 +913,7 @@ void openssl_connection::progress_transport() {
             SSL_handle_events(connection_.get());
         }
         return;
-    } else if (!SSL_is_init_finished(connection_.get())) {
+    } else if (driver_ == event_driver::connection && !SSL_is_init_finished(connection_.get())) {
         ERR_clear_error();
         auto const result = SSL_do_handshake(connection_.get());
         if (result != 1) {
@@ -832,7 +926,7 @@ void openssl_connection::progress_transport() {
             }
         }
     }
-    if (!closed_) SSL_handle_events(connection_.get());
+    if (!closed_ && driver_ == event_driver::connection) SSL_handle_events(connection_.get());
     SSL_CONN_CLOSE_INFO close_info {};
     if (SSL_get_conn_close_info(connection_.get(), &close_info, sizeof(close_info)) == 1) {
         closed_ = true;
@@ -1014,6 +1108,10 @@ openssl_connection::stream_state const* openssl_connection::find(multiflow::flow
 }
 
 multiflow::flow_handle openssl_connection::attach_stream(unique_ssl stream, bool incoming) {
+    // MFFlowCom has socket write semantics: report consumed bytes immediately.
+    // OpenSSL's default all-or-nothing retry retains the original buffer/length,
+    // while the proxy can append to or compact its queue under backpressure.
+    SSL_set_mode(stream.get(), SSL_MODE_ENABLE_PARTIAL_WRITE);
     auto const stream_type = SSL_get_stream_type(stream.get());
     auto const stream_direction = stream_type == SSL_STREAM_TYPE_BIDI
         ? multiflow::direction::bidirectional
@@ -1032,7 +1130,11 @@ bool openssl_connection::poll_stream(stream_state const& stream, std::uint64_t e
     SSL_POLL_ITEM item { SSL_as_poll_descriptor(stream.stream.get()), events, 0 };
     timeval timeout { 0, 0 };
     std::size_t result_count = 0;
-    if (SSL_poll(&item, 1, sizeof(item), &timeout, 0, &result_count) != 1) return false;
+    // Readiness is a snapshot; the connection/listener owner drives transport.
+    // A normal SSL_poll() ticks the engine again, including sibling connections
+    // on a shared listener. Doing that for every stream multiplies I/O work.
+    if (SSL_poll(&item, 1, sizeof(item), &timeout,
+                 SSL_POLL_FLAG_NO_HANDLE_EVENTS, &result_count) != 1) return false;
     return result_count != 0 && (item.revents & events) != 0;
 }
 
@@ -1045,7 +1147,7 @@ void openssl_connection::emit(multiflow::event_type type,
 
 std::unique_ptr<openssl_listener> openssl_listener::create(SSL_CTX* context, int udp_fd,
                                                            bool enable_local_address,
-                                                           datagram_observer observer) {
+                                                           datagram_observer observer, datagram_source source) {
     if (!context || udp_fd < 0) return nullptr;
 
     // The dispatcher, not the optional observer, requires the original local
@@ -1082,7 +1184,7 @@ std::unique_ptr<openssl_listener> openssl_listener::create(SSL_CTX* context, int
     }
 
     BIO* network_bio = nullptr;
-    auto dispatcher = std::unique_ptr<openssl_listener::dispatcher_state> {};
+    auto dispatcher = std::shared_ptr<openssl_listener::dispatcher_state> {};
     bool local_address_enabled = false;
     if (enable_local_address) {
         BIO* application_bio = nullptr;
@@ -1110,9 +1212,10 @@ std::unique_ptr<openssl_listener> openssl_listener::create(SSL_CTX* context, int
             || BIO_dgram_set_mtu(application_bio, 1500) != 1) {
             return fail_pair();
         }
-        dispatcher = std::make_unique<openssl_listener::dispatcher_state>();
+        dispatcher = std::make_shared<openssl_listener::dispatcher_state>();
         dispatcher->application_bio = application_bio;
         dispatcher->socket_fd = udp_fd;
+        dispatcher->source = std::move(source);
         network_bio = ssl_bio;
         local_address_enabled = true;
     } else {
@@ -1143,7 +1246,8 @@ std::unique_ptr<openssl_connection> openssl_listener::accept() {
     unique_ssl connection(SSL_accept_connection(listener_.get(),
                                                 SSL_ACCEPT_CONNECTION_NO_BLOCK));
     if (!connection) return nullptr;
-    return std::make_unique<openssl_connection>(std::move(connection));
+    return std::make_unique<openssl_connection>(std::move(connection), -1,
+        openssl_connection::event_driver::listener);
 }
 
 bool openssl_listener::handle_events() {
@@ -1165,6 +1269,15 @@ bool openssl_listener::handle_events() {
     }
     if (!receive_input_batch()) return false;
     return progress_listener_timers();
+}
+
+bool openssl_listener::finish_events() {
+    // Stream writes only enqueue bytes. Tick once after all sessions have run,
+    // otherwise queued data can wait for a peer packet which will never arrive.
+    if (!listener_) return fail_operation("listener is not initialized");
+    if (dispatcher_state_) return progress_listener_timers();
+    return SSL_handle_events(listener_.get()) == 1
+        || fail_operation("SSL_handle_events after stream output");
 }
 
 bool openssl_listener::fail_operation(std::string operation) {
@@ -1195,11 +1308,30 @@ bool openssl_listener::progress_input_packet() {
     dispatcher.input_active = true;
     auto clear_active = [&dispatcher]() { dispatcher.input_active = false; };
 
-    if (!inject_bio_datagram(dispatcher.application_bio, packet)) {
-        clear_active();
-        return fail_operation("BIO_sendmmsg into listener");
-    }
-    dispatcher.pending_input.pop_front();
+    // Established short-header packets carry their own BIO addresses and can
+    // share one engine tick across connections. No last-packet fallback is safe
+    // for that batch. Initial/Handshake packets retain one-packet scope for
+    // certificate/Retry callbacks. Keep each batch below the BIO capacity.
+    auto const can_batch = [](dispatcher_state::packet const& input) {
+        return input.association != 0 && !input.data.empty()
+            && (input.data.front() & 0x80) == 0;
+    };
+    bool const batch = can_batch(packet);
+    if (batch) dispatcher.input_active = false;
+    std::size_t bytes = 0;
+    do {
+        auto const& input = dispatcher.pending_input.front();
+        if (!inject_bio_datagram(dispatcher.application_bio, input)) {
+            clear_active();
+            return fail_operation("BIO_sendmmsg into listener");
+        }
+        bytes += input.data.size();
+        dispatcher.pending_input.pop_front();
+        if (!batch || dispatcher.pending_input.empty()) break;
+
+        auto const& next = dispatcher.pending_input.front();
+        if (!can_batch(next) || bytes + next.data.size() > 65536) break;
+    } while (true);
 
     ERR_clear_error();
     if (SSL_handle_events(listener_.get()) != 1) {
@@ -1222,7 +1354,9 @@ bool openssl_listener::receive_input_batch() {
     // certificate futures, shutdown, or management snapshots.
     for (std::size_t count = 0; count < 64; ++count) {
         dispatcher_state::packet packet;
-        if (!receive_socket_datagram(dispatcher.socket_fd, packet)) {
+        if (dispatcher.source) {
+            if (!dispatcher.source(packet)) break;
+        } else if (!receive_socket_datagram(dispatcher.socket_fd, packet)) {
             if (detail::datagram_receive_would_block(errno)) break;
             last_error_ = std::string("recvmsg: ") + std::strerror(errno);
             return false;
@@ -1241,6 +1375,8 @@ bool openssl_listener::receive_input_batch() {
         observe_datagram(observer_state_.get(), datagram_direction::ingress, packet);
 
         dispatcher.pending_input.push_back(std::move(packet));
+    }
+    while (!dispatcher.pending_input.empty()) {
         if (!progress_input_packet()) return false;
     }
     return true;
@@ -1317,6 +1453,24 @@ unsigned openssl_listener::current_ingress_ifindex() const {
 std::uint64_t openssl_listener::current_association() const {
     return dispatcher_state_ && dispatcher_state_->input_active
         ? dispatcher_state_->active_association : 0;
+}
+
+bool openssl_listener::bind_connection_route(SSL* connection) {
+    if (!dispatcher_state_) return true;
+    if (!connection || SSL_is_connection(connection) != 1
+        || !dispatcher_state_->input_active || current_association() == 0) return false;
+    int const index = connection_route_index();
+    if (index < 0) return false;
+    auto* existing = static_cast<connection_route_observer*>(SSL_get_ex_data(connection, index));
+    if (existing) return existing->route.association == current_association();
+
+    auto observer = std::make_unique<connection_route_observer>(connection_route_observer {
+        dispatcher_state_, {current_peer(), current_local(), current_association()}});
+    if (SSL_set_ex_data(connection, index, observer.get()) != 1) return false;
+    SSL_set_msg_callback_arg(connection, observer.get());
+    SSL_set_msg_callback(connection, observe_connection_id);
+    observer.release();
+    return true;
 }
 
 #endif // SMITHPROXY_OPENSSL_QUIC

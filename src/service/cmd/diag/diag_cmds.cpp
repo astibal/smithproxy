@@ -1831,6 +1831,9 @@ static void print_quic_sessions(DiagCli* cli, int flags, bool listener_summary, 
                       service->bound_port(), sessions.size(),
                       static_cast<unsigned long long>(counters.accepted_sessions),
                       static_cast<unsigned long long>(counters.completed_sessions));
+            cli_print(cli, "  worker: %zu/%zu, receiver queue drops: %llu",
+                      service->worker_index() + 1, service->worker_count(),
+                      static_cast<unsigned long long>(service->dropped_datagrams()));
         }
 
         for (auto const& session : sessions) {

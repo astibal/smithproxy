@@ -19,6 +19,8 @@
 
 namespace sx::quic {
 
+class worker_dispatcher;
+
 namespace detail {
 /** Internal guard against allocator reuse of a borrowed OpenSSL handle. */
 bool same_certificate_callback_identity(std::string const& staged_server_name,
@@ -144,6 +146,12 @@ public:
     listener_service(listener_service const&) = delete;
     listener_service& operator=(listener_service const&) = delete;
 
+    /** Join a receiver before prepare(); each index has one session owner. */
+    void assign_worker(std::shared_ptr<worker_dispatcher> dispatcher, std::size_t index);
+    std::size_t worker_index() const { return worker_index_; }
+    std::size_t worker_count() const;
+    std::uint64_t dropped_datagrams() const;
+
     /** Allocate contexts/socket/listener. Safe to call again after success. */
     bool prepare();
     /** Run the single-thread event loop until stop() or a fatal listener error. */
@@ -207,6 +215,8 @@ private:
     /** Record a fatal listener error and make ready() false. */
     void fail(std::string message);
 
+    std::shared_ptr<worker_dispatcher> dispatcher_; ///< Shared ingress, never shared SSL state.
+    std::size_t worker_index_ = 0;                ///< Stable index throughout this generation.
     int address_family_;                         ///< Separate IPv4/IPv6 sockets avoid mapped-address ambiguity.
     std::uint16_t port_;                         ///< Requested local service port.
     std::uint16_t bound_port_ = 0;               ///< Actual port, relevant when port_ is zero.

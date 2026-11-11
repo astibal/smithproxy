@@ -16,10 +16,11 @@ from aioquic.quic.events import ProtocolNegotiated, QuicEvent
 class Http3OriginProtocol(QuicConnectionProtocol):
     """Answer every request with deterministic headers and a short body."""
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, identity="", **kwargs):
         super().__init__(*args, **kwargs)
         self.http = None
         self.responded = set()
+        self.identity = identity
 
     def quic_event_received(self, event: QuicEvent) -> None:
         if isinstance(event, ProtocolNegotiated):
@@ -54,6 +55,7 @@ class Http3OriginProtocol(QuicConnectionProtocol):
                     (b"content-type", b"text/plain"),
                     (b"content-length", str(len(body)).encode()),
                     (b"x-smithproxy-h3", b"decoded"),
+                    (b"x-origin-address", self.identity.encode()),
                 ],
             )
             self.http.send_data(
@@ -159,8 +161,10 @@ async def run(arguments: argparse.Namespace) -> None:
         for host in (arguments.host, arguments.host6):
             if not host:
                 continue
+            protocol = BulkOriginProtocol if arguments.bulk else functools.partial(
+                Http3OriginProtocol, identity=f"{host}:{arguments.port}")
             servers.append(await serve(host, arguments.port, configuration=configuration,
-                                       create_protocol=BulkOriginProtocol if arguments.bulk else Http3OriginProtocol))
+                                       create_protocol=protocol))
         print(f"READY h3-origin {arguments.host}:{arguments.port} ipv6={arguments.host6}", flush=True)
         await asyncio.Future()
     finally:

@@ -254,10 +254,16 @@ void CfgValueHelp::init() {
             .may_be_empty(false)
             .value_filter(HW_FILTER);
 
-    add("settings.quic_workers", "experimental QUIC listener thread count")
+    add("settings.quic_workers", "QUIC session worker count per address family")
             .live_action("QUIC", CfgValue::live_apply_t::workers_tproxy)
-            .help_quick("<number>: -1 disabled, 0 or 1 enables one event loop")
-            .may_be_empty(false);
+            .help_quick("<number>: -1 disabled, 0 or 1 one worker, N workers per IPv4/IPv6 (max 4xCPU)")
+            .may_be_empty(false)
+            .value_filter([](std::string const& value) {
+                if (value == "-1") return CfgValue::filter_retval::accept(value);
+                return VALUE_UINT_RANGE_GEN([] { return 0LL; }, [] {
+                    return 4LL * std::max(1U, std::thread::hardware_concurrency());
+                }, value);
+            });
 
     add("settings.socks_workers", "SOCKS proxy traffic thread count")
             .live_action("SOCKS", CfgValue::live_apply_t::workers_socks)

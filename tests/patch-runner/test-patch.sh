@@ -102,6 +102,7 @@ Common environment variables:
   QUIC_THROUGHPUT_BYTES          Bytes per H3 flow (default: 8 MiB).
   QUIC_THROUGHPUT_REPEATS        Samples per direction/concurrency (default: 3).
   QUIC_THROUGHPUT_CONCURRENCY    Independent H3 connections (default: 1,4,16).
+  QUIC_WORKERS                  QUIC workers per address family (default: 1).
   TLS_THROUGHPUT_BYTES           Bytes per measured E2E flow (default: 64 MiB).
   TLS_THROUGHPUT_REPEATS         Samples per direction/concurrency (default: 3).
   TLS_THROUGHPUT_CONCURRENCY     Measured flow counts (default: 1,4,16).
@@ -1079,7 +1080,7 @@ print(*(x.getsockname()[1] for x in s))'
         TCP_CHURN_PARALLEL \
         TLS_TRANSFER_BYTES TLS_TRANSFER_REPEATS TLS_TRANSFER_CONCURRENCY \
         TLS_THROUGHPUT_BYTES TLS_THROUGHPUT_REPEATS TLS_THROUGHPUT_CONCURRENCY \
-        QUIC_THROUGHPUT_BYTES QUIC_THROUGHPUT_REPEATS QUIC_THROUGHPUT_CONCURRENCY \
+        QUIC_THROUGHPUT_BYTES QUIC_THROUGHPUT_REPEATS QUIC_THROUGHPUT_CONCURRENCY QUIC_WORKERS \
         CHURN_MIN_PORT CHURN_MAX_PORT; do
         [[ -z ${!variable:-} ]] || LAB_ENV+=("$variable=${!variable}")
     done

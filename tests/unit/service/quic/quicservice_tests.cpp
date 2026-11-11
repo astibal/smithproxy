@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "service/quic/quicservice.hpp"
+#include "service/quic/worker_dispatcher.hpp"
 
 #include "proxy/multiflow/mfflowcom.hpp"
 #include <sslcertstore.hpp>
@@ -14,6 +15,7 @@
 #if SMITHPROXY_OPENSSL_QUIC
 #include <arpa/inet.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #endif
@@ -439,7 +441,7 @@ private:
     sx::multiflow::MFProxy bridge_;
 };
 
-TEST_F(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
+static void exercise_proxy_stream(bool use_workers) {
     auto origin_context = quic::make_openssl_quic_context(true);
     auto client_context = quic::make_openssl_quic_context(false);
     ASSERT_NE(origin_context, nullptr);
@@ -476,16 +478,43 @@ TEST_F(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
                                      return std::make_unique<classified_test_bridge>(
                                          std::move(left), std::move(right), limits);
                                  });
+    std::shared_ptr<quic::worker_dispatcher> receiver;
+    std::unique_ptr<quic::listener_service> sibling;
+    if (use_workers) {
+        receiver = std::make_shared<quic::worker_dispatcher>(2);
+        quic::datagram_endpoint target;
+        auto* address = reinterpret_cast<sockaddr_in*>(&target.address);
+        address->sin_family = AF_INET;
+        address->sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        target.size = sizeof(*address);
+        auto const owner = receiver->owner(target);
+        proxy.assign_worker(receiver, owner);
+        sibling = std::make_unique<quic::listener_service>(0,
+            "etc/certs/default/srv-cert.pem", "etc/certs/default/srv-key.pem",
+            false, ntohs(origin_address.sin_port), false, lifecycle, quic::resource_limits{},
+            "127.0.0.1");
+        sibling->assign_worker(receiver, 1 - owner);
+    }
     ASSERT_TRUE(proxy.prepare()) << proxy.last_error();
+    if (sibling) {
+        ASSERT_TRUE(sibling->prepare()) << sibling->last_error();
+        ASSERT_EQ(sibling->bound_port(), proxy.bound_port());
+    }
+    std::thread sibling_thread;
+    if (sibling) sibling_thread = std::thread([&] { sibling->run(); });
     std::thread proxy_thread([&proxy]() { proxy.run(); });
     struct thread_guard {
         quic::listener_service& service;
         std::thread& thread;
+        quic::listener_service* sibling;
+        std::thread& sibling_thread;
         ~thread_guard() {
             service.stop();
+            if (sibling) sibling->stop();
             if (thread.joinable()) thread.join();
+            if (sibling_thread.joinable()) sibling_thread.join();
         }
-    } guard { proxy, proxy_thread };
+    } guard { proxy, proxy_thread, sibling.get(), sibling_thread };
 
     sockaddr_in proxy_address {};
     proxy_address.sin_family = AF_INET;
@@ -615,6 +644,11 @@ TEST_F(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
     EXPECT_EQ(diagnostics.accepted_sessions, 1U);
     EXPECT_EQ(diagnostics.completed_sessions, 1U);
     EXPECT_EQ(diagnostics.idle_timeouts, 1U);
+    if (sibling) {
+        EXPECT_EQ(sibling->diagnostics().accepted_sessions, 0U);
+        EXPECT_EQ(sibling->dropped_datagrams(), 0U);
+        EXPECT_EQ(proxy.dropped_datagrams(), 0U);
+    }
 
     external->close();
     proxy.stop();
@@ -622,6 +656,14 @@ TEST_F(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
     origin->close();
     close(origin_fd);
 }
+TEST_F(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
+    exercise_proxy_stream(false);
+}
+
+TEST_F(QuicListenerService, ReceiverKeepsStreamAndLifecycleOnSelectedWorker) {
+    exercise_proxy_stream(true);
+}
+
 namespace {
 
 class HookSessionSetup final : public sx::proxymaker::SessionSetup {
@@ -717,3 +759,183 @@ TEST(QuicTlsSnapshot, DistinguishesAbsentPendingCompletedAndEndedHandshakes) {
     tls.ended = true;
     EXPECT_STREQ(tls.handshake_status(), "completed");
 }
+
+#if SMITHPROXY_OPENSSL_QUIC
+namespace {
+quic::datagram_endpoint worker_test_address(const char* host, std::uint16_t port = 443) {
+    quic::datagram_endpoint result;
+    auto* address = reinterpret_cast<sockaddr_in*>(&result.address);
+    address->sin_family = AF_INET;
+    address->sin_port = htons(port);
+    inet_pton(AF_INET, host, &address->sin_addr);
+    result.size = sizeof(*address);
+    return result;
+}
+
+quic::datagram_endpoint worker_test_address6(const char* host, std::uint16_t port = 443) {
+    quic::datagram_endpoint result;
+    auto* address = reinterpret_cast<sockaddr_in6*>(&result.address);
+    address->sin6_family = AF_INET6;
+    address->sin6_port = htons(port);
+    inet_pton(AF_INET6, host, &address->sin6_addr);
+    result.size = sizeof(*address);
+    return result;
+}
+
+bool inbox_readable(quic::worker_dispatcher const& receiver, std::size_t worker) {
+    pollfd descriptor {receiver.wake_fd(worker), POLLIN, 0};
+    return ::poll(&descriptor, 1, 0) == 1 && (descriptor.revents & POLLIN);
+}
+}
+
+TEST(QuicWorkerDispatcher, PreservesOwnerAndMetadataAcrossClientAndPortChanges) {
+    quic::worker_dispatcher receiver(4);
+    auto first = worker_test_address("198.18.20.1");
+    auto second = worker_test_address("198.18.20.2");
+    auto const owner = receiver.owner(first);
+    ASSERT_NE(owner, receiver.owner(second));
+    EXPECT_EQ(owner, receiver.owner(worker_test_address("198.18.20.1", 8443)));
+    for (unsigned i = 0; i < 2; ++i) {
+        quic::datagram_packet packet;
+        packet.local = first;
+        packet.peer = worker_test_address(i ? "10.0.0.2" : "10.0.0.1", 1000 + i);
+        packet.ingress_ifindex = 7;
+        packet.data = {static_cast<unsigned char>(i)};
+        ASSERT_TRUE(receiver.enqueue(std::move(packet)));
+    }
+    EXPECT_TRUE(inbox_readable(receiver, owner));
+    EXPECT_FALSE(inbox_readable(receiver, receiver.owner(second)));
+    for (unsigned i = 0; i < 2; ++i) {
+        quic::datagram_packet packet;
+        ASSERT_TRUE(receiver.pop(owner, packet));
+        EXPECT_EQ(packet.data, (std::vector<unsigned char>{static_cast<unsigned char>(i)}));
+        EXPECT_EQ(packet.ingress_ifindex, 7U);
+        EXPECT_EQ(receiver.owner(packet.local), owner);
+        EXPECT_EQ(inbox_readable(receiver, owner), i == 0);
+    }
+    quic::datagram_packet packet;
+    EXPECT_FALSE(receiver.pop(owner, packet));
+}
+
+TEST(QuicWorkerDispatcher, BoundsQueuesAndNeverStealsFromRetiredOwners) {
+    quic::worker_dispatcher receiver(2);
+    quic::datagram_packet packet;
+    packet.local = worker_test_address("198.18.20.1");
+    packet.peer = worker_test_address("10.0.0.1");
+    packet.data.resize(65536);
+    auto const owner = receiver.owner(packet.local);
+    for (int i = 0; i < 64; ++i) ASSERT_TRUE(receiver.enqueue(packet));
+    EXPECT_FALSE(receiver.enqueue(packet));
+    EXPECT_EQ(receiver.dropped(owner), 1U);
+    quic::datagram_packet received;
+    ASSERT_TRUE(receiver.pop(owner, received));
+    EXPECT_TRUE(receiver.enqueue(packet));
+    receiver.retire(owner);
+    EXPECT_FALSE(receiver.enqueue(packet));
+    EXPECT_FALSE(inbox_readable(receiver, owner));
+    EXPECT_FALSE(receiver.pop(1 - owner, received));
+    EXPECT_EQ(receiver.dropped(owner), 2U);
+}
+
+TEST(QuicWorkerDispatcher, ReceivesOriginalDestinationsIntoDistinctWorkerInboxes) {
+    int const fd = ::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    ASSERT_GE(fd, 0);
+    struct socket_guard { int fd; ~socket_guard() { ::close(fd); } } guard {fd};
+    int enabled = 1;
+    ASSERT_EQ(::setsockopt(fd, SOL_IP, IP_RECVORIGDSTADDR, &enabled, sizeof(enabled)), 0);
+    sockaddr_in address {};
+    address.sin_family = AF_INET;
+    ASSERT_EQ(::bind(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
+    socklen_t size = sizeof(address);
+    ASSERT_EQ(::getsockname(fd, reinterpret_cast<sockaddr*>(&address), &size), 0);
+    quic::worker_dispatcher receiver(2);
+    ASSERT_TRUE(receiver.attach_socket(fd));
+    ASSERT_TRUE(receiver.start());
+    for (auto host : {"127.0.0.1", "127.0.0.2"}) {
+        auto const target = worker_test_address(host, ntohs(address.sin_port));
+        unsigned char payload = 73;
+        ASSERT_EQ(::sendto(fd, &payload, 1, 0,
+            reinterpret_cast<sockaddr const*>(&target.address), target.size), 1);
+    }
+    pollfd descriptors[] {{receiver.wake_fd(0), POLLIN, 0}, {receiver.wake_fd(1), POLLIN, 0}};
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while ((!inbox_readable(receiver, 0) || !inbox_readable(receiver, 1))
+           && std::chrono::steady_clock::now() < deadline) ::poll(descriptors, 2, 10);
+    for (std::size_t worker = 0; worker < 2; ++worker) {
+        quic::datagram_packet packet;
+        ASSERT_TRUE(receiver.pop(worker, packet));
+        EXPECT_EQ(receiver.owner(packet.local), worker);
+        EXPECT_EQ(packet.data, (std::vector<unsigned char>{73}));
+        EXPECT_TRUE(packet.peer.valid());
+    }
+    receiver.stop();
+    EXPECT_EQ(receiver.error(), 0);
+}
+
+TEST(QuicWorkerDispatcher, PreservesIpv6DestinationAndIngressInterface) {
+    int const fd = ::socket(AF_INET6, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    ASSERT_GE(fd, 0);
+    struct socket_guard { int fd; ~socket_guard() { ::close(fd); } } guard {fd};
+    int enabled = 1;
+    ASSERT_EQ(::setsockopt(fd, SOL_IPV6, IPV6_RECVORIGDSTADDR, &enabled, sizeof(enabled)), 0);
+    ASSERT_EQ(::setsockopt(fd, SOL_IPV6, IPV6_RECVPKTINFO, &enabled, sizeof(enabled)), 0);
+    sockaddr_in6 address {};
+    address.sin6_family = AF_INET6;
+    ASSERT_EQ(::bind(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
+    socklen_t size = sizeof(address);
+    ASSERT_EQ(::getsockname(fd, reinterpret_cast<sockaddr*>(&address), &size), 0);
+
+    quic::worker_dispatcher receiver(4);
+    EXPECT_NE(receiver.owner(worker_test_address6("fd00::1")),
+              receiver.owner(worker_test_address6("fd00::2")));
+    EXPECT_EQ(receiver.owner(worker_test_address6("fd00::1", 443)),
+              receiver.owner(worker_test_address6("fd00::1", 8443)));
+    ASSERT_TRUE(receiver.attach_socket(fd));
+    ASSERT_TRUE(receiver.start());
+    auto const target = worker_test_address6("::1", ntohs(address.sin6_port));
+    auto const owner = receiver.owner(target);
+    unsigned char payload = 91;
+    ASSERT_EQ(::sendto(fd, &payload, 1, 0,
+        reinterpret_cast<sockaddr const*>(&target.address), target.size), 1);
+    pollfd descriptor {receiver.wake_fd(owner), POLLIN, 0};
+    ASSERT_EQ(::poll(&descriptor, 1, 1000), 1);
+    quic::datagram_packet packet;
+    ASSERT_TRUE(receiver.pop(owner, packet));
+    EXPECT_EQ(packet.local.address.ss_family, AF_INET6);
+    EXPECT_EQ(packet.peer.address.ss_family, AF_INET6);
+    EXPECT_EQ(reinterpret_cast<sockaddr_in6 const*>(&packet.local.address)->sin6_port,
+              address.sin6_port);
+    EXPECT_EQ(receiver.owner(packet.local), owner);
+    EXPECT_GT(packet.ingress_ifindex, 0U);
+    EXPECT_EQ(packet.data, (std::vector<unsigned char>{91}));
+    receiver.stop();
+    EXPECT_EQ(receiver.error(), 0);
+}
+
+TEST(QuicWorkerDispatcher, DoesNotLoseWakeupsWhileProducerAndConsumerOverlap) {
+    quic::worker_dispatcher receiver(2);
+    auto const destination = worker_test_address("198.18.20.1");
+    auto const owner = receiver.owner(destination);
+    constexpr unsigned count = 500;
+    std::thread producer([&] {
+        for (unsigned i = 0; i < count; ++i) {
+            quic::datagram_packet packet;
+            packet.local = destination;
+            packet.peer = worker_test_address("10.0.0.1");
+            packet.data = {static_cast<unsigned char>(i)};
+            receiver.enqueue(std::move(packet));
+            std::this_thread::yield();
+        }
+    });
+    struct thread_guard { std::thread& thread; ~thread_guard() { thread.join(); } } guard {producer};
+    for (unsigned i = 0; i < count; ++i) {
+        pollfd descriptor {receiver.wake_fd(owner), POLLIN, 0};
+        ASSERT_EQ(::poll(&descriptor, 1, 1000), 1);
+        quic::datagram_packet packet;
+        ASSERT_TRUE(receiver.pop(owner, packet));
+        EXPECT_EQ(packet.data, (std::vector<unsigned char>{static_cast<unsigned char>(i)}));
+    }
+    EXPECT_FALSE(inbox_readable(receiver, owner));
+    EXPECT_EQ(receiver.dropped(owner), 0U);
+}
+#endif

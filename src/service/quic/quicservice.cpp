@@ -2,6 +2,8 @@
 
 #include "proxy/quic/spq1.hpp"
 #include "service/quic/quiclog.hpp"
+#include "service/quic/worker_dispatcher.hpp"
+#include <stdexcept>
 
 #include <traflog/pcapapi.hpp>
 
@@ -153,6 +155,30 @@ listener_service::listener_service(std::uint16_t port, std::string certificate,
     (void)log();
 }
 
+void listener_service::assign_worker(std::shared_ptr<worker_dispatcher> dispatcher,
+                                    std::size_t index) {
+#if SMITHPROXY_OPENSSL_QUIC
+    if (ready_ || !dispatcher || index >= dispatcher->size())
+        throw std::logic_error("invalid QUIC worker assignment");
+    dispatcher_ = std::move(dispatcher);
+    worker_index_ = index;
+#endif
+}
+
+std::size_t listener_service::worker_count() const {
+#if SMITHPROXY_OPENSSL_QUIC
+    if (dispatcher_) return dispatcher_->size();
+#endif
+    return 1;
+}
+
+std::uint64_t listener_service::dropped_datagrams() const {
+#if SMITHPROXY_OPENSSL_QUIC
+    if (dispatcher_) return dispatcher_->dropped(worker_index_);
+#endif
+    return 0;
+}
+
 diagnostics_snapshot listener_service::diagnostics() const {
     return {
         connection_count_.load(), accepted_sessions_.load(), completed_sessions_.load(),
@@ -251,6 +277,18 @@ bool listener_service::open_socket() {
     wake_fd_ = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
     if (wake_fd_ < 0) {
         return fail_open(std::string("eventfd: ") + std::strerror(errno));
+    }
+    if (dispatcher_ && dispatcher_->socket_fd() >= 0) {
+        udp_fd_ = ::fcntl(dispatcher_->socket_fd(), F_DUPFD_CLOEXEC, 0);
+        if (udp_fd_ < 0) return fail_open("cannot duplicate QUIC receiver socket");
+        sockaddr_storage bound {};
+        socklen_t size = sizeof(bound);
+        if (::getsockname(udp_fd_, reinterpret_cast<sockaddr*>(&bound), &size) != 0)
+            return fail_open("cannot inspect QUIC receiver socket");
+        bound_port_ = bound.ss_family == AF_INET
+            ? ntohs(reinterpret_cast<sockaddr_in*>(&bound)->sin_port)
+            : ntohs(reinterpret_cast<sockaddr_in6*>(&bound)->sin6_port);
+        return true;
     }
     if (address_family_ != AF_INET && address_family_ != AF_INET6)
         return fail_open("unsupported QUIC listener address family");
@@ -356,9 +394,20 @@ bool listener_service::prepare() {
     }
 
     if (!open_socket()) return false;
+    datagram_source source;
+    if (dispatcher_) {
+        if (!dispatcher_->attach_socket(udp_fd_)) {
+            fail("cannot retain QUIC receiver socket");
+            return false;
+        }
+        source = [this](datagram_packet& packet) {
+            return dispatcher_->pop(worker_index_, packet);
+        };
+    }
     listener_ = openssl_listener::create(
-        context_.get(), udp_fd_, transparent_,
-        [this](datagram_view const& datagram) { observe_datagram(datagram); });
+        context_.get(), udp_fd_, transparent_ || bool(dispatcher_),
+        [this](datagram_view const& datagram) { observe_datagram(datagram); },
+        std::move(source));
     if (!listener_) {
         fail("cannot create OpenSSL QUIC listener: " + openssl_error_stack());
         return false;
@@ -375,13 +424,25 @@ bool listener_service::prepare() {
 void listener_service::run() {
 #if SMITHPROXY_OPENSSL_QUIC
     if (!ready_ && !prepare()) return;
-    log().inf("listener loop started on udp/*:%u", bound_port_);
+    log().inf("listener loop started on udp/*:%u worker=%zu/%zu", bound_port_,
+              worker_index_, worker_count());
+    if (dispatcher_ && !dispatcher_->start()) {
+        fail("cannot start QUIC receiver");
+        dispatcher_->retire(worker_index_);
+        return;
+    }
 
+    bool application_progress = false;
     while (!stopping_) {
+        if (dispatcher_ && dispatcher_->error() != 0) {
+            fail(std::string("QUIC receiver: ") + std::strerror(dispatcher_->error()));
+            break;
+        }
         // With no retained work, wait solely for network input or stop().
         // Active connections still need a bounded tick because OpenSSL QUIC
         // timers still require deadline-based wakeups.
-        auto const application_timeout = sessions_.empty() && certificate_jobs_.empty()
+        auto const application_timeout = application_progress ? 0
+            : sessions_.empty() && certificate_jobs_.empty()
                 && staged_upstreams_.empty() && pending_captures_.empty()
                 && dispatcher_bindings_.empty()
             ? -1
@@ -394,10 +455,13 @@ void listener_service::run() {
         // polling only the shared downstream listener would defer that update
         // to the coarse application tick and can stall a full QUIC window.
         std::vector<pollfd> descriptors {
-            { udp_fd_, listener_->desired_socket_events(), 0 },
+            { udp_fd_, static_cast<short>(listener_->desired_socket_events()
+                & (dispatcher_ ? ~POLLIN : ~0)), 0 },
             { wake_fd_, POLLIN, 0 },
         };
-        descriptors.reserve(2 + sessions_.size());
+        descriptors.reserve(3 + sessions_.size());
+        if (dispatcher_) descriptors.push_back(
+            {dispatcher_->wake_fd(worker_index_), POLLIN, 0});
         for (auto const& value : sessions_) {
             if (!value.upstream) continue;
             auto* connection = value.upstream->native_handle();
@@ -452,14 +516,26 @@ void listener_service::run() {
         progress_certificate_jobs();
         if (!draining_) accept_connections();
         auto const now = std::chrono::steady_clock::now();
+        // A productive pass may leave application bytes buffered in OpenSSL.
+        // Revisit all sessions without sleeping, but give each one its turn.
+        application_progress = false;
         for (auto& linked : sessions_) {
+            auto const before = linked.forwarded_bytes;
             progress_session(linked, now);
+            application_progress |= linked.forwarded_bytes != before;
             if (!flush_session_output(linked)) {
                 stopping_ = true;
                 break;
             }
             // Flushing may generate the final handshake/shutdown secrets.
             publish_capture_secrets(linked);
+        }
+
+        // Accepted connections share one engine. Flush their newly queued
+        // writes together, before poll(), rather than ticking per stream/session.
+        if (!listener_->finish_events()) {
+            fail("OpenSSL QUIC listener output failure: " + listener_->last_error());
+            break;
         }
 
         // Publish only after removing objects whose grace period has elapsed.
@@ -471,6 +547,7 @@ void listener_service::run() {
             dispatcher_bindings_.empty()) stopping_ = true;
     }
     cleanup_sessions();
+    if (dispatcher_) dispatcher_->retire(worker_index_);
     process_detail_requests();
     log().inf("listener loop stopped on udp/*:%u", bound_port_);
 #endif
@@ -826,17 +903,11 @@ void listener_service::progress_handshake(
 
 void listener_service::progress_active(
     session& value, std::chrono::steady_clock::time_point now) {
-    // One successful stream write can merely enqueue data inside OpenSSL. Run
-    // a bounded follow-up pass so the connection state machine sees that work
-    // before we sleep in poll(). Stop at the first quiescent pass; the cap
-    // preserves fairness when a session continuously has buffered data.
-    constexpr std::size_t maximum_pump_passes = 64;
-    std::size_t moved = 0;
-    for (std::size_t pass = 0; pass < maximum_pump_passes; ++pass) {
-        auto const pass_moved = value.proxy->pump_once();
-        moved += pass_moved;
-        if (pass_moved == 0) break;
-    }
+    // One pass per session keeps a busy stream from repeatedly driving its
+    // engine while siblings wait. The worker revisits productive sessions in
+    // the next round without blocking in poll(); the listener flushes once
+    // after every session has had a chance to enqueue its output.
+    auto const moved = value.proxy->pump_once();
     if (moved != 0) {
         value.last_activity = now;
         value.forwarded_bytes += moved;
@@ -863,6 +934,10 @@ void listener_service::progress_active(
 }
 
 bool listener_service::flush_session_output(session& value) {
+    // Explicit stream writes enqueue data without running the upstream engine.
+    // Flush after the application pass, before poll() can put this worker to
+    // sleep waiting for a peer that has not received our newly queued bytes.
+    if (value.upstream) value.upstream->progress_transport();
     if (!value.client_endpoint.valid() || !value.target_endpoint.valid()) return true;
     if (listener_->flush_output(value.client_endpoint, value.target_endpoint,
                                 value.capture_association)) return true;
@@ -1271,7 +1346,10 @@ int listener_service::bind_capture_session(SSL* downstream) {
         log().war("downstream ClientHello has no QUIC dispatcher association");
         return 0;
     }
-    return 1;
+    // Connection IDs can rotate after the handshake. Learn authenticated CID
+    // frames from this SSL, so two destinations sharing a client IP:port never
+    // depend on an ambiguous peer-only route lookup.
+    return listener_->bind_connection_route(downstream) ? 1 : 0;
 }
 
 int listener_service::certificate_callback(SSL* ssl, void* argument) {

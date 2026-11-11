@@ -1203,6 +1203,14 @@ if [[ -n ${PPLAY_SUITE:-} && ${PPLAY_SUITE_SKIP_RUN:-0} != 1 ]]; then
     echo 'PASS4 pplay suite through Smithproxy'
     echo 'PASS6 pplay suite through Smithproxy'
 fi
+if [[ $QUIC_TEST == 1 ]]; then
+    # Check real intercepted wire tuples, including one client port shared by
+    # two destinations and later reused by a fresh connection. Capture/export
+    # assertions above keep their original four-request reference scenario.
+    python3 "$ROOT/runner/tests/quic-transparency.py" run --root "$ROOT" \
+        --client-ns "$CLIENT" --server-ns "$SERVER" --data-ns "$NS" \
+        --in-if "$IN_IF" --out-if "$OUT_IF"
+fi
 ip netns exec "$NS" nft list ruleset > "$ROOT/results/nft-active.txt"
 ip -n "$NS" -j route show table all > "$ROOT/results/data-routes.json"
 # A stopped proxy must not silently become an ordinary forwarding router.

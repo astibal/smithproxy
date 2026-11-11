@@ -409,6 +409,7 @@ add_executable(smithproxy
         src/proxy/quic/openssl.cpp
         src/proxy/quic/hooks.cpp
         src/service/quic/quicservice.cpp
+        src/service/quic/worker_dispatcher.cpp
         src/proxy/startstoptls.hpp
         src/proxy/startstoptls.cpp
 
@@ -699,6 +700,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 src/proxy/filters/statsfilter.cpp
                 tests/unit/proxy/filters/statsfilter_tests.cpp
                 src/service/quic/quicservice.cpp
+                src/service/quic/worker_dispatcher.cpp
                 tests/unit/service/quic/quicservice_tests.cpp
 
                 src/ext/hpack/hpack.hpp
@@ -1006,6 +1008,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
         src/proxy/quic/hooks.cpp
                 tests/unit/proxy/quic/openssl_tests.cpp
                 src/service/quic/quicservice.cpp
+                src/service/quic/worker_dispatcher.cpp
                 tests/unit/service/quic/quicservice_tests.cpp
                 tests/quic/testbed/quic_testbed.cpp
         )
@@ -1020,6 +1023,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 src/proxy/quic/openssl.cpp
         src/proxy/quic/hooks.cpp
                 src/service/quic/quicservice.cpp
+                src/service/quic/worker_dispatcher.cpp
                 tests/quic/testbed/quic_test_node.cpp
         )
         target_link_libraries(quic_test_node smithproxy_qpack socle_lib pthread crypto ssl)

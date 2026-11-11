@@ -229,6 +229,23 @@ std::pair<int, std::string> tshark_quic_stream_data(std::string const& path) {
 
 } // namespace
 
+TEST(OpenSslQuicDispatcher, ResolvesOutputPeerOnlyWhenItsTupleIsUnambiguous) {
+    quic::detail::datagram_route_table routes;
+    auto const peer = loopback_endpoint(12345);
+    routes.remember({1}, {peer, loopback_endpoint(443), 7});
+    routes.remember({2}, {peer, loopback_endpoint(443), 7});
+    ASSERT_TRUE(routes.resolve_peer(peer));
+    EXPECT_EQ(routes.resolve_peer(peer)->association, 7U);
+    EXPECT_FALSE(routes.resolve_peer(loopback_endpoint(12346)));
+    // A reused client socket is still routable to the same local address;
+    // only attribution to one retained connection becomes ambiguous.
+    routes.remember({3}, {peer, loopback_endpoint(443), 8});
+    ASSERT_TRUE(routes.resolve_peer(peer));
+    EXPECT_EQ(routes.resolve_peer(peer)->association, 0U);
+    routes.remember({4}, {peer, loopback_endpoint(8443), 9});
+    EXPECT_FALSE(routes.resolve_peer(peer));
+}
+
 TEST(OpenSslQuicDispatcher, IgnoresZeroLengthConnectionIds) {
     quic::detail::datagram_route_table routes;
     routes.remember({}, {loopback_endpoint(10001), loopback_endpoint(443)});
@@ -246,6 +263,39 @@ TEST(OpenSslQuicDispatcher, IgnoresZeroLengthConnectionIds) {
     routes.learn(initial.data(), initial.size(),
                  {loopback_endpoint(10001), loopback_endpoint(443)});
     EXPECT_EQ(routes.size(), 1U);
+}
+
+TEST(OpenSslQuicDispatcher, LearnsRotatedCidWithoutConfusingASharedClientPort) {
+    quic::detail::datagram_route_table routes;
+    auto const peer = loopback_endpoint(41001);
+    auto const first = quic::detail::datagram_route {peer, loopback_endpoint(443), 1};
+    auto second = first;
+    reinterpret_cast<sockaddr_in*>(&second.local.address)->sin_addr.s_addr = htonl(0x7f000002);
+    second.association = 2;
+    routes.remember({0x01}, first);
+    routes.remember({0x02}, second);
+    EXPECT_FALSE(routes.resolve_peer(peer));
+
+    // type=NEW_CONNECTION_ID, sequence=1, retire_prior_to=0, length=2.
+    std::vector<unsigned char> frame {0x18, 1, 0, 2, 0xab, 0xcd};
+    frame.resize(frame.size() + 16); // Stateless reset token.
+    ASSERT_TRUE(routes.learn_new_connection_id(frame.data(), frame.size(), second));
+    std::vector<unsigned char> packet {0x40, 0xab, 0xcd, 0x10};
+    auto route = routes.resolve(packet.data(), packet.size());
+    ASSERT_TRUE(route);
+    EXPECT_EQ(route->association, 2U);
+    EXPECT_EQ(reinterpret_cast<sockaddr_in const*>(&route->local.address)->sin_addr.s_addr,
+              htonl(0x7f000002));
+    EXPECT_FALSE(routes.learn_new_connection_id(frame.data(), frame.size() - 1, first));
+    frame[3] = 21;
+    EXPECT_FALSE(routes.learn_new_connection_id(frame.data(), frame.size(), first));
+
+    // A colliding CID may not redirect packets to the newly learned owner.
+    routes.remember({0xab, 0xcd}, first);
+    route = routes.resolve(packet.data(), packet.size());
+    ASSERT_TRUE(route);
+    EXPECT_FALSE(route->peer.valid());
+    EXPECT_FALSE(route->local.valid());
 }
 
 TEST(OpenSslQuicDispatcher, ResolvesOnlyUnambiguousKnownRoutes) {
@@ -614,6 +664,67 @@ TEST_F(OpenSslQuic, TransparentDispatcherKeepsConcurrentHandshakesIsolated) {
         EXPECT_EQ(server->negotiated_alpn(), "h3");
     }
 
+    // Exercise mixed-client datagram batches and one shared output phase.
+    // Each SNI identifies the expected payload, so cross-client routing cannot
+    // pass merely because every transfer happens to have the same length.
+    std::vector<mf::flow_handle> client_flows;
+    std::vector<mf::flow_handle> server_flows(client_count);
+    std::vector<std::string> requests(client_count), replies(client_count);
+    std::vector<bool> echoed(client_count, false);
+    for (std::size_t i = 0; i < client_count; ++i) {
+        auto flow = clients[i]->open_flow(mf::direction::bidirectional);
+        ASSERT_NE(flow.generation, 0U);
+        client_flows.push_back(flow);
+        std::string payload(8192, static_cast<char>('A' + i));
+        ASSERT_EQ(clients[i]->write(flow, payload.data(), payload.size()).size, payload.size());
+    }
+    auto const transfer_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < transfer_deadline) {
+        for (auto& client : clients) client->drain_events();
+        ASSERT_TRUE(listener->handle_events());
+        for (std::size_t i = 0; i < client_count; ++i) {
+            for (auto const& event : servers[i]->drain_events()) {
+                if (event.type == mf::event_type::flow_open && event.flow) server_flows[i] = *event.flow;
+            }
+            if (!server_flows[i].generation) continue;
+            char data[8192] {};
+            auto read = servers[i]->read(server_flows[i], data, sizeof(data));
+            requests[i].append(data, read.size);
+            if (requests[i].size() == 8192 && !echoed[i]) {
+                auto const client_index = std::stoul(servers[i]->server_name().substr(7));
+                EXPECT_EQ(requests[i], std::string(8192, static_cast<char>('A' + client_index)));
+                ASSERT_EQ(servers[i]->write(server_flows[i], requests[i].data(), requests[i].size()).size,
+                          requests[i].size());
+                echoed[i] = true;
+            }
+        }
+        ASSERT_TRUE(listener->finish_events());
+        for (std::size_t i = 0; i < client_count; ++i) {
+            clients[i]->drain_events();
+            char data[8192] {};
+            auto read = clients[i]->read(client_flows[i], data, sizeof(data));
+            replies[i].append(data, read.size);
+        }
+        if (std::all_of(replies.begin(), replies.end(), [](auto const& reply) { return reply.size() == 8192; })) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    for (std::size_t i = 0; i < client_count; ++i)
+        EXPECT_EQ(replies[i], std::string(8192, static_cast<char>('A' + i)));
+
+    // Saturate a send buffer without draining the receiver. A socket adapter
+    // must expose partial consumption and allow a different next write, rather
+    // than retaining an invisible all-or-nothing OpenSSL retry operation.
+    std::string oversized(4 * 1024 * 1024, 'x');
+    auto const partial = clients.front()->write(client_flows.front(),
+                                                oversized.data(), oversized.size());
+    ASSERT_EQ(partial.status, mf::io_status::ok);
+    EXPECT_GT(partial.size, 0U);
+    EXPECT_LT(partial.size, oversized.size());
+    std::string changed_queue(1024, 'y');
+    auto const retry = clients.front()->write(client_flows.front(),
+                                              changed_queue.data(), changed_queue.size());
+    EXPECT_TRUE(retry.status == mf::io_status::ok || retry.status == mf::io_status::would_block);
+
     for (auto& client : clients) client->close();
     for (auto& server : servers) server->close();
     close(server_fd);
@@ -718,9 +829,11 @@ TEST_F(OpenSslQuic, LoopbackStreamProducesSelfDecryptingPcapng) {
     auto const capture_path = capture->FS.filename_full;
     ::unlink(capture_path.c_str());
 
+    std::size_t egress_datagrams = 0;
     auto listener = quic::openssl_listener::create(
         server_context.get(), server_fd, true,
-        [journal](quic::datagram_view const& datagram) {
+        [journal, &egress_datagrams](quic::datagram_view const& datagram) {
+            if (datagram.direction == quic::datagram_direction::egress) ++egress_datagrams;
             auto packet = complete_udp_packet(datagram);
             journal->write_packet(datagram.direction == quic::datagram_direction::ingress
                                       ? socle::side_t::LEFT : socle::side_t::RIGHT,
@@ -789,17 +902,25 @@ TEST_F(OpenSslQuic, LoopbackStreamProducesSelfDecryptingPcapng) {
     mf::MFFlowCom client_com(client_connection, client_flow);
     static constexpr char message[] = "smithproxy-quic";
 
+    // The independent client/upstream engine follows the same explicit rule:
+    // writes and readiness queries must not send the new stream by themselves.
+    // The receive loop below then proves that the owner's transport tick does.
+    ASSERT_EQ(client_com.write(client_com.token(), message, sizeof(message) - 1, 0),
+              static_cast<ssize_t>(sizeof(message) - 1));
+    for (int pass = 0; pass < 8; ++pass) {
+        client_connection->readable(client_flow);
+        client_connection->writable(client_flow);
+    }
+    ASSERT_TRUE(listener->handle_events()) << listener->last_error();
+    for (auto const& event : server_connection->drain_events()) {
+        EXPECT_NE(event.type, mf::event_type::flow_open);
+    }
+
     mf::flow_handle server_flow;
     std::unique_ptr<mf::MFFlowCom> server_com;
     std::string received;
-    bool sent = false;
     auto const stream_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
     while (std::chrono::steady_clock::now() < stream_deadline && received.empty()) {
-        if (!sent) {
-            auto const written = client_com.write(client_com.token(), message, sizeof(message) - 1, 0);
-            ASSERT_GE(written, 0);
-            sent = written == static_cast<ssize_t>(sizeof(message) - 1);
-        }
         client_connection->drain_events();
         ASSERT_TRUE(listener->handle_events()) << listener->last_error();
         for (auto const& event : server_connection->drain_events()) {
@@ -816,6 +937,33 @@ TEST_F(OpenSslQuic, LoopbackStreamProducesSelfDecryptingPcapng) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     EXPECT_EQ(received, message);
+
+    // Stream operations must not drive the listener's shared engine. Queue a
+    // reply, repeatedly collect events, and verify only the listener send phase
+    // releases it. This also catches a missing final tick before poll().
+    ASSERT_TRUE(listener->finish_events());
+    auto const before_reply = egress_datagrams;
+    static constexpr char reply[] = "listener-owned-output";
+    ASSERT_EQ(server_connection->write(server_flow, reply, sizeof(reply) - 1).size,
+              sizeof(reply) - 1);
+    for (int pass = 0; pass < 8; ++pass) server_connection->drain_events();
+    ASSERT_TRUE(listener->flush_output(listener->current_peer(),
+                                      listener->current_local()));
+    EXPECT_EQ(egress_datagrams, before_reply);
+    ASSERT_TRUE(listener->finish_events());
+    EXPECT_GT(egress_datagrams, before_reply);
+    std::string response;
+    auto const reply_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (response.size() < sizeof(reply) - 1
+           && std::chrono::steady_clock::now() < reply_deadline) {
+        client_connection->drain_events();
+        ASSERT_TRUE(listener->handle_events());
+        char data[64] {};
+        auto const read = client_connection->read(client_flow, data, sizeof(data));
+        response.append(data, read.size);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    EXPECT_EQ(response, reply);
 
     ASSERT_EQ(client_connection->finish(client_flow), mf::io_status::ok);
     static constexpr char after_fin[] = "must-not-be-written";
