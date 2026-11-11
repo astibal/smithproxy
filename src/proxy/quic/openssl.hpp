@@ -53,8 +53,10 @@ struct datagram_packet {
     unsigned ingress_ifindex = 0;
 };
 
-/** Nonblocking packet source; false means no queued input is available. */
-using datagram_source = std::function<bool(datagram_packet&)>;
+// The source transfers ownership of a bounded batch. Zero means the inbox is
+// empty; there is no hidden worker cache after its level-triggered wake clears.
+inline constexpr size_t datagram_batch_limit = 64;
+using datagram_source = std::function<size_t(datagram_packet*, size_t)>;
 
 /** Read one UDP datagram with original destination/interface metadata. */
 bool receive_datagram(int fd, datagram_packet& packet);

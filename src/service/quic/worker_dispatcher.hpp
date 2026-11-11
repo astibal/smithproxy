@@ -42,8 +42,14 @@ public:
     int wake_fd(std::size_t worker) const;
     /** Move one packet out, clearing the wakeup only when the inbox is empty. */
     bool pop(std::size_t worker, datagram_packet& packet);
+    /** Move at most capacity packets under one lock, then process outside it. */
+    std::size_t pop_batch(std::size_t worker, datagram_packet* packets, std::size_t capacity);
     /** Route one packet; false records overload or an already retired owner. */
     bool enqueue(datagram_packet packet);
+    /** Route at most datagram_batch_limit packets, locking each owner once.
+     * Returns accepted packets; rejected packets increment that owner's drops.
+     */
+    std::size_t enqueue_batch(datagram_packet* packets, std::size_t count);
     std::uint64_t dropped(std::size_t worker) const;
     int error() const { return error_.load(); }
 

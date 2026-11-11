@@ -867,6 +867,96 @@ TEST(QuicDatagramBatch, PreservesPayloadAndDestinationAcrossReusedSlots) {
     EXPECT_TRUE(errno == EAGAIN || errno == EWOULDBLOCK);
 }
 
+TEST(QuicWorkerDispatcher, BatchPreservesOrderLimitsAndLevelTriggeredWakeups) {
+    quic::worker_dispatcher receiver(2);
+    std::array<quic::datagram_packet, 6> input;
+    for (size_t i = 0; i < input.size(); ++i) {
+        input[i].local = worker_test_address(i % 2 ? "198.18.20.1" : "198.18.20.2");
+        input[i].data = {static_cast<unsigned char>(i)};
+    }
+    auto first = receiver.owner(input[0].local);
+    auto second = receiver.owner(input[1].local);
+    ASSERT_NE(first, second);
+    ASSERT_EQ(receiver.enqueue_batch(input.data(), input.size()), input.size());
+    std::array<quic::datagram_packet, 2> output;
+    EXPECT_EQ(receiver.pop_batch(first, output.data(), 0), 0U);
+    ASSERT_TRUE(inbox_readable(receiver, first));
+    ASSERT_EQ(receiver.pop_batch(first, output.data(), output.size()), 2U);
+    EXPECT_EQ(output[0].data, (std::vector<unsigned char>{0}));
+    EXPECT_EQ(output[1].data, (std::vector<unsigned char>{2}));
+    EXPECT_TRUE(inbox_readable(receiver, first));
+    ASSERT_EQ(receiver.pop_batch(first, output.data(), output.size()), 1U);
+    EXPECT_EQ(output[0].data, (std::vector<unsigned char>{4}));
+    EXPECT_FALSE(inbox_readable(receiver, first));
+    EXPECT_TRUE(inbox_readable(receiver, second));
+    receiver.retire(second);
+    EXPECT_FALSE(inbox_readable(receiver, second));
+    input[0].local = worker_test_address("198.18.20.1");
+    EXPECT_EQ(receiver.enqueue_batch(input.data(), 1), 0U);
+    EXPECT_EQ(receiver.dropped(second), 1U);
+
+    // A batch may fit only partially. Byte limits still apply per packet.
+    for (auto& packet : input) {
+        packet.local = worker_test_address("198.18.20.2");
+        packet.data.resize(1024 * 1024);
+    }
+    EXPECT_EQ(receiver.enqueue_batch(input.data(), input.size()), 4U);
+    EXPECT_EQ(receiver.dropped(first), 2U);
+    EXPECT_TRUE(inbox_readable(receiver, first));
+}
+
+TEST(QuicWorkerDispatcher, ConcurrentBatchesDoNotLoseWakeupsOrReorderOwners) {
+    quic::worker_dispatcher receiver(4);
+    constexpr unsigned batches = 512, width = 16;
+    std::atomic_bool done {false};
+    std::atomic_size_t accepted {0};
+    std::thread producer([&] {
+        for (unsigned batch = 0; batch < batches; ++batch) {
+            std::array<quic::datagram_packet, width> packets;
+            for (unsigned i = 0; i < width; ++i) {
+                unsigned sequence = batch * width + i;
+                packets[i].local = worker_test_address(("198.18.20." + std::to_string(2 + sequence % 4)).c_str());
+                packets[i].data.resize(sizeof(sequence));
+                std::memcpy(packets[i].data.data(), &sequence, sizeof(sequence));
+            }
+            accepted += receiver.enqueue_batch(packets.data(), packets.size());
+        }
+        done = true;
+    });
+    std::array<int, 4> previous {-1, -1, -1, -1};
+    std::array<pollfd, 4> events;
+    for (size_t worker = 0; worker < events.size(); ++worker)
+        events[worker] = {receiver.wake_fd(worker), POLLIN, 0};
+    size_t consumed = 0;
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (done && consumed == accepted) break;
+        ::poll(events.data(), events.size(), 10);
+        for (size_t worker = 0; worker < events.size(); ++worker) {
+            if (!(events[worker].revents & POLLIN)) continue;
+            std::array<quic::datagram_packet, 7> packets;
+            auto count = receiver.pop_batch(worker, packets.data(), packets.size());
+            for (size_t i = 0; i < count; ++i) {
+                unsigned sequence = 0;
+                std::memcpy(&sequence, packets[i].data.data(), sizeof(sequence));
+                EXPECT_GT(static_cast<int>(sequence), previous[worker]);
+                EXPECT_EQ(receiver.owner(packets[i].local), worker);
+                previous[worker] = sequence;
+            }
+            consumed += count;
+        }
+    }
+    producer.join();
+    EXPECT_EQ(consumed, accepted.load());
+    size_t drops = 0;
+    for (size_t worker = 0; worker < events.size(); ++worker) {
+        drops += receiver.dropped(worker);
+        EXPECT_FALSE(inbox_readable(receiver, worker));
+        EXPECT_GE(previous[worker], 0);
+    }
+    EXPECT_EQ(consumed + drops, batches * width);
+}
+
 TEST(QuicWorkerDispatcher, PreservesOwnerAndMetadataAcrossClientAndPortChanges) {
     quic::worker_dispatcher receiver(4);
     auto first = worker_test_address("198.18.20.1");

@@ -6,6 +6,8 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
+#include <array>
+#include <algorithm>
 #include <stdexcept>
 #include <system_error>
 #include <sys/eventfd.h>
@@ -108,32 +110,63 @@ int worker_dispatcher::wake_fd(std::size_t worker) const {
 }
 
 bool worker_dispatcher::pop(std::size_t worker, datagram_packet& packet) {
+    return pop_batch(worker, &packet, 1) != 0;
+}
+
+std::size_t worker_dispatcher::pop_batch(
+        std::size_t worker, datagram_packet* packets, std::size_t capacity) {
+    if (!capacity) return 0;
     auto& queue = *inboxes_.at(worker);
     std::lock_guard lock(queue.lock);
-    if (queue.packets.empty()) return false;
-    queue.bytes -= queue.packets.front().data.size();
-    packet = std::move(queue.packets.front());
-    queue.packets.pop_front();
-    if (queue.packets.empty()) {
+    auto count = std::min({capacity, datagram_batch_limit, queue.packets.size()});
+    for (std::size_t i = 0; i < count; ++i) {
+        queue.bytes -= queue.packets.front().data.size();
+        packets[i] = std::move(queue.packets.front());
+        queue.packets.pop_front();
+    }
+    // Clear under the same lock as enqueue's empty-to-nonempty transition:
+    // a producer arriving afterwards must publish a fresh wakeup.
+    if (count && queue.packets.empty()) {
         eventfd_t ignored;
         (void)::eventfd_read(queue.wake, &ignored);
     }
-    return true;
+    return count;
 }
 
 bool worker_dispatcher::enqueue(datagram_packet packet) {
-    auto& queue = *inboxes_[owner(packet.local)];
-    std::lock_guard lock(queue.lock);
-    if (queue.retired || queue.packets.size() >= inbox::max_packets
-        || packet.data.size() > inbox::max_bytes - queue.bytes) {
-        ++queue.dropped;
-        return false;
+    return enqueue_batch(&packet, 1) != 0;
+}
+
+std::size_t worker_dispatcher::enqueue_batch(datagram_packet* packets, std::size_t count) {
+    if (count > datagram_batch_limit) throw std::invalid_argument("QUIC inbox batch too large");
+    // A small fixed routing array avoids per-batch maps and allocations. Mark
+    // handled slots with size(), which cannot name a worker. Relative order
+    // within each owner's queue is the same as the receive order.
+    std::array<std::size_t, datagram_batch_limit> owners;
+    for (std::size_t i = 0; i < count; ++i) owners[i] = owner(packets[i].local);
+    std::size_t accepted = 0;
+    for (std::size_t first = 0; first < count; ++first) {
+        auto worker = owners[first];
+        if (worker == inboxes_.size()) continue;
+        auto& queue = *inboxes_[worker];
+        std::lock_guard lock(queue.lock);
+        bool const was_empty = queue.packets.empty();
+        for (std::size_t i = first; i < count; ++i) {
+            if (owners[i] != worker) continue;
+            owners[i] = inboxes_.size();
+            auto& packet = packets[i];
+            if (queue.retired || queue.packets.size() >= inbox::max_packets
+                || packet.data.size() > inbox::max_bytes - queue.bytes) {
+                ++queue.dropped;
+                continue;
+            }
+            queue.bytes += packet.data.size();
+            queue.packets.push_back(std::move(packet));
+            ++accepted;
+        }
+        if (was_empty && !queue.packets.empty()) (void)::eventfd_write(queue.wake, 1);
     }
-    bool const wake = queue.packets.empty();
-    queue.bytes += packet.data.size();
-    queue.packets.push_back(std::move(packet));
-    if (wake) (void)::eventfd_write(queue.wake, 1);
-    return true;
+    return accepted;
 }
 
 std::uint64_t worker_dispatcher::dropped(std::size_t worker) const {
@@ -162,9 +195,12 @@ void worker_dispatcher::run() {
             break;
         }
         for (std::size_t i = 0; i < 64 && !stopping_;) {
-            auto count = receiver.receive(socket_fd_, [this](datagram_packet&& packet) {
-                if (packet.peer.valid() && packet.local.valid()) enqueue(std::move(packet));
+            std::array<datagram_packet, datagram_receiver::capacity> packets;
+            std::size_t valid = 0;
+            auto count = receiver.receive(socket_fd_, [&](datagram_packet&& packet) {
+                if (packet.peer.valid() && packet.local.valid()) packets[valid++] = std::move(packet);
             });
+            enqueue_batch(packets.data(), valid);
             if (count < 0) {
                 if (detail::datagram_receive_would_block(errno)) break;
                 fail(errno);

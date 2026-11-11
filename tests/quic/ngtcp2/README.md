@@ -204,3 +204,26 @@ Check that the final fault counters include both blocked and shortened sends.
 Keep the interposer out of throughput runs. Also run the ordinary testbed with
 both backends and the namespace harness's `quic` and `quic-pcapng` suites to
 verify transparent tuples, IPv4/IPv6, payload integrity and decrypted captures.
+
+### Dispatcher inbox batching and multi-worker measurements
+
+The receiver groups its packet batch by destination owner and locks each inbox
+once. A worker takes up to 64 owned datagrams under one lock, then processes them
+outside the lock. Queue packet/byte limits and per-owner ordering are unchanged.
+The eventfd remains readable while any queued packet remains; draining the last
+packet clears it under the producer's lock. There is no hidden local packet
+cache that could outlive the wakeup.
+
+The throughput harness accepts `QUIC_THROUGHPUT_DESTINATIONS=4` (default `1`).
+It adds disposable origin aliases .2/.3/.4/.5 and ::2/::3/::4/::5 and distributes
+flows round-robin. With `QUIC_WORKERS=4`, these addresses cover all four owners;
+raising concurrency against one address alone does not test multi-worker load.
+Use identical fixture settings for the baseline and candidate binaries, and
+reverse the execution order for a second block. Suggested concurrent flow counts
+are 4,16,64 with 16 MiB per flow, alongside the usual single-destination control.
+
+Each throughput sample now records client completion durations and p50/p95.
+These include process startup, handshake and transfer; they are not network RTT.
+`quic-throughput-workers-v4.txt` and `-v6.txt` preserve the listener acceptance
+and receiver-queue drop counters after each family. Inspect these to confirm
+owner coverage and account for overload rather than silently excluding it.

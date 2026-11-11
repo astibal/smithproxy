@@ -1471,10 +1471,12 @@ bool openssl_listener::receive_input_batch() {
 
     // Bound each pass so a hot UDP socket cannot starve established streams,
     // certificate jobs, shutdown, or management snapshots.
-    for (std::size_t count = 0; count < 64; ++count) {
+    std::array<datagram_packet, datagram_batch_limit> packets;
+    auto available = dispatcher.source ? dispatcher.source(packets.data(), packets.size()) : packets.size();
+    for (std::size_t count = 0; count < available; ++count) {
         dispatcher_state::packet packet;
         if (dispatcher.source) {
-            if (!dispatcher.source(packet)) break;
+            packet = std::move(packets[count]);
         } else if (!receive_socket_datagram(dispatcher.socket_fd, packet)) {
             if (detail::datagram_receive_would_block(errno)) break;
             last_error_ = std::string("recvmsg: ") + std::strerror(errno);

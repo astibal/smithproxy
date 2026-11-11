@@ -288,9 +288,9 @@ private:
     // Bound ingress work so a busy socket cannot starve timers or the bridge.
     void receive_batch(bool downstream, ng::timestamp ts) {
         if (downstream && source_) {
-            datagram_packet packet;
-            for (size_t n = 0; n < ng::packet_batch_limit && source_(packet); ++n)
-                receive(packet, downstream, ts);
+            std::array<datagram_packet, ng::packet_batch_limit> packets;
+            auto count = source_(packets.data(), packets.size());
+            for (size_t n = 0; n < count; ++n) receive(packets[n], downstream, ts);
             return;
         }
         int fd = downstream ? fd_ : output_.fd;

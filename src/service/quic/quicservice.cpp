@@ -376,8 +376,8 @@ bool listener_service::prepare() {
             fail("cannot retain QUIC receiver socket");
             return false;
         }
-        source = [this](datagram_packet& packet) {
-            return dispatcher_->pop(worker_index_, packet);
+        source = [this](datagram_packet* packets, size_t capacity) {
+            return dispatcher_->pop_batch(worker_index_, packets, capacity);
         };
     }
     listener_ = make_worker_transport(
