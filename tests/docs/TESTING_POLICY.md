@@ -106,6 +106,11 @@ CPU seconds/GiB. These are end-to-end lab rates, not isolated proxy capacity:
 the QUIC origin uses aioquic and may itself be the bottleneck. Its download
 queue is bounded to 256 KiB per stream and uploads require the expected size
 and SHA-256 before returning success.
+The QUIC suite also measures the same client/origin directly from the proxy
+namespace, with the origin CA and identical transfer sizes and concurrency.
+These `quic-direct-throughput-v*.json` references omit proxy CPU accounting
+and help distinguish fixture limits from forwarding overhead. Set
+`QUIC_THROUGHPUT_DIRECT_BASELINE=0` only for focused instrumentation runs.
 
 Repository tests must be registered in CTest instead of requiring knowledge of
 another ad-hoc command. Tests which intentionally require public network

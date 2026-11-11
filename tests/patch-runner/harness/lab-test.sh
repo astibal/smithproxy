@@ -466,6 +466,20 @@ if [[ $QUIC_THROUGHPUT_TEST == 1 ]]; then
             --output "$ROOT/results/quic-throughput-v$family.json" > /dev/null
         python3 "$ROOT/runner/tests/tls-transfer-report.py" --label 'QUIC throughput' \
             "$ROOT/results/quic-throughput-v$family.json"
+        # The same curl/origin pair bounds what this fixture can deliver.
+        # Starting in the proxy namespace reaches the origin directly, without
+        # changing transparent interception rules or trusting the MITM CA.
+        if [[ ${QUIC_THROUGHPUT_DIRECT_BASELINE:-1} == 1 ]]; then
+            ip netns exec "$NS" python3 "$ROOT/runner/tests/tls-transfer.py" \
+                --protocol h3 --curl "$QUIC_CURL_BIN" --host "$host" \
+                --ca-file "$ROOT/config/certs/origin-ca.pem" \
+                --bytes "${QUIC_THROUGHPUT_BYTES:-8388608}" \
+                --repeats "${QUIC_THROUGHPUT_REPEATS:-3}" \
+                --concurrency "${QUIC_THROUGHPUT_CONCURRENCY:-1,4,16}" \
+                --output "$ROOT/results/quic-direct-throughput-v$family.json" > /dev/null
+            python3 "$ROOT/runner/tests/tls-transfer-report.py" --label 'QUIC direct reference' \
+                "$ROOT/results/quic-direct-throughput-v$family.json"
+        fi
         echo "PASS$family QUIC throughput: checked H3 download/upload measured without a performance gate"
     done
     exit 0
