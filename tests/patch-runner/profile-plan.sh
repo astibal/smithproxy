@@ -8,7 +8,7 @@ PATCH_RUNNER_REPORTABLE_PROFILES=(native sanity traffic lifecycle corpus fuzz co
 PATCH_RUNNER_CAPTURE_SECTIONS=(capture-traffic capture-pcapng quic quic-pcapng)
 mapfile -t PATCH_RUNNER_QUIC_CERT_SECTIONS < <(python3 "$(dirname "${BASH_SOURCE[0]}")/harness/suites/tls/certificate_cases.py")
 ((${#PATCH_RUNNER_QUIC_CERT_SECTIONS[@]} > 0)) || return 1
-PATCH_RUNNER_TRAFFIC_SECTIONS=(rtt tls-throughput tls-policy routing transfer tcp-churn udp-churn "${PATCH_RUNNER_CAPTURE_SECTIONS[@]}" "${PATCH_RUNNER_QUIC_CERT_SECTIONS[@]}")
+PATCH_RUNNER_TRAFFIC_SECTIONS=(rtt tls-throughput quic-throughput tls-policy routing transfer tcp-churn udp-churn "${PATCH_RUNNER_CAPTURE_SECTIONS[@]}" "${PATCH_RUNNER_QUIC_CERT_SECTIONS[@]}")
 PATCH_RUNNER_CORPUS_SECTIONS=()
 for patch_runner_corpus_category in regular edge insanity; do
     for patch_runner_corpus_shard in 1 2 3 4; do
@@ -61,7 +61,7 @@ patch_runner_section_profile() {
         lifecycle) printf '%s\n' lifecycle ;;
         corpus-*) printf '%s\n' corpus ;;
         fuzz.*) printf '%s\n' fuzz ;;
-        rtt|tls-throughput|tls-policy|routing|transfer|quic|quic-pcapng|quic-cert.*|tcp-churn|udp-churn|capture|capture-traffic|capture-pcapng)
+        rtt|tls-throughput|quic-throughput|tls-policy|routing|transfer|quic|quic-pcapng|quic-cert.*|tcp-churn|udp-churn|capture|capture-traffic|capture-pcapng)
             printf '%s\n' traffic
             ;;
         *) printf '%s\n' sanity ;;

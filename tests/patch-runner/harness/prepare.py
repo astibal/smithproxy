@@ -178,6 +178,9 @@ if quic_test:
         write_limit_server = 0;
     }
 '''
+    if os.environ.get('QUIC_THROUGHPUT_TEST') == '1':
+        profile = profile.replace('write_payload = TRUE', 'write_payload = FALSE')
+        profile = profile.replace('webhook_enable = TRUE', 'webhook_enable = FALSE')
     text, profile_count = re.subn(
         r'(content_profiles\s*=\s*\{)', r'\1\n' + profile,
         text, count=1,

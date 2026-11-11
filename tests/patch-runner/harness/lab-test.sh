@@ -52,6 +52,7 @@ TLS_SUITE_TEST=${TLS_SUITE_TEST:-0}
 export TLS_PROFILE_TEST=${TLS_PROFILE_TEST:-$TLS_SUITE_TEST}
 TLS_TRANSFER_TEST=${TLS_TRANSFER_TEST:-0}
 TLS_THROUGHPUT_TEST=${TLS_THROUGHPUT_TEST:-0}
+QUIC_THROUGHPUT_TEST=${QUIC_THROUGHPUT_TEST:-0}
 KTLS_PROBE_TEST=${KTLS_PROBE_TEST:-0}
 STARTTLS_SUITE_TEST=${STARTTLS_SUITE_TEST:-0}
 POLICY_TEST=${POLICY_TEST:-0}
@@ -264,7 +265,9 @@ if [[ $QUIC_TEST == 1 ]]; then
         future_*) QUIC_ORIGIN_IDENTITY=future ;;
         untrusted_*) QUIC_ORIGIN_IDENTITY=untrusted ;;
     esac
-    ip netns exec "$SERVER" python3 -u "$ROOT/runner/tests/h3-origin.py" \
+    QUIC_ORIGIN_ARGS=()
+    [[ $QUIC_THROUGHPUT_TEST != 1 ]] || QUIC_ORIGIN_ARGS+=(--bulk)
+    ip netns exec "$SERVER" python3 -u "$ROOT/runner/tests/h3-origin.py" "${QUIC_ORIGIN_ARGS[@]}" \
         --host6 fd00:20::2 \
         --certificate "$ROOT/config/certs/$QUIC_ORIGIN_IDENTITY-cert.pem" \
         --key "$ROOT/config/certs/$QUIC_ORIGIN_IDENTITY-key.pem" \
@@ -449,6 +452,23 @@ if [[ $PRIVSEP_TEST == 1 ]]; then
         'http://[fd00:20::2]:8080/' > "$ROOT/results/privsep-http6.txt"
     grep -q 'runner-origin-ok peer=fd00:20::1' "$ROOT/results/privsep-http6.txt"
     echo 'PASS6 privsep TCP/HTTP: unprivileged core uses transparent listener'
+fi
+if [[ $QUIC_THROUGHPUT_TEST == 1 ]]; then
+    for family in 4 6; do
+        host=198.18.20.2
+        [[ $family != 6 ]] || host=fd00:20::2
+        ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/tls-transfer.py" \
+            --protocol h3 --curl "$QUIC_CURL_BIN" --host "$host" \
+            --ca-file "$ROOT/config/certs/ca-cert.pem" --pid "$(cat "$ROOT/data/proxy.pid")" \
+            --bytes "${QUIC_THROUGHPUT_BYTES:-8388608}" \
+            --repeats "${QUIC_THROUGHPUT_REPEATS:-3}" \
+            --concurrency "${QUIC_THROUGHPUT_CONCURRENCY:-1,4,16}" \
+            --output "$ROOT/results/quic-throughput-v$family.json" > /dev/null
+        python3 "$ROOT/runner/tests/tls-transfer-report.py" --label 'QUIC throughput' \
+            "$ROOT/results/quic-throughput-v$family.json"
+        echo "PASS$family QUIC throughput: checked H3 download/upload measured without a performance gate"
+    done
+    exit 0
 fi
 if [[ -n ${QUIC_TLS_PROFILE_TEST:-} ]]; then
     # This is a separate admission probe: a rejecting profile must not first
@@ -768,7 +788,7 @@ if [[ $TLS_THROUGHPUT_TEST == 1 ]]; then
             --bytes "${TLS_THROUGHPUT_BYTES:-67108864}" \
             --repeats "${TLS_THROUGHPUT_REPEATS:-3}" \
             --concurrency "${TLS_THROUGHPUT_CONCURRENCY:-1,4,16}" \
-            > "$ROOT/results/tls-throughput-v$family.json"
+            --output "$ROOT/results/tls-throughput-v$family.json" > /dev/null
         python3 "$ROOT/runner/tests/tls-transfer-report.py" \
             --label 'TLS throughput' "$ROOT/results/tls-throughput-v$family.json"
         echo "PASS$family TLS throughput: E2E download/upload measured without a performance gate"
