@@ -1302,11 +1302,14 @@ bool openssl_listener::handle_events() {
     // Transparent mode owns recvmsg/sendmsg so the original destination and
     // selected source address stay attached to every individual datagram.
     if (!flush_dispatcher_socket()) return false;
+    if (!receive_input_batch()) return false;
+    bool const received = !dispatcher_state_->pending_input.empty();
     while (!dispatcher_state_->pending_input.empty()) {
         if (!progress_input_packet()) return false;
     }
-    if (!receive_input_batch()) return false;
-    return progress_listener_timers();
+    // Processing a batch already ticks the entire engine, including timers.
+    // Only an empty receive pass needs a separate timer/output tick here.
+    return received || progress_listener_timers();
 }
 
 bool openssl_listener::finish_events() {
@@ -1413,9 +1416,6 @@ bool openssl_listener::receive_input_batch() {
         observe_datagram(observer_state_.get(), datagram_direction::ingress, packet);
 
         dispatcher.pending_input.push_back(std::move(packet));
-    }
-    while (!dispatcher.pending_input.empty()) {
-        if (!progress_input_packet()) return false;
     }
     return true;
 }
