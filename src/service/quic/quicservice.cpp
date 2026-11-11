@@ -103,33 +103,6 @@ buffer make_udp_packet(datagram_view const& datagram) {
     return packet;
 }
 
-int listener_poll_timeout(SSL* listener, int application_timeout_ms) {
-    timeval timeout {};
-    int infinite = 1;
-    if (!listener || SSL_get_event_timeout(listener, &timeout, &infinite) != 1
-        || infinite) {
-        return application_timeout_ms;
-    }
-    auto const seconds = static_cast<long long>(timeout.tv_sec);
-    auto const microseconds = static_cast<long long>(timeout.tv_usec);
-    auto const openssl_timeout = seconds >= INT_MAX / 1000
-        ? INT_MAX
-        : static_cast<int>(std::min<long long>(
-              INT_MAX, seconds * 1000 + (microseconds + 999) / 1000));
-    return application_timeout_ms < 0
-        ? openssl_timeout : std::min(application_timeout_ms, openssl_timeout);
-}
-
-short connection_poll_events(SSL* connection) {
-    if (!connection) return 0;
-    // QUIC peers can send ACK and flow-control datagrams after the current
-    // OpenSSL call has returned success, so there need not be a contemporaneous
-    // SSL_net_read_desired() hint to arm the future wakeup. Keep input armed;
-    // unlike POLLOUT it cannot continuously fire on an idle UDP socket.
-    short events = POLLIN;
-    if (SSL_net_write_desired(connection) > 0) events |= POLLOUT;
-    return events;
-}
 #endif
 
 } // namespace
@@ -355,9 +328,10 @@ bool listener_service::open_socket() {
 bool listener_service::prepare() {
 #if SMITHPROXY_OPENSSL_QUIC
     if (ready_) return true;
-    upstream_engine_.reset();
+    listener_.reset();
+    backend_ = configured_transport_backend();
     // A previous prepare may have opened the transport successfully and then
-    // failed while constructing the OpenSSL listener. Do not retain or
+    // failed while constructing the worker transport. Do not retain or
     // overwrite those descriptors on a retry.
     if (udp_fd_ >= 0) {
         ::close(udp_fd_);
@@ -368,10 +342,10 @@ bool listener_service::prepare() {
         wake_fd_ = -1;
     }
     stopping_ = false;
-    context_ = make_openssl_quic_context(true);
-    client_context_ = make_openssl_quic_context(false);
+    context_ = make_transport_context(backend_, true);
+    client_context_ = make_transport_context(backend_, false);
     if (!context_ || !client_context_) {
-        fail("cannot create OpenSSL QUIC context: " + openssl_error_stack());
+        fail("cannot create QUIC context (check backend availability): " + openssl_error_stack());
         return false;
     }
     const bool native_credentials = certificate_pem_.has_value() || private_key_pem_.has_value();
@@ -394,14 +368,8 @@ bool listener_service::prepare() {
         SSL_CTX_set_verify(client_context_.get(), SSL_VERIFY_NONE, nullptr);
     }
     if (!open_socket()) return false;
-    // Both sides of every A:B pair stay on this worker. OpenSSL demultiplexes
-    // all B connections by CID on one shared outgoing engine and UDP socket.
-    auto upstream_engine = make_openssl_quic_client_engine(client_context_.get(), address_family_);
-    if (!upstream_engine) {
-        fail("cannot create QUIC upstream engine: " + openssl_error_stack());
-        return false;
-    }
-
+    // Both sides of every A:B pair stay on this worker. Each backend owns
+    // one incoming and one outgoing transport scheduler, with shared sockets.
     datagram_source source;
     if (dispatcher_) {
         if (!dispatcher_->attach_socket(udp_fd_)) {
@@ -412,18 +380,19 @@ bool listener_service::prepare() {
             return dispatcher_->pop(worker_index_, packet);
         };
     }
-    listener_ = openssl_listener::create(
-        context_.get(), udp_fd_, transparent_ || bool(dispatcher_),
+    listener_ = make_worker_transport(
+        backend_, context_.get(), client_context_.get(), udp_fd_, address_family_,
+        transparent_ || bool(dispatcher_),
         [this](datagram_view const& datagram) { observe_datagram(datagram); },
-        std::move(source));
+        std::move(source), limits_.max_sessions);
     if (!listener_) {
-        fail("cannot create OpenSSL QUIC listener: " + openssl_error_stack());
+        fail("cannot create QUIC worker transport: " + openssl_error_stack());
         return false;
     }
-    upstream_engine_ = std::move(upstream_engine);
     ready_ = true;
     last_error_.clear();
-    log().inf("listener ready on udp/*:%u verify-upstream=%d", bound_port_, verify_upstream_);
+    log().inf("listener ready on udp/*:%u verify-upstream=%d backend=%s", bound_port_, verify_upstream_,
+              backend_ == transport_backend::ngtcp2 ? "ngtcp2" : "openssl");
     return true;
 #else
     return open_socket();
@@ -460,7 +429,7 @@ void listener_service::run() {
         if (!listener_->handle_events() && !stopping_) {
             auto detail = listener_->last_error();
             if (detail.empty()) detail = openssl_error_stack();
-            fail("OpenSSL QUIC listener event failure: " + detail);
+            fail("QUIC listener event failure: " + detail);
             break;
         }
         // One receive/timer pass for all B connections, including certificate
@@ -521,9 +490,16 @@ bool listener_service::wait_for_work() {
             && dispatcher_bindings_.empty()
         ? -1
         : 50;
-    auto* native_listener = listener_->native_handle();
-    auto timeout = listener_poll_timeout(native_listener, application_timeout);
-    timeout = listener_poll_timeout(upstream_engine_.get(), timeout);
+    auto timeout = listener_->timeout();
+    if (application_timeout >= 0) {
+        auto cap = std::chrono::milliseconds(application_timeout);
+        if (timeout.count() < 0 || cap < timeout) timeout = cap;
+    }
+    timespec deadline {};
+    if (timeout.count() >= 0) {
+        deadline.tv_sec = timeout.count() / 1000000000;
+        deadline.tv_nsec = timeout.count() % 1000000000;
+    }
 
     // Both engines expose one socket each. Pending certificate jobs and
     // accepted sessions share the same upstream readiness and deadline.
@@ -531,15 +507,15 @@ bool listener_service::wait_for_work() {
         { udp_fd_, static_cast<short>(listener_->desired_socket_events()
             & (dispatcher_ ? ~POLLIN : ~0)), 0 },
         { wake_fd_, POLLIN, 0 },
-        { SSL_get_fd(upstream_engine_.get()), connection_poll_events(upstream_engine_.get()), 0 },
+        { listener_->upstream_fd(), listener_->upstream_events(), 0 },
     };
     if (dispatcher_) descriptors.push_back(
         {dispatcher_->wake_fd(worker_index_), POLLIN, 0});
 
-    log().dum("poll listener-events=0x%x fds=%zu timeout=%d sessions=%zu cert-jobs=%zu",
-              descriptors[0].events, descriptors.size(), timeout,
+    log().dum("poll listener-events=0x%x fds=%zu timeout-ns=%lld sessions=%zu cert-jobs=%zu",
+              descriptors[0].events, descriptors.size(), static_cast<long long>(timeout.count()),
               sessions_.size(), certificate_jobs_.size());
-    auto const polled = ::poll(descriptors.data(), descriptors.size(), timeout);
+    auto const polled = ::ppoll(descriptors.data(), descriptors.size(), timeout.count() < 0 ? nullptr : &deadline, nullptr);
     if (polled < 0 && errno != EINTR) {
         fail(std::string("poll: ") + std::strerror(errno));
         return false;
@@ -689,7 +665,7 @@ bool listener_service::accept_connections() {
     bool accepted_any = false;
     while (auto accepted = listener_->accept()) {
         accepted_any = true;
-        auto connection = std::shared_ptr<openssl_connection>(std::move(accepted));
+        auto connection = std::shared_ptr<transport_connection>(std::move(accepted));
 
         // Refuse excess work before allocating session/proxy state.
         if (sessions_.size() >= limits_.max_sessions) {
@@ -947,14 +923,16 @@ bool listener_service::flush_session_output(session& value) {
     if (listener_->flush_output(value.client_endpoint, value.target_endpoint,
                                 value.capture_association)) return true;
 
-    fail("OpenSSL QUIC connection output failure: " + listener_->last_error());
+    fail("QUIC connection output failure: " + listener_->last_error());
     return false;
 }
 
 bool listener_service::progress_upstream_engine() {
     ERR_clear_error();
-    if (SSL_handle_events(upstream_engine_.get()) == 1) return true;
-    fail("OpenSSL QUIC upstream engine failure: " + openssl_error_stack());
+    if (listener_->handle_upstream()) return true;
+    auto detail = listener_->last_error();
+    if (detail.empty()) detail = openssl_error_stack();
+    fail("QUIC upstream transport failure: " + detail);
     return false;
 }
 
@@ -1586,7 +1564,7 @@ bool listener_service::progress_certificate_jobs() {
 // Prefer a configured identity, then a cached/generated MITM certificate. An empty
 // result rejects the handshake and closes the upstream rather than forwarding data.
 listener_service::verified_certificate listener_service::verify_and_spoof(
-    std::shared_ptr<openssl_connection> const& upstream,
+    std::shared_ptr<transport_connection> const& upstream,
     datagram_endpoint destination, std::string const& server_name) {
     verified_certificate verified;
     auto* verifier = certificate_verifier::get(upstream->native_handle());
@@ -1725,7 +1703,7 @@ bool listener_service::install_verified_certificate(
     return true;
 }
 
-std::shared_ptr<openssl_connection> listener_service::connect_upstream(
+std::shared_ptr<transport_connection> listener_service::connect_upstream(
     std::string const& host, proxymaker::SessionSetup* setup) {
     if (host.empty() || !client_context_) return nullptr;
     addrinfo hints {};
@@ -1739,7 +1717,7 @@ std::shared_ptr<openssl_connection> listener_service::connect_upstream(
         return nullptr;
     }
 
-    std::shared_ptr<openssl_connection> result;
+    std::shared_ptr<transport_connection> result;
     for (auto* current = addresses; current && !result; current = current->ai_next) {
         std::string error;
         datagram_endpoint target;
@@ -1747,36 +1725,36 @@ std::shared_ptr<openssl_connection> listener_service::connect_upstream(
         target.size = current->ai_addrlen;
         auto const [target_host, target_port] = endpoint_parts(target);
         auto connection = proxymaker::connect(setup, target_host, target_port, [&] {
-            return connect_with_hooks(client_context_.get(), current->ai_addr,
+            return listener_->connect(client_context_.get(), current->ai_addr,
                                       current->ai_addrlen, host, &error, setup, [&](SSL* ssl) {
                 auto policy = setup ? setup->tls_policy(target_host, target_port)
                     : std::optional {proxymaker::QuicTlsPolicy {}};
                 return policy && (!verify_upstream_ || certificate_verifier::install(ssl, *policy));
-            }, upstream_engine_.get());
+            });
         });
-        if (connection) result = std::shared_ptr<openssl_connection>(std::move(connection));
+        if (connection) result = std::shared_ptr<transport_connection>(std::move(connection));
     }
     ::freeaddrinfo(addresses);
     return result;
 }
 
-std::shared_ptr<openssl_connection> listener_service::connect_upstream(
+std::shared_ptr<transport_connection> listener_service::connect_upstream(
     datagram_endpoint const& target, std::string const& server_name,
     proxymaker::SessionSetup* setup) {
     if (!target.valid() || server_name.empty() || !client_context_) return nullptr;
     std::string error;
     auto const [host, port] = endpoint_parts(target);
     auto connection = proxymaker::connect(setup, host, port, [&] {
-        return connect_with_hooks(
+        return listener_->connect(
             client_context_.get(), reinterpret_cast<sockaddr const*>(&target.address),
             target.size, server_name, &error, setup, [&](SSL* ssl) {
                 auto policy = setup ? setup->tls_policy(host, port)
                     : std::optional {proxymaker::QuicTlsPolicy {}};
                 return policy && (!verify_upstream_ || certificate_verifier::install(ssl, *policy));
-            }, upstream_engine_.get());
+            });
     });
     return connection
-        ? std::shared_ptr<openssl_connection>(std::move(connection))
+        ? std::shared_ptr<transport_connection>(std::move(connection))
         : nullptr;
 }
 #endif

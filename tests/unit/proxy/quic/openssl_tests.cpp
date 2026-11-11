@@ -296,8 +296,9 @@ TEST(OpenSslQuicDispatcher, LearnsRotatedCidWithoutConfusingASharedClientPort) {
     EXPECT_FALSE(routes.resolve_peer(peer));
 
     // type=NEW_CONNECTION_ID, sequence=1, retire_prior_to=0, length=2.
-    std::vector<unsigned char> frame {0x18, 1, 0, 2, 0xab, 0xcd};
-    frame.resize(frame.size() + 16); // Stateless reset token.
+    std::vector<unsigned char> frame(6 + 16, 0); // Header plus stateless reset token.
+    const unsigned char header[] {0x18, 1, 0, 2, 0xab, 0xcd};
+    std::copy(std::begin(header), std::end(header), frame.begin());
     ASSERT_TRUE(routes.learn_new_connection_id(frame.data(), frame.size(), second));
     std::vector<unsigned char> packet {0x40, 0xab, 0xcd, 0x10};
     auto route = routes.resolve(packet.data(), packet.size());

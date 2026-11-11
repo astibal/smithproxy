@@ -18,6 +18,7 @@ add_executable(quic_transport_experiment connection.cpp node.cpp
     ${SMITHPROXY_SOURCE_DIR}/src/proxy/quic/wire.cpp
     ${SMITHPROXY_SOURCE_DIR}/src/proxy/quic/h3capture.cpp
     ${SMITHPROXY_SOURCE_DIR}/src/proxy/quic/spq1.cpp
+    ${SMITHPROXY_SOURCE_DIR}/src/proxy/quic/transport.cpp
     ${SMITHPROXY_SOURCE_DIR}/src/proxy/quic/openssl.cpp
     ${SMITHPROXY_SOURCE_DIR}/src/proxy/quic/hooks.cpp
     ${SMITHPROXY_SOURCE_DIR}/src/service/quic/quicservice.cpp

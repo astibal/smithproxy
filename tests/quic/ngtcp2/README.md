@@ -31,7 +31,8 @@ a comparison of transport integrations, not a full Smithproxy policy benchmark.
 Use a completed Smithproxy build for the socle and qpack support libraries.
 ngtcp2 and its OpenSSL crypto helper must already be installed or supplied through
 CMake's normal include/library search options. This prototype was exercised with
-ngtcp2 1.16.0 and OpenSSL 3.5.5. No dependency is added to production targets.
+ngtcp2 1.16.0 and OpenSSL 3.5.5. The standalone target does not change the default daemon build. The opt-in
+production integration is described below.
 
 ```sh
 cmake -S tests/quic/ngtcp2 -B /path/to/experiment-build \
@@ -87,3 +88,50 @@ complete TLS before MFProxy is created.
 
 A positive result justifies production integration work; it does not establish
 production feature parity or attribute the entire difference to library CPU cost.
+
+## Production-service integration
+
+The root build now optionally places the same transport beneath the ordinary
+`listener_service`. Enable it with `-DSMITHPROXY_ENABLE_NGTCP2=ON`, supplying the
+ngtcp2 and crypto-helper install prefix through normal CMake search paths. This
+requires ngtcp2's OpenSSL crypto helper and OpenSSL 3.5 TLS-only QUIC API. The
+libraries remain external; no vendored or private OpenSSL build is required.
+
+Select `SMITHPROXY_QUIC_BACKEND=ngtcp2` in the daemon environment. Unset or
+`openssl` retains the original backend; unavailable/unknown selections fail
+listener preparation. The startup log records the selected backend.
+
+```
+shared UDP receiver -> destination owner -> single worker
+                                           |
+                            incoming transport / A
+                                           |
+                           existing listener_service
+                       policy, B certificate verification,
+                     MITM identity, lifecycle, captures/hooks
+                                           |
+                           existing stream MitmProxy
+                                           |
+                            outgoing transport / B
+```
+
+A pauses its certificate callback while the same B connection completes the
+normal verifier, including trust exceptions, OCSP and CT. B then carries the
+application data. Each worker owns both transport schedulers and CID tables;
+connections never migrate between workers. The kernel route lookup for B uses
+an unsent temporary UDP socket, not a third QUIC or TLS connection.
+
+`integration.quic_ngtcp2_testbed` runs the existing QUIC corpus with this backend;
+`integration.quic_testbed` continues to exercise OpenSSL. The native namespace
+harness also accepts the backend environment selection. Use its `quic`,
+`quic-pcapng`, `quic-cert.*` and `quic-throughput` suites against the actual daemon.
+The native throughput test checks every response/payload and must use identical
+policies, workers, endpoints, libraries and sample sizes for both backends.
+
+This remains an experimental transport integration, not a deployment switch.
+It supports QUIC v1 on the original transparent tuple; migration and stateless
+Retry/address-validation policy equivalence are not established. Unlike the
+rough node, the production adapter retires abandoned connections and their CID
+routes after a bounded close-delivery period. Certificate rejection, lifecycle,
+capture and policy behavior are verified by the shared service tests rather
+than reimplemented in the adapter.
