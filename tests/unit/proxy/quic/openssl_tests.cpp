@@ -426,6 +426,37 @@ TEST_F(OpenSslQuic, EmptyUdpDatagramDoesNotFailTheSharedListener) {
     close(server_fd);
 }
 
+TEST_F(OpenSslQuic, EmptyAcceptDoesNotDriveTheListenerEngine) {
+    auto context = quic::make_openssl_quic_context(true);
+    ASSERT_NE(context, nullptr);
+    auto const fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, IPPROTO_UDP);
+    ASSERT_GE(fd, 0);
+    auto listener = quic::openssl_listener::create(context.get(), fd, false);
+    ASSERT_NE(listener, nullptr) << quic::openssl_error_stack();
+
+    // Count transport operations, not elapsed time: a speculative accept must
+    // not repeat the owner's receive/timer pass when no connection is queued.
+    std::size_t network_calls = 0;
+    auto* bio = SSL_get_rbio(listener->native_handle());
+    BIO_set_callback_arg(bio, reinterpret_cast<char*>(&network_calls));
+    BIO_set_callback_ex(bio, [](BIO* observed, int operation, const char*, std::size_t,
+                                int, long, int result, std::size_t*) -> long {
+        if (operation == BIO_CB_READ || operation == BIO_CB_WRITE
+            || operation == BIO_CB_RECVMMSG || operation == BIO_CB_SENDMMSG)
+            ++*reinterpret_cast<std::size_t*>(BIO_get_callback_arg(observed));
+        return result;
+    });
+    for (int attempt = 0; attempt < 8; ++attempt) EXPECT_EQ(listener->accept(), nullptr);
+    EXPECT_EQ(network_calls, 0U);
+
+    // The explicit driver must still poll the socket even with an empty queue.
+    EXPECT_TRUE(listener->handle_events()) << listener->last_error();
+    EXPECT_GT(network_calls, 0U);
+    BIO_set_callback_ex(bio, nullptr);
+    listener.reset();
+    close(fd);
+}
+
 TEST_F(OpenSslQuic, CreatesTransparentIpv6Listener) {
     auto server_context = quic::make_openssl_quic_context(true);
     ASSERT_NE(server_context, nullptr) << quic::openssl_error_stack();

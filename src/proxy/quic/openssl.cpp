@@ -1281,6 +1281,10 @@ std::unique_ptr<openssl_listener> openssl_listener::create(SSL_CTX* context, int
 
 std::unique_ptr<openssl_connection> openssl_listener::accept() {
     if (!listener_) return nullptr;
+    // SSL_accept_connection(NO_BLOCK) still ticks the whole engine when its
+    // queue is empty. The worker already drove input/timers in handle_events();
+    // accepting must only dequeue connections, not run every sibling again.
+    if (SSL_get_accept_connection_queue_len(listener_.get()) == 0) return nullptr;
     unique_ssl connection(SSL_accept_connection(listener_.get(),
                                                 SSL_ACCEPT_CONNECTION_NO_BLOCK));
     if (!connection) return nullptr;
