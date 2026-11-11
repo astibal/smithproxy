@@ -706,17 +706,34 @@ TEST_F(OpenSslQuic, WorkerDomainOwnsIndependentOutgoingConnections) {
     ASSERT_EQ(servers.size(), 2U);
     for (auto const& client : clients) ASSERT_TRUE(client->handshake_complete());
 
+    // An owner may sleep after consuming progress, even though the connection
+    // and its streams remain writable. Merely sampling events is passive.
+    clients[1]->take_application_progress();
+    clients[1]->drain_events();
+    EXPECT_FALSE(clients[1]->take_application_progress());
+
     // Destroy one B, then exercise application I/O on its sibling. Its socket,
     // domain and stream state must survive the other connection's destruction.
     clients[0]->close();
     clients[0].reset();
     EXPECT_EQ(SSL_get0_domain(SSL_get0_listener(clients[1]->native_handle())), domain);
     auto flow = clients[1]->open_flow(mf::direction::bidirectional);
+    EXPECT_TRUE(clients[1]->take_application_progress());
+    EXPECT_FALSE(clients[1]->take_application_progress());
     std::string const payload = "the sibling still owns its connection";
     auto const calls_before_write = network_calls;
+    EXPECT_EQ(clients[1]->write(flow, payload.data(), 0).size, 0U);
+    EXPECT_FALSE(clients[1]->take_application_progress());
     ASSERT_EQ(clients[1]->write(flow, payload.data(), payload.size()).size, payload.size());
+    EXPECT_TRUE(clients[1]->take_application_progress());
     clients[1]->drain_events();
+    EXPECT_FALSE(clients[1]->take_application_progress());
     EXPECT_EQ(network_calls, calls_before_write);
+    // Control-only output needs the same immediate owner pass as payload.
+    ASSERT_EQ(clients[1]->finish(flow), mf::io_status::ok);
+    EXPECT_TRUE(clients[1]->take_application_progress());
+    ASSERT_EQ(clients[1]->finish(flow), mf::io_status::ok);
+    EXPECT_FALSE(clients[1]->take_application_progress());
     std::string received;
     auto const data_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
     while (received.empty() && std::chrono::steady_clock::now() < data_deadline) {
@@ -726,7 +743,11 @@ TEST_F(OpenSslQuic, WorkerDomainOwnsIndependentOutgoingConnections) {
             for (auto const& event : server->drain_events()) {
                 if (!event.flow) continue;
                 char buffer[128];
+                server->take_application_progress();
                 auto read = server->read(*event.flow, buffer, sizeof(buffer));
+                if (read.size != 0) {
+                    EXPECT_TRUE(server->take_application_progress());
+                }
                 received.append(buffer, read.size);
             }
         }

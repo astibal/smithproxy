@@ -202,8 +202,8 @@ private:
     /** Start or collect one origin-verification job for a downstream handshake. */
     int prepare_verified_certificate(SSL* downstream);
     struct verified_certificate;
-    /** Progress pending upstreams on the I/O worker, outside OpenSSL callbacks. */
-    void progress_certificate_jobs();
+    /** Progress pending upstreams; true asks the engine to resume a changed job. */
+    bool progress_certificate_jobs();
     /** Verify the final upstream identity and derive its downstream certificate. */
     verified_certificate verify_and_spoof(
         std::shared_ptr<openssl_connection> const& upstream,
@@ -352,8 +352,8 @@ private:
     void observe_datagram(datagram_view const& datagram);
     /** Publish keylog records added since the previous session-loop pass. */
     void publish_capture_secrets(session& value);
-    /** Accept every connection currently available without blocking the worker. */
-    void accept_connections();
+    /** Dequeue available connections; true includes rejections needing a close frame. */
+    bool accept_connections();
     /** Progress one session according to its explicit lifecycle state. */
     void progress_session(session& value, std::chrono::steady_clock::time_point now);
     /** Complete both handshakes and construct the per-stream proxy bridge. */
@@ -364,8 +364,10 @@ private:
     bool flush_session_output(session& value);
     /** Tick the shared outgoing engine once; false stops the worker on failure. */
     bool progress_upstream_engine();
-    /** Release expired draining sessions and abandoned staged upstream legs. */
-    void reap_expired(std::chrono::steady_clock::time_point now);
+    /** Wait for network/deadline/control readiness; false ends the worker loop. */
+    bool wait_for_work();
+    /** Release expired sessions/jobs; true requests a final transport cleanup pass. */
+    bool reap_expired(std::chrono::steady_clock::time_point now);
     /** Stop proxying and begin bounded nonblocking shutdown of both legs. */
     void start_draining(session& value, std::chrono::steady_clock::time_point now,
                         std::uint64_t protocol_error = 0,

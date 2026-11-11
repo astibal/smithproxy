@@ -447,47 +447,10 @@ void listener_service::run() {
             fail(std::string("QUIC receiver: ") + std::strerror(dispatcher_->error()));
             break;
         }
-        // With no retained work, wait solely for network input or stop().
-        // Active connections still need a bounded tick because OpenSSL QUIC
-        // timers still require deadline-based wakeups.
-        auto const application_timeout = application_progress ? 0
-            : sessions_.empty() && certificate_jobs_.empty()
-                && staged_upstreams_.empty() && pending_captures_.empty()
-                && dispatcher_bindings_.empty()
-            ? -1
-            : 50;
-        auto* native_listener = listener_->native_handle();
-        auto timeout = listener_poll_timeout(native_listener, application_timeout);
-        timeout = listener_poll_timeout(upstream_engine_.get(), timeout);
-
-        // Both engines expose one socket each. Pending certificate jobs and
-        // accepted sessions share the same upstream readiness and deadline.
-        std::vector<pollfd> descriptors {
-            { udp_fd_, static_cast<short>(listener_->desired_socket_events()
-                & (dispatcher_ ? ~POLLIN : ~0)), 0 },
-            { wake_fd_, POLLIN, 0 },
-            { SSL_get_fd(upstream_engine_.get()), connection_poll_events(upstream_engine_.get()), 0 },
-        };
-        if (dispatcher_) descriptors.push_back(
-            {dispatcher_->wake_fd(worker_index_), POLLIN, 0});
-
-        log().dum("poll listener-events=0x%x fds=%zu timeout=%d sessions=%zu cert-jobs=%zu",
-                  descriptors[0].events, descriptors.size(), timeout,
-                  sessions_.size(), certificate_jobs_.size());
-        auto const polled = ::poll(descriptors.data(), descriptors.size(), timeout);
-        if (polled < 0 && errno != EINTR) {
-            fail(std::string("poll: ") + std::strerror(errno));
-            break;
-        }
-        if (descriptors[1].revents & POLLIN) {
-            eventfd_t wakeups = 0;
-            while (::eventfd_read(wake_fd_, &wakeups) == 0) {
-            }
-        }
-        if (descriptors[0].revents != 0) {
-            log().dum("network wake revents=0x%x", descriptors[0].revents);
-        }
-        if (stopping_) break;
+        // Every engine pass is followed by application work. A productive
+        // application pass queues transport work for the next round, so only
+        // an unproductive pass may wait for network input or a deadline.
+        if (!application_progress && !wait_for_work()) break;
 
         // Do not pre-classify this shared UDP socket with MSG_PEEK. OpenSSL may
         // receive a batch after the peek, so a following DTLS datagram could
@@ -506,16 +469,21 @@ void listener_service::run() {
 
         // During live reconfiguration, keep servicing established sessions but
         // stop admitting new ones until the listener can leave naturally.
-        progress_certificate_jobs();
-        if (!draining_) accept_connections();
+        application_progress = progress_certificate_jobs();
+        if (!draining_) application_progress |= accept_connections();
         auto const now = std::chrono::steady_clock::now();
-        // A productive pass may leave application bytes buffered in OpenSSL.
-        // Revisit all sessions without sleeping, but give each one its turn.
-        application_progress = false;
+        // Revisit productive sessions without sleeping, but give every A:B
+        // pair its turn. Reads, FIN/reset and lifecycle changes count too.
         for (auto& linked : sessions_) {
             auto const before = linked.forwarded_bytes;
+            auto const previous_state = linked.state;
             progress_session(linked, now);
-            application_progress |= linked.forwarded_bytes != before;
+            application_progress |= linked.forwarded_bytes != before
+                || linked.state != previous_state;
+            if (linked.downstream)
+                application_progress |= linked.downstream->take_application_progress();
+            if (linked.upstream)
+                application_progress |= linked.upstream->take_application_progress();
             if (!flush_session_output(linked)) {
                 stopping_ = true;
                 break;
@@ -524,17 +492,12 @@ void listener_service::run() {
             publish_capture_secrets(linked);
         }
 
-        // Accepted connections share one engine. Flush their newly queued
-        // writes together, before poll(), rather than ticking per stream/session.
-        if (!listener_->finish_events()) {
-            fail("OpenSSL QUIC listener output failure: " + listener_->last_error());
-            break;
-        }
-        // Flush all upstream writes together after every session had a turn.
-        if (!progress_upstream_engine()) break;
+        // Do not tick either engine here: a purported output-only tick can
+        // receive more input. The next round flushes queued writes and then
+        // visits their application consumers before considering a sleep.
 
         // Publish only after removing objects whose grace period has elapsed.
-        reap_expired(now);
+        application_progress |= reap_expired(now);
         publish_session_snapshots(now);
         process_detail_requests();
         if (draining_ && sessions_.empty() && certificate_jobs_.empty() &&
@@ -549,6 +512,49 @@ void listener_service::run() {
 }
 
 #if SMITHPROXY_OPENSSL_QUIC
+bool listener_service::wait_for_work() {
+    // With no retained work, wait solely for network input or stop().
+    // Retained sessions need bounded lifecycle/verification checks as well as
+    // wakeups for the earlier of the two engines' transport deadlines.
+    auto const application_timeout = sessions_.empty() && certificate_jobs_.empty()
+            && staged_upstreams_.empty() && pending_captures_.empty()
+            && dispatcher_bindings_.empty()
+        ? -1
+        : 50;
+    auto* native_listener = listener_->native_handle();
+    auto timeout = listener_poll_timeout(native_listener, application_timeout);
+    timeout = listener_poll_timeout(upstream_engine_.get(), timeout);
+
+    // Both engines expose one socket each. Pending certificate jobs and
+    // accepted sessions share the same upstream readiness and deadline.
+    std::vector<pollfd> descriptors {
+        { udp_fd_, static_cast<short>(listener_->desired_socket_events()
+            & (dispatcher_ ? ~POLLIN : ~0)), 0 },
+        { wake_fd_, POLLIN, 0 },
+        { SSL_get_fd(upstream_engine_.get()), connection_poll_events(upstream_engine_.get()), 0 },
+    };
+    if (dispatcher_) descriptors.push_back(
+        {dispatcher_->wake_fd(worker_index_), POLLIN, 0});
+
+    log().dum("poll listener-events=0x%x fds=%zu timeout=%d sessions=%zu cert-jobs=%zu",
+              descriptors[0].events, descriptors.size(), timeout,
+              sessions_.size(), certificate_jobs_.size());
+    auto const polled = ::poll(descriptors.data(), descriptors.size(), timeout);
+    if (polled < 0 && errno != EINTR) {
+        fail(std::string("poll: ") + std::strerror(errno));
+        return false;
+    }
+    if (descriptors[1].revents & POLLIN) {
+        eventfd_t wakeups = 0;
+        while (::eventfd_read(wake_fd_, &wakeups) == 0) {
+        }
+    }
+    if (descriptors[0].revents != 0) {
+        log().dum("network wake revents=0x%x", descriptors[0].revents);
+    }
+    return !stopping_;
+}
+
 void listener_service::observe_datagram(datagram_view const& datagram) {
     if (datagram.direction == datagram_direction::ingress) {
         log().ext("datagram peer=%s original-destination=%s association=%llu",
@@ -677,8 +683,10 @@ bool listener_service::prepare_resumed_upstream(session& value) {
     return true;
 }
 
-void listener_service::accept_connections() {
+bool listener_service::accept_connections() {
+    bool accepted_any = false;
     while (auto accepted = listener_->accept()) {
+        accepted_any = true;
         auto connection = std::shared_ptr<openssl_connection>(std::move(accepted));
 
         // Refuse excess work before allocating session/proxy state.
@@ -733,6 +741,7 @@ void listener_service::accept_connections() {
                   static_cast<unsigned long long>(value.id),
                   endpoint_text(value.client_endpoint).c_str());
     }
+    return accepted_any;
 }
 
 void listener_service::progress_session(
@@ -947,7 +956,7 @@ bool listener_service::progress_upstream_engine() {
     return false;
 }
 
-void listener_service::reap_expired(std::chrono::steady_clock::time_point now) {
+bool listener_service::reap_expired(std::chrono::steady_clock::time_point now) {
     auto const before = sessions_.size();
     sessions_.erase(std::remove_if(sessions_.begin(), sessions_.end(), [&](auto& value) {
         auto const expired = value.state == session_state::draining
@@ -962,6 +971,7 @@ void listener_service::reap_expired(std::chrono::steady_clock::time_point now) {
     connection_count_ -= removed;
     completed_sessions_ += removed;
     snapshots_dirty_ |= removed != 0;
+    bool transport_cleanup = removed != 0;
 
     // A verified upstream can outlive a client that disappeared before accept.
     // Bound that orphan state by the same handshake timeout.
@@ -973,6 +983,7 @@ void listener_service::reap_expired(std::chrono::steady_clock::time_point now) {
         ++handshake_timeouts_;
         dispatcher_bindings_.erase(iterator->first);
         if (iterator->second.connection) iterator->second.connection->close(1);
+        transport_cleanup = true;
         iterator = staged_upstreams_.erase(iterator);
     }
 
@@ -986,6 +997,7 @@ void listener_service::reap_expired(std::chrono::steady_clock::time_point now) {
         ++handshake_timeouts_;
         dispatcher_bindings_.erase(iterator->first);
         if (iterator->second.upstream) iterator->second.upstream->close(1);
+        transport_cleanup = true;
         iterator = certificate_jobs_.erase(iterator);
     }
 
@@ -1019,6 +1031,7 @@ void listener_service::reap_expired(std::chrono::steady_clock::time_point now) {
             ++iterator;
         }
     }
+    return transport_cleanup;
 }
 
 // Read on the owning worker; publish only copied values to the management plane.
@@ -1495,7 +1508,8 @@ int listener_service::prepare_verified_certificate(SSL* downstream) {
 // Advance each pending certificate request on the listener thread. A job keeps
 // its upstream connection for forwarding; only revocation checks leave this thread.
 // OpenSSL's downstream certificate callback consumes the ready/failed state later.
-void listener_service::progress_certificate_jobs() {
+bool listener_service::progress_certificate_jobs() {
+    bool progress = false;
     for (auto& [downstream, job] : certificate_jobs_) {
         if (job.state == certificate_state::certificate_ready
             || job.state == certificate_state::failed) {
@@ -1509,6 +1523,7 @@ void listener_service::progress_certificate_jobs() {
             continue;
         }
         if (!job.upstream) {
+            progress = true; // A new B channel needs its first shared engine pass.
             job.upstream = transparent_
                 ? connect_upstream(job.destination, job.server_name, job.setup.get())
                 : connect_upstream(job.server_name, job.setup.get());
@@ -1516,6 +1531,7 @@ void listener_service::progress_certificate_jobs() {
         if (!job.upstream) {
             ++upstream_failures_;
             job.state = certificate_state::failed;
+            progress = true; // Resume the downstream callback to report failure.
             continue;
         }
 
@@ -1528,6 +1544,7 @@ void listener_service::progress_certificate_jobs() {
                          "QUIC upstream handshake failed");
             ++upstream_failures_;
             job.state = certificate_state::failed;
+            progress = true; // Resume the downstream callback to report failure.
             continue;
         }
         if (!job.upstream->handshake_complete()) {
@@ -1547,6 +1564,7 @@ void listener_service::progress_certificate_jobs() {
             job.upstream->close(1);
             ++upstream_failures_;
             job.state = certificate_state::failed;
+            progress = true; // Resume the downstream callback to report failure.
             continue;
         }
         if (hook_outcome(job.setup.get(), job.upstream->native_handle(), false)) {
@@ -1555,9 +1573,11 @@ void listener_service::progress_certificate_jobs() {
         if (!job.result.certificate) {
             ++upstream_failures_;
         }
+        progress = true; // Resume the suspended downstream certificate callback.
         job.state = job.result.certificate ? certificate_state::certificate_ready
                                            : certificate_state::failed;
     }
+    return progress;
 }
 
 // Select the downstream identity only after authenticating the retained upstream.

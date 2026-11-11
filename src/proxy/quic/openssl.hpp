@@ -209,6 +209,8 @@ public:
     bool writable(multiflow::flow_handle flow) const override;
     /** Advance handshake/shutdown/timers without consuming queued flow events. */
     void progress_transport();
+    /** Consume application/lifecycle progress; the owner must tick before sleeping. */
+    bool take_application_progress() { return std::exchange(application_progress_, false); }
     /** Progress TLS, QUIC timers, stream acceptance, and lifecycle events. */
     std::vector<multiflow::event> drain_events() override;
 
@@ -264,6 +266,7 @@ private:
     multiflow::flow_id next_internal_id_ = 1;
     multiflow::generation_id next_generation_ = 1;
     event_driver driver_ = event_driver::connection; ///< Owner of transport ticks.
+    bool application_progress_ = true;          ///< New channels need an initial owner pass.
     bool closing_ = false;                      ///< Nonblocking shutdown needs progress.
     bool closed_ = false;                       ///< Transport reached terminal state.
 };

@@ -780,7 +780,13 @@ multiflow::io_result openssl_connection::read(multiflow::flow_handle flow,
     std::size_t read_size = 0;
     ERR_clear_error();
     auto const result = SSL_read_ex(state->stream.get(), destination, size, &read_size);
-    if (result == 1) return { read_size, multiflow::io_status::ok };
+    if (result == 1) {
+        // Consuming input can queue MAX_DATA/MAX_STREAM_DATA even when the
+        // bridge cannot forward anything yet. Byte-forwarding counters alone
+        // therefore cannot decide whether the worker is allowed to sleep.
+        application_progress_ |= read_size != 0;
+        return { read_size, multiflow::io_status::ok };
+    }
 
     auto const ssl_error = SSL_get_error(state->stream.get(), result);
     if (ssl_error == SSL_ERROR_WANT_READ || ssl_error == SSL_ERROR_WANT_WRITE) {
@@ -837,6 +843,7 @@ multiflow::io_result openssl_connection::write(multiflow::flow_handle flow,
     std::size_t written_size = 0;
     ERR_clear_error();
     auto const result = SSL_write_ex(state->stream.get(), source, size, &written_size);
+    application_progress_ |= written_size != 0;
     if (result == 1) return { written_size, multiflow::io_status::ok };
     auto const ssl_error = SSL_get_error(state->stream.get(), result);
     if (ssl_error == SSL_ERROR_WANT_READ || ssl_error == SSL_ERROR_WANT_WRITE) {
@@ -877,6 +884,7 @@ multiflow::io_status openssl_connection::finish(multiflow::flow_handle flow) {
     auto const result = SSL_stream_conclude(state->stream.get(), 0);
     if (result == 1) {
         state->write_terminal_reported = true;
+        application_progress_ = true; // A FIN needs output even without payload.
         return multiflow::io_status::ok;
     }
     auto const error = SSL_get_error(state->stream.get(), result);
@@ -1186,6 +1194,10 @@ void openssl_connection::emit(multiflow::event_type type,
                               std::uint64_t protocol_error) {
     event_key key { type, flow ? flow->id : 0 };
     events_.emplace(key, multiflow::event { type, flow, protocol_error });
+    // Readable/writable are level-triggered observations, not completed work.
+    // In particular, an idle writable stream must not keep its worker spinning.
+    if (type != multiflow::event_type::readable && type != multiflow::event_type::writable)
+        application_progress_ = true;
 }
 
 std::unique_ptr<openssl_listener> openssl_listener::create(SSL_CTX* context, int udp_fd,
