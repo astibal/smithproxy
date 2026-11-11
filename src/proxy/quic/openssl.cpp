@@ -590,13 +590,17 @@ send_result send_socket_datagram(int fd,
 
 bool drain_bio_output(openssl_listener::dispatcher_state& state) {
     if (state.route_failed) return false;
+    // The BIO can return a full UDP payload, but ordinary QUIC packets are
+    // much smaller. Reuse scratch space; retain only the actual payload in
+    // each queued packet instead of allocating/zeroing 64 KiB per datagram.
+    std::array<unsigned char, 65536> payload;
+    unique_bio_addr peer(BIO_ADDR_new());
+    unique_bio_addr local(BIO_ADDR_new());
+    if (!peer || !local) return false;
     while (state.pending_output.size() < 1024) {
-        openssl_listener::dispatcher_state::packet packet;
-        packet.data.resize(65536);
-        unique_bio_addr peer(BIO_ADDR_new());
-        unique_bio_addr local(BIO_ADDR_new());
-        if (!peer || !local) return false;
-        BIO_MSG message { packet.data.data(), packet.data.size(), peer.get(), local.get(), 0 };
+        BIO_ADDR_clear(peer.get());
+        BIO_ADDR_clear(local.get());
+        BIO_MSG message { payload.data(), payload.size(), peer.get(), local.get(), 0 };
         std::size_t processed = 0;
         ERR_clear_error();
         if (BIO_recvmmsg(state.application_bio, &message, sizeof(message), 1, 0,
@@ -607,7 +611,8 @@ bool drain_bio_output(openssl_listener::dispatcher_state& state) {
             ERR_clear_error();
             break;
         }
-        packet.data.resize(message.data_len);
+        openssl_listener::dispatcher_state::packet packet;
+        packet.data.assign(payload.data(), payload.data() + message.data_len);
         // Reading the application half reverses the sender's BIO addresses.
         packet.peer = endpoint_from_bio(local.get());
         packet.local = endpoint_from_bio(peer.get());
