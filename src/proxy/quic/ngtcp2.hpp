@@ -79,6 +79,9 @@ private:
         multiflow::direction direction;
         std::deque<chunk> rx;
         std::deque<chunk> tx;
+        // Fully submitted chunks stay alive for retransmission until ACK. Keep
+        // their count, not an iterator: deque append may invalidate iterators.
+        size_t tx_submitted = 0;
         uint64_t received = 0;
         uint64_t queued = 0;
         uint64_t acknowledged = 0;

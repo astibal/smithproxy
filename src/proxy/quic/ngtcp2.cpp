@@ -233,6 +233,7 @@ int connection::ack_stream(ngtcp2_conn*, int64_t id, uint64_t offset, uint64_t s
         state.acknowledged = offset + size;
         while (!state.tx.empty() && state.tx.front().offset + state.tx.front().bytes.size() <= state.acknowledged) {
             state.tx.pop_front();
+            --state.tx_submitted;
         }
         return 0;
     } catch (...) {
@@ -258,6 +259,7 @@ int connection::closed_stream(ngtcp2_conn* conn, uint32_t flags, int64_t id,
         auto& state = owner.ensure_stream(id, true);
         state.tx_closed = true;
         state.tx.clear();
+        state.tx_submitted = 0;
         if (flags & NGTCP2_STREAM_CLOSE_FLAG_APP_ERROR_CODE_SET) {
             state.reset = true;
             owner.events_.push_back({mf::event_type::reset, mf::flow_handle{uint64_t(id), 1}, error});
@@ -517,15 +519,13 @@ connection::transmit_selection connection::select_transmit_stream() {
         auto& state = it->second;
         if (state.tx_closed || state.reset) continue;
 
-        auto data = std::find_if(state.tx.begin(), state.tx.end(), [](chunk const& value) {
-            return value.used != value.bytes.size();
-        });
-        bool has_data = data != state.tx.end();
+        bool has_data = state.tx_submitted < state.tx.size();
+        auto* data = has_data ? &state.tx[state.tx_submitted] : nullptr;
         bool has_fin = state.fin_requested && !state.fin_submitted;
         if (!has_data && !has_fin) continue;
 
         next_tx_ = it->first + 1;
-        return {it->first, &state, has_data ? &*data : nullptr};
+        return {it->first, &state, data};
     }
     // Stream -1 asks ngtcp2 to produce only transport/control frames.
     return {};
@@ -551,7 +551,10 @@ ngtcp2_ssize connection::write_stream_packet(ngtcp2_pkt_info& info, timestamp ts
     // Accepted bytes are retained until ACK; acceptance alone does not free
     // buffer capacity. ngtcp2 may accept only part of the offered final slice.
     if (accepted >= 0) {
-        if (data) data->used += accepted;
+        if (data) {
+            data->used += accepted;
+            if (data->used == data->bytes.size()) ++state->tx_submitted;
+        }
         if (fin && size_t(accepted) == slice.len) state->fin_submitted = true;
     }
     if (count == NGTCP2_ERR_STREAM_DATA_BLOCKED || count == NGTCP2_ERR_STREAM_SHUT_WR) {
