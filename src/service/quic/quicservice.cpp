@@ -556,7 +556,9 @@ bool listener_service::wait_for_work() {
 }
 
 void listener_service::observe_datagram(datagram_view const& datagram) {
-    if (datagram.direction == datagram_direction::ingress) {
+    // Log arguments are evaluated even when ext() discards the message. Do
+    // not format two socket addresses per packet with packet logging disabled.
+    if (datagram.direction == datagram_direction::ingress && *log().level() >= EXT) {
         log().ext("datagram peer=%s original-destination=%s association=%llu",
                   endpoint_text(datagram.peer).c_str(), endpoint_text(datagram.local).c_str(),
                   static_cast<unsigned long long>(datagram.association));
@@ -597,8 +599,8 @@ void listener_service::observe_datagram(datagram_view const& datagram) {
 void listener_service::publish_capture_secrets(session& value) {
     if (!value.capture_log || !value.keylog || !value.downstream
         || !value.downstream->handshake_complete()) return;
-    auto lines = value.keylog->snapshot();
-    if (value.keylog_cursor >= lines.size()) return;
+    auto lines = value.keylog->snapshot(value.keylog_cursor);
+    if (lines.empty()) return;
 
     // Wireshark treats a TLS-keylog DSB as a self-contained key schedule. The
     // accepted handshake already has both directions' handshake and 1-RTT
@@ -912,8 +914,8 @@ void listener_service::progress_active(
     session& value, std::chrono::steady_clock::time_point now) {
     // One pass per session keeps a busy stream from repeatedly driving its
     // engine while siblings wait. The worker revisits productive sessions in
-    // the next round without blocking in poll(); the listener flushes once
-    // after every session has had a chance to enqueue its output.
+    // the next round without blocking in poll(); that round's transport phase
+    // flushes the output queued by all sessions in this pass.
     auto const moved = value.proxy->pump_once();
     if (moved != 0) {
         value.last_activity = now;

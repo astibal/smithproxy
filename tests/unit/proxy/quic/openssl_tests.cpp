@@ -28,6 +28,24 @@
 namespace quic = sx::quic;
 namespace mf = sx::multiflow;
 
+#if SMITHPROXY_OPENSSL_QUIC
+TEST(OpenSslQuicKeylog, RepublishesCompleteSecretsOnlyWhenTheyChange) {
+    quic::keylog_store store;
+    EXPECT_TRUE(store.snapshot().empty());
+    store.append("handshake-secret");
+    EXPECT_EQ(store.snapshot(), (std::vector<std::string>{"handshake-secret"}));
+    EXPECT_TRUE(store.snapshot(1).empty());
+
+    // A later key update must produce a complete block, including the earlier
+    // handshake material needed to decrypt the same capture independently.
+    store.append("application-secret");
+    EXPECT_EQ(store.snapshot(1),
+              (std::vector<std::string>{"handshake-secret", "application-secret"}));
+    store.append("application-secret");
+    EXPECT_TRUE(store.snapshot(2).empty());
+}
+#endif
+
 TEST(OpenSslQuicSocketIo, TreatsKernelQueueExhaustionAsBackpressure) {
     using result = quic::detail::datagram_send_result;
     EXPECT_EQ(quic::detail::classify_datagram_send(-1, EAGAIN, 1200),

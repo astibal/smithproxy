@@ -70,8 +70,8 @@ class keylog_store final {
 public:
     /** Save one complete NSS key-log line, ignoring empty and duplicate records. */
     void append(std::string line);
-    /** Return a stable copy suitable for a later capture/export operation. */
-    std::vector<std::string> snapshot() const;
+    /** Return all records if new ones exist beyond known_lines; otherwise empty. */
+    std::vector<std::string> snapshot(std::size_t known_lines = 0) const;
 
 private:
     mutable std::mutex mutex_;

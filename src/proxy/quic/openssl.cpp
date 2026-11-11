@@ -110,8 +110,11 @@ void keylog_store::append(std::string line) {
     }
 }
 
-std::vector<std::string> keylog_store::snapshot() const {
+std::vector<std::string> keylog_store::snapshot(std::size_t known_lines) const {
     std::lock_guard lock(mutex_);
+    // The worker checks this after every session pass. Avoid copying the same
+    // secrets for each packet, but keep an updated PCAPNG block self-contained.
+    if (lines_.size() <= known_lines) return {};
     return lines_;
 }
 #endif
@@ -1413,7 +1416,7 @@ bool openssl_listener::receive_input_batch() {
     auto& dispatcher = *dispatcher_state_;
 
     // Bound each pass so a hot UDP socket cannot starve established streams,
-    // certificate futures, shutdown, or management snapshots.
+    // certificate jobs, shutdown, or management snapshots.
     for (std::size_t count = 0; count < 64; ++count) {
         dispatcher_state::packet packet;
         if (dispatcher.source) {

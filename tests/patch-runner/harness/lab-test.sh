@@ -484,6 +484,13 @@ if [[ $QUIC_THROUGHPUT_TEST == 1 ]]; then
         fi
         echo "PASS$family QUIC throughput: checked H3 download/upload measured without a performance gate"
     done
+    # Keep the receiver running as a regression detector: disabling only the
+    # content profile used to leave synchronous connection-start hooks active.
+    if [[ -s "$ROOT/results/quic-webhooks.jsonl" ]]; then
+        echo 'FAIL QUIC throughput: webhook requests contaminated the measurement' >&2
+        exit 1
+    fi
+    echo 'PASS QUIC throughput: no webhook requests during measurement'
     exit 0
 fi
 if [[ -n ${QUIC_TLS_PROFILE_TEST:-} ]]; then
