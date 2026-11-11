@@ -14,6 +14,7 @@
 
 namespace sx::quic {
 namespace {
+// Own only worker-created sockets; the shared downstream fd remains borrowed.
 struct socket_owner {
     int fd = -1;
     ~socket_owner() { if (fd >= 0) ::close(fd); }
@@ -57,6 +58,7 @@ datagram_endpoint outgoing_path(int fd, sockaddr const* peer, socklen_t size) {
     return local;
 }
 
+// Compare network identity rather than sockaddr padding bytes.
 bool same_endpoint(datagram_endpoint const& a, datagram_endpoint const& b) {
     if (a.address.ss_family != b.address.ss_family) return false;
     if (a.address.ss_family == AF_INET) {
@@ -70,10 +72,35 @@ bool same_endpoint(datagram_endpoint const& a, datagram_endpoint const& b) {
         && std::memcmp(&x->sin6_addr, &y->sin6_addr, sizeof(in6_addr)) == 0;
 }
 
+// Configure identity, ALPN and the shared policy before B can emit its Initial.
+// Numeric destinations use IP verification without sending an IP literal as SNI.
+bool configure_upstream_tls(SSL* ssl, std::string const& name, HookEvent const& offer,
+                            std::function<bool(SSL*)> const& configure) {
+    if (offer.alpn.empty() || offer.alpn.size() > 255) return false;
+
+    std::vector<unsigned char> alpn {static_cast<unsigned char>(offer.alpn.size())};
+    alpn.insert(alpn.end(), offer.alpn.begin(), offer.alpn.end());
+    std::array<unsigned char, sizeof(in6_addr)> binary {};
+    bool numeric = inet_pton(AF_INET, name.c_str(), binary.data()) == 1
+        || inet_pton(AF_INET6, name.c_str(), binary.data()) == 1;
+    bool identity = numeric
+        ? X509_VERIFY_PARAM_set1_ip_asc(SSL_get0_param(ssl), name.c_str()) == 1
+        : SSL_set_tlsext_host_name(ssl, name.c_str()) == 1 && SSL_set1_host(ssl, name.c_str()) == 1;
+    if (!identity) return false;
+    if (SSL_set_alpn_protos(ssl, alpn.data(), alpn.size()) != 0) return false;
+    if (!apply_hook_offer(ssl, offer, name)) return false;
+    return !configure || configure(ssl);
+}
+
+// The worker owns socket I/O and CID routing for both legs. Entries have stable
+// addresses: callbacks borrow their owner until retirement removes every route.
 class ngtcp2_worker final : public worker_transport {
+    static constexpr ng::timestamp close_delivery_grace = 3 * NGTCP2_SECONDS;
+
     struct entry {
         std::shared_ptr<ng::connection> connection;
-        datagram_endpoint peer, local;
+        datagram_endpoint peer;
+        datagram_endpoint local;
         uint64_t association = 0;
         unsigned ifindex = 0;
         bool downstream = false;
@@ -99,9 +126,12 @@ public:
     // happens under the saved A tuple, even when no new packet accompanied it.
     bool handle_events() override { return progress(true); }
     bool handle_upstream() override { return progress(false); }
+    // Transfer a newly received A leg to the service once; the worker retains
+    // its transport owner until the service releases the complete session.
     std::shared_ptr<transport_connection> accept() override {
         if (accepted_.empty()) return {};
-        auto result = std::move(accepted_.front()); accepted_.pop_front();
+        auto result = std::move(accepted_.front());
+        accepted_.pop_front();
         return result;
     }
 
@@ -113,7 +143,8 @@ public:
         std::string* error, proxymaker::SessionSetup* setup,
         std::function<bool(SSL*)> const& configure) override {
         HookEvent offer;
-        offer.sni = name; offer.alpn = "h3";
+        offer.sni = name;
+        offer.alpn = "h3";
         if (!hook_start(setup, offer)) {
             if (error) *error = "QUIC start rejected by callback";
             return {};
@@ -122,21 +153,11 @@ public:
             if (!tls || !peer || size > sizeof(sockaddr_storage))
                 throw std::runtime_error("invalid ngtcp2 peer");
             datagram_endpoint remote;
-            remote.size = size; std::memcpy(&remote.address, peer, size);
+            remote.size = size;
+            std::memcpy(&remote.address, peer, size);
             return create(tls, false, outgoing_path(output_.fd, peer, size), remote, 0, nullptr, ng::now(),
                 [&](SSL* ssl) {
-                    if (offer.alpn.empty() || offer.alpn.size() > 255) return false;
-                    std::vector<unsigned char> alpn {static_cast<unsigned char>(offer.alpn.size())};
-                    alpn.insert(alpn.end(), offer.alpn.begin(), offer.alpn.end());
-                    std::array<unsigned char, sizeof(in6_addr)> binary {};
-                    bool numeric = inet_pton(AF_INET, name.c_str(), binary.data()) == 1
-                        || inet_pton(AF_INET6, name.c_str(), binary.data()) == 1;
-                    bool identity = numeric
-                        ? X509_VERIFY_PARAM_set1_ip_asc(SSL_get0_param(ssl), name.c_str()) == 1
-                        : SSL_set_tlsext_host_name(ssl, name.c_str()) == 1 && SSL_set1_host(ssl, name.c_str()) == 1;
-                    if (!identity || SSL_set_alpn_protos(ssl, alpn.data(), alpn.size())
-                        || !apply_hook_offer(ssl, offer, name)) return false;
-                    return !configure || configure(ssl);
+                    return configure_upstream_tls(ssl, name, offer, configure);
                 });
         } catch (std::exception const& e) {
             if (error) *error = e.what();
@@ -148,6 +169,9 @@ public:
     // Writes performed by the bridge mark application progress; the following
     // worker pass sends them in a bounded batch, just like the OpenSSL path.
     bool flush_output(datagram_endpoint const&, datagram_endpoint const&, uint64_t) override { return true; }
+
+    // Include both transport expiry and close-delivery retirement in ppoll.
+    // A negative duration tells the service there is no pending deadline.
     std::chrono::nanoseconds timeout() const override {
         auto ts = ng::now();
         auto earliest = std::numeric_limits<ng::timestamp>::max();
@@ -181,25 +205,33 @@ private:
                 if (!inserted && it->second != owner) throw std::runtime_error("ngtcp2 CID collision");
                 owner->cids.insert(std::move(key));
             } else {
-                map.erase(key); owner->cids.erase(key);
+                map.erase(key);
+                owner->cids.erase(key);
             }
         };
     }
 
+    // Build under a stable owner and roll back CID registrations on failure.
+    // No callback can outlive the entry retained in entries_.
     std::shared_ptr<ng::connection> create(
         SSL_CTX* tls, bool downstream, datagram_endpoint local, datagram_endpoint peer,
         unsigned ifindex, ngtcp2_pkt_hd const* initial, ng::timestamp started,
         std::function<bool(SSL*)> configure) {
         auto value = std::make_unique<entry>();
         auto* owner = value.get();
-        owner->local = local; owner->peer = peer; owner->ifindex = ifindex;
+        owner->local = local;
+        owner->peer = peer;
+        owner->ifindex = ifindex;
         owner->downstream = downstream;
         owner->association = downstream ? next_association_++ : 0;
         datagram_observer observer;
-        if (downstream && observer_) observer = [this, owner](datagram_view const& packet) {
-            auto view = packet; view.association = owner->association;
-            observer_(view);
-        };
+        if (downstream && observer_) {
+            observer = [this, owner](datagram_view const& packet) {
+                auto view = packet;
+                view.association = owner->association;
+                observer_(view);
+            };
+        }
         try {
             owner->connection = std::make_shared<ng::connection>(tls, downstream, local, peer,
                 initial, router(owner), started, std::move(configure), std::move(observer),
@@ -213,27 +245,37 @@ private:
         return result;
     }
 
-    /** Recover the CID owner before invoking any TLS callback or capture observer. */
-    void receive(datagram_packet const& packet, bool downstream, ng::timestamp ts) {
-        if (!packet.peer.valid() || !packet.local.valid()) return;
+    // Resolve an existing CID, or admit a v1 Initial on A. Unknown B packets
+    // cannot create sessions. The common service owns admission diagnostics.
+    entry* find_or_accept(datagram_packet const& packet, bool downstream, ng::timestamp ts) {
         ngtcp2_version_cid header {};
-        if (ngtcp2_pkt_decode_version_cid(&header, packet.data.data(), packet.data.size(), 16)) return;
+        if (ngtcp2_pkt_decode_version_cid(&header, packet.data.data(), packet.data.size(), 16)) return nullptr;
         auto& map = downstream ? incoming_ : outgoing_;
         std::string key(reinterpret_cast<char const*>(header.dcid), header.dcidlen);
         auto it = map.find(key);
         entry* owner = it == map.end() ? nullptr : it->second;
-        if (!owner) {
-            // Leave one receive batch beyond the steady A:B capacity so the
-            // common service can reject/count excess sessions itself. Retired
-            // transports remain bounded while their close packet drains.
-            ngtcp2_pkt_hd initial {};
-            if (!downstream || entries_.size() >= 2 * limit_ + 64
-                || ngtcp2_accept(&initial, packet.data.data(), packet.data.size()) != 0
-                || initial.version != NGTCP2_PROTO_VER_V1) return;
-            auto connection = create(server_, true, packet.local, packet.peer, packet.ingress_ifindex, &initial, ts, {});
-            owner = incoming_.at(key);
-            accepted_.push_back(std::move(connection));
-        }
+        if (owner) return owner;
+
+        // Leave one receive batch beyond the steady A:B capacity so the
+        // common service can reject/count excess sessions itself. Retired
+        // transports remain bounded while their close packet drains.
+        ngtcp2_pkt_hd initial {};
+        if (!downstream || entries_.size() >= 2 * limit_ + ng::packet_batch_limit) return nullptr;
+        if (ngtcp2_accept(&initial, packet.data.data(), packet.data.size()) != 0) return nullptr;
+        if (initial.version != NGTCP2_PROTO_VER_V1) return nullptr;
+
+        auto connection = create(server_, true, packet.local, packet.peer,
+                                 packet.ingress_ifindex, &initial, ts, {});
+        owner = incoming_.at(key);
+        accepted_.push_back(std::move(connection));
+        return owner;
+    }
+
+    // Restore the service's callback context before TLS processing or capture.
+    void receive(datagram_packet const& packet, bool downstream, ng::timestamp ts) {
+        if (!packet.peer.valid() || !packet.local.valid()) return;
+        auto* owner = find_or_accept(packet, downstream, ts);
+        if (!owner) return;
         // Migration needs dispatcher/transparent-routing agreement. Preserve the
         // original tuple until that capability is implemented and tested.
         if (!same_endpoint(owner->peer, packet.peer) || !same_endpoint(owner->local, packet.local)) return;
@@ -243,27 +285,46 @@ private:
         owner->connection->receive(packet, ts);
     }
 
+    // Bound ingress work so a busy socket cannot starve timers or the bridge.
+    void receive_batch(bool downstream, ng::timestamp ts) {
+        datagram_packet packet;
+        for (size_t n = 0; n < ng::packet_batch_limit; ++n) {
+            bool received;
+            if (downstream) {
+                received = source_ ? source_(packet) : receive_datagram(fd_, packet);
+            } else {
+                received = receive_datagram(output_.fd, packet);
+            }
+            if (!received) break;
+            receive(packet, downstream, ts);
+        }
+    }
+
+    // TLS may resume without a fresh datagram. Reinstall each owner's tuple
+    // before callbacks, then service its timers and bounded packet output.
+    void progress_connections(bool downstream, ng::timestamp ts) {
+        int fd = downstream ? fd_ : output_.fd;
+        for (auto& value : entries_) {
+            if (value->downstream != downstream) continue;
+            current_ = value.get();
+            value->connection->progress_transport();
+            value->connection->expire(ts);
+            value->connection->transmit(fd, ts);
+        }
+    }
+
+    // One worker turn uses one timestamp for receive, expiry and transmission.
+    // Report errors to the shared service rather than throwing across its loop.
     bool progress(bool downstream) {
         try {
             auto ts = ng::now();
-            datagram_packet packet;
-            for (size_t n = 0; n < 64; ++n) {
-                bool got = downstream ? (source_ ? source_(packet) : receive_datagram(fd_, packet))
-                                      : receive_datagram(output_.fd, packet);
-                if (!got) break;
-                receive(packet, downstream, ts);
-            }
-            for (auto& value : entries_) {
-                if (value->downstream != downstream) continue;
-                current_ = value.get();
-                value->connection->progress_transport();
-                value->connection->expire(ts);
-                value->connection->transmit(downstream ? fd_ : output_.fd, ts);
-            }
+            receive_batch(downstream, ts);
+            progress_connections(downstream, ts);
             retire(ts);
             return true;
         } catch (std::exception const& e) {
-            error_ = e.what(); return false;
+            error_ = e.what();
+            return false;
         }
     }
 
@@ -271,21 +332,31 @@ private:
     void retire(ng::timestamp ts) {
         for (auto it = entries_.begin(); it != entries_.end();) {
             auto& value = **it;
-            if (value.connection.use_count() != 1) { ++it; continue; }
+            if (value.connection.use_count() != 1) {
+                ++it;
+                continue;
+            }
             if (!value.retirement) {
                 value.connection->close();
-                value.retirement = ts + 3 * NGTCP2_SECONDS;
+                value.retirement = ts + close_delivery_grace;
             }
-            if (value.retirement > ts) { ++it; continue; }
+            if (value.retirement > ts) {
+                ++it;
+                continue;
+            }
             if (current_ == &value) current_ = nullptr;
             erase_routes(value);
             it = entries_.erase(it);
         }
     }
+
+    // Remove aliases before destroying the owner borrowed by the routing table.
     void erase_routes(entry const& value) {
         auto& map = value.downstream ? incoming_ : outgoing_;
         for (auto const& cid : value.cids) map.erase(cid);
     }
+
+    // POLLOUT is needed only while an encrypted datagram is retained after EAGAIN.
     bool blocked(bool downstream) const {
         return std::any_of(entries_.begin(), entries_.end(), [=](auto const& value) {
             return value->downstream == downstream && value->connection->send_blocked();
@@ -324,10 +395,14 @@ unique_ssl_ctx make_ngtcp2_context(bool server) {
     return context;
 }
 
+// Keep construction failure compatible with the service factory contract.
 std::unique_ptr<worker_transport> make_ngtcp2_worker(
     SSL_CTX* server, SSL_CTX*, int fd, int family, bool, datagram_observer observer,
     datagram_source source, size_t limit) {
-    try { return std::make_unique<ngtcp2_worker>(server, fd, family, std::move(observer), std::move(source), limit); }
-    catch (...) { return {}; }
+    try {
+        return std::make_unique<ngtcp2_worker>(server, fd, family, std::move(observer), std::move(source), limit);
+    } catch (...) {
+        return {};
+    }
 }
 } // namespace sx::quic

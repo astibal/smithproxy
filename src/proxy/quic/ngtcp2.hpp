@@ -14,6 +14,8 @@
 namespace sx::quic::ng {
 
 using timestamp = ngtcp2_tstamp;
+// Shared scheduling budget keeps either leg from monopolizing a worker pass.
+inline constexpr size_t packet_batch_limit = 64;
 timestamp now();
 using cid_router = std::function<void(ngtcp2_cid const&, bool)>;
 
@@ -31,7 +33,7 @@ public:
 
     /** Process a complete datagram, preserving its actual local/remote tuple. */
     void receive(datagram_packet const& packet, timestamp ts);
-    /** Expire due protocol timers and return the next absolute deadline. */
+    /** Expire due protocol timers; deadline() supplies the next absolute expiry. */
     void expire(timestamp ts);
     timestamp deadline() const;
     /** Produce bounded output; EAGAIN retains the exact encrypted packet. */
@@ -66,6 +68,8 @@ public:
     std::vector<multiflow::event> drain_events() override;
 
 private:
+    // RX uses used as a read cursor; TX uses it as a submission cursor. TX
+    // storage remains immutable and alive until the acknowledged range covers it.
     struct chunk {
         std::vector<unsigned char> bytes;
         uint64_t offset = 0;
@@ -73,12 +77,29 @@ private:
     };
     struct stream {
         multiflow::direction direction;
-        std::deque<chunk> rx, tx;
-        uint64_t received = 0, queued = 0, acknowledged = 0;
-        bool peer_fin = false, fin_notified = false;
-        bool fin_requested = false, fin_submitted = false, tx_closed = false, reset = false;
+        std::deque<chunk> rx;
+        std::deque<chunk> tx;
+        uint64_t received = 0;
+        uint64_t queued = 0;
+        uint64_t acknowledged = 0;
+        bool peer_fin = false;
+        bool fin_notified = false;
+        bool fin_requested = false;
+        bool fin_submitted = false;
+        bool tx_closed = false;
+        bool reset = false;
     };
+    // A borrowed view valid during one packet submission; queues own the storage.
+    struct transmit_selection {
+        int64_t id = -1;
+        stream* state = nullptr;
+        chunk* data = nullptr;
+    };
+    static constexpr size_t max_udp_payload = 1350;
     static constexpr size_t stream_buffer_limit = 1024 * 1024;
+    void initialize_tls(SSL_CTX* tls, std::function<bool(SSL*)> const& configure);
+    transmit_selection select_transmit_stream();
+    ngtcp2_ssize write_stream_packet(ngtcp2_pkt_info& info, timestamp ts);
     stream& ensure_stream(int64_t id, bool incoming);
     void notify_fin(int64_t id, stream& value);
     void fail(int error, char const* operation);
@@ -97,8 +118,11 @@ private:
     static int new_cid(ngtcp2_conn*, ngtcp2_cid*, uint8_t*, size_t, void*);
     static int remove_cid(ngtcp2_conn*, ngtcp2_cid const*, void*);
 
-    bool progress_ = true, tls_paused_ = false;
-    bool server_, closed_ = false, send_close_ = false;
+    bool progress_ = true;
+    bool tls_paused_ = false;
+    bool server_;
+    bool closed_ = false;
+    bool send_close_ = false;
     ngtcp2_ccerr close_error_ {};
     datagram_endpoint local_, remote_;
     cid_router route_;
