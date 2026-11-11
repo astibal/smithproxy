@@ -409,14 +409,28 @@ TEST_F(QuicListenerService, RejectsSessionsBeyondConfiguredLimit) {
     if(external) external->close();
 }
 
+// A busy application must not make management sampling run at packet frequency.
+struct bridge_sampling_probe {
+    std::atomic_bool busy = false;
+    std::atomic_size_t pumps = 0;
+    std::atomic_size_t summaries = 0;
+};
+
 // The listener must retain bridge diagnostics independently of bridge lifetime.
 class classified_test_bridge final : public sx::multiflow::flow_proxy {
 public:
     classified_test_bridge(std::shared_ptr<sx::multiflow::connection> left,
                            std::shared_ptr<sx::multiflow::connection> right,
-                           sx::multiflow::proxy_limits limits)
-        : bridge_(std::move(left), std::move(right), limits) {}
-    std::size_t pump_once(std::size_t size) override { return bridge_.pump_once(size); }
+                           sx::multiflow::proxy_limits limits,
+                           std::shared_ptr<bridge_sampling_probe> probe = {})
+        : bridge_(std::move(left), std::move(right), limits), probe_(std::move(probe)) {}
+    std::size_t pump_once(std::size_t size) override {
+        auto const moved = bridge_.pump_once(size);
+        if (!probe_) return moved;
+        ++probe_->pumps;
+        // Keep the worker productive without depending on machine throughput.
+        return probe_->busy ? moved + 1 : moved;
+    }
     std::size_t pair_count() const override { return bridge_.pair_count(); }
     std::size_t queued_bytes() const override { return bridge_.queued_bytes(); }
     std::size_t limit_rejections() const override { return bridge_.limit_rejections(); }
@@ -428,6 +442,7 @@ public:
         return {};
     }
     sx::multiflow::flow_summary summary() const override {
+        if (probe_) ++probe_->summaries;
         sx::multiflow::flow_summary result;
         result.policies = {2, 3};
         result.filters = {"test-filter"};
@@ -439,9 +454,10 @@ public:
     }
 private:
     sx::multiflow::MFProxy bridge_;
+    std::shared_ptr<bridge_sampling_probe> probe_;
 };
 
-static void exercise_proxy_stream(bool use_workers) {
+static void exercise_proxy_stream(bool use_workers, bool check_sampling = false) {
     auto origin_context = quic::make_openssl_quic_context(true);
     auto client_context = quic::make_openssl_quic_context(false);
     ASSERT_NE(origin_context, nullptr);
@@ -468,15 +484,16 @@ static void exercise_proxy_stream(bool use_workers) {
     ASSERT_NE(origin_listener, nullptr);
 
     quic::lifecycle_options lifecycle;
-    lifecycle.idle_timeout = std::chrono::milliseconds(100);
+    lifecycle.idle_timeout = std::chrono::milliseconds(300);
     lifecycle.drain_timeout = std::chrono::milliseconds(100);
+    auto probe = check_sampling ? std::make_shared<bridge_sampling_probe>() : nullptr;
     quic::listener_service proxy(0, "etc/certs/default/srv-cert.pem",
                                  "etc/certs/default/srv-key.pem", false,
                                  ntohs(origin_address.sin_port), false, lifecycle,
                                  {}, "127.0.0.1",
-                                 [](auto left, auto right, auto limits, auto) {
+                                 [probe](auto left, auto right, auto limits, auto) {
                                      return std::make_unique<classified_test_bridge>(
-                                         std::move(left), std::move(right), limits);
+                                         std::move(left), std::move(right), limits, probe);
                                  });
     std::shared_ptr<quic::worker_dispatcher> receiver;
     std::unique_ptr<quic::listener_service> sibling;
@@ -614,6 +631,26 @@ static void exercise_proxy_stream(bool use_workers) {
     EXPECT_GT(snapshots.front().forwarded_bytes, 0U);
     EXPECT_NE(snapshots.front().target, "-");
 
+    if (probe) {
+        auto const pumps = probe->pumps.load();
+        auto const summaries = probe->summaries.load();
+        auto const started = std::chrono::steady_clock::now();
+        probe->busy = true;
+        while (std::chrono::steady_clock::now() - started < std::chrono::milliseconds(250)) {
+            external->drain_events();
+            ASSERT_TRUE(origin_listener->handle_events());
+            origin->drain_events();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        auto const elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - started).count();
+        auto const samples = probe->summaries.load() - summaries;
+        EXPECT_GE(probe->pumps.load() - pumps, 20U);
+        EXPECT_GT(samples, 0U); // Diagnostics still refresh while traffic is busy.
+        EXPECT_LE(samples, static_cast<std::size_t>(elapsed / 100 + 2));
+        probe->busy = false;
+    }
+
     auto const close_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     bool saw_draining = false;
     while (std::chrono::steady_clock::now() < close_deadline
@@ -662,6 +699,10 @@ TEST_F(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
 
 TEST_F(QuicListenerService, ReceiverKeepsStreamAndLifecycleOnSelectedWorker) {
     exercise_proxy_stream(true);
+}
+
+TEST_F(QuicListenerService, BusyWorkerSamplesDiagnosticsAndPublishesLifecycle) {
+    exercise_proxy_stream(false, true);
 }
 
 namespace {

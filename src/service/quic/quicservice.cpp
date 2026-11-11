@@ -724,6 +724,7 @@ void listener_service::accept_connections() {
         attach_staged_upstream(incoming);
 
         sessions_.push_back(std::move(incoming));
+        snapshots_dirty_ = true;
         ++connection_count_;
         ++accepted_sessions_;
 
@@ -738,6 +739,8 @@ void listener_service::progress_session(
     session& value, std::chrono::steady_clock::time_point now) {
     switch (value.state) {
     case session_state::handshake:
+        // Keep certificate/TLS phases observable even between state changes.
+        snapshots_dirty_ = true;
         progress_handshake(value, now);
         break;
     case session_state::active:
@@ -958,6 +961,7 @@ void listener_service::reap_expired(std::chrono::steady_clock::time_point now) {
     auto const removed = before - sessions_.size();
     connection_count_ -= removed;
     completed_sessions_ += removed;
+    snapshots_dirty_ |= removed != 0;
 
     // A verified upstream can outlive a client that disappeared before accept.
     // Bound that orphan state by the same handshake timeout.
@@ -1093,6 +1097,13 @@ std::string listener_service::handshake_phase(session const& value) const {
 
 void listener_service::publish_session_snapshots(
     std::chrono::steady_clock::time_point now) {
+    // Rendering rates, policies and TLS details is management work, not part
+    // of forwarding each packet. Reuse this round's timestamp; never sleep or
+    // delay I/O to sample it. Admission, handshake and shutdown bypass the cap.
+    if (!snapshots_dirty_ && now < next_snapshot_) return;
+    next_snapshot_ = now + std::chrono::milliseconds(100);
+    snapshots_dirty_ = false;
+
     std::vector<session_snapshot> result;
     result.reserve(sessions_.size());
     for (auto const& linked : sessions_) {
@@ -1186,6 +1197,7 @@ void listener_service::start_draining(session& value,
               static_cast<unsigned long long>(protocol_error),
               static_cast<unsigned long long>(value.forwarded_bytes));
     value.state = session_state::draining;
+    snapshots_dirty_ = true;
     value.draining_since = now;
     if (value.proxy) {
         value.stream_summary = value.proxy->summary();

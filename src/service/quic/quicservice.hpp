@@ -168,7 +168,7 @@ public:
     std::size_t connection_count() const { return connection_count_; }
     /** Atomically sample operational counters without touching session state. */
     diagnostics_snapshot diagnostics() const;
-    /** Return a copy without exposing worker-affine OpenSSL/MF objects. */
+    /** Copy periodically sampled diagnostics; lifecycle changes bypass sampling. */
     std::vector<session_snapshot> session_diagnostics() const;
     using session_details = std::map<std::uint64_t, std::vector<std::string>>;
     // Render live stream details on their owner, only when explicitly requested.
@@ -239,6 +239,8 @@ private:
     std::atomic_size_t connection_count_ = 0;     ///< Sessions currently retained by the loop.
     mutable std::mutex snapshots_mutex_;          ///< Protects only copied diagnostics.
     std::vector<session_snapshot> snapshots_;     ///< Last worker-published view.
+    std::chrono::steady_clock::time_point next_snapshot_ {}; ///< Worker-owned sampling deadline.
+    bool snapshots_dirty_ = true;                ///< Lifecycle changes must be visible immediately.
     static inline std::atomic_uint64_t next_session_id_ {1}; ///< Unique across IPv4/IPv6 listeners.
 
     // Monotonic atomics back diagnostics(); writers live in the worker except
