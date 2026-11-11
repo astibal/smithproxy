@@ -1,5 +1,44 @@
 # Experimental ngtcp2 A:B bridge
 
+## Working production checkpoint — 2026-11-11
+
+Branch `experiment/ngtcp2-quic`, implementation through `4f2a8852`, is a
+working, opt-in drop-in replacement for the **OpenSSL QUIC transport** beneath
+the production service. OpenSSL still supplies TLS and cryptography. This is
+no longer only the insecure standalone experiment described below.
+
+Rhino's complete `full --parallel 8 --jobs 8` run passed with ngtcp2 selected:
+
+- 72/72 native CTest entries, including the OpenSSL and ngtcp2 service testbeds;
+- 71/71 runtime sections, with no reported flaky results;
+- IPv4/IPv6 transparency, capture/decryption, hooks, certificate policy,
+  lifecycle, corpus, fuzzing, and native throughput checks.
+
+The successful run is retained on Rhino under
+`/home/astib/Documents/ChatGPT/Smithproxy/p3-runs/quic-ngtcp2-experiment-20261111/`
+`full-p8-isolated-20261111T163424Z/`. Its `launch.sh` records the exact invocation;
+the final `summary.txt` and `sections.tsv` are in the `*-full` directory
+beneath `lab/results`.
+
+Testing used ngtcp2 1.16.0 and the task's patched OpenSSL 3.5.5 runtime. Library
+selection is deliberately outside Git: build-local runtime paths and endpoint
+wrappers isolate it from capture tools. An earlier global `LD_LIBRARY_PATH`
+override prevented tcpdump from mapping libcrypto and failed four capture
+sections; the isolated full rerun passed all four without product changes.
+
+Production-path A/B measurements before this checkpoint showed roughly
+1.5–1.9x throughput versus the patched OpenSSL QUIC backend. Initial-packet
+captures of twelve A:B pairs showed no repeated ACK/PING echo: incoming PINGs
+were acknowledged without adding a responding PING. These are lab observations,
+not a guarantee for arbitrary networks or a complete protocol conformance claim.
+
+Keep the single-worker A:B ownership, shared service verification and same-B
+certificate/data connection when continuing this branch. The backend is still
+opt-in; fixed-tuple QUIC v1 is tested, while migration and stateless
+Retry/address-validation equivalence remain open. Passing P8 does not remove
+those boundaries. No private OpenSSL sources or deployment paths belong in the
+production build configuration.
+
 This standalone executable answers a narrow question: does replacing the QUIC
 transport, while keeping Smithproxy's stream bridge and worker ownership, offer
 useful throughput headroom?
