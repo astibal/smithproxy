@@ -1,6 +1,7 @@
 [Unit]
 Description=Smithproxy Core - tenant %i
-After=network.target remote-fs.target nss-lookup.target
+Requires=sx-network@%i.service
+After=network.target remote-fs.target nss-lookup.target sx-network@%i.service
 
 [Service]
 #User=_sxy

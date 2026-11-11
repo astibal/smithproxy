@@ -87,6 +87,7 @@ protected:
         auto lock = std::scoped_lock(HttpSessions::lock);
         HttpSessions::access_keys.clear();
         HttpSessions::api_keys.clear();
+        HttpSessions::archive_keys.clear();
         HttpSessions::extend_on_access = false;
     }
 
@@ -94,6 +95,7 @@ protected:
         auto lock = std::scoped_lock(HttpSessions::lock);
         HttpSessions::access_keys.clear();
         HttpSessions::api_keys.clear();
+        HttpSessions::archive_keys.clear();
         HttpSessions::extend_on_access = true;
     }
 };
@@ -136,6 +138,57 @@ TEST_F(HttpSessionsTest, InvalidCsrfDoesNotDestroyOtherwiseValidSession) {
 
     EXPECT_FALSE(HttpSessions::validate_tokens("auth", "wrong"));
     EXPECT_TRUE(HttpSessions::validate_tokens("auth", "token"));
+}
+
+TEST_F(HttpSessionsTest, ArchiveKeysAreExplicitPrivilegedAccessKeys) {
+    HttpSessions::replace_api_keys({"ordinary"});
+    HttpSessions::replace_archive_keys({"backup-admin"});
+
+    EXPECT_TRUE(HttpSessions::has_access_key("ordinary"));
+    EXPECT_FALSE(HttpSessions::has_archive_key("ordinary"));
+    EXPECT_TRUE(HttpSessions::has_access_key("backup-admin"));
+    EXPECT_TRUE(HttpSessions::has_archive_key("backup-admin"));
+    EXPECT_EQ(HttpSessions::archive_keys_snapshot(),
+              (std::set<std::string>{"backup-admin"}));
+}
+
+TEST_F(HttpSessionsTest, ArchiveCapabilityRequiresValidCsrfAndExplicitGrant) {
+    {
+        auto lock = std::scoped_lock(HttpSessions::lock);
+        HttpSessions::access_keys["ordinary"]["csrf_token"] =
+            TimedOptional<std::string>("ordinary-csrf", 60);
+        HttpSessions::access_keys["ordinary"]["archive_access"] =
+            TimedOptional<std::string>("0", 60);
+        HttpSessions::access_keys["archive"]["csrf_token"] =
+            TimedOptional<std::string>("archive-csrf", 60);
+        HttpSessions::access_keys["archive"]["archive_access"] =
+            TimedOptional<std::string>("1", 60);
+    }
+
+    EXPECT_FALSE(HttpSessions::validate_archive_tokens(
+        "ordinary", "ordinary-csrf"));
+    EXPECT_FALSE(HttpSessions::validate_archive_tokens(
+        "archive", "wrong-csrf"));
+    EXPECT_TRUE(HttpSessions::validate_archive_tokens(
+        "archive", "archive-csrf"));
+}
+
+TEST_F(HttpSessionsTest, ArchiveKeyLoadsOnceFromEnvironmentAndIsRemoved) {
+    const std::string secret(32, 'a');
+    ASSERT_EQ(::setenv("SMITHPROXY_ARCHIVE_API_KEY", secret.c_str(), 1), 0);
+
+    EXPECT_TRUE(HttpSessions::load_archive_key_from_environment());
+    EXPECT_EQ(::getenv("SMITHPROXY_ARCHIVE_API_KEY"), nullptr);
+    EXPECT_TRUE(HttpSessions::has_archive_key(secret));
+    EXPECT_TRUE(HttpSessions::has_access_key(secret));
+}
+
+TEST_F(HttpSessionsTest, ShortArchiveEnvironmentKeyIsRejectedAndRemoved) {
+    ASSERT_EQ(::setenv("SMITHPROXY_ARCHIVE_API_KEY", "too-short", 1), 0);
+
+    EXPECT_FALSE(HttpSessions::load_archive_key_from_environment());
+    EXPECT_EQ(::getenv("SMITHPROXY_ARCHIVE_API_KEY"), nullptr);
+    EXPECT_TRUE(HttpSessions::archive_keys_snapshot().empty());
 }
 
 TEST_F(HttpSessionsTest, GeneratedTokensAreNonEmptyAndIndependent) {

@@ -13,7 +13,9 @@
 #include <service/httpd/cfg/get.hpp>
 #include <service/httpd/cfg/save.hpp>
 #include <service/httpd/cfg/state.hpp>
+#include <service/httpd/cfg/archive.hpp>
 #include <service/httpd/cfg/transaction.hpp>
+#include <service/privileged_file.hpp>
 
 #include <service/httpd/wh/whcontrol.hpp>
 
@@ -215,6 +217,54 @@ namespace sx::webserver::dispatchers {
             authorized::token_protected<json>(&cfg_state));
         cfg_state_handler->Content_Type = "application/json";
         server.addController(std::shared_ptr<lmh::Controller>(cfg_state_handler));
+
+        auto* cfg_archive_download_handler = new Http_Responder(
+            "GET",
+            "/api/config/archive/download",
+            authorized::token_protected<Http_JsonResponseParams>(
+                &cfg_archive_download, authorized::Access::archive));
+        server.addController(std::shared_ptr<lmh::Controller>(cfg_archive_download_handler));
+
+        auto* cfg_archive_previous_download_handler = new Http_Responder(
+            "GET",
+            "/api/config/archive/previous/download",
+            authorized::token_protected<Http_JsonResponseParams>(
+                &cfg_archive_previous_download, authorized::Access::archive));
+        server.addController(
+            std::shared_ptr<lmh::Controller>(cfg_archive_previous_download_handler));
+
+        auto* cfg_archive_validate_handler = new Http_Responder(
+            "POST",
+            "/api/config/archive/validate",
+            authorized::token_protected<Http_JsonResponseParams>(&cfg_archive_validate));
+        cfg_archive_validate_handler->Content_Type = "application/json";
+        cfg_archive_validate_handler->Max_Request_Body_Size =
+            sx::privsep::files::max_config_payload;
+        server.addController(std::shared_ptr<lmh::Controller>(cfg_archive_validate_handler));
+
+        auto* cfg_archive_restore_handler = new Http_Responder(
+            "POST",
+            "/api/config/archive/restore",
+            authorized::token_protected<Http_JsonResponseParams>(
+                &cfg_archive_restore, authorized::Access::archive));
+        cfg_archive_restore_handler->Content_Type = "application/json";
+        cfg_archive_restore_handler->Max_Request_Body_Size =
+            sx::privsep::files::max_config_payload;
+        server.addController(std::shared_ptr<lmh::Controller>(cfg_archive_restore_handler));
+
+        auto* cfg_archive_resources_handler = new Http_Responder(
+            "GET", "/api/config/archive/resources",
+            authorized::token_protected<Http_JsonResponseParams>(&cfg_archive_resources));
+        server.addController(std::shared_ptr<lmh::Controller>(cfg_archive_resources_handler));
+
+        for(const auto* method : {"GET", "PUT", "DELETE"}) {
+            auto* handler = new Http_Responder(
+                method, "/api/config/archive/resource",
+                authorized::token_protected<Http_JsonResponseParams>(
+                    &cfg_archive_resource, authorized::Access::archive));
+            handler->Max_Request_Body_Size = sx::privsep::files::max_config_payload;
+            server.addController(std::shared_ptr<lmh::Controller>(handler));
+        }
 
         auto* cfg_save_handler = new Http_Responder(
             "POST",

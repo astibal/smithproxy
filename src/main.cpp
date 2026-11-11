@@ -38,6 +38,8 @@
 */    
 
 
+#include <filesystem>
+
 //#define MEM_DEBUG 1
 #ifdef MEM_DEBUG
     #include <mcheck.h>
@@ -78,6 +80,7 @@
 #include <libconfig.h++>
 
 #include <service/cfgapi/cfgapi.hpp>
+#include <service/cfgapi/cfg_pack.hpp>
 #include <utils/tenants.hpp>
 #include <service/daemon.hpp>
 #include <service/privileged_file.hpp>
@@ -289,16 +292,88 @@ void prepare_queue_logger(loglevel const& lev) {
 }
 
 
-void prepare_html_renderer() {
+bool prepare_html_renderer() {
 
     auto const& log = DaemonFactory::instance()->get_log();
 
-    if(!html()->load_files(CfgFactory::get()->dir_msg_templates)) {
+    auto& directory = CfgFactory::get()->dir_msg_templates;
+    const auto native = CfgFactory::get()->native_resources(
+        "templates/replacement/en", directory,
+        {"test.txt", "html_page.txt", "html_img_warning.txt",
+         "tls_replacement.txt", "tls_replacement_common.txt",
+         "tls_replacement_light.txt", "tls_replacement_dark.txt",
+         "tls_replacement_branded.txt"});
+    if(!html()->load_files(directory, native)) {
         _err("Cannot load messages from '%s', replacements will not work correctly !!!", CfgFactory::get()->dir_msg_templates.c_str());
+        return false;
     } else {
         std::string test = "test";
         _dia("Message testing string: %s", html()->render_noargs(test).c_str());
     }
+    return true;
+}
+
+void prepare_native_pki() {
+    auto& factory = SSLFactory::factory();
+    auto legacy_dir = CfgFactory::get()->configured_certs_path;
+    if(!legacy_dir.empty() && legacy_dir.back() != '/') legacy_dir += '/';
+
+    // load_settings() has already projected directory-backed resources into
+    // the private runtime tree. Default identities can stay in memory.
+    const auto native_pki = CfgFactory::get()->resources("pki/ca/default/");
+    auto resolve = [&](std::optional<std::string>& target,
+                       const char* archive_name, const char* legacy_name,
+                       bool optional = false) {
+        const auto logical = std::string("pki/ca/default/") + archive_name;
+        if(optional && CfgFactory::get()->using_native_archive() &&
+           std::find(native_pki.begin(), native_pki.end(), logical) == native_pki.end()) {
+            target.reset();
+            return;
+        }
+        auto resource = CfgFactory::get()->resolve_resource(
+            logical, legacy_dir + legacy_name);
+        if (resource.is_native()) target = resource.content();
+        else target.reset();
+    };
+
+    resolve(factory.config.native_ca_cert, SSLFactory::config_t::CA_CERTF,
+            SSLFactory::config_t::CA_CERTF);
+    resolve(factory.config.native_ca_key, SSLFactory::config_t::CA_KEYF,
+            SSLFactory::config_t::CA_KEYF);
+    resolve(factory.config.native_sr_cert, SSLFactory::config_t::SR_CERTF,
+            SSLFactory::config_t::SR_CERTF);
+    resolve(factory.config.native_sr_key, SSLFactory::config_t::SR_KEYF,
+            SSLFactory::config_t::SR_KEYF);
+    resolve(factory.config.native_cl_cert, SSLFactory::config_t::CL_CERTF,
+            SSLFactory::config_t::CL_CERTF);
+    resolve(factory.config.native_cl_key, SSLFactory::config_t::CL_KEYF,
+            SSLFactory::config_t::CL_KEYF);
+    resolve(factory.config.native_po_cert, SSLFactory::config_t::PO_CERTF,
+            SSLFactory::config_t::PO_CERTF, true);
+    resolve(factory.config.native_po_key, SSLFactory::config_t::PO_KEYF,
+            SSLFactory::config_t::PO_KEYF, true);
+}
+
+std::vector<sx::cfg::CfgPack::File> legacy_cftar_resources(
+    std::string message_directory) {
+    using File = sx::cfg::CfgPack::File;
+    if(!message_directory.empty() && message_directory.back() != '/') {
+        message_directory += '/';
+    }
+    return {
+        // The renderer consumes four base templates. Keep the established
+        // variants as portable configuration data for later theme selection.
+        File{"templates/replacement/en/test.txt", message_directory + "test.txt"},
+        File{"templates/replacement/en/html_page.txt", message_directory + "html_page.txt"},
+        File{"templates/replacement/en/html_img_warning.txt", message_directory + "html_img_warning.txt"},
+        File{"templates/replacement/en/tls_replacement.txt", message_directory + "tls_replacement.txt"},
+        File{"templates/replacement/en/tls_replacement_common.txt", message_directory + "tls_replacement_common.txt"},
+        File{"templates/replacement/en/tls_replacement_light.txt", message_directory + "tls_replacement_light.txt"},
+        File{"templates/replacement/en/tls_replacement_dark.txt", message_directory + "tls_replacement_dark.txt"},
+        File{"templates/replacement/en/tls_replacement_branded.txt", message_directory + "tls_replacement_branded.txt"},
+
+        File{"pki/mitm/ssh/hostkeys/ed25519", "/etc/smithproxy/ssh_host_ed25519_key", false, true},
+    };
 }
 
 void prepare_mem_debugs() {
@@ -533,6 +608,14 @@ int main(int argc, char *argv[]) {
 
     CfgFactory::init();
 
+    // Complete archive backup/restore is intentionally not authorized by keys
+    // stored inside that archive. Import the separate process credential before
+    // any helper is forked, then remove it from the inherited environment.
+    const bool archive_api_requested =
+        std::getenv("SMITHPROXY_ARCHIVE_API_KEY") != nullptr;
+    const bool archive_api_enabled =
+        sx::webserver::HttpSessions::load_archive_key_from_environment();
+
 #ifdef MEMPOOL_ALL
     if( CRYPTO_set_mem_functions(mempool_alloc, mempool_realloc, mempool_free) == 0) {
         std::cerr << "WARNING: openssl allocators not registered, defaulting" << std::endl;
@@ -730,7 +813,45 @@ int main(int argc, char *argv[]) {
     if(CfgFactory::get()->config_file_check_only) {
         Log::get()->level(DIA);
     }
-    bool CONFIG_LOADED = SmithProxy::instance().load_config(CfgFactory::get()->config_file);
+
+    // Keep the selected legacy name before activation changes config_file to
+    // the native path. Custom -c inputs may be extensionless or use another suffix.
+    const auto startup_config_path = CfgFactory::get()->config_file;
+    const auto startup_legacy_path =
+        std::filesystem::path(startup_config_path).extension() == ".cftar"
+            ? std::string{} : startup_config_path;
+
+    bool CONFIG_LOADED = false;
+    bool migrate_legacy = false;
+    try {
+        const auto selected_config = CfgFactory::get()->config_file;
+        constexpr std::string_view cftar_suffix = ".cftar";
+        const bool selected_archive =
+            selected_config.size() >= cftar_suffix.size() &&
+            selected_config.compare(
+                selected_config.size() - cftar_suffix.size(),
+                cftar_suffix.size(), cftar_suffix) == 0;
+        sx::cfg::CfgArchive::Paths archive_paths {
+            selected_archive
+                ? selected_config
+                : sx::cfg::CfgArchive::native_path_for(selected_config),
+            selected_config,
+            std::nullopt,
+        };
+
+        // A command-line CfgTar remains native and receives full validation.
+        // Every legacy path, including a custom or tenant path, owns a native
+        // sibling and therefore follows the same one-time migration entrance.
+        if(selected_archive) {
+            archive_paths.explicit_archive = selected_config;
+        }
+        auto source = sx::cfg::CfgArchive::open(std::move(archive_paths));
+        migrate_legacy = !source.is_cftar();
+        CONFIG_LOADED = SmithProxy::instance().load_config(std::move(source));
+    }
+    catch(const std::exception& error) {
+        _fat("Unable to select configuration source: %s", error.what());
+    }
 
     if(CONFIG_LOADED) {
         bool upgraded_status = false;
@@ -743,14 +864,158 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        if(upgraded_status) {
-            CONFIG_LOADED = SmithProxy::instance().load_config(CfgFactory::get()->config_file);
+        bool migrated_to_cftar = false;
+        if(migrate_legacy && !CfgFactory::get()->config_file_check_only) {
+            try {
+                sx::cfg::CfgPack::Migration migration {
+                    {
+                        CfgFactory::get()->config_file,
+                        sx::cfg::CfgArchive::startup_path_for(
+                            CfgFactory::get()->config_file),
+                        legacy_cftar_resources(CfgFactory::get()->dir_msg_templates),
+                        {},
+                        true,
+                    },
+                    sx::cfg::CfgArchive::native_path_for(
+                        CfgFactory::get()->config_file),
+                };
+                // Default identities are explicit files. Custom TLS identity
+                // collections move into purpose-oriented server/client and
+                // SNI/IP namespaces instead of preserving legacy cc-* names.
+                auto certificate_directory = CfgFactory::get()->configured_certs_path;
+                if(!certificate_directory.empty() && certificate_directory.back() != '/') {
+                    certificate_directory += '/';
+                }
+                for(const auto* name : {"ca-cert.pem", "ca-key.pem", "srv-cert.pem",
+                                        "srv-key.pem", "cl-cert.pem", "cl-key.pem",
+                                        "portal-cert.pem", "portal-key.pem",
+                                        "portal-gen.info", "sslca.json"}) {
+                    const bool optional = std::string_view(name).rfind("portal-", 0) == 0 ||
+                                          std::string_view(name) == "sslca.json";
+                    migration.input.files.push_back({
+                        std::string("pki/ca/default/") + name,
+                        certificate_directory + name,
+                        false, optional});
+                }
+                for(const auto& directory : std::initializer_list<sx::cfg::CfgPack::Directory>{
+                        {"pki/mitm/tls/server/sni", certificate_directory + "sni", true},
+                        {"pki/mitm/tls/server/ip", certificate_directory + "ip", true},
+                        {"pki/mitm/tls/client/sni", certificate_directory + "cc-sni", true},
+                        {"pki/mitm/tls/client/ip", certificate_directory + "cc-ip", true}}) {
+                    migration.input.directories.push_back(directory);
+                }
+
+                // Product-managed trust material is portable configuration.
+                // System trust stores remain external operating-system state.
+                const auto& trust_file = CfgFactory::get()->configured_ca_bundle_file;
+                if(trust_file.rfind("/etc/smithproxy/", 0) == 0) {
+                    migration.input.files.push_back({
+                        "pki/trust/ca-bundle.pem", trust_file, false, false});
+                }
+                const auto& trust_path = CfgFactory::get()->configured_ca_bundle_path;
+                if(trust_path.rfind("/etc/smithproxy/", 0) == 0) {
+                    migration.input.directories.push_back({
+                        "pki/trust/directory", trust_path, false});
+                }
+
+                const bool created = sx::cfg::CfgPack::migrate(migration);
+                _not("native configuration archive %s",
+                     created ? "created" : "accepted after concurrent creation");
+
+                sx::cfg::CfgArchive::Paths archive_paths {
+                    migration.archive_path,
+                    CfgFactory::get()->config_file,
+                    std::nullopt,
+                };
+                CONFIG_LOADED = SmithProxy::instance().load_config(
+                    sx::cfg::CfgArchive::open(std::move(archive_paths)), true);
+                migrated_to_cftar = CONFIG_LOADED;
+                if(!CONFIG_LOADED) {
+                    _cri("new native configuration archive FAILED to load");
+                }
+            }
+            catch(const std::exception& error) {
+                // Migration never replaces the working legacy files. Keep the
+                // process usable and retry the absent archive on the next boot.
+                _err("cannot create native configuration archive: %s", error.what());
+                log.event(ERR, "Native configuration migration failed: %s", error.what());
+            }
+        }
+
+        if(upgraded_status && !migrated_to_cftar) {
+            CONFIG_LOADED = SmithProxy::instance().reload_config();
             if(CONFIG_LOADED) {
                 _not("upgraded config file has been reloaded");
             }
             else {
                 _cri("upgraded config file FAILED to load");
             }
+        }
+    }
+
+    if(archive_api_enabled) {
+        log.event(INF, "Privileged configuration archive API access enabled");
+    }
+    else if(archive_api_requested) {
+        log.event(ERR,
+            "Privileged configuration archive API key rejected: expected 32-256 bytes");
+    }
+
+    // Prove that required native runtime resources load before retiring any
+    // legacy input. Check-only mode performs the same validation without writes.
+    if(CONFIG_LOADED && CfgFactory::get()->using_native_archive()) {
+        try {
+            prepare_native_pki();
+            CONFIG_LOADED = prepare_html_renderer() &&
+                            SSLFactory::factory().load_from_files() &&
+                            SSLFactory::factory().load_trust_store();
+        }
+        catch(const std::exception& error) {
+            CONFIG_LOADED = false;
+            _err("native configuration resources failed to load: %s", error.what());
+        }
+    }
+
+    // Startup only: once native configuration has loaded successfully, remove
+    // its legacy sibling from source selection. Reload/check never retire it.
+    // In particular, loss of CFtar on a later boot must not revive stale policy.
+    if(CONFIG_LOADED && !CfgFactory::get()->config_file_check_only &&
+       CfgFactory::get()->using_native_archive()) {
+        try {
+            const auto backup = sx::cfg::CfgPack::retire_legacy_config(
+                CfgFactory::get()->config_file, startup_legacy_path);
+
+            if(!backup.empty()) {
+                log.event(INF, "Legacy configuration renamed to %s", backup.c_str());
+            }
+        }
+        catch(const std::exception& error) {
+            _err("legacy configuration retirement failed: %s", error.what());
+            log.event(ERR, "Legacy configuration retirement failed: %s", error.what());
+        }
+    }
+
+    // Once the default native archive is authoritative, preserve the original
+    // /etc layout exactly once and remove its individual files. A failed or
+    // interrupted cleanup is retried on the next start against the immutable
+    // memento; explicit tenant and custom configuration paths are untouched.
+    if(CONFIG_LOADED && !CfgFactory::get()->config_file_check_only &&
+       CfgFactory::get()->using_native_archive() &&
+       CfgFactory::get()->config_file == "/etc/smithproxy/smithproxy.cftar") {
+        try {
+            const auto retired = sx::cfg::CfgPack::retire_legacy_tree(
+                "/etc/smithproxy", "smithproxy.cftar",
+                "smithproxy.pre-cftar.tar");
+            if(retired.backup_created || retired.files_removed != 0) {
+                _not("legacy configuration retired: backup=%s files=%zu",
+                     retired.backup_created ? "created" : "existing",
+                     retired.files_removed);
+            }
+        }
+        catch(const std::exception& error) {
+            _err("legacy configuration retirement deferred: %s", error.what());
+            log.event(ERR, "Legacy configuration retirement deferred: %s",
+                      error.what());
         }
     }
 
@@ -907,6 +1172,10 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
+    // Observe external CFtar replacement only after the privileged reader is
+    // available. Detection marks restart pending; it never mutates runtime.
+    CfgFactory::get()->start_archive_monitor();
+
     // openssl mem debugs
     prepare_mem_debugs();
 
@@ -965,6 +1234,7 @@ int main(int argc, char *argv[]) {
 
     // launch listeners
 
+    prepare_native_pki();
     if(SmithProxy::instance().create_listeners()) {
 
         // init to get certificates and info

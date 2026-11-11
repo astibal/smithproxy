@@ -16,6 +16,16 @@ enum class ConfigCollectionKind {
     ordered_objects,
 };
 
+// Identifies the kind of write requested at a configuration path.  The
+// authorization backend may use it together with inherited path policy.
+enum class ConfigMutation {
+    set,
+    toggle,
+    add,
+    remove,
+    move,
+};
+
 struct ConfigCli2Access {
     using ValueOperation = std::function<bool(std::string_view path, std::string_view property,
                                               const std::vector<std::string>& values, std::string& error)>;
@@ -30,6 +40,10 @@ struct ConfigCli2Access {
     std::function<ConfigCollectionKind(std::string_view path)> collection_kind;
     std::function<bool(std::string_view path)> can_add;
     std::function<bool(std::string_view path)> can_move;
+    // Authorizes the final mutation, not merely entry into configuration
+    // mode. An absent callback uses the safe privilege-15 default.
+    std::function<bool(std::string_view path, std::string_view member,
+                       ConfigMutation mutation, int session_privilege)> authorize_mutation;
     ValueOperation set;
     std::function<std::string(std::string_view path, std::string_view property,
                               const std::vector<std::string>& values)> set_confirmation;
@@ -50,6 +64,8 @@ public:
     void reset() noexcept { active_ = false; locations_.clear(); }
     bool active() const noexcept { return active_; }
     std::string path() const;
+    bool can_mutate(int session_privilege, ConfigMutation mutation,
+                    std::string_view member = {}) const;
 
 private:
     libconfig::Setting* current() const;

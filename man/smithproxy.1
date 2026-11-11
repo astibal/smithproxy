@@ -33,8 +33,8 @@ the interactive CLI.
 .SH OPTIONS
 .TP
 .BR \-c " file, " \-\-config-file " file"
-Load the specified configuration file instead of
-.IR /etc/smithproxy/smithproxy.cfg .
+Load the specified CFtar archive or standalone legacy configuration instead of
+.IR /etc/smithproxy/smithproxy.cftar .
 .TP
 .BR \-o ", " \-\-config-check-only
 Load and validate the configuration, print diagnostics and exit without
@@ -95,22 +95,27 @@ SOCKS4/SOCKS5 and HTTP CONNECT listeners accept explicit client connections.
 Hostnames supplied by the client are resolved by Smithproxy and pass through
 the same policy and inspection path as transparent traffic.
 .SH CONFIGURATION
-The main configuration is a libconfig file. The default path is:
+The native configuration is one validated CFtar archive. The default path is:
 .nf
-    /etc/smithproxy/smithproxy.cfg
+    /etc/smithproxy/smithproxy.cftar
 .fi
+.PP
+The archive contains the libconfig tree as
+.IR smithproxy.cfg ,
+Linux interception settings as
+.IR smithproxy.startup.cfg ,
+and product-managed certificates, templates and other runtime resources.
+Use
+.BR smithproxy-cftar (1)
+for offline inspection and editing.
 .PP
 Most settings can be inspected and edited in the interactive CLI. Use
 .B save config
-to persist the active configuration. Smithproxy can create a backup and upgrade
-older configuration schemas while loading them; review service logs after an
-upgrade.
-.PP
-Network interception itself is prepared by the installed startup scripts and
-their settings in:
-.nf
-    /etc/smithproxy/smithproxy.startup.cfg
-.fi
+to persist the active configuration into the archive. On first start after an
+upgrade, Smithproxy converts a legacy configuration tree into CFtar, preserves
+the original tree in
+.IR /etc/smithproxy/smithproxy.pre-cftar.tar ,
+and retires the loose files only after validating both archives.
 .SH INTERACTIVE CLI
 Run
 .B sx_cli
@@ -202,19 +207,21 @@ an
 .B ssh_profile .
 The initial implementation supports password-authenticated session channels;
 other SSH features may remain opaque or unsupported.
+.SH ENVIRONMENT
+.TP
+.B SMITHPROXY_ARCHIVE_API_KEY
+Separate high-impact credential for complete CFtar download, resource access and
+restore. It is removed from the process environment immediately after startup.
+PAM-authenticated members of the configured administrative group receive the
+same capability. Ordinary HTTP API keys deliberately do not.
 .SH FILES
 .TP
-.I /etc/smithproxy/smithproxy.cfg
-Main service configuration.
+.I /etc/smithproxy/smithproxy.cftar
+Native configuration archive containing the main configuration, startup
+settings and product-managed runtime resources.
 .TP
-.I /etc/smithproxy/smithproxy.startup.cfg
-Startup and Linux interception settings.
-.TP
-.I /etc/smithproxy/users.cfg
-Optional authentication configuration.
-.TP
-.I /etc/smithproxy/certs/default/
-Default CA, client and server keys and certificates.
+.I /etc/smithproxy/smithproxy.pre-cftar.tar
+One-time memento of the loose configuration tree retired during migration.
 .TP
 .I /var/log/smithproxy/
 Service logs and optional TLS key log.

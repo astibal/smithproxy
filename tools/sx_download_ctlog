@@ -1,7 +1,9 @@
 #!/usr/bin/env sh
 
-FILE_PATH="/etc/smithproxy/ct_log_list.cnf"
+FILE_PATH="${SMITHPROXY_CTLOG:-/var/smithproxy/data/ct_log_list.cnf}"
 FILE_URL="https://download.smithproxy.org/additional/ct_log_list.cnf"
+
+mkdir -p "$(dirname "${FILE_PATH}")" || exit 1
 
 wget ${FILE_URL} -O ${FILE_PATH}
 
@@ -12,4 +14,3 @@ else
     echo "   !!! Smithproxy must be restarted to reload CT logs."
     echo
 fi
-

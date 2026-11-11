@@ -9,11 +9,13 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <future>
 #include <vector>
 
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+#include <sys/file.h>
 #include <unistd.h>
 
 #include <service/privileged_file.hpp>
@@ -116,12 +118,10 @@ TEST_F(PrivilegedFileTest, AtomicWriteRejectsSymlinkAndDirectoryTargets) {
     EXPECT_EQ(content, "original");
 }
 
-TEST_F(PrivilegedFileTest, ConfigSizeIsBounded) {
-    const std::string oversized(16U * 1024U * 1024U + 1U, 'x');
-    errno = 0;
-    EXPECT_EQ(sx::privsep::files::write_file_atomic(targets_.config, oversized), -1);
-    EXPECT_EQ(errno, EFBIG);
-    EXPECT_FALSE(std::filesystem::exists(targets_.config));
+TEST_F(PrivilegedFileTest, ConfigSupportsNativeArchiveSizedPayload) {
+    const std::string archive(20U * 1024U * 1024U, 'x');
+    ASSERT_EQ(sx::privsep::files::write_file_atomic(targets_.config, archive), 0);
+    EXPECT_EQ(std::filesystem::file_size(targets_.config), archive.size());
 }
 
 TEST_F(PrivilegedFileTest, ConcurrentAtomicReplacementNeverMixesPayloadsOrLeavesTemps) {
@@ -160,6 +160,84 @@ TEST_F(PrivilegedFileTest, BackupSuffixIsRestrictedAndComputedByHelper) {
     EXPECT_EQ(errno, EINVAL);
 }
 
+TEST_F(PrivilegedFileTest, CfgTarBackupKeepsNativeExtension) {
+    const auto archive = (root_ / "smithproxy.cftar").string();
+    EXPECT_EQ(sx::privsep::files::write_backup_atomic(archive, "1.2.3", "backup"), 0);
+
+    std::string content;
+    EXPECT_EQ(sx::privsep::files::read_file(archive + ".1.2.3.bak.cftar", content), 0);
+    EXPECT_EQ(content, "backup");
+}
+
+TEST_F(PrivilegedFileTest, ConfigInstallBacksUpAndReplacesExpectedGeneration) {
+    const auto archive = (root_ / "smithproxy.cftar").string();
+    ASSERT_EQ(sx::privsep::files::write_file_atomic(archive, "generation one"), 0);
+
+    ASSERT_EQ(sx::privsep::files::config_install(
+                  archive, "generation one", "generation two"), 0);
+
+    std::string content;
+    ASSERT_EQ(sx::privsep::files::read_file(archive, content), 0);
+    EXPECT_EQ(content, "generation two");
+    ASSERT_EQ(sx::privsep::files::read_file(
+                  archive + ".previous.bak.cftar", content), 0);
+    EXPECT_EQ(content, "generation one");
+}
+
+TEST_F(PrivilegedFileTest, ConfigInstallRefusesStaleExpectedGeneration) {
+    ASSERT_EQ(sx::privsep::files::write_file_atomic(targets_.config, "current"), 0);
+
+    errno = 0;
+    EXPECT_EQ(sx::privsep::files::config_install(
+                  targets_.config, "stale", "replacement"), -1);
+    EXPECT_EQ(errno, ESTALE);
+
+    std::string content;
+    ASSERT_EQ(sx::privsep::files::read_file(targets_.config, content), 0);
+    EXPECT_EQ(content, "current");
+    EXPECT_FALSE(std::filesystem::exists(
+        targets_.config + ".previous.bak.cfg"));
+}
+
+TEST_F(PrivilegedFileTest, ConfigInstallSharesOfflineDirectoryLockDomain) {
+    ASSERT_EQ(sx::privsep::files::write_file_atomic(targets_.config, "first"), 0);
+    const int directory = ::open(root_.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    ASSERT_GE(directory, 0);
+    ASSERT_EQ(::flock(directory, LOCK_EX), 0);
+
+    auto install = std::async(std::launch::async, [&] {
+        return sx::privsep::files::config_install(targets_.config, "first", "second");
+    });
+    EXPECT_EQ(install.wait_for(std::chrono::milliseconds(100)),
+              std::future_status::timeout);
+
+    ASSERT_EQ(::flock(directory, LOCK_UN), 0);
+    ASSERT_EQ(::close(directory), 0);
+    EXPECT_EQ(install.get(), 0);
+
+    std::string content;
+    ASSERT_EQ(sx::privsep::files::read_file(targets_.config, content), 0);
+    EXPECT_EQ(content, "second");
+}
+
+TEST_F(PrivilegedFileTest, ConfigInstallTimesOutWithoutDelayedPublication) {
+    ASSERT_EQ(sx::privsep::files::write_file_atomic(targets_.config, "first"), 0);
+    const int directory = ::open(root_.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    ASSERT_GE(directory, 0);
+    ASSERT_EQ(::flock(directory, LOCK_EX), 0);
+
+    errno = 0;
+    EXPECT_EQ(sx::privsep::files::config_install(
+                  targets_.config, "first", "must-not-appear"), -1);
+    EXPECT_EQ(errno, ETIMEDOUT);
+    ASSERT_EQ(::flock(directory, LOCK_UN), 0);
+    ASSERT_EQ(::close(directory), 0);
+
+    std::string content;
+    ASSERT_EQ(sx::privsep::files::read_file(targets_.config, content), 0);
+    EXPECT_EQ(content, "first");
+}
+
 TEST_F(PrivilegedFileTest, ServerReadsWritesAndBacksUpOnlyConfiguredTarget) {
     ASSERT_EQ(sx::privsep::files::write_file_atomic(targets_.config, "initial"), 0);
     int channels[2] = {-1, -1};
@@ -175,14 +253,34 @@ TEST_F(PrivilegedFileTest, ServerReadsWritesAndBacksUpOnlyConfiguredTarget) {
     EXPECT_EQ(client->config_read(content), 0);
     EXPECT_EQ(content, "initial");
     EXPECT_EQ(client->config_write("replacement"), 0);
+    EXPECT_EQ(client->config_install("replacement", "installed"), 0);
     EXPECT_EQ(client->config_backup("2.0", "saved"), 0);
+    std::string backup;
+    EXPECT_EQ(client->config_backup_read("2.0", backup), 0);
+    EXPECT_EQ(backup, "saved");
     client.reset();
     helper.join();
 
     EXPECT_EQ(sx::privsep::files::read_file(targets_.config, content), 0);
+    EXPECT_EQ(content, "installed");
+    EXPECT_EQ(sx::privsep::files::read_file(
+                  targets_.config + ".previous.bak.cfg", content), 0);
     EXPECT_EQ(content, "replacement");
     EXPECT_EQ(sx::privsep::files::read_file(targets_.config + ".2.0.bak.cfg", content), 0);
     EXPECT_EQ(content, "saved");
+}
+
+TEST_F(PrivilegedFileTest, BackupReadRejectsUnsafeVersionAndMissingFile) {
+    std::string content;
+    errno = 0;
+    EXPECT_EQ(sx::privsep::files::config_backup_read(
+                  targets_.config, "../../escape", content), -1);
+    EXPECT_EQ(errno, EINVAL);
+
+    errno = 0;
+    EXPECT_EQ(sx::privsep::files::config_backup_read(
+                  targets_.config, "missing", content), -1);
+    EXPECT_EQ(errno, ENOENT);
 }
 
 TEST_F(PrivilegedFileTest, RegisteredVirtualOperationExtendsProtocolWithoutDispatcherChanges) {
@@ -412,7 +510,8 @@ TEST_F(PrivilegedFileTest, OversizedDescriptorContentDoesNotReplaceConfig) {
         ::close(channels[1]);
         const int content = ::memfd_create("oversized-config", MFD_CLOEXEC);
         ASSERT_GE(content, 0);
-        ASSERT_EQ(::ftruncate(content, 16U * 1024U * 1024U + 1U), 0);
+        ASSERT_EQ(::ftruncate(content,
+                             sx::privsep::files::max_config_payload + 1U), 0);
         sx::privsep::files::Reply response;
         errno = 0;
         EXPECT_EQ(client.request(static_cast<std::uint8_t>(sx::privsep::files::Opcode::ConfigWrite),

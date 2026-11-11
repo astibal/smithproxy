@@ -43,6 +43,7 @@
 #include <cstdlib>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <thread>
 
@@ -104,6 +105,9 @@ struct HttpSessions {
 
     static inline std::mutex lock;
     static inline std::set<std::string> api_keys;
+    // Archive keys are deliberately separate from ordinary configuration
+    // keys: a complete backup contains private keys and startup shell input.
+    static inline std::set<std::string> archive_keys;
     static inline sessions_t access_keys;
     static inline uint32_t session_ttl = 3600;
     static inline bool extend_on_access = true;
@@ -188,14 +192,34 @@ struct HttpSessions {
         return CRYPTO_memcmp(csrf_token.data(), db_csrf_token.data(), csrf_token.size()) == 0;
     }
 
+    // Validate the ordinary session pair before consulting the stronger
+    // capability. Invalid CSRF must not refresh archive authorization.
+    static bool validate_archive_tokens(
+        std::string const& auth_token, std::string const& csrf_token) {
+        return validate_tokens(auth_token, csrf_token) &&
+               table_value(auth_token, "archive_access") == "1";
+    }
+
     static bool has_api_key(std::string const& key) {
         auto lc_ = std::scoped_lock(lock);
         return api_keys.find(key) != api_keys.end();
     }
 
+    static bool has_archive_key(std::string const& key) {
+        auto lc_ = std::scoped_lock(lock);
+        return archive_keys.find(key) != archive_keys.end();
+    }
+
+    // Archive credentials are a strict superset of ordinary API access.
+    static bool has_access_key(std::string const& key) {
+        auto lc_ = std::scoped_lock(lock);
+        return api_keys.find(key) != api_keys.end() ||
+               archive_keys.find(key) != archive_keys.end();
+    }
+
     static bool has_api_keys() {
         auto lc_ = std::scoped_lock(lock);
-        return !api_keys.empty();
+        return !api_keys.empty() || !archive_keys.empty();
     }
 
     static bool api_header_allowed() {
@@ -213,9 +237,34 @@ struct HttpSessions {
         return api_keys;
     }
 
+    static std::set<std::string> archive_keys_snapshot() {
+        auto lc_ = std::scoped_lock(lock);
+        return archive_keys;
+    }
+
     static void replace_api_keys(std::set<std::string> keys) {
         auto lc_ = std::scoped_lock(lock);
         api_keys = std::move(keys);
+    }
+
+    static void replace_archive_keys(std::set<std::string> keys) {
+        auto lc_ = std::scoped_lock(lock);
+        archive_keys = std::move(keys);
+    }
+
+    // Load the high-impact backup capability outside the archive it protects.
+    // Removing the environment value avoids passing it to tools or child
+    // processes started later in the daemon lifetime.
+    static bool load_archive_key_from_environment() {
+        const char* value = std::getenv("SMITHPROXY_ARCHIVE_API_KEY");
+        if(!value || !*value) return false;
+        const std::string key(value);
+        ::unsetenv("SMITHPROXY_ARCHIVE_API_KEY");
+        // Match the entropy of generated API credentials and reject accidental
+        // short deployment values before they become a root-adjacent secret.
+        if(key.size() < 32 || key.size() > 256) return false;
+        replace_archive_keys({key});
+        return true;
     }
 
     static void cleanup() {
@@ -246,8 +295,13 @@ struct HttpSessions {
 
 std::thread* create_httpd_thread(unsigned short port, int listener_fd = -1);
 
+// One HTTP response may carry either structured JSON or exact binary bytes.
+// Keeping both forms in the common envelope lets authentication and routing
+// stay identical for API metadata and native archive downloads.
 struct Http_JsonResponseParams : public lmh::ResponseParams {
     nlohmann::json response;
+    std::optional<std::string> binary;
+    std::optional<std::string> content_type;
 };
 
 template <typename Callable>
@@ -256,8 +310,6 @@ class Http_Responder : public lmh::DynamicController {
     std::string path;
 
     Callable responder;
-    static constexpr std::size_t max_request_body_size = 8U * 1024U * 1024U;
-
     static inline const std::vector<std::pair<std::string, std::string>> Http_Response_Headers  = {
             { "X-Vendor", "smithproxy " SMITH_VERSION },
             { "Access-Control-Allow-Origin", "*" }
@@ -266,6 +318,7 @@ class Http_Responder : public lmh::DynamicController {
 public:
 
     std::string Content_Type = "application/text";
+    std::size_t Max_Request_Body_Size = 8U * 1024U * 1024U;
     Http_Responder(std::string m, std::string p, Callable r)
             : meth(std::move(m)), path(std::move(p)), responder(r) {};
 
@@ -300,11 +353,11 @@ public:
             }
         }
         else if(*upload_data_size > 0) {
-            if(*upload_data_size > max_request_body_size ||
-               body->request_data.size() > max_request_body_size - *upload_data_size) {
+            if(*upload_data_size > Max_Request_Body_Size ||
+               body->request_data.size() > Max_Request_Body_Size - *upload_data_size) {
                 // Keep a bounded marker until libmicrohttpd's final callback.
                 body->request_data.clear();
-                body->request_data.resize(max_request_body_size + 1);
+                body->request_data.resize(Max_Request_Body_Size + 1);
             } else {
                 body->request_data.append(upload_data, *upload_data_size);
             }
@@ -313,7 +366,7 @@ public:
         }
 
         Http_JsonResponseParams ret;
-        if(body && body->request_data.size() > max_request_body_size) {
+        if(body && body->request_data.size() > Max_Request_Body_Size) {
             ret.response_code = 413;
             ret.response = {{"error", "request body too large"}};
         } else {
@@ -326,11 +379,14 @@ public:
         // body and headers.
         if(ret.response_code >= 100) {
 
-            auto ct = std::make_pair("Content-Type", Content_Type);
+            auto ct = std::make_pair("Content-Type", ret.content_type.value_or(Content_Type));
             ret.headers.emplace_back(std::move(ct));
             std::copy(Http_Response_Headers.begin(), Http_Response_Headers.end(), std::back_inserter(ret.headers));
 
-            if(ret.response.is_string()) {
+            if(ret.binary) {
+                response.write(ret.binary->data(), static_cast<std::streamsize>(ret.binary->size()));
+            }
+            else if(ret.response.is_string()) {
                 response << ret.response.template get<std::string>();
             }
             else {

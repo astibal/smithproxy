@@ -5,6 +5,7 @@
 #include <service/cfgapi/cfg_write_gate.hpp>
 
 #include <chrono>
+#include <future>
 #include <mutex>
 
 namespace tx = sx::cfg::tx;
@@ -468,4 +469,40 @@ TEST(CfgTransaction, RejectsCommitAfterLeaseExpires) {
     EXPECT_EQ(committed.error().code, "lease_expired");
     EXPECT_FALSE(applied);
     EXPECT_EQ(board.revision_current(), base.id);
+}
+
+TEST(CfgTransaction, CommitThatEnteredBeforeExpiryFinishesAtomically) {
+    auto now = sx::cfg::CfgLease::Clock::time_point {};
+    UpdateBoard board;
+    auto base = board.init_revision(base_config, "startup");
+    sx::cfg::CfgWriteGate gate(
+        [&now] { return now; },
+        [] { return "lease-token"; });
+    std::recursive_mutex config_mutex;
+    std::future<bool> waiting_writer;
+    auto transaction = tx::Transaction::create(
+        board,
+        gate,
+        config_mutex,
+        "gui",
+        base.id,
+        [&](std::string const&) -> tx::Result<void> {
+            now += sx::cfg::CfgLease::default_ttl;
+            waiting_writer = std::async(std::launch::async, [&] {
+                return gate.enter(config_mutex).has_value();
+            });
+            EXPECT_EQ(
+                waiting_writer.wait_for(20ms),
+                std::future_status::timeout);
+            return {};
+        });
+    ASSERT_TRUE(transaction);
+    auto prepared = transaction->prepare(tx::Set {"settings.enabled", false});
+    ASSERT_TRUE(prepared);
+
+    auto committed = transaction->commit(std::move(*prepared));
+
+    ASSERT_TRUE(committed);
+    EXPECT_TRUE(waiting_writer.get());
+    EXPECT_NE(board.revision_current(), base.id);
 }

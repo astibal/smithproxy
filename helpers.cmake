@@ -47,7 +47,9 @@ function(install_secret_if_not_exists src dest)
                     \"Private-key destination is a directory: \$ENV{DESTDIR}${dest}/${src_name}\")
         elseif(NOT EXISTS \"\$ENV{DESTDIR}${dest}/${src_name}\")
             message(STATUS \"Installing: \$ENV{DESTDIR}${dest}/${src_name}\")
-            file(INSTALL DESTINATION \"\$ENV{DESTDIR}${dest}\" TYPE FILE
+            # file(INSTALL) applies DESTDIR itself. Passing the staged path
+            # here would prefix DESTDIR twice during package construction.
+            file(INSTALL DESTINATION \"${dest}\" TYPE FILE
                  FILES \"${src}\" PERMISSIONS OWNER_READ OWNER_WRITE)
         else()
             message(STATUS \"Restricting: \$ENV{DESTDIR}${dest}/${src_name}\")
@@ -63,10 +65,50 @@ function(install_secret_if_not_exists src dest)
     ")
 endfunction(install_secret_if_not_exists)
 
+# Seed CFtar only on a genuinely new installation. An upgrade with a legacy
+# smithproxy.cfg must let the runtime migration preserve that configuration;
+# installing package defaults beside it would incorrectly win source selection.
+function(install_native_config_if_no_legacy src dest native_name legacy_name)
+    if(NOT IS_ABSOLUTE "${src}")
+        set(src "${CMAKE_CURRENT_SOURCE_DIR}/${src}")
+    endif()
+    find_program(chmod_program chmod)
+    if(NOT chmod_program)
+        message(FATAL_ERROR "chmod is required to install native configuration")
+    endif()
+
+    install(CODE "
+        set(native_path \"\$ENV{DESTDIR}${dest}/${native_name}\")
+        set(legacy_path \"\$ENV{DESTDIR}${dest}/${legacy_name}\")
+        if(IS_SYMLINK \"\${native_path}\")
+            message(FATAL_ERROR \"Refusing native configuration symlink: \${native_path}\")
+        elseif(EXISTS \"\${native_path}\")
+            execute_process(COMMAND \"${chmod_program}\" 0600 -- \"\${native_path}\"
+                            RESULT_VARIABLE chmod_result ERROR_VARIABLE chmod_error)
+            if(chmod_result)
+                message(FATAL_ERROR \"Unable to restrict native configuration: \${chmod_error}\")
+            endif()
+        elseif(EXISTS \"\${legacy_path}\")
+            message(STATUS \"Deferring native configuration to legacy migration\")
+        else()
+            message(STATUS \"Installing native configuration: \${native_path}\")
+            file(INSTALL DESTINATION \"${dest}\" TYPE FILE FILES \"${src}\"
+                 RENAME \"${native_name}\" PERMISSIONS OWNER_READ OWNER_WRITE)
+        endif()
+    ")
+endfunction(install_native_config_if_no_legacy)
+
 function (create_dir _dirpath)
     install(CODE "
-        message(STATUS \"Directory : ${_dirpath}\")
-        execute_process(COMMAND \"${CMAKE_COMMAND}\" -E make_directory ${_dirpath})
+        set(staged_dir \"\$ENV{DESTDIR}${_dirpath}\")
+        message(STATUS \"Directory : \${staged_dir}\")
+        execute_process(
+            COMMAND \"${CMAKE_COMMAND}\" -E make_directory \"\${staged_dir}\"
+            RESULT_VARIABLE create_result
+            ERROR_VARIABLE create_error)
+        if(create_result)
+            message(FATAL_ERROR \"Unable to create \${staged_dir}: \${create_error}\")
+        endif()
     ")
 endfunction (create_dir)
 

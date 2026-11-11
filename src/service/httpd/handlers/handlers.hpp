@@ -16,17 +16,24 @@ namespace sx::webserver {
 
     namespace authorized {
 
+        enum class Access {
+            standard,
+            archive,
+        };
+
         std::string client_address(MHD_Connection* mc);
 
         template<typename T>
         struct token_protected {
             using the_call = std::function<T(MHD_Connection*, std::string const&, std::string const&)>;
 
-            explicit token_protected(the_call c) : Func(c) {};
+            explicit token_protected(the_call c, Access access = Access::standard)
+                : Func(c), required_access_(access) {};
             Http_JsonResponseParams operator()(MHD_Connection *conn, std::string const& meth, std::string const &req) const;
 
             private:
                 the_call Func;
+                Access required_access_;
         };
 
         template<typename T>
@@ -56,8 +63,12 @@ namespace sx::webserver::authorized {
         ret.response_code = MHD_HTTP_UNAUTHORIZED;
 
         auto validate_and_call = [&](auto const& key, auto const& token) {
-            if (HttpSessions::validate_tokens(key, token)
-                    ) {
+            // Validate CSRF first. An invalid request must not extend the
+            // lifetime of a privileged archive capability as a side effect.
+            const bool archive_allowed = required_access_ == Access::archive
+                ? HttpSessions::validate_archive_tokens(key, token)
+                : HttpSessions::validate_tokens(key, token);
+            if (archive_allowed) {
                 if constexpr (std::is_same_v<T, Http_JsonResponseParams>) {
                     ret = Func(conn, meth, req);
                 } else {
@@ -75,7 +86,10 @@ namespace sx::webserver::authorized {
         };
 
         auto validate_api_key_and_call = [&](auto const& key) {
-            if (HttpSessions::has_api_key(key)) {
+            const bool allowed = required_access_ == Access::archive
+                ? HttpSessions::has_archive_key(key)
+                : HttpSessions::has_access_key(key);
+            if (allowed) {
                 if constexpr (std::is_same_v<T, Http_JsonResponseParams>) {
                     ret = Func(conn, meth, req);
                 } else {

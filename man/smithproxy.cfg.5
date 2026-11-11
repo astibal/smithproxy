@@ -3,10 +3,13 @@
 .SH NAME
 smithproxy.cfg \- Smithproxy service configuration
 .SH SYNOPSIS
-.I /etc/smithproxy/smithproxy.cfg
+.I smithproxy.cfg
+inside
+.I /etc/smithproxy/smithproxy.cftar
 .SH DESCRIPTION
 .B smithproxy.cfg
-is the main Smithproxy configuration file. It defines listeners, logging,
+is the main libconfig entry in the native Smithproxy configuration archive. It
+defines listeners, logging,
 administrative interfaces, named match objects, inspection profiles, capture
 targets, routing rules and the ordered traffic policy.
 .PP
@@ -17,8 +20,13 @@ The file uses libconfig syntax. Validate a file without starting listeners:
 .PP
 The interactive CLI can inspect and modify supported settings. Use
 .B save config
-to persist the active configuration. Direct edits should be validated before
-reloading or restarting the service.
+to persist the active configuration into CFtar. Use
+.BR smithproxy-cftar (1)
+to inspect or edit the archive offline. A standalone CFG supplied explicitly
+with
+.B --config-file
+remains useful for validation and recovery, but is not the normal installed
+storage format.
 .SH SYNTAX
 Assignments use
 .B name = value;
@@ -280,7 +288,8 @@ running binary.
 .SH EXAMPLES
 .SS Validate a candidate file
 .nf
-    cp /etc/smithproxy/smithproxy.cfg /tmp/smithproxy-test.cfg
+    smithproxy-cftar get /etc/smithproxy/smithproxy.cftar smithproxy.cfg \e
+        > /tmp/smithproxy-test.cfg
     $EDITOR /tmp/smithproxy-test.cfg
     smithproxy -c /tmp/smithproxy-test.cfg -o
 .fi
@@ -326,17 +335,12 @@ Assign
 only to the intended policy rules; routing profiles do nothing until referenced.
 .SH FILES
 .TP
-.I /etc/smithproxy/smithproxy.cfg
-Main configuration.
+.I /etc/smithproxy/smithproxy.cftar
+Native archive containing this libconfig entry, startup settings and
+product-managed resources.
 .TP
-.I /etc/smithproxy/smithproxy.startup.cfg
-Linux interception and service startup settings; not part of the libconfig tree.
-.TP
-.I /etc/smithproxy/users.cfg
-Optional authentication configuration.
-.TP
-.I /etc/smithproxy/certs/default/
-Default TLS CA and endpoint certificates.
+.I /etc/smithproxy/smithproxy.pre-cftar.tar
+One-time migration memento of the retired loose configuration tree.
 .TP
 .I /var/smithproxy/data/
 Default local capture directory.
@@ -347,6 +351,7 @@ before reload; an invalid listener or routing configuration can interrupt or
 bypass inspection.
 .SH SEE ALSO
 .BR smithproxy (1),
+.BR smithproxy-cftar (1),
 .BR smithproxy-mitm (7),
 .BR smithproxy-policy (7),
 .BR smithproxy-capture (7),

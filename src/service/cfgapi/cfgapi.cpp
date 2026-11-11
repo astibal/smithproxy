@@ -45,7 +45,9 @@
 #include <sys/ioctl.h>
 
 #include <cstdio>
+#include <cerrno>
 #include <cstdlib>
+#include <cstring>
 #include <vector>
 
 #include <socle.hpp>
@@ -100,6 +102,91 @@ sx::cfg::SaveResult CfgFactory::save_running(
     return saver.save(expected_revision, source);
 }
 
+sx::cfg::ArchiveRestoreResult CfgFactory::restore_startup_archive(
+    std::string const& expected_revision,
+    std::string const& expected_hash,
+    std::string const& payload) {
+    auto factory = get();
+
+    // CfgFactory supplies storage capabilities; restore orchestration remains
+    // isolated in the testable coordinator.
+    sx::cfg::CfgArchiveRestorer restorer({
+        *board(),
+        *write_gate(),
+        lock(),
+        factory->archive_storage_,
+    });
+
+    return restorer.restore(expected_revision, expected_hash, payload);
+}
+
+bool CfgFactory::ArchiveStorage::available() const {
+    return owner_.config_archive_ && owner_.config_archive_->is_cftar();
+}
+
+std::string CfgFactory::ArchiveStorage::current() const {
+    return owner_.config_archive_->archive_payload();
+}
+
+sx::cfg::CfgSaveData CfgFactory::ArchiveStorage::prepare_main(
+    std::string content) const {
+    return owner_.config_archive_->prepare_save(std::move(content));
+}
+
+sx::cfg::CfgSaveData CfgFactory::ArchiveStorage::prepare_resource(
+    std::string path,
+    std::optional<std::string> content,
+    bool executable) const {
+    // CfgArchive edits a copy. Nothing observable changes until installation
+    // succeeds and accept_archive_resource() advances the cached archive.
+    return owner_.config_archive_->prepare_resource(
+        std::move(path), std::move(content), executable);
+}
+
+bool CfgFactory::ArchiveStorage::publish(
+    const sx::cfg::CfgSaveData& prepared) const {
+    owner_.log.inf("publishing native configuration archive: bytes=%zu",
+                   prepared.replacement.size());
+    // One privileged operation binds the recovery and replacement writes to
+    // the exact archive from which prepare() derived this candidate.
+    if(!prepared.previous ||
+       sx::privsep::files::config_install(
+           owner_.config_file, *prepared.previous, prepared.replacement) != 0) {
+        owner_.log.err("native configuration archive publication failed");
+        return false;
+    }
+
+    // Advance cache and monitor only after durable installation succeeds.
+    owner_.config_archive_->accept_saved_archive(prepared.replacement);
+    owner_.accept_archive_monitor(prepared.replacement);
+    owner_.log.noti("native configuration archive publication completed");
+    return true;
+}
+
+bool CfgFactory::ArchiveStorage::restart_required() const {
+    return owner_.startup_archive_pending_ ||
+           owner_.external_archive_change_locked();
+}
+
+void CfgFactory::ArchiveStorage::require_restart() {
+    owner_.startup_archive_pending_ = true;
+    owner_.log.noti("configuration archive activation deferred until restart");
+}
+
+sx::cfg::ResourceWriteResult CfgFactory::write_archive_resource(
+    std::string expected_revision,
+    std::string expected_archive_hash,
+    std::string path,
+    std::optional<std::string> content,
+    bool executable) {
+    auto factory = get();
+    sx::cfg::CfgResourceWriter writer({
+        *board(), *write_gate(), lock(), factory->archive_storage_,
+    });
+    return writer.write(std::move(expected_revision), std::move(expected_archive_hash),
+                        std::move(path), std::move(content), executable);
+}
+
 bool CfgFactory::ct_requested() const {
     return std::any_of(db_prof_tls.begin(), db_prof_tls.end(),
         [](const auto& entry) {
@@ -151,30 +238,252 @@ std::map<std::string, std::shared_ptr<CfgElement>>& CfgFactory::section_db(std::
     throw std::invalid_argument(msg.c_str());
 }
 
+// Preserve the historical file API as an explicitly selected legacy source.
 bool CfgFactory::cfgapi_init(const char* fnm) {
+    sx::cfg::CfgArchive::Paths paths;
+    paths.explicit_config = fnm;
+    return cfgapi_init(sx::cfg::CfgArchive::open(std::move(paths)));
+}
+
+// Parse the main configuration exposed by a fully selected source. The source
+// becomes active only after parsing succeeds, so a failed reload does not alter
+// the persistent target used by subsequent save or backup operations.
+bool CfgFactory::cfgapi_init(sx::cfg::CfgArchive source) {
 
     std::scoped_lock<std::recursive_mutex> l(lock_);
 
-    _dia("Reading config file");
+    _inf("loading configuration source: native=%d", source.is_cftar());
     
-    // Read the file. If there is an error, report it and exit.
+    // Native archives are already held and validated by CfgArchive. Legacy
+    // files keep using the privileged reader so reload works after uid drop.
     try {
         std::string content;
-        if(sx::privsep::files::config_read(fnm, content) != 0) throw FileIOException();
+        if(source.is_cftar()) {
+            content = source.main_config();
+        }
+        else if(sx::privsep::files::config_read(source.path(), content) != 0) {
+            throw FileIOException();
+        }
         cfgapi.readString(content);
     }
     catch(const FileIOException &fioex)
     {
-        _err("I/O error while reading config file: %s: %s", fnm, fioex.what());
+        _err("I/O error while reading config source: %s: %s", source.path().c_str(), fioex.what());
         return false;   
     }
     catch(const ParseException &pex)
     {
-        _err("Parse error in %s at %s:%d - %s", fnm, pex.getFile(), pex.getLine(), pex.getError());
+        _err("Parse error in %s at %s:%d - %s", source.path().c_str(),
+             pex.getFile(), pex.getLine(), pex.getError());
         return false;
     }
-    
+
+    config_file = source.path();
+    config_archive_ = std::move(source);
+    configure_archive_monitor_locked();
+    _not("configuration source loaded successfully: native=%d",
+         config_archive_->is_cftar());
     return true;
+}
+
+// Re-open the active source using the privileged channel where needed. Native
+// bytes pass through complete TAR and manifest validation before being returned.
+sx::cfg::CfgArchive CfgFactory::reload_source() {
+    std::string path;
+    bool native = false;
+    {
+        // Copy the small source identity under the config lock, then release it
+        // before filesystem IPC and archive parsing.
+        std::scoped_lock<std::recursive_mutex> l(lock_);
+        if (!config_archive_) {
+            throw sx::cfg::CfgTarError("configuration source is not initialized");
+        }
+        path = config_archive_->path();
+        native = config_archive_->is_cftar();
+    }
+
+    sx::cfg::CfgArchive::Paths paths;
+    if (native) {
+        std::string bytes;
+        if (sx::privsep::files::config_read(path, bytes) != 0) {
+            throw sx::cfg::CfgTarError("cannot read native configuration source");
+        }
+        return sx::cfg::CfgArchive::read_archive(std::move(path), bytes);
+    }
+    paths.explicit_config = std::move(path);
+    return sx::cfg::CfgArchive::open(std::move(paths));
+}
+
+sx::cfg::CfgResource CfgFactory::resolve_resource(std::string logical_path,
+                                                  std::string legacy_path) {
+    std::scoped_lock<std::recursive_mutex> lock(lock_);
+    if (!config_archive_) {
+        throw sx::cfg::CfgTarError("configuration source is not initialized");
+    }
+    return config_archive_->resolve(std::move(logical_path), std::move(legacy_path));
+}
+
+std::map<std::string, std::string> CfgFactory::native_resources(
+    std::string logical_dir, std::string legacy_dir,
+    const std::vector<std::string>& names) {
+    if (!logical_dir.empty() && logical_dir.back() != '/') logical_dir += '/';
+    if (!legacy_dir.empty() && legacy_dir.back() != '/') legacy_dir += '/';
+
+    std::map<std::string, std::string> result;
+    for (const auto& name : names) {
+        auto resource = resolve_resource(logical_dir + name, legacy_dir + name);
+        if (resource.is_native()) {
+            result.emplace(name, resource.content());
+        }
+    }
+    return result;
+}
+
+std::vector<std::string> CfgFactory::resources(std::string_view logical_dir) {
+    std::scoped_lock<std::recursive_mutex> lock(lock_);
+    if (!config_archive_) {
+        throw sx::cfg::CfgTarError("configuration source is not initialized");
+    }
+    return config_archive_->resources(logical_dir);
+}
+
+sx::cfg::CfgArchiveInfo CfgFactory::archive_info() {
+    std::scoped_lock<std::recursive_mutex> lock(CfgFactory::lock());
+    if (!config_archive_) {
+        throw sx::cfg::CfgTarError("configuration source is not initialized");
+    }
+    return config_archive_->info();
+}
+
+bool CfgFactory::using_native_archive() const {
+    std::scoped_lock<std::recursive_mutex> lock(CfgFactory::lock());
+    return config_archive_ && config_archive_->is_cftar();
+}
+
+std::string CfgFactory::archive_payload() {
+    std::scoped_lock<std::recursive_mutex> lock(CfgFactory::lock());
+    if (!config_archive_) {
+        throw sx::cfg::CfgTarError("configuration source is not initialized");
+    }
+    return config_archive_->archive_payload();
+}
+
+std::string CfgFactory::previous_archive_payload() {
+    std::scoped_lock<std::recursive_mutex> lock(CfgFactory::lock());
+    if (!config_archive_ || !config_archive_->is_cftar()) {
+        throw sx::cfg::CfgTarError("native configuration archive is not active");
+    }
+
+    std::string payload;
+    if (sx::privsep::files::config_backup_read(config_file, "previous", payload) != 0) {
+        const int error = errno;
+        throw sx::cfg::CfgTarError(
+            "cannot read previous configuration archive: " +
+            std::string(std::strerror(error)));
+    }
+    const auto archive = sx::cfg::CfgTar::read(payload);
+    sx::cfg::CfgManifest::validate(archive);
+    return payload;
+}
+
+std::string CfgFactory::archive_resource(std::string const& path) {
+    std::scoped_lock<std::recursive_mutex> guard(CfgFactory::lock());
+    if(!config_archive_ || !config_archive_->is_cftar() ||
+       !sx::cfg::CfgManifest::is_resource_path(path)) {
+        throw sx::cfg::CfgTarError("native configuration resource is unavailable");
+    }
+    return config_archive_->archive().at(path).data;
+}
+
+std::string CfgFactory::materialize_runtime_archive() {
+    std::scoped_lock<std::recursive_mutex> guard(CfgFactory::lock());
+    if(!config_archive_ || !config_archive_->is_cftar()) return {};
+    if(!runtime_tree_) {
+        log.inf("creating runtime view of archived configuration resources");
+        runtime_tree_.emplace(
+            sx::cfg::CfgRuntimeTree::create(config_archive_->archive()));
+    }
+    return runtime_tree_->root();
+}
+
+void CfgFactory::apply_runtime_resource_paths() {
+    auto& ssl = SSLFactory::factory();
+    ssl.certs_path() = configured_certs_path;
+    ssl.ca_file() = configured_ca_bundle_file;
+    ssl.ca_path() = configured_ca_bundle_path;
+
+    const auto runtime = materialize_runtime_archive();
+    if(runtime.empty()) {
+        log.dia("runtime archive resources are unavailable; configured legacy paths remain active");
+        return;
+    }
+
+    // Socle still discovers custom identities and OpenSSL trust directories
+    // through paths. Only this compatibility edge sees the private tree.
+    ssl.certs_path() = runtime + "/pki/mitm/tls/";
+    const auto trust = resources("pki/trust/");
+    if(std::find(trust.begin(), trust.end(), "pki/trust/ca-bundle.pem") !=
+       trust.end()) {
+        ssl.ca_file() = runtime + "/pki/trust/ca-bundle.pem";
+        ssl.ca_path().clear();
+    }
+    else if(std::any_of(trust.begin(), trust.end(), [](const auto& path) {
+                return path.rfind("pki/trust/directory/", 0) == 0;
+            })) {
+        ssl.ca_file().clear();
+        ssl.ca_path() = runtime + "/pki/trust/directory";
+    }
+    log.noti("archived runtime resource paths applied");
+}
+
+bool CfgFactory::startup_archive_pending() const {
+    std::scoped_lock<std::recursive_mutex> guard(CfgFactory::lock());
+    return archive_storage_.restart_required();
+}
+
+void CfgFactory::configure_archive_monitor_locked() {
+    if(archive_monitor_id_ != 0) {
+        archive_monitor_service_.remove(archive_monitor_id_);
+        archive_monitor_id_ = 0;
+    }
+    archive_monitor_.reset();
+
+    if(!config_archive_ || !config_archive_->is_cftar()) {
+        log.dia("configuration archive monitor disabled for legacy source");
+        return;
+    }
+
+    archive_monitor_ = std::make_shared<sx::cfg::CfgArchiveMonitor>(
+        sx::cfg::CfgArchiveMonitor::Context{
+            config_archive_->path(), config_archive_->archive_payload()});
+    archive_monitor_id_ = archive_monitor_service_.add(
+        archive_monitor_, std::chrono::seconds(2));
+    if(archive_monitor_id_ == 0) {
+        archive_monitor_.reset();
+        throw sx::cfg::CfgTarError("cannot register configuration archive monitor");
+    }
+    log.inf("configuration archive monitor registered");
+}
+
+void CfgFactory::start_archive_monitor() {
+    std::scoped_lock<std::recursive_mutex> guard(CfgFactory::lock());
+    if(archive_monitor_) {
+        archive_monitor_service_.start();
+        log.inf("configuration archive monitor started");
+    }
+}
+
+void CfgFactory::accept_archive_monitor(std::string_view payload) const {
+    if(archive_monitor_) archive_monitor_->accept(payload);
+}
+
+bool CfgFactory::external_archive_change_locked() const {
+    return archive_monitor_ && archive_monitor_->change_detected();
+}
+
+std::string CfgFactory::archive_monitor_error() const {
+    std::scoped_lock<std::recursive_mutex> guard(CfgFactory::lock());
+    return archive_monitor_ ? archive_monitor_->last_error() : std::string {};
 }
 
 std::shared_ptr<CfgAddress> CfgFactory::lookup_address (const char *name) {
@@ -656,6 +965,21 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added per-direction Sift payload budget");
         return true;
     }
+    else if(upgrade_to_num == 1049) {
+        // Persist the current schema before the startup path promotes a
+        // standalone legacy installation to its first native archive.
+        log.event(INF, "prepared configuration for native CfgTar storage");
+        return true;
+    }
+    else if(upgrade_to_num == 1050) {
+        // These paths described product-owned files before CFtar. Saving the
+        // upgraded configuration deliberately omits them: the resources now
+        // live in the archive and a native runtime must never rediscover stale
+        // files through an old path setting. Keep the loaded values in memory
+        // until the migration packer has copied their content into CFtar.
+        log.event(INF, "removed legacy product resource paths from configuration");
+        return true;
+    }
 
 
     return false;
@@ -688,56 +1012,37 @@ bool CfgFactory::upgrade_to_0_9_23 () {
     return true;
 }
 
+bool CfgFactory::backup_before_upgrade(
+    std::string const& previous_version) const {
+    try {
+        std::string content;
+        if(archive_storage_.available()) {
+            // Preserve every native resource, not only smithproxy.cfg.
+            content = archive_storage_.current();
+        }
+        else if(sx::privsep::files::config_read(config_file, content) != 0) {
+            throw FileIOException();
+        }
+
+        if(sx::privsep::files::config_backup(
+               config_file, previous_version, content) != 0) {
+            throw FileIOException();
+        }
+        return true;
+    }
+    catch(std::exception const& error) {
+        _err("error writing config file backup %s", error.what());
+        return false;
+    }
+}
+
+bool CfgFactory::save_upgrade() const {
+    if(save_config()) return true;
+    _err("cannot save upgraded configuration");
+    return false;
+}
+
 bool CfgFactory::upgrade_and_save() {
-
-    auto serialize = [](const Config& config, std::string& output) -> bool {
-        char* data = nullptr;
-        std::size_t size = 0;
-        FILE* stream = ::open_memstream(&data, &size);
-        if(stream == nullptr) return false;
-        config.write(stream);
-        const bool ok = ::fclose(stream) == 0;
-        if(ok) output.assign(data, size);
-        ::free(data);
-        return ok;
-    };
-
-
-    auto backup = [this, &serialize](std::string const& prev_ver) {
-        try {
-            std::stringstream ss;
-            ss << CfgFactory::get()->config_file;
-            ss << "." << prev_ver << ".bak.cfg";
-
-            #if ( LIBCONFIGXX_VER_MAJOR >= 1 && LIBCONFIGXX_VER_MINOR < 7 )
-            cfgapi.setOptions(Setting::OptionOpenBraceOnSeparateLine);
-            #else
-            cfgapi.setOptions(Config::OptionOpenBraceOnSeparateLine);
-            #endif
-
-            cfgapi.setTabWidth(4);
-            std::string content;
-            if(!serialize(cfgapi, content)
-               || sx::privsep::files::config_backup(CfgFactory::get()->config_file,
-                                                     prev_ver, content) != 0) {
-                throw FileIOException();
-            }
-        }
-        catch(ConfigException const& e) {
-            _err("error writing config file backup %s", e.what());
-            return false;
-        }
-
-        return true;
-    };
-
-    auto save_status = [this]() -> bool {
-        if(not save_config()) {
-            _err("cannot upgrade_version config file");
-            return false;
-        }
-        return true;
-    };
 
     bool do_save = false;
 
@@ -772,7 +1077,7 @@ bool CfgFactory::upgrade_and_save() {
         auto& v = internal.add("version", Setting::TypeString);
         v = SMITH_VERSION;
 
-        return save_status();
+        return save_upgrade();
 
     }
 
@@ -787,7 +1092,7 @@ bool CfgFactory::upgrade_and_save() {
         internal.add("schema", libconfig::Setting::TypeInt) = 1000;
     }
 
-    [&]{
+    {
         int num_touches = 0;
 
         if(our_schema > cfg_schema) {
@@ -806,13 +1111,13 @@ bool CfgFactory::upgrade_and_save() {
                 do_save = true;
             }
         }
-    }();
+    }
 
 
     if(std::string v1; load_if_exists(internal, "version", v1)) {
 
         if (v1 != SMITH_VERSION) {
-            backup(v1);
+            if(!backup_before_upgrade(v1)) return false;
             upgrade_by_version(v1);
 
             internal["version"] = SMITH_VERSION;
@@ -827,7 +1132,7 @@ bool CfgFactory::upgrade_and_save() {
     }
 
     if(do_save) {
-        return save_status();
+        return save_upgrade();
     }
 
     return false;
@@ -1018,16 +1323,27 @@ bool CfgFactory::load_settings () {
         }
     }
 
-    load_if_exists(cfgapi.getRoot()["settings"], "certs_path",SSLFactory::factory().certs_path());
+    // Start every load from the historical standalone defaults. A legacy
+    // configuration may legitimately omit these optional settings, and a
+    // failed first migration must remain bootable from its original files.
+    // Native archives override the filesystem paths below with their private
+    // materialized tree.
+    configured_certs_path = "/etc/smithproxy/certs/default/";
+    configured_ca_bundle_path.clear();
+    configured_ca_bundle_file.clear();
+    dir_msg_templates = "/etc/smithproxy/msg/en/";
+    load_if_exists(cfgapi.getRoot()["settings"], "certs_path", configured_certs_path);
+    SSLFactory::factory().certs_path() = configured_certs_path;
     load_if_exists(cfgapi.getRoot()["settings"], "certs_ca_key_password",SSLFactory::factory().certs_password());
 
     if(! load_if_exists(cfgapi.getRoot()["settings"], "certs_ctlog",SSLFactory::factory().ctlogfile())) {
-        SSLFactory::factory().ctlogfile() = "/etc/smithproxy/ct_log_list.cnf";
+        SSLFactory::factory().ctlogfile() = "/var/smithproxy/data/ct_log_list.cnf";
     }
 
 
-    load_if_exists(cfgapi.getRoot()["settings"], "ca_bundle_path",SSLFactory::factory().ca_path());
-    load_if_exists(cfgapi.getRoot()["settings"], "ca_bundle_file", SSLFactory::factory().ca_file());
+    load_if_exists(cfgapi.getRoot()["settings"], "ca_bundle_path", configured_ca_bundle_path);
+    load_if_exists(cfgapi.getRoot()["settings"], "ca_bundle_file", configured_ca_bundle_file);
+    apply_runtime_resource_paths();
 
     load_if_exists(cfgapi.getRoot()["settings"], "ssl_autodetect",MitmMasterProxy::ssl_autodetect);
     load_if_exists(cfgapi.getRoot()["settings"], "ssl_autodetect_harder",MitmMasterProxy::ssl_autodetect_harder);
@@ -3658,6 +3974,15 @@ int CfgFactory::policy_apply (baseHostCX *originator, MitmProxy *proxy, int matc
                 auto options = sx::ssh::transport_options{};
                 options.profile_name = rule->profile_ssh->element_name();
                 options.host_key = rule->profile_ssh->host_key;
+                if(options.host_key == "pki/mitm/ssh/hostkeys/ed25519" ||
+                   options.host_key == "/etc/smithproxy/ssh_host_ed25519_key") {
+                    auto resource = resolve_resource(
+                        "pki/mitm/ssh/hostkeys/ed25519",
+                        options.host_key);
+                    if (resource.is_native()) {
+                        options.host_key_pem = resource.content();
+                    }
+                }
                 options.hostkeys = rule->profile_ssh->hostkey_policy == "strict"
                     ? sx::ssh::hostkey_policy::strict
                     : rule->profile_ssh->hostkey_policy == "accept-new"
@@ -5783,7 +6108,8 @@ int CfgFactory::save_policy(Config& ex) const {
 bool CfgFactory::new_ssh_profile(Setting& section, std::string const& name) const {
     try {
         Setting& item = section.add(name, Setting::TypeGroup);
-        item.add("host_key", Setting::TypeString) = "/etc/smithproxy/ssh_host_ed25519_key";
+        item.add("host_key", Setting::TypeString) =
+            "pki/mitm/ssh/hostkeys/ed25519";
         item.add("hostkey_policy", Setting::TypeString) = "accept-new";
         for(auto const* feature : {"shell", "exec", "subsystem", "pty",
                                    "environment", "local_forward",
@@ -5967,11 +6293,26 @@ int save_settings(Config& ex) {
         it_ns.add(Setting::TypeString) = ns.str_host;
     }
 
-    objects.add("certs_path", Setting::TypeString) = SSLFactory::factory().certs_path();
+    // Keep path-based resources only while the legacy file remains the
+    // authoritative source. Migration can fail safely and retry on the next
+    // start only if an intervening schema upgrade preserves these locations.
+    if(!CfgFactory::get()->using_native_archive()) {
+        objects.add("certs_path", Setting::TypeString) =
+            CfgFactory::get()->configured_certs_path;
+        objects.add("messages_dir", Setting::TypeString) =
+            CfgFactory::get()->dir_msg_templates;
+    }
+
     objects.add("certs_ca_key_password", Setting::TypeString) = SSLFactory::factory().certs_password();
     objects.add("certs_ctlog", Setting::TypeString) = SSLFactory::factory().ctlogfile();
-    objects.add("ca_bundle_path", Setting::TypeString) = SSLFactory::factory().ca_path();
-    objects.add("ca_bundle_file", Setting::TypeString) = SSLFactory::factory().ca_file();
+    // Preserve external operating-system trust locations. Product-managed
+    // trust below /etc/smithproxy is stored in CFtar and has no path setting.
+    const auto& ca_path = CfgFactory::get()->configured_ca_bundle_path;
+    const auto& ca_file = CfgFactory::get()->configured_ca_bundle_file;
+    objects.add("ca_bundle_path", Setting::TypeString) =
+        ca_path.rfind("/etc/smithproxy/", 0) == 0 ? "" : ca_path;
+    objects.add("ca_bundle_file", Setting::TypeString) =
+        ca_file.rfind("/etc/smithproxy/", 0) == 0 ? "" : ca_file;
 
     objects.add("plaintext_port", Setting::TypeString) = CfgFactory::get()->listen_tcp_port_base;
     objects.add("plaintext_workers", Setting::TypeInt) = CfgFactory::get()->num_workers_tcp;
@@ -6032,8 +6373,6 @@ int save_settings(Config& ex) {
     objects.add("syslog_family", Setting::TypeInt) = CfgFactory::get()->syslog_family;
 
     objects.add("sslkeylog_file", Setting::TypeString) = CfgFactory::get()->sslkeylog_file_base;
-    objects.add("messages_dir", Setting::TypeString) = CfgFactory::get()->dir_msg_templates;
-
     Setting& admin_objects = objects.add("admin", Setting::TypeGroup);
     admin_objects.add("group", Setting::TypeString) = CfgFactory::get()->admin_group;
 
@@ -6170,6 +6509,16 @@ bool CfgFactory::save_config() const {
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
+    // After restore, cfgapi still represents the old running process while the
+    // file already contains the next startup state. Serializing cfgapi now would
+    // destroy the explicitly restored archive, so only restart can clear this
+    // intentional split.
+    if(archive_storage_.restart_required()) {
+        _err("configuration save refused: startup archive change awaits restart");
+        log.event(ERR, "Configuration NOT saved: restart required after archive change");
+        return false;
+    }
+
     Config ex;
 
 
@@ -6278,15 +6627,26 @@ bool CfgFactory::save_config() const {
         std::string content;
         if(serialized) content.assign(data, size);
         ::free(data);
-        if(!serialized || sx::privsep::files::config_write(CfgFactory::get()->config_file,
-                                                           content) != 0) {
+        if(!serialized) {
+            throw FileIOException();
+        }
+
+        // Preserve every native resource while replacing only smithproxy.cfg.
+        // Native storage also keeps the exact previously accepted archive as
+        // a recovery copy. If that write fails, the active archive remains
+        // untouched and UpdateBoard continues to report an unsaved revision.
+        if(archive_storage_.available()) {
+            auto prepared = archive_storage_.prepare_main(std::move(content));
+            if(!archive_storage_.publish(prepared)) throw FileIOException();
+        }
+        else if(sx::privsep::files::config_write(config_file, content) != 0) {
             throw FileIOException();
         }
         log.event(NOT, "Configuration saved");
 
         return true;
     }
-    catch(ConfigException const& e) {
+    catch(std::exception const& e) {
         _err("error writing config file %s", e.what());
         log.event(ERR, "Configuration NOT saved: %s", e.what());
 

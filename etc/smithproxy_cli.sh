@@ -52,8 +52,28 @@
 
 num_re='^[0-9]+$'
 DEFAULT_PORT="50000"
+ARCHIVE="${SMITHPROXY_CFTAR:-/etc/smithproxy/smithproxy.cftar}"
+CFTAR="${SMITHPROXY_CFTAR_CMD:-smithproxy-cftar}"
+TEMP_CONFIG=""
 
-PORT=`cat /etc/smithproxy/smithproxy.cfg | grep 'cli \+= *\|port *=' | grep 'cli \+= *' -A1 | grep port | awk -F= '{ print $2 }' |  grep -o '[0-9]\+'`
+cleanup() {
+    [ -z "${TEMP_CONFIG}" ] || rm -f "${TEMP_CONFIG}"
+}
+trap cleanup EXIT HUP INT TERM
+
+# The standalone configuration is native-only. An absent archive means the
+# daemon has not completed its one-time migration and the CLI must not revive
+# a stale loose configuration behind it. Tenant files remain an explicit,
+# separate legacy feature until tenant support is redesigned.
+if [ ! -f "${ARCHIVE}" ]; then
+    echo "Native Smithproxy configuration is unavailable: ${ARCHIVE}" >&2
+    exit 1
+fi
+TEMP_CONFIG="$(mktemp)" || exit 1
+"${CFTAR}" get "${ARCHIVE}" smithproxy.cfg >"${TEMP_CONFIG}" || exit 1
+CONFIG="${TEMP_CONFIG}"
+
+PORT=$(grep 'cli \+= *\|port *=' "${CONFIG}" | grep 'cli \+= *' -A1 | grep port | awk -F= '{ print $2 }' | grep -o '[0-9]\+')
 
 if [ -f /etc/smithproxy/smithproxy.tenants.cfg ]; then
 

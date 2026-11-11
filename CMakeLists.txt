@@ -120,6 +120,7 @@ target_include_directories(nlohmann_json INTERFACE
     "${PROJECT_SOURCE_DIR}/third_party/nlohmann/include")
 
 find_package (LibConfig REQUIRED)
+find_package (LibArchive REQUIRED)
 if (LIBCONFIGPP_FOUND)
     include_directories(${LIBCONFIGPP_INCLUDE_DIRS})
 endif (LIBCONFIGPP_FOUND)
@@ -276,6 +277,86 @@ target_include_directories(smithproxy_libcli PUBLIC
         ${PROJECT_SOURCE_DIR}/src/service/libcli
 )
 
+add_executable(smithproxy-cftar
+        src/utils/crypto.cpp
+        src/service/cfgapi/cftar_main.cpp
+        src/service/cfgapi/cftar_cli.cpp
+        src/service/cfgapi/cfg_pack.cpp
+        src/service/cfgapi/cfg_archive.cpp
+        src/service/cfgapi/cfg_archive_session.cpp
+        src/service/cfgapi/cfg_io.cpp
+        src/service/cfgapi/cfg_exposure.cpp
+        src/service/cfgapi/cfg_file_lock.cpp
+        src/service/cfgapi/cfg_runtime_tree.cpp
+        src/service/cfgapi/cfg_tar.cpp
+)
+target_include_directories(smithproxy-cftar PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(smithproxy-cftar PRIVATE
+        smithproxy_libcli pthread crypto LibArchive::LibArchive
+        nlohmann_json::nlohmann_json ${LIBCONFIGPP_LIBRARIES})
+
+# Ship a native configuration from the first installation. The historical
+# files remain package inputs for upgrades and emergency fallback, but a new
+# instance starts from the same validated archive format used at runtime.
+set(SMITHPROXY_DEFAULT_CFTAR
+        ${CMAKE_CURRENT_BINARY_DIR}/defaults/smithproxy.cftar)
+add_custom_command(
+        OUTPUT ${SMITHPROXY_DEFAULT_CFTAR}
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+                ${CMAKE_CURRENT_BINARY_DIR}/defaults
+        COMMAND ${CMAKE_COMMAND} -E rm -f
+                ${SMITHPROXY_DEFAULT_CFTAR}.new
+        COMMAND $<TARGET_FILE:smithproxy-cftar> create
+                --config ${PROJECT_SOURCE_DIR}/etc/smithproxy.cfg
+                --startup ${PROJECT_SOURCE_DIR}/etc/smithproxy.startup.cfg
+                --output ${SMITHPROXY_DEFAULT_CFTAR}.new
+                --file pki/ca/default/ca-cert.pem=${PROJECT_SOURCE_DIR}/etc/certs/default/ca-cert.pem
+                --file pki/ca/default/ca-key.pem=${PROJECT_SOURCE_DIR}/etc/certs/default/ca-key.pem
+                --file pki/ca/default/srv-cert.pem=${PROJECT_SOURCE_DIR}/etc/certs/default/srv-cert.pem
+                --file pki/ca/default/srv-key.pem=${PROJECT_SOURCE_DIR}/etc/certs/default/srv-key.pem
+                --file pki/ca/default/cl-cert.pem=${PROJECT_SOURCE_DIR}/etc/certs/default/cl-cert.pem
+                --file pki/ca/default/cl-key.pem=${PROJECT_SOURCE_DIR}/etc/certs/default/cl-key.pem
+                --file pki/ca/default/portal-cert.pem=${PROJECT_SOURCE_DIR}/etc/certs/default/portal-cert.pem
+                --file pki/ca/default/portal-key.pem=${PROJECT_SOURCE_DIR}/etc/certs/default/portal-key.pem
+                --file pki/ca/default/portal-gen.info=${PROJECT_SOURCE_DIR}/etc/certs/default/portal-gen.info
+                --file pki/ca/default/sslca.json=${PROJECT_SOURCE_DIR}/etc/certs/default/sslca.json
+                --file templates/replacement/en/test.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/test.txt
+                --file templates/replacement/en/html_page.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/html_page.txt
+                --file templates/replacement/en/html_img_warning.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/html_img_warning.txt
+                --file templates/replacement/en/tls_replacement.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement.txt
+                --file templates/replacement/en/tls_replacement_common.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_common.txt
+                --file templates/replacement/en/tls_replacement_light.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_light.txt
+                --file templates/replacement/en/tls_replacement_dark.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_dark.txt
+                --file templates/replacement/en/tls_replacement_branded.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_branded.txt
+        COMMAND ${CMAKE_COMMAND} -E rename
+                ${SMITHPROXY_DEFAULT_CFTAR}.new
+                ${SMITHPROXY_DEFAULT_CFTAR}
+        DEPENDS smithproxy-cftar
+                ${PROJECT_SOURCE_DIR}/etc/smithproxy.cfg
+                ${PROJECT_SOURCE_DIR}/etc/smithproxy.startup.cfg
+                ${PROJECT_SOURCE_DIR}/etc/certs/default/ca-cert.pem
+                ${PROJECT_SOURCE_DIR}/etc/certs/default/ca-key.pem
+                ${PROJECT_SOURCE_DIR}/etc/certs/default/srv-cert.pem
+                ${PROJECT_SOURCE_DIR}/etc/certs/default/srv-key.pem
+                ${PROJECT_SOURCE_DIR}/etc/certs/default/cl-cert.pem
+                ${PROJECT_SOURCE_DIR}/etc/certs/default/cl-key.pem
+                ${PROJECT_SOURCE_DIR}/etc/certs/default/portal-cert.pem
+                ${PROJECT_SOURCE_DIR}/etc/certs/default/portal-key.pem
+                ${PROJECT_SOURCE_DIR}/etc/certs/default/portal-gen.info
+                ${PROJECT_SOURCE_DIR}/etc/certs/default/sslca.json
+                ${PROJECT_SOURCE_DIR}/etc/msg/en/test.txt
+                ${PROJECT_SOURCE_DIR}/etc/msg/en/html_page.txt
+                ${PROJECT_SOURCE_DIR}/etc/msg/en/html_img_warning.txt
+                ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement.txt
+                ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_common.txt
+                ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_light.txt
+                ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_dark.txt
+                ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_branded.txt
+        COMMENT "Building default Smithproxy CfgTar"
+        VERBATIM)
+add_custom_target(smithproxy-default-cftar ALL
+        DEPENDS ${SMITHPROXY_DEFAULT_CFTAR})
+
 add_executable(smithproxy
 
         src/main.cpp
@@ -288,11 +369,20 @@ add_executable(smithproxy
         src/service/cfgapi/cfg_tx_validate.cpp
         src/service/cfgapi/cfg_tx_basket.cpp
         src/service/cfgapi/cfg_save.cpp
+        src/service/cfgapi/cfg_archive_restore.cpp
+        src/service/cfgapi/cfg_archive_monitor.cpp
+        src/service/cfgapi/cfg_resource_write.cpp
+        src/service/cfgapi/cfg_io.cpp
+        src/service/cfgapi/cfg_runtime_tree.cpp
         src/service/httpd/cfg/save.cpp
+        src/service/httpd/cfg/archive.cpp
         src/service/httpd/cfg/transaction.cpp
         src/service/httpd/cfg/state.cpp
         src/service/cfgapi/cfg_update.cpp
         src/service/cfgapi/cfg_revision.cpp
+        src/service/cfgapi/cfg_tar.cpp
+        src/service/cfgapi/cfg_archive.cpp
+        src/service/cfgapi/cfg_pack.cpp
         src/staticcontent.cpp
 
         src/proxy/mitmhost.cpp
@@ -474,6 +564,30 @@ target_link_libraries(smithproxy-webhook-broker pthread)
 option(SMITHPROXY_OPTIMIZED_TESTS "Build native tests outside Debug" OFF)
 if(BUILD_TESTING)
         find_program(PATCH_RUNNER_PYTHON NAMES python3 REQUIRED)
+        add_test(NAME unit.cftar_help COMMAND smithproxy-cftar --help)
+        set_tests_properties(unit.cftar_help
+                PROPERTIES LABELS "native;unit;config" TIMEOUT 10)
+        add_test(NAME integration.cftar_install
+                COMMAND ${PATCH_RUNNER_PYTHON}
+                ${PROJECT_SOURCE_DIR}/tests/install/cftar_install.py
+                --build ${CMAKE_CURRENT_BINARY_DIR}
+                --cftar $<TARGET_FILE:smithproxy-cftar>)
+        set_tests_properties(integration.cftar_install
+                PROPERTIES LABELS "native;integration;config;security" TIMEOUT 60)
+        add_test(NAME integration.cftar_process
+                COMMAND ${PATCH_RUNNER_PYTHON}
+                ${PROJECT_SOURCE_DIR}/tests/process/cftar_process_e2e.py
+                $<TARGET_FILE:smithproxy-cftar> --source ${PROJECT_SOURCE_DIR})
+        set_tests_properties(integration.cftar_process
+                PROPERTIES LABELS "native;integration;config;security" TIMEOUT 60)
+        add_test(NAME unit.sx_network_check
+                COMMAND ${PATCH_RUNNER_PYTHON}
+                ${PROJECT_SOURCE_DIR}/tests/network/sx_network_check_test.py)
+        set_tests_properties(unit.sx_network_check
+                PROPERTIES
+                LABELS "native;unit;network"
+                TIMEOUT 15
+                ENVIRONMENT "SMITHPROXY_CFTAR_CMD=$<TARGET_FILE:smithproxy-cftar>")
         add_subdirectory(tests/patch-runner/cpu-monitor)
         add_test(NAME unit.patch_runner_profile_plan
                 COMMAND ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-profile-plan.sh)
@@ -619,6 +733,12 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/service/cfgapi/cfg_tx_basket_tests.cpp
                 src/service/cfgapi/cfg_save.cpp
                 tests/unit/service/cfgapi/cfg_save_tests.cpp
+                src/service/cfgapi/cfg_tar.cpp
+                src/service/cfgapi/cfg_archive.cpp
+                src/service/cfgapi/cfg_archive_restore.cpp
+                tests/unit/service/cfgapi/cfg_archive_restore_tests.cpp
+                src/service/cfgapi/cfg_resource_write.cpp
+                tests/unit/service/cfgapi/cfg_resource_write_tests.cpp
                 src/service/httpd/cfg/save.cpp
                 tests/unit/service/httpd/cfg_save_tests.cpp
                 src/service/httpd/cfg/transaction.cpp
@@ -709,6 +829,17 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/service/reload/reloadable_resource_test.cpp
         )
 
+        add_executable(sx_gtests_cfg_archive_monitor
+                src/utils/crypto.cpp
+                src/service/comm.cpp
+                src/service/privileged_file.cpp
+                src/service/reload/file_reload_service.cpp
+                src/service/cfgapi/cfg_tar.cpp
+                src/service/cfgapi/cfg_archive.cpp
+                src/service/cfgapi/cfg_archive_monitor.cpp
+                tests/unit/service/cfg_archive_monitor_tests.cpp
+        )
+
         add_executable(sx_gtests_network_context
                 src/service/network_context.cpp
                 tests/unit/service/network_context_tests.cpp
@@ -726,6 +857,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
         )
 
         add_executable(sx_gtests_file_privsep
+                src/utils/crypto.cpp
                 src/service/comm.cpp
                 src/service/privileged_file.cpp
                 tests/unit/service/comm_tests.cpp
@@ -772,7 +904,55 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
         target_compile_definitions(tls_testbed PRIVATE
                 SMITHPROXY_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
-        target_link_libraries(sx_gtests gtest gtest_main smithproxy_libcli smithproxy_qpack socle_lib pthread crypto ssl crypt ${UNWIND_LIB})
+        target_link_libraries(sx_gtests gtest gtest_main smithproxy_libcli smithproxy_qpack socle_lib pthread crypto ssl crypt
+                LibArchive::LibArchive nlohmann_json::nlohmann_json ${UNWIND_LIB})
+        add_executable(sx_gtests_cfg_tar
+                src/utils/crypto.cpp
+                src/service/cfgapi/cfg_tar.cpp
+                src/service/cfgapi/cfg_archive.cpp
+                src/service/cfgapi/cfg_archive_session.cpp
+                src/service/cfgapi/cfg_io.cpp
+                src/service/cfgapi/cfg_exposure.cpp
+                src/service/cfgapi/cfg_file_lock.cpp
+                src/service/cfgapi/cfg_pack.cpp
+                src/service/cfgapi/cfg_runtime_tree.cpp
+                tests/unit/service/cfg_tar_tests.cpp
+                tests/unit/service/cfg_archive_tests.cpp
+                tests/unit/service/cfg_archive_session_tests.cpp
+                tests/unit/service/cfg_pack_tests.cpp
+                tests/unit/service/cfg_runtime_tree_tests.cpp)
+        target_link_libraries(sx_gtests_cfg_tar PRIVATE gtest gtest_main
+                pthread crypto LibArchive::LibArchive nlohmann_json::nlohmann_json
+                ${LIBCONFIGPP_LIBRARIES})
+        add_test(NAME unit.cfg_tar COMMAND sx_gtests_cfg_tar)
+
+        add_executable(sx_gtests_cfg_io_faults
+                src/utils/crypto.cpp
+                src/service/cfgapi/cfg_tar.cpp
+                src/service/cfgapi/cfg_archive.cpp
+                src/service/cfgapi/cfg_pack.cpp
+                tests/unit/service/cfg_io_fault_tests.cpp)
+        target_link_libraries(sx_gtests_cfg_io_faults PRIVATE gtest gtest_main
+                pthread crypto LibArchive::LibArchive nlohmann_json::nlohmann_json)
+        target_link_options(sx_gtests_cfg_io_faults PRIVATE
+                -Wl,--wrap=open -Wl,--wrap=openat
+                -Wl,--wrap=fstat -Wl,--wrap=fstatat -Wl,--wrap=lstat
+                -Wl,--wrap=read -Wl,--wrap=write -Wl,--wrap=fsync
+                -Wl,--wrap=dup -Wl,--wrap=fdopendir -Wl,--wrap=readdir
+                -Wl,--wrap=mkdir -Wl,--wrap=mkdirat
+                -Wl,--wrap=archive_read_new
+                -Wl,--wrap=archive_read_support_format_tar
+                -Wl,--wrap=archive_read_open_memory
+                -Wl,--wrap=archive_read_next_header
+                -Wl,--wrap=archive_errno -Wl,--wrap=archive_entry_pathname
+                -Wl,--wrap=archive_read_data
+                -Wl,--wrap=archive_write_new
+                -Wl,--wrap=archive_write_set_format_pax_restricted
+                -Wl,--wrap=archive_write_open -Wl,--wrap=archive_entry_new
+                -Wl,--wrap=archive_write_header -Wl,--wrap=archive_write_data
+                -Wl,--wrap=archive_write_close)
+        add_test(NAME unit.cfg_io_faults COMMAND sx_gtests_cfg_io_faults)
+        set_tests_properties(unit.cfg_tar PROPERTIES LABELS "native;unit")
         if("${USE_PAM}" STREQUAL "Y")
             target_link_libraries(sx_gtests pam)
         endif()
@@ -791,6 +971,9 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 nlohmann_json::nlohmann_json ${LIBCONFIGPP_LIBRARIES})
         target_link_libraries(sx_gtests_privsep gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(sx_gtests_file_privsep gtest gtest_main socle_lib pthread crypto ssl)
+        target_link_libraries(sx_gtests_cfg_archive_monitor PRIVATE
+                gtest gtest_main socle_lib pthread crypto ssl
+                LibArchive::LibArchive nlohmann_json::nlohmann_json)
         target_link_libraries(sx_gtests_gre_broker gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(sx_gtests_cli_broker gtest gtest_main pthread)
         target_link_libraries(sx_gtests_api_broker gtest gtest_main pthread)
@@ -858,6 +1041,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
             add_test(NAME unit.startstoptls COMMAND sx_gtests_startstoptls)
             add_test(NAME unit.httpconnect COMMAND sx_gtests_httpconnect)
             add_test(NAME unit.reloadable COMMAND sx_gtests_reloadable)
+            add_test(NAME unit.cfg_archive_monitor COMMAND sx_gtests_cfg_archive_monitor)
             add_test(NAME unit.network_context COMMAND sx_gtests_network_context)
             add_test(NAME unit.privsep COMMAND sx_gtests_privsep)
             add_test(NAME unit.file_privsep COMMAND sx_gtests_file_privsep)
@@ -891,7 +1075,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                     COMMAND ${PROJECT_SOURCE_DIR}/tools/test-linux-distros.sh)
             set_tests_properties(
                     unit.core unit.listener_lifecycle unit.http1 unit.startstoptls unit.httpconnect unit.reloadable
-                    unit.network_context
+                    unit.cfg_archive_monitor unit.network_context
                     PROPERTIES LABELS "native;unit")
             set_tests_properties(unit.listener_lifecycle
                     PROPERTIES WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}")
@@ -931,6 +1115,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
             set_tests_properties(external.inet external.pcap_experiments external.dns
                     PROPERTIES TIMEOUT 180)
             set_tests_properties(unit.reloadable PROPERTIES LABELS "native;unit;reload")
+            set_tests_properties(unit.cfg_archive_monitor
+                    PROPERTIES LABELS "native;unit;reload;config;security")
             set_tests_properties(unit.network_context PROPERTIES LABELS "native;unit;network")
             set_tests_properties(integration.tls_testbed PROPERTIES LABELS "native;integration;tls")
             set_tests_properties(integration.quic_testbed PROPERTIES LABELS "native;integration;quic")
@@ -1063,7 +1249,9 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 add_test(NAME integration.main_process
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/tests/process/main_process_e2e.py
-                        $<TARGET_FILE:smithproxy> --source ${PROJECT_SOURCE_DIR})
+                        $<TARGET_FILE:smithproxy>
+                        --source ${PROJECT_SOURCE_DIR}
+                        --native-archive ${SMITHPROXY_DEFAULT_CFTAR})
                 add_test(NAME integration.redirect
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/tests/transparent/redirect_integration.py
@@ -1206,6 +1394,13 @@ if(SMITHPROXY_FUZZING)
     target_compile_options(http2_content_framing_fuzzer PRIVATE
             -Wno-error=missing-template-arg-list-after-template-kw)
     smithproxy_fuzzer(http2_content_framing_fuzzer)
+
+    add_executable(cfg_tar_fuzzer
+            src/service/cfgapi/cfg_tar.cpp
+            src/service/cfgapi/cfg_archive.cpp
+            tests/fuzz/service/cfg_tar_fuzzer.cpp)
+    target_link_libraries(cfg_tar_fuzzer LibArchive::LibArchive nlohmann_json::nlohmann_json)
+    smithproxy_fuzzer(cfg_tar_fuzzer)
 endif()
 
 option(SMITHPROXY_TLS_FUZZING "Build Clang TLS libFuzzer targets" OFF)
@@ -1289,7 +1484,8 @@ if((CMAKE_SYSTEM_PROCESSOR MATCHES "arm") OR (CMAKE_SYSTEM_PROCESSOR STREQUAL "a
     target_link_libraries (smithproxy atomic)
 endif()
 
-target_link_libraries(smithproxy smithproxy_libcli smithproxy_qpack socle_lib pthread ssl crypto rt ${UNWIND_LIB})
+target_link_libraries(smithproxy smithproxy_libcli smithproxy_qpack socle_lib pthread ssl crypto rt
+        LibArchive::LibArchive ${UNWIND_LIB})
 
 if("${USE_LIBSSH}" STREQUAL "Y")
     target_compile_definitions(smithproxy PRIVATE USE_LIBSSH)

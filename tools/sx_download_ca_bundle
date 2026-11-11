@@ -1,18 +1,22 @@
 #!/usr/bin/env sh
 
-FILE_PATH="/etc/smithproxy/certs/ca_curl_bundle.pem"
+ARCHIVE="${SMITHPROXY_CFTAR:-/etc/smithproxy/smithproxy.cftar}"
+CFTAR="${SMITHPROXY_CFTAR_CMD:-smithproxy-cftar}"
+RESOURCE="pki/trust/ca-bundle.pem"
 FILE_URL="https://curl.se/ca/cacert.pem"
+FILE_PATH="$(mktemp)" || exit 1
+trap 'rm -f "${FILE_PATH}"' EXIT HUP INT TERM
 
-wget ${FILE_URL} -O ${FILE_PATH}
+wget "${FILE_URL}" -O "${FILE_PATH}"
 
 if [ $? -ne 0 ]; then
     echo "   !!! Sorry, something went wrong..."
 else
+    "${CFTAR}" resource import "${ARCHIVE}" "${RESOURCE}" "${FILE_PATH}" || exit 1
     echo
-    echo "       => file saved here: ${FILE_PATH}"
-    echo "   !!! Smithproxy must be reconfigured to use this CA bundle and then restarted."
+    echo "       => resource saved as ${RESOURCE}"
+    echo "   !!! Smithproxy must be restarted to activate the new trust bundle."
     echo
 fi
-
 
 

@@ -1,5 +1,7 @@
 #include <service/privileged_file.hpp>
 
+#include <utils/crypto.hpp>
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -14,9 +16,12 @@
 #include <poll.h>
 #include <signal.h>
 #include <string_view>
+#include <thread>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 #include <sys/mman.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -24,12 +29,95 @@
 
 namespace {
 
-constexpr std::size_t max_file_size = 16U * 1024U * 1024U;
+constexpr std::size_t max_file_size = sx::privsep::files::max_config_payload;
+constexpr auto config_lock_timeout = std::chrono::seconds(5);
 
 std::mutex state_mutex;
 std::shared_ptr<sx::privsep::files::Client> installed_client;
 sx::privsep::files::Targets installed_targets;
 pid_t helper_pid = -1;
+
+// Own both levels of the CFtar publication lock. The directory inode anchors
+// the lock domain even if an administrator removes and recreates the visible
+// sidecar while another writer is active. This small counterpart deliberately
+// lives inside the privileged helper instead of pulling the wider cfgapi object
+// graph across the privilege boundary; its protocol mirrors CfgFileLock.
+class ConfigPublicationLock final {
+public:
+    static ConfigPublicationLock acquire(const std::string& path) {
+        auto parent = std::filesystem::path(path).parent_path();
+        if(parent.empty()) parent = ".";
+
+        const int directory = ::open(
+            parent.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+        if(directory < 0) return {};
+        if(wait(directory) != 0) {
+            const int saved = errno;
+            ::close(directory);
+            errno = saved;
+            return {};
+        }
+
+        const auto sidecar_path = path + ".lock";
+        const int sidecar = ::open(
+            sidecar_path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
+        if(sidecar < 0 || wait(sidecar) != 0) {
+            const int saved = errno;
+            if(sidecar >= 0) ::close(sidecar);
+            ::flock(directory, LOCK_UN);
+            ::close(directory);
+            errno = saved;
+            return {};
+        }
+        return ConfigPublicationLock(directory, sidecar);
+    }
+
+    ConfigPublicationLock() = default;
+    ConfigPublicationLock(const ConfigPublicationLock&) = delete;
+    ConfigPublicationLock& operator=(const ConfigPublicationLock&) = delete;
+    ConfigPublicationLock(ConfigPublicationLock&& other) noexcept
+        : directory_(std::exchange(other.directory_, -1)),
+          sidecar_(std::exchange(other.sidecar_, -1)) {}
+    ~ConfigPublicationLock() { release(); }
+
+    explicit operator bool() const noexcept { return sidecar_ >= 0; }
+
+private:
+    ConfigPublicationLock(int directory, int sidecar) noexcept
+        : directory_(directory), sidecar_(sidecar) {}
+
+    static int wait(int fd) {
+        const auto deadline = std::chrono::steady_clock::now() + config_lock_timeout;
+        while(::flock(fd, LOCK_EX | LOCK_NB) != 0) {
+            if(errno == EINTR) continue;
+            if(errno != EWOULDBLOCK && errno != EAGAIN) return -1;
+            if(std::chrono::steady_clock::now() >= deadline) {
+                errno = ETIMEDOUT;
+                return -1;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(25));
+        }
+        return 0;
+    }
+
+    void release() noexcept {
+        const int saved = errno;
+        if(sidecar_ >= 0) {
+            ::flock(sidecar_, LOCK_UN);
+            ::close(sidecar_);
+            sidecar_ = -1;
+        }
+        if(directory_ >= 0) {
+            ::flock(directory_, LOCK_UN);
+            ::close(directory_);
+            directory_ = -1;
+        }
+        errno = saved;
+    }
+
+    int directory_ {-1};
+    int sidecar_ {-1};
+};
 
 int write_all(int fd, const char* data, std::size_t size) {
     std::size_t offset = 0;
@@ -85,6 +173,16 @@ bool safe_version(std::string_view value) {
     return std::all_of(value.begin(), value.end(), [](unsigned char c) {
         return std::isalnum(c) || c == '.' || c == '_' || c == '-';
     });
+}
+
+// Keep legacy backup names unchanged while making a native backup recognizable
+// and directly usable as a CfgTar file.
+std::string backup_path(const std::string& path, std::string_view version) {
+    constexpr std::string_view archive_extension = ".cftar";
+    const bool native = path.size() >= archive_extension.size() &&
+        path.compare(path.size() - archive_extension.size(), archive_extension.size(),
+                     archive_extension) == 0;
+    return path + "." + std::string(version) + (native ? ".bak.cftar" : ".bak.cfg");
 }
 
 int make_content_fd(const std::string& content) {
@@ -152,6 +250,45 @@ int atomic_replace_from_fd(const std::string& path, int source) {
     return result;
 }
 
+std::string content_hash(std::string_view content) {
+    const auto digest = sx::crypto::sha256(content);
+    return digest ? "sha256:" + *digest : std::string {};
+}
+
+// Serialize daemon and offline-tool writers through the stable sidecar inode.
+// The current file is read only after the lock is held, so the expected hash,
+// recovery copy and active replacement describe one indivisible generation.
+int install_config_from_fd(
+    const std::string& path, std::string_view expected_hash, int replacement) {
+    // Use the same two-level lock domain as smithproxy-cftar. The bounded wait
+    // also finishes before the IPC client's deadline, so a caller can never be
+    // told that save timed out and then observe a delayed publication.
+    auto publication_lock = ConfigPublicationLock::acquire(path);
+    if(!publication_lock) return -1;
+
+    std::string current;
+    int result = sx::privsep::files::read_file(path, current);
+    if(result == 0 && content_hash(current) != expected_hash) {
+        errno = ESTALE;
+        result = -1;
+    }
+    if(result == 0) {
+        const int previous = make_content_fd(current);
+        if(previous < 0) {
+            result = -1;
+        }
+        else {
+            result = atomic_replace_from_fd(backup_path(path, "previous"), previous);
+            const int saved = errno;
+            ::close(previous);
+            errno = saved;
+        }
+    }
+    if(result == 0) result = atomic_replace_from_fd(path, replacement);
+
+    return result;
+}
+
 sx::privsep::files::Reply error_reply(int error) {
     return sx::comm::error_reply(error);
 }
@@ -177,13 +314,29 @@ public:
             if(fd < 0) return error_reply(errno);
             return {0, {}, fd};
         }
+        if(opcode == Opcode::ConfigBackupRead) {
+            if(request.fd >= 0 || !safe_version(request.payload)) return error_reply(EINVAL);
+            const int fd = open_regular_readonly(backup_path(target_, request.payload));
+            if(fd < 0) return error_reply(errno);
+            return {0, {}, fd};
+        }
+        if(opcode == Opcode::ConfigInstall) {
+            if(request.fd < 0 || request.payload.size() != 71 ||
+               request.payload.compare(0, 7, "sha256:") != 0) {
+                return error_reply(EINVAL);
+            }
+            if(install_config_from_fd(target_, request.payload, request.fd) != 0) {
+                return error_reply(errno);
+            }
+            return {};
+        }
 
         const bool backup = opcode == Opcode::ConfigBackup;
         if(opcode != Opcode::ConfigWrite && !backup) return error_reply(EOPNOTSUPP);
         if(request.fd < 0 || (!backup && !request.payload.empty())
            || (backup && !safe_version(request.payload))) return error_reply(EINVAL);
         const std::string destination = backup
-            ? target_ + "." + request.payload + ".bak.cfg" : target_;
+            ? backup_path(target_, request.payload) : target_;
         if(atomic_replace_from_fd(destination, request.fd) != 0) return error_reply(errno);
         return {};
     }
@@ -331,7 +484,7 @@ int write_file_atomic(const std::string& path, const std::string& content) {
 int write_backup_atomic(const std::string& path, const std::string& version_text,
                         const std::string& content) {
     if(!safe_version(version_text)) { errno = EINVAL; return -1; }
-    return write_file_atomic(path + "." + version_text + ".bak.cfg", content);
+    return write_file_atomic(backup_path(path, version_text), content);
 }
 
 Client::Client(int fd, std::chrono::milliseconds timeout): sx::comm::Client(fd, timeout) {}
@@ -357,6 +510,23 @@ int Client::config_write(const std::string& content) {
     const int saved = errno; ::close(fd); errno = saved; return result;
 }
 
+int Client::config_install(
+    const std::string& expected, const std::string& replacement) {
+    // Send only the expected digest through the control payload. The bounded
+    // replacement travels in a sealed-purpose descriptor like ConfigWrite.
+    const auto expected_hash = content_hash(expected);
+    if(expected_hash.empty()) { errno = EIO; return -1; }
+    const int fd = make_content_fd(replacement);
+    if(fd < 0) return -1;
+    Reply response;
+    const int result = request(
+        static_cast<std::uint8_t>(Opcode::ConfigInstall), expected_hash, fd, response);
+    const int saved = errno;
+    ::close(fd);
+    errno = saved;
+    return result;
+}
+
 int Client::config_backup(const std::string& version_text, const std::string& content) {
     if(!safe_version(version_text)) { errno = EINVAL; return -1; }
     const int fd = make_content_fd(content);
@@ -364,6 +534,20 @@ int Client::config_backup(const std::string& version_text, const std::string& co
     Reply response;
     const int result = request(static_cast<std::uint8_t>(Opcode::ConfigBackup), version_text, fd, response);
     const int saved = errno; ::close(fd); errno = saved; return result;
+}
+
+int Client::config_backup_read(const std::string& version_text, std::string& output) {
+    if(!safe_version(version_text)) { errno = EINVAL; return -1; }
+    Reply response;
+    if(request(static_cast<std::uint8_t>(Opcode::ConfigBackupRead),
+               version_text, -1, response) != 0) return -1;
+    if(response.fd < 0) { errno = EPROTO; return -1; }
+    const int result = read_fd(response.fd, output);
+    const int saved = errno;
+    ::close(response.fd);
+    response.fd = -1;
+    errno = saved;
+    return result;
 }
 
 int Client::pid_exists(bool& output) {
@@ -392,7 +576,9 @@ Server::Server(int fd, Targets targets): sx::comm::Server(fd) {
     register_operation(Opcode::Ping, std::move(ping));
     register_operation(Opcode::ConfigRead, config);
     register_operation(Opcode::ConfigWrite, config);
-    register_operation(Opcode::ConfigBackup, std::move(config));
+    register_operation(Opcode::ConfigBackup, config);
+    register_operation(Opcode::ConfigInstall, config);
+    register_operation(Opcode::ConfigBackupRead, std::move(config));
     register_operation(Opcode::PidExists, pid);
     register_operation(Opcode::PidWrite, pid);
     register_operation(Opcode::PidRemove, std::move(pid));
@@ -455,6 +641,27 @@ int config_write(const std::string& path, const std::string& content) {
     return write_file_atomic(path, content);
 }
 
+int config_install(
+    const std::string& path,
+    const std::string& expected,
+    const std::string& replacement) {
+    // The facade keeps pre-privsep tests and the installed helper on identical
+    // compare-backup-replace semantics.
+    if(auto client = current_client()) {
+        if(!target_matches(path, installed_targets.config)) { errno = EACCES; return -1; }
+        return client->config_install(expected, replacement);
+    }
+    const auto expected_hash = content_hash(expected);
+    if(expected_hash.empty()) { errno = EIO; return -1; }
+    const int fd = make_content_fd(replacement);
+    if(fd < 0) return -1;
+    const int result = install_config_from_fd(path, expected_hash, fd);
+    const int saved = errno;
+    ::close(fd);
+    errno = saved;
+    return result;
+}
+
 int config_backup(const std::string& path, const std::string& version_text,
                   const std::string& content) {
     if(auto client = current_client()) {
@@ -462,6 +669,16 @@ int config_backup(const std::string& path, const std::string& version_text,
         return client->config_backup(version_text, content);
     }
     return write_backup_atomic(path, version_text, content);
+}
+
+int config_backup_read(const std::string& path, const std::string& version_text,
+                       std::string& output) {
+    if(!safe_version(version_text)) { errno = EINVAL; return -1; }
+    if(auto client = current_client()) {
+        if(!target_matches(path, installed_targets.config)) { errno = EACCES; return -1; }
+        return client->config_backup_read(version_text, output);
+    }
+    return read_file(backup_path(path, version_text), output);
 }
 
 int pid_exists(const std::string& path, bool& output) {

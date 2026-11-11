@@ -677,6 +677,40 @@ void register_smithproxy_cli2_commands(libcli2::Cli& cli, std::string subscriber
             return 0;
         });
 
+    cli.command("show config archive")
+        .reset_definition()
+        .help("Show persistent configuration archive inventory")
+        .available_if(privileged_exec)
+        .handler([](libcli2::Context& context, const libcli2::Invocation&) {
+            const auto d = context.decor();
+            try {
+                const auto info = CfgFactory::get()->archive_info();
+                context.print(d.key("Format:") + " " +
+                              d.value(info.native ? "CFtar" : "legacy config"));
+                if (!info.native) return 0;
+
+                context.print(d.key("Version:") + " " +
+                              d.value(std::to_string(info.format_version)));
+                context.print(d.key("Entries:") + " " +
+                              d.value(std::to_string(info.entries.size())));
+                context.print(d.key("Payload bytes:") + " " +
+                              d.value(std::to_string(info.payload_size)));
+                context.print("");
+                context.print(d.heading("Archive entries:"));
+                for (const auto& entry : info.entries) {
+                    context.print("  " + d.value(entry.path) + "  " +
+                                  std::to_string(entry.size) + " bytes" +
+                                  (entry.executable ? "  executable" : ""));
+                }
+                return 0;
+            }
+            catch (const std::exception& error) {
+                context.print(d.error(std::string("Cannot inspect configuration archive: ") +
+                                      error.what()));
+                return -1;
+            }
+        });
+
     cli.command("execute reload")
         .reset_definition()
         .help("Reload configuration file")
@@ -688,7 +722,7 @@ void register_smithproxy_cli2_commands(libcli2::Cli& cli, std::string subscriber
                     "Configuration is locked by an active commit lease"));
                 return -1;
             }
-            const bool loaded = SmithProxy::instance().load_config(CfgFactory::get()->config_file, true);
+            const bool loaded = SmithProxy::instance().reload_config();
             if (!loaded) {
                 context.print(context.decor().error("Configuration file reload FAILED"));
                 return -1;

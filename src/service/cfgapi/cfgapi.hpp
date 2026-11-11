@@ -55,8 +55,15 @@
 #include <traflog/pcaplog.hpp>
 
 #include "cfg_update.hpp"
+#include "cfg_archive.hpp"
+#include "cfg_log.hpp"
+#include "cfg_archive_monitor.hpp"
+#include "cfg_archive_restore.hpp"
+#include "cfg_resource_write.hpp"
+#include "cfg_runtime_tree.hpp"
 #include "cfg_write_gate.hpp"
 #include "cfg_tx_validate.hpp"
+#include <service/reload/file_reload_service.hpp>
 
 namespace sx::cfg {
 struct SaveResult;
@@ -75,8 +82,7 @@ public:
 
     struct log { ;
         static logan_lite &config() {
-            static logan_lite l("config");
-            return l;
+            return sx::cfg::config_log();
         }
         static logan_lite &policy() {
             static logan_lite l("policy");
@@ -111,8 +117,57 @@ private:
 
 class CfgFactory : public CfgFactoryBase {
 
+    // Adapts the factory-owned archive cache and persistence boundary to the
+    // narrow interface required by CfgResourceWriter. CfgFactory owns this
+    // collaborator; it is not itself a resource archive.
+    class ArchiveStorage final : public sx::cfg::CfgArchiveStorage {
+    public:
+        explicit ArchiveStorage(CfgFactory& owner): owner_(owner) {}
+
+        // Report whether the factory currently owns a writable native archive.
+        [[nodiscard]] bool available() const override;
+        // Return the exact native archive bytes used as the write base.
+        [[nodiscard]] std::string current() const override;
+        // Replace smithproxy.cfg in an isolated archive copy.
+        [[nodiscard]] sx::cfg::CfgSaveData prepare_main(
+            std::string content) const override;
+        // Apply one resource edit to an isolated archive copy.
+        [[nodiscard]] sx::cfg::CfgSaveData prepare_resource(
+            std::string path,
+            std::optional<std::string> content,
+            bool executable) const override;
+        // Publish and adopt the candidate without exposing a partial state.
+        [[nodiscard]] bool publish(
+            const sx::cfg::CfgSaveData& prepared) const override;
+        // Combine deliberate startup changes with externally detected writes.
+        [[nodiscard]] bool restart_required() const override;
+        // Record that published startup bytes are not active in runtime yet.
+        void require_restart() override;
+
+    private:
+        CfgFactory& owner_;
+    };
+
     libconfig::Config cfgapi;
+    // Describes the persistent bytes backing cfgapi. Keeping source policy
+    // beside the parsed config prevents save and backup paths from guessing
+    // whether config_file names a legacy text file or a native archive. It is
+    // mutable because the historically const save_config() advances the cached
+    // archive only after durable replacement succeeds.
+    mutable std::optional<sx::cfg::CfgArchive> config_archive_;
+    // A restored archive is the next startup configuration, while cfgapi still
+    // describes the running process. Block ordinary saves until restart so the
+    // explicitly restored bytes cannot be overwritten by that older state.
+    mutable bool startup_archive_pending_ = false;
+    // Own the materialized runtime view of resources selected at startup.
+    std::optional<sx::cfg::CfgRuntimeTree> runtime_tree_;
+    // The shared reload worker observes persistent CFtar generations without
+    // ever applying them to the running configuration.
+    std::shared_ptr<sx::cfg::CfgArchiveMonitor> archive_monitor_;
+    sx::reload::FileReloadService archive_monitor_service_;
+    sx::reload::FileReloadService::resource_id archive_monitor_id_ {0};
     std::recursive_mutex lock_;
+    ArchiveStorage archive_storage_;
 
     static inline std::shared_ptr<CfgFactory> self;
     static inline std::shared_ptr<UpdateBoard> update_board;
@@ -121,17 +176,20 @@ class CfgFactory : public CfgFactoryBase {
 public:
     // Each version bump implies a config upgrade - we start on 1000
     // see upgrade_schema() - control config upgrade
-    constexpr static inline const int SCHEMA_VERSION  = 1048;
+    constexpr static inline const int SCHEMA_VERSION  = 1050;
 
     static inline std::atomic_bool LOAD_ERRORS = false;
     static constexpr std::string_view CT_UNAVAILABLE_WARNING =
         "Certificate Transparency is enabled by policy, but the CT log list is "
         "unavailable. CT validation remains FAIL-CLOSED.";
 
-    CfgFactory() = default;
+    CfgFactory(): archive_storage_(*this) {}
     CfgFactory(CfgFactory const &) = delete;
     void operator=(const CfgFactory&) = delete;
-    ~CfgFactory() override { cleanup(); }
+    ~CfgFactory() override {
+        archive_monitor_service_.stop();
+        cleanup();
+    }
 
     static void init() {
         self = std::make_shared<CfgFactory>();
@@ -150,9 +208,22 @@ public:
 
     static std::recursive_mutex& lock() { return get()->lock_; }
     static std::shared_ptr<sx::cfg::CfgWriteGate> write_gate() { return write_gate_; }
+    // Persist the current running configuration into its native startup archive.
     static sx::cfg::SaveResult save_running(
         std::string const& expected_revision,
         std::string const& source);
+    // Validate and atomically install an uploaded archive for the next restart.
+    static sx::cfg::ArchiveRestoreResult restore_startup_archive(
+        std::string const& expected_revision,
+        std::string const& expected_hash,
+        std::string const& payload);
+    // Replace one native archive resource without changing the running process.
+    static sx::cfg::ResourceWriteResult write_archive_resource(
+        std::string expected_revision,
+        std::string expected_archive_hash,
+        std::string path,
+        std::optional<std::string> content,
+        bool executable = false);
     static sx::cfg::tx::Transaction::CreateResult make_transaction(std::string owner) {
         auto factory = get();
         return sx::cfg::tx::Transaction::create(
@@ -212,7 +283,12 @@ public:
     std::string listen_socks_port = "1080";
     std::string listen_http_connect_port = "3128";
 
-    std::string dir_msg_templates = "/etc/smithproxy/msg/en/";
+    // Preserve user-facing resource settings independently from temporary
+    // runtime materialization. Saving must never publish a /tmp archive view.
+    std::string configured_certs_path;
+    std::string configured_ca_bundle_path;
+    std::string configured_ca_bundle_file;
+    std::string dir_msg_templates;
 
     bool config_file_check_only = false;
 
@@ -356,7 +432,67 @@ public:
 
     std::vector<AddressInfo> db_nameservers;
 
-    bool  cfgapi_init(const char* fnm);
+    // Select and load a native archive or an explicit legacy configuration path.
+    bool cfgapi_init(const char* fnm);
+    // Load the parsed configuration from an already validated archive source.
+    bool cfgapi_init(sx::cfg::CfgArchive source);
+
+    // Re-open the same logical source for reload. A native archive is parsed
+    // and validated again; an explicit legacy path remains explicit.
+    sx::cfg::CfgArchive reload_source();
+
+    // Resolve a persistent resource against the source selected for the
+    // running configuration. The returned value owns native bytes or the
+    // explicit legacy path, so it remains valid after this method unlocks.
+    sx::cfg::CfgResource resolve_resource(std::string logical_path,
+                                          std::string legacy_path);
+
+    // Resolve a named directory as individual resources. Native archives must
+    // contain every requested entry; an explicit legacy source remains the
+    // only mode in which the directory path is consulted.
+    std::map<std::string, std::string> native_resources(
+        std::string logical_dir, std::string legacy_dir,
+        const std::vector<std::string>& names);
+
+    // List stored native resources without assigning them runtime semantics.
+    // In particular, commands/ entries remain inert until an explicit caller
+    // requests and authorizes an action in a later feature.
+    std::vector<std::string> resources(std::string_view logical_dir);
+
+    // Return a content-free administrative inventory of the active persistent
+    // configuration source.
+    sx::cfg::CfgArchiveInfo archive_info();
+
+    // Report whether the active source is the native archive rather than an
+    // explicitly selected legacy source used during migration or tenant startup.
+    bool using_native_archive() const;
+
+    // Serialize the active native archive exactly as it would be persisted.
+    // Legacy sources fail explicitly because they are not complete CFtar
+    // configuration bundles.
+    std::string archive_payload();
+
+    // Read and validate the recovery archive through the privileged file
+    // capability. The returned bytes are suitable for an exact download.
+    std::string previous_archive_payload();
+
+    // Read one validated resource from the active native archive.
+    std::string archive_resource(std::string const& path);
+
+    // Materialize the active archive resources into a protected runtime tree.
+    std::string materialize_runtime_archive();
+
+    // Project native directory-backed resources into a private runtime tree;
+    // legacy sources retain their configured filesystem paths unchanged.
+    void apply_runtime_resource_paths();
+
+    // True after a successful restore that deliberately requires a process
+    // restart, or after an external CFtar replacement is observed.
+    [[nodiscard]] bool startup_archive_pending() const;
+    // Start persistent archive observation after privilege separation is ready.
+    void start_archive_monitor();
+    // Return the latest external archive observation error, if any.
+    [[nodiscard]] std::string archive_monitor_error() const;
     void  cleanup();
 
     static void cfg_clone_setting(libconfig::Setting& dst, libconfig::Setting& orig, int index = -1 );
@@ -491,6 +627,21 @@ public:
     // The caller holds a write-gate guard from before the mutation.
     [[nodiscard]] bool record_revision(std::string const& source,
                                        std::string description) const;
+
+private:
+    // Preserve the exact persistent source before a version upgrade mutates it.
+    [[nodiscard]] bool backup_before_upgrade(
+        std::string const& previous_version) const;
+    // Persist an upgraded configuration and report a version-specific error.
+    [[nodiscard]] bool save_upgrade() const;
+    // Replace the monitored generation after a configuration source is loaded.
+    void configure_archive_monitor_locked();
+    // Advance the monitor after Smithproxy successfully publishes known bytes.
+    void accept_archive_monitor(std::string_view payload) const;
+    // Read the lock-free external-change signal while the config lock is held.
+    [[nodiscard]] bool external_archive_change_locked() const;
+
+public:
 
 
     size_t cleanup_db_address ();

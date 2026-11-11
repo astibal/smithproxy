@@ -91,14 +91,20 @@ REDIRECT_EXEMPT_USERS=""   # could contain multiple users separated by spaces
 
 BYPASS_CONNECTIONS="" # multiple values are semicolon-separated srcip:dstip:dstport tuples
 
-tenant_table="/etc/smithproxy/smithproxy.tenants.cfg"
+SMITHPROXY_ETC_DIR="${SMITHPROXY_ETC_DIR:-/etc/smithproxy}"
+SMITHPROXY_RUN_DIR="${SMITHPROXY_RUN_DIR:-/run/smithproxy}"
+SMITHPROXY_CFTAR_CMD="${SMITHPROXY_CFTAR_CMD:-/usr/bin/smithproxy-cftar}"
+SMITHPROXY_CONFIG_DIR="${SMITHPROXY_ETC_DIR}"
+SMITHPROXY_NATIVE_DIR=""
+
+tenant_table="${SMITHPROXY_ETC_DIR}/smithproxy.tenants.cfg"
 tenant_id="default"
 tenant_index="0"
 tenant_range="0.0.0.0/0"
 tenant_range6="::/0"
 
 
-LOGFILE='/var/log/smithproxy/startup.log'
+LOGFILE="${SMITHPROXY_NETWORK_LOG:-/var/log/smithproxy/startup.log}"
 
 
 function prepare_log {
@@ -107,9 +113,69 @@ function prepare_log {
 }
 
 function logit {
+    if [[ "${NETWORK_DIAGNOSTIC_QUIET:-0}" == "1" &&
+          "${NETWORK_FORCE_LOG:-0}" != "1" ]]; then
+        return
+    fi
     echo "`date -R`: $1" >> ${LOGFILE}
     echo $1
 }
+
+function network_watch_log {
+    NETWORK_FORCE_LOG=1 logit "$1"
+}
+
+# Select the same persistent source as the core service. A present native
+# archive is fail-closed: both files must come from one fully validated CfgTar.
+# The temporary directory is private and exists only for this script process.
+function prepare_config_source {
+    local archive="${SMITHPROXY_ETC_DIR}/smithproxy.cftar"
+
+    # Multi-tenant instances retain their explicit historical files. CfgTar v1
+    # currently represents only the standalone/default configuration.
+    if [[ "${tenant_id}" != "default" && "${tenant_id}" != "0" ]]; then
+        return
+    fi
+    if [[ -f "${SMITHPROXY_ETC_DIR}/smithproxy.${tenant_id}.cfg" ]]; then
+        return
+    fi
+    if [[ ! -e "${archive}" && ! -L "${archive}" ]]; then
+        return
+    fi
+    if [[ ! -x "${SMITHPROXY_CFTAR_CMD}" ]]; then
+        logit "ERROR: CfgTar reader is not executable: ${SMITHPROXY_CFTAR_CMD}"
+        exit 1
+    fi
+
+    install -d -m 0700 "${SMITHPROXY_RUN_DIR}"
+    SMITHPROXY_NATIVE_DIR=$(mktemp -d "${SMITHPROXY_RUN_DIR}/sx-network-cftar.XXXXXX") || {
+        logit "ERROR: Cannot create private CfgTar runtime directory."
+        exit 1
+    }
+    chmod 0700 "${SMITHPROXY_NATIVE_DIR}"
+
+    if ! "${SMITHPROXY_CFTAR_CMD}" get "${archive}" smithproxy.cfg \
+            >"${SMITHPROXY_NATIVE_DIR}/smithproxy.cfg" ||
+       ! "${SMITHPROXY_CFTAR_CMD}" get "${archive}" smithproxy.startup.cfg \
+            >"${SMITHPROXY_NATIVE_DIR}/smithproxy.startup.cfg"; then
+        logit "ERROR: Cannot load validated network configuration from ${archive}."
+        exit 1
+    fi
+    chmod 0600 "${SMITHPROXY_NATIVE_DIR}/smithproxy.cfg" \
+               "${SMITHPROXY_NATIVE_DIR}/smithproxy.startup.cfg"
+    SMITHPROXY_CONFIG_DIR="${SMITHPROXY_NATIVE_DIR}"
+}
+
+# Remove only the mktemp directory created by prepare_config_source(). The
+# variable is initialized by this script and never accepted from the caller.
+function cleanup_config_source {
+    if [[ -n "${SMITHPROXY_NATIVE_DIR}" ]]; then
+        rm -rf -- "${SMITHPROXY_NATIVE_DIR}"
+        SMITHPROXY_NATIVE_DIR=""
+    fi
+}
+
+trap cleanup_config_source EXIT
 
 function tenant_apply {
 
@@ -144,10 +210,11 @@ function tenant_apply {
         fi
     fi
 
-    SX_CFG="/etc/smithproxy/smithproxy.cfg"
+    prepare_config_source
+    SX_CFG="${SMITHPROXY_CONFIG_DIR}/smithproxy.cfg"
 
-    if [ -f "/etc/smithproxy/smithproxy.${tenant_id}.cfg" ]; then
-        SX_CFG="/etc/smithproxy/smithproxy.${tenant_id}.cfg"
+    if [ -f "${SMITHPROXY_ETC_DIR}/smithproxy.${tenant_id}.cfg" ]; then
+        SX_CFG="${SMITHPROXY_ETC_DIR}/smithproxy.${tenant_id}.cfg"
     fi
 
     # QUIC interception is deliberately separate from the generic UDP proxy.
@@ -623,7 +690,181 @@ function setup_redirect {
 }
 
 
+# Verify the kernel state owned by sx_network without changing it.  The check
+# deliberately covers only stable invariants; packet counters and unrelated
+# firewall rules are ignored so normal traffic cannot trigger false alarms.
+function network_check_failure {
+    echo "$1"
+    NETWORK_CHECK_FAILURES=$((NETWORK_CHECK_FAILURES + 1))
+}
+
+function network_check_rule {
+    local command=$1
+    shift
+
+    if ! "${command}" -w 5 "$@" >/dev/null 2>&1; then
+        network_check_failure "missing firewall rule: ${command} $*"
+    fi
+}
+
+function network_check_family {
+    local command=$1
+    local family=$2
+    local range=$3
+    local ip_family=()
+
+    if [[ "${family}" == "ipv6" ]]; then
+        ip_family=(-6)
+    fi
+
+    if ! "${command}" -w 5 -t mangle -S "${SMITH_CHAIN_NAME}" >/dev/null 2>&1; then
+        network_check_failure "missing ${family} mangle chain ${SMITH_CHAIN_NAME}"
+    fi
+    if ! "${command}" -w 5 -t mangle -S "${DIVERT_CHAIN_NAME}" >/dev/null 2>&1; then
+        network_check_failure "missing ${family} divert chain ${DIVERT_CHAIN_NAME}"
+    fi
+
+    network_check_rule "${command}" -t mangle -C PREROUTING \
+        -s "${range}" -j "${SMITH_CHAIN_NAME}"
+    network_check_rule "${command}" -t mangle -C PREROUTING \
+        -d "${range}" -j "${SMITH_CHAIN_NAME}"
+    network_check_rule "${command}" -t mangle -C PREROUTING \
+        -s "${range}" -p tcp -m socket -j "${DIVERT_CHAIN_NAME}"
+
+    local rule_dump
+    rule_dump=$("${IP_CMD}" "${ip_family[@]}" rule show 2>/dev/null)
+    local mark_hex mask_hex
+    printf -v mark_hex '0x%x' "${DIVERT_FWMARK}"
+    printf -v mask_hex '0x%x' "${DIVERT_FWMASK}"
+    if ! grep -Eq "fwmark ${mark_hex}/${mask_hex} .*lookup ${DIVERT_IP_RULE}([[:space:]]|$)" \
+            <<<"${rule_dump}"; then
+        network_check_failure \
+            "missing ${family} policy rule: fwmark ${mark_hex}/${mask_hex} lookup ${DIVERT_IP_RULE}"
+    fi
+
+    local route_dump
+    route_dump=$("${IP_CMD}" "${ip_family[@]}" route show table "${DIVERT_IP_RULE}" \
+        2>/dev/null)
+    if [[ "${family}" == "ipv6" ]]; then
+        if ! grep -Eq '^local (::/0|default) dev lo([[:space:]]|$)' <<<"${route_dump}"; then
+            network_check_failure \
+                "missing ipv6 local route in table ${DIVERT_IP_RULE}"
+        fi
+    elif ! grep -Eq '^local (0\.0\.0\.0/0|default) dev lo([[:space:]]|$)' \
+            <<<"${route_dump}"; then
+        network_check_failure "missing ipv4 local route in table ${DIVERT_IP_RULE}"
+    fi
+}
+
+function network_check_sysctl {
+    local key=$1
+    local expected=$2
+    local actual
+
+    actual=$("${SYSCTL_CMD}" -n "${key}" 2>/dev/null)
+    if [[ "${actual}" != "${expected}" ]]; then
+        network_check_failure \
+            "unexpected sysctl ${key}: expected ${expected}, got ${actual:-unavailable}"
+    fi
+}
+
+function network_check {
+    NETWORK_CHECK_FAILURES=0
+
+    local required_command
+    for required_command in "${IPTABLES_CMD}" "${IP6TABLES_CMD}" \
+                            "${IP_CMD}" "${SYSCTL_CMD}"; do
+        if ! command -v "${required_command}" >/dev/null 2>&1; then
+            network_check_failure "required command not found: ${required_command}"
+        fi
+    done
+    if [[ ${NETWORK_CHECK_FAILURES} -gt 0 ]]; then
+        return 1
+    fi
+
+    if [[ ${SMITH_RUN_TRANSPARENT} -gt 0 ]]; then
+        SMITH_CHAIN_NAME="SX.${tenant_id}"
+        DIVERT_CHAIN_NAME="DX.${tenant_id}"
+        network_check_family "${IPTABLES_CMD}" ipv4 "${tenant_range}"
+        if [[ -n "${tenant_range6}" ]]; then
+            network_check_family "${IP6TABLES_CMD}" ipv6 "${tenant_range6}"
+        fi
+
+        network_check_sysctl net.ipv4.ip_forward 1
+        network_check_sysctl net.ipv4.ip_nonlocal_bind 1
+        network_check_sysctl net.ipv6.conf.all.forwarding 1
+        network_check_sysctl net.ipv6.ip_nonlocal_bind 1
+    fi
+
+    if [[ ${SMITH_RUN_REDIRECT} -gt 0 ]]; then
+        SMITH_CHAIN_NAME="SX.rdr.${tenant_id}"
+        if ! "${IPTABLES_CMD}" -w 5 -t nat -S "${SMITH_CHAIN_NAME}" \
+                >/dev/null 2>&1; then
+            network_check_failure "missing ipv4 redirect chain ${SMITH_CHAIN_NAME}"
+        fi
+        if ! "${IP6TABLES_CMD}" -w 5 -t nat -S "${SMITH_CHAIN_NAME}" \
+                >/dev/null 2>&1; then
+            network_check_failure "missing ipv6 redirect chain ${SMITH_CHAIN_NAME}"
+        fi
+        network_check_rule "${IPTABLES_CMD}" -t nat -C OUTPUT -j "${SMITH_CHAIN_NAME}"
+        network_check_rule "${IP6TABLES_CMD}" -t nat -C OUTPUT -j "${SMITH_CHAIN_NAME}"
+    fi
+
+    [[ ${NETWORK_CHECK_FAILURES} -eq 0 ]]
+}
+
+# The timer calls watch instead of check.  It records the current result and
+# emits output only when health changes, avoiding one identical warning every
+# minute while still preserving the first useful failure in the journal.
+function network_watch {
+    local output status digest previous previous_status
+    output=$(network_check)
+    status=$?
+    digest=$(printf '%s\n%s' "${status}" "${output}" | cksum | awk '{ print $1 }')
+
+    local safe_tenant=${tenant_id//[^A-Za-z0-9_.-]/_}
+    local state_file="${SMITHPROXY_RUN_DIR}/sx-network-${safe_tenant}.state"
+    install -d -m 0700 "${SMITHPROXY_RUN_DIR}"
+
+    if [[ -f "${state_file}" ]]; then
+        previous=$(<"${state_file}")
+        previous_status=${previous%% *}
+    fi
+
+    if [[ "${previous}" != "${status} ${digest}" ]]; then
+        if [[ ${status} -ne 0 ]]; then
+            network_watch_log "sx_network state drift detected for tenant ${tenant_id}"
+            while IFS= read -r line; do
+                [[ -n "${line}" ]] && network_watch_log "  ${line}"
+            done <<<"${output}"
+        elif [[ "${previous_status}" == "1" ]]; then
+            network_watch_log "sx_network state recovered for tenant ${tenant_id}"
+        fi
+    else
+        return 0
+    fi
+
+    local temporary="${state_file}.$$"
+    printf '%s %s\n' "${status}" "${digest}" >"${temporary}"
+    chmod 0600 "${temporary}"
+    mv -f "${temporary}" "${state_file}"
+
+    # A drift is diagnostic information, not a timer failure.  Returning zero
+    # keeps systemd quiet until watch itself cannot run.
+    return 0
+}
+
+
 prepare_log
+
+IPTABLES_CMD="${IPTABLES_CMD:-iptables}"
+IP6TABLES_CMD="${IP6TABLES_CMD:-ip6tables}"
+IP_CMD="${IP_CMD:-ip}"
+SYSCTL_CMD="${SYSCTL_CMD:-sysctl}"
+
+case "$1" in
+    check|watch) NETWORK_DIAGNOSTIC_QUIET=1 ;;
+esac
 
 tenant_apply $1 $2
 
@@ -632,8 +873,8 @@ tenant_apply $1 $2
 
 
 # source defaults - could be used to override variables above
-if [[ -f /etc/smithproxy/smithproxy.startup.cfg ]]; then
- . /etc/smithproxy/smithproxy.startup.cfg $1 "before"
+if [[ -f "${SMITHPROXY_CONFIG_DIR}/smithproxy.startup.cfg" ]]; then
+ . "${SMITHPROXY_CONFIG_DIR}/smithproxy.startup.cfg" $1 "before"
 fi
 
 case "$1" in
@@ -650,18 +891,34 @@ case "$1" in
     fi
 
     if [[ ${SMITH_RUN_REDIRECT} -gt 0 ]]; then
-        setup_redirect $1
+      setup_redirect $1
     fi
 
-    ;;
+      ;;
+
+    check)
+      if network_check; then
+          echo "sx_network state is healthy for tenant ${tenant_id}"
+      else
+          exit 1
+      fi
+      ;;
+
+    watch)
+      network_watch
+      ;;
 
   *)
-    logit "Usage: $0 {start|stop} [tenant ID]"
+    logit "Usage: $0 {start|stop|bypass|unbypass|check|watch} [tenant ID]"
     exit 1
     ;;
 esac
 
 
-if [[ -f /etc/smithproxy/smithproxy.startup.cfg ]]; then
- . /etc/smithproxy/smithproxy.startup.cfg $1 "after"
-fi
+case "$1" in
+    start|stop|bypass|unbypass)
+      if [[ -f "${SMITHPROXY_CONFIG_DIR}/smithproxy.startup.cfg" ]]; then
+       . "${SMITHPROXY_CONFIG_DIR}/smithproxy.startup.cfg" $1 "after"
+      fi
+      ;;
+esac

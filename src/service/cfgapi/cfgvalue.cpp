@@ -117,13 +117,8 @@ void CfgValueHelp::init() {
     .help_quick("enter <value>");
 
 
-    add("settings.certs_path", "directory for TLS-resigning CA certificate and key")
-            .help_quick("<string>: (default: /etc/smithproxy/certs/default)")
-            .may_be_empty(false)
-            .value_filter(CfgValue::VALUE_DIR);
-
     add("settings.certs_ctlog", "file containing certificate transparency log list")
-            .help_quick("<string>: file with certificate transparency keys (default: ct_log_list.cnf)")
+            .help_quick("<string>: runtime CT log data (default: /var/smithproxy/data/ct_log_list.cnf)")
             .value_filter(CfgValue::VALUE_FILE);
 
     add("settings.certs_ca_key_password", "TLS-resigning CA private key protection password")
@@ -366,11 +361,6 @@ void CfgValueHelp::init() {
     add("settings.sslkeylog_file", "where to dump TLS keying material")
         .help_quick("file path where to dump tls keys (if set)")
         .value_filter(CfgValue::VALUE_BASEDIR);
-
-    add("settings.messages_dir", "replacement text directory")
-        .help_quick("directory path to message files")
-        .may_be_empty(false)
-        .value_filter(CfgValue::VALUE_DIR);
 
     add("settings.write_payload_dir", "root directory for packet dumps")
         .help_quick("directory path for payload dump files")

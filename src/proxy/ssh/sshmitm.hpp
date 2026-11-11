@@ -14,6 +14,8 @@
 
 #include <proxy/ssh/sshprotocol.hpp>
 
+#include <optional>
+
 class logan_lite;
 
 namespace sx::ssh {
@@ -84,6 +86,7 @@ struct transport_options {
     hostkey_policy hostkeys = hostkey_policy::insecure;
     std::string trusted_hostkeys = trusted_hostkeys_path;
     std::string host_key;
+    std::optional<std::string> host_key_pem;
     std::string upstream_host;
     unsigned int upstream_port = 22;
     std::function<void(bool upstream, std::string_view)> plaintext_observer;

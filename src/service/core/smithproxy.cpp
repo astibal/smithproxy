@@ -64,6 +64,38 @@
 extern "C" int __lsan_do_recoverable_leak_check();
 #endif
 
+namespace {
+
+struct QuicCredentials {
+    std::string certificate_path;
+    std::string private_key_path;
+    std::optional<std::string> certificate_pem;
+    std::optional<std::string> private_key_pem;
+};
+
+QuicCredentials quic_credentials() {
+    auto directory = SSLFactory::factory().certs_path();
+    if (!directory.empty() && directory.back() != '/') directory += '/';
+
+    QuicCredentials result {
+        directory + SSLFactory::config_t::SR_CERTF,
+        directory + SSLFactory::config_t::SR_KEYF,
+        std::nullopt,
+        std::nullopt,
+    };
+    auto certificate = CfgFactory::get()->resolve_resource(
+        std::string("pki/ca/default/") + SSLFactory::config_t::SR_CERTF,
+        result.certificate_path);
+    auto private_key = CfgFactory::get()->resolve_resource(
+        std::string("pki/ca/default/") + SSLFactory::config_t::SR_KEYF,
+        result.private_key_path);
+    if (certificate.is_native()) result.certificate_pem = certificate.content();
+    if (private_key.is_native()) result.private_key_pem = private_key.content();
+    return result;
+}
+
+} // namespace
+
 SmithProxy::~SmithProxy () {
 
 #ifndef MEMPOOL_DISABLE
@@ -74,7 +106,7 @@ SmithProxy::~SmithProxy () {
 
 void SmithProxy::reload() {
     _war("reloading configuration (excluding signatures)");
-    SmithProxy::instance().load_config(CfgFactory::get()->config_file,true);
+    SmithProxy::instance().reload_config();
     _dia("USR1 signal handler finished");
 }
 
@@ -139,19 +171,19 @@ bool SmithProxy::create_tproxy_listeners() {
         if (!sx::quic::openssl_quic_available()) {
             _war("QUIC listener disabled: linked OpenSSL has no QUIC server support (OpenSSL 3.5+ required)");
         } else {
-            auto certs_path = SSLFactory::factory().certs_path();
-            if (!certs_path.empty() && certs_path.back() != '/') certs_path += '/';
+            auto credentials = quic_credentials();
             auto service = std::make_unique<sx::quic::listener_service>(
                 static_cast<std::uint16_t>(std::stoi(CfgFactory::get()->listen_quic_port)),
-                certs_path + SSLFactory::config_t::SR_CERTF,
-                certs_path + SSLFactory::config_t::SR_KEYF,
+                credentials.certificate_path, credentials.private_key_path,
                 true, 443, true, sx::quic::lifecycle_options {}, sx::quic::resource_limits {},
                 std::string {}, sx::multiflow::make_mitm_flow_proxy,
                 // Capture can be enabled after this listener starts. Keep the
                 // bounded pre-policy wire journal ready; only an approved
                 // stream logger may attach it to local or remote output.
                 true,
-                sx::proxymaker::make_quic_session_setup);
+                sx::proxymaker::make_quic_session_setup,
+                std::move(credentials.certificate_pem),
+                std::move(credentials.private_key_pem));
             if (!service->prepare()) {
                 _err("Failed to setup QUIC listener: %s", service->last_error().c_str());
                 return false;
@@ -443,12 +475,10 @@ bool SmithProxy::create_listeners() {
                         _war("QUIC currently uses one event-loop thread; quic_workers=%d requested",
                              CfgFactory::get()->num_workers_quic);
                     }
-                    auto certs_path = SSLFactory::factory().certs_path();
-                    if (!certs_path.empty() && certs_path.back() != '/') certs_path += '/';
+                    auto credentials = quic_credentials();
                     auto service = std::make_unique<sx::quic::listener_service>(
                         static_cast<std::uint16_t>(std::stoi(CfgFactory::get()->listen_quic_port)),
-                        certs_path + SSLFactory::config_t::SR_CERTF,
-                        certs_path + SSLFactory::config_t::SR_KEYF,
+                        credentials.certificate_path, credentials.private_key_path,
                         true, 443, true, sx::quic::lifecycle_options {},
                         sx::quic::resource_limits {}, std::string {},
                         sx::multiflow::make_mitm_flow_proxy,
@@ -457,7 +487,9 @@ bool SmithProxy::create_listeners() {
                         // The bounded journal remains private until policy attaches
                         // a logger (MitmProxy::toggle_tlog enforces the switch).
                         true,
-                        sx::proxymaker::make_quic_session_setup);
+                        sx::proxymaker::make_quic_session_setup,
+                        std::move(credentials.certificate_pem),
+                        std::move(credentials.private_key_pem));
                     if (!service->prepare()) {
                         _fat("Failed to setup QUIC listener: %s", service->last_error().c_str());
                         return false;
@@ -1138,16 +1170,37 @@ bool SmithProxy::init_syslog() {
     return true;
 }
 
+// Keep direct filename callers on the explicit legacy path. Automatic CfgTar
+// preference is decided once by main(), not inferred from a file extension.
 bool SmithProxy::load_config(std::string& config_f, bool reload) {
-    const bool loaded = CfgFactory::get()->cfgapi_init(config_f.c_str());
+    sx::cfg::CfgArchive::Paths paths;
+    paths.explicit_config = config_f;
+    return load_config(sx::cfg::CfgArchive::open(std::move(paths)), reload);
+}
+
+// Install one already selected source into CfgFactory, then apply the parsed
+// configuration and runtime hooks exactly as the historical loader did.
+bool SmithProxy::load_config(sx::cfg::CfgArchive source, bool reload) {
+    const bool loaded = CfgFactory::get()->cfgapi_init(std::move(source));
     if(!loaded) {
         _fat("Unable to load config.");
     }
 
-    CfgFactory::get()->config_file = config_f;
     return CfgFactory::get()->apply_config(reload) &&
            apply_config_hooks(reload) &&
            loaded;
+}
+
+// Re-open the current storage format and apply it as a runtime reload. Failure
+// leaves source selection intact and is reported to the signal or CLI caller.
+bool SmithProxy::reload_config() {
+    try {
+        return load_config(CfgFactory::get()->reload_source(), true);
+    }
+    catch(const std::exception& error) {
+        _err("Unable to reopen configuration source: %s", error.what());
+        return false;
+    }
 }
 
 bool SmithProxy::apply_config_hooks(bool reload) {
@@ -1160,7 +1213,14 @@ bool SmithProxy::apply_config_hooks(bool reload) {
     // lock is needed here to not try to match against potentially empty/partial policy list
     std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
     try {
-        if(reload && !html()->load_files(CfgFactory::get()->dir_msg_templates)) {
+        auto& directory = CfgFactory::get()->dir_msg_templates;
+        const auto native = CfgFactory::get()->native_resources(
+            "templates/replacement/en", directory,
+            {"test.txt", "html_page.txt", "html_img_warning.txt",
+             "tls_replacement.txt", "tls_replacement_common.txt",
+             "tls_replacement_light.txt", "tls_replacement_dark.txt",
+             "tls_replacement_branded.txt"});
+        if(reload && !html()->load_files(directory, native)) {
             _err("Cannot reload messages from '%s'; keeping the previous complete template set",
                  CfgFactory::get()->dir_msg_templates.c_str());
         }

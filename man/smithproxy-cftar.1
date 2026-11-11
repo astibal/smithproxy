@@ -1,0 +1,89 @@
+.TH SMITHPROXY-CFTAR 1 "November 2026" "smithproxy" "System Administration"
+.SH NAME
+smithproxy-cftar \- inspect and edit Smithproxy configuration archives
+.SH SYNOPSIS
+.B smithproxy-cftar
+.I command
+.RI [ arguments ]
+.br
+.B smithproxy-cftar
+.BR interactive | -i
+.I archive.cftar
+.SH DESCRIPTION
+.B smithproxy-cftar
+operates on an offline Smithproxy CFtar archive. It does not modify the
+configuration currently running inside a Smithproxy process.
+.PP
+Mutating commands validate the complete candidate archive, take the shared
+publication lock, reject stale input, preserve the previous generation, and
+atomically publish the replacement.
+.SH COMMANDS
+.TP
+.B create --config FILE --startup FILE --output FILE
+Create a new archive. Additional resources may be supplied with
+.B --file ARCHIVE_PATH=FILE
+or
+.BR --executable " ARCHIVE_PATH=FILE" .
+.TP
+.B verify FILE
+Validate the TAR structure, manifest, required entries, paths, and limits.
+.TP
+.B inspect FILE
+Print the archive path, content hash, and entry count.
+.TP
+.B list FILE [PREFIX]
+List entries, optionally restricted to a logical path prefix.
+.TP
+.B get FILE ARCHIVE_PATH
+Write one validated archive entry to standard output.
+.TP
+.B resource import FILE ARCHIVE_PATH SOURCE [executable]
+Import one resource and atomically publish the new archive generation.
+.TP
+.B resource import-set FILE ARCHIVE_PATH=SOURCE [...]
+Import several resources and publish all changes as one archive generation.
+No resource is installed when any source or mapping is invalid.
+.TP
+.B resource export FILE ARCHIVE_PATH DESTINATION
+Export one resource into a newly created filesystem file.
+.TP
+.B resource remove FILE ARCHIVE_PATH
+Remove one resource and atomically publish the new archive generation.
+.TP
+.B interactive FILE
+Open the small offline administration shell. The
+.B -i
+alias is equivalent.
+.SH INTERACTIVE MODE
+Interactive mode provides inspect, list, show, validate, diff, edit, import,
+export, remove, save, discard, expose, close, and quit operations. Changes
+remain in an isolated working copy until
+.B save
+is explicitly requested.
+.PP
+Exposed resources are read-only temporary files owned by the interactive
+session and are removed when closed or when the session exits.
+.SH CONCURRENCY
+The tool shares the CFtar publication lock with Smithproxy. Publication fails
+if the archive changed after the session was opened; reopen the archive and
+repeat the intended change against the new generation.
+.PP
+When Smithproxy observes a valid external replacement, it marks the startup
+configuration as requiring restart. The running configuration is not changed
+automatically.
+.SH FILES
+.TP
+.I /etc/smithproxy/smithproxy.cftar
+Default native Smithproxy configuration archive.
+.TP
+.I ARCHIVE.cftar.lock
+Sidecar publication lock shared by the daemon and offline tools.
+.TP
+.I ARCHIVE.cftar.previous.bak.cftar
+Previous valid generation retained during successful publication.
+.SH EXIT STATUS
+Zero indicates success. One indicates an operational or validation failure.
+Two indicates invalid command-line usage.
+.SH SEE ALSO
+.BR smithproxy (1),
+.BR smithproxy.cfg (5)

@@ -1,11 +1,24 @@
 #!/usr/bin/env sh
 
-CERT_PATH="/etc/smithproxy/certs/default/portal-cert.pem"
+ARCHIVE="${SMITHPROXY_CFTAR:-/etc/smithproxy/smithproxy.cftar}"
+CFTAR="${SMITHPROXY_CFTAR_CMD:-smithproxy-cftar}"
+RESOURCE="pki/ca/default/portal-cert.pem"
+CERT_PATH="$(mktemp)" || exit 1
+
+cleanup() {
+    rm -f "${CERT_PATH}"
+}
+trap cleanup EXIT HUP INT TERM
+
+if [ ! -f "${ARCHIVE}" ]; then
+    echo "Native Smithproxy configuration is unavailable: ${ARCHIVE}" >&2
+    exit 1
+fi
+"${CFTAR}" get "${ARCHIVE}" "${RESOURCE}" >"${CERT_PATH}" || exit 1
 
 echo "[+] Smithproxy Portal (API and authentication) certificate info: "
 echo
-echo "  Path: ${CERT_PATH}"
+echo "  Resource: ${RESOURCE}"
 echo
 openssl x509 -in "${CERT_PATH}" -noout -text | grep 'Issuer' -B 1 -A 10 | sed -e 's/^      //'
 openssl x509 -in "${CERT_PATH}" -noout -text | grep 'Subject Alternative Name' -A1 | sed -e 's/^      //'
-

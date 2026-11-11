@@ -154,6 +154,8 @@ public:
 
     static bool init_syslog();
     bool load_config(std::string& config_f, bool reload = false);
+    bool load_config(sx::cfg::CfgArchive source, bool reload = false);
+    bool reload_config();
 
     ObjAPI API;
 

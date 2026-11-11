@@ -40,7 +40,10 @@ def run_case(root, proxy, hooks, config, eventually, run, sessions, cli):
         assert all(info['parent_id'] in parents for info in streams.values())
         assert not [e for e in events if e.get('action') == 'connection-stop'], events
         assert not (root / 'quic-closed').exists()
-        original = config.read_text()
+        # Startup retires the legacy file; revoke the active native config.
+        original = subprocess.check_output(
+            [str(Path(proxy.args[0]).with_name('smithproxy-cftar')), 'get',
+             str(config.with_suffix('.cftar')), 'smithproxy.cfg'], text=True)
         if os.environ.get('QUIC_REVALIDATION_TRIGGER') == 'role':
             # Change the interface map, not the policy's ingress_role criterion.
             revoked = re.sub(r'(?<!_)role = "Office"', 'role = "Blocked"', original)
@@ -48,6 +51,8 @@ def run_case(root, proxy, hooks, config, eventually, run, sessions, cli):
             revoked = original.replace('action = "accept"', 'action = "deny"')
         assert revoked != original, 'policy revocation did not change configuration'
         config.write_text(revoked)
+        from cftar_fixture import publish_config
+        publish_config(Path(proxy.args[0]), config)
         proxy.send_signal(signal.SIGUSR1)
         eventually(lambda: (root / 'quic-closed').exists(), timeout=15)
         eventually(lambda: set(streams) <= {e['id'] for e in hooks.snapshot()
