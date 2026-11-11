@@ -91,13 +91,22 @@ if os.environ.get('TLS_PROFILE_TEST') == '1':
     prepare_certificates(certs)
     text = configure(text)
 
-tls_write_chunk = os.environ.get('TLS_WRITE_CHUNK')
-if tls_write_chunk is not None:
-    if not tls_write_chunk.isdigit() or not 1024 <= int(tls_write_chunk) <= 1048576:
-        raise ValueError('TLS_WRITE_CHUNK must be between 1024 and 1048576')
-    text = text.replace('settings = {', f'''settings = {{
-    tuning = {{ tls_write_chunk = {tls_write_chunk}; }};
-''', 1)
+# Keep all tuning overrides in one group, including mixed TLS/QUIC runs.
+tuning_overrides = []
+for variable, key, lower, upper in (
+    ('TLS_WRITE_CHUNK', 'tls_write_chunk', 1024, 1048576),
+    ('QUIC_INBOX_PACKETS', 'quic_inbox_packets', 1, 1048576),
+    ('QUIC_INBOX_BYTES', 'quic_inbox_bytes', 1024, 1073741824),
+):
+    value = os.environ.get(variable)
+    if value is None:
+        continue
+    if not value.isdigit() or not lower <= int(value) <= upper:
+        raise ValueError(f'{variable} must be between {lower} and {upper}')
+    tuning_overrides.append(f'{key} = {int(value)};')
+if tuning_overrides:
+    tuning = ' '.join(tuning_overrides)
+    text = text.replace('settings = {', 'settings = {\n    tuning = { ' + tuning + ' };\n', 1)
 ssl_use_ktls = os.environ.get('SSL_USE_KTLS')
 if ssl_use_ktls is not None:
     if ssl_use_ktls not in ('0', '1'):

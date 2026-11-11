@@ -18,8 +18,6 @@ namespace sx::quic {
 struct worker_dispatcher::inbox {
     // The receiver cannot let a slow owner consume unbounded memory. Dropping
     // on overload leaves QUIC recovery with the original owner, never a sibling.
-    static constexpr std::size_t max_packets = 1024;
-    static constexpr std::size_t max_bytes = 4 * 1024 * 1024;
     std::mutex lock;
     std::deque<datagram_packet> packets;
     std::size_t bytes = 0;
@@ -29,7 +27,11 @@ struct worker_dispatcher::inbox {
     ~inbox() { if (wake >= 0) ::close(wake); }
 };
 
-worker_dispatcher::worker_dispatcher(std::size_t workers) {
+worker_dispatcher::worker_dispatcher(std::size_t workers, std::size_t max_packets,
+                                     std::size_t max_bytes)
+    : max_packets_(max_packets), max_bytes_(max_bytes) {
+    if (!max_packets_ || !max_bytes_)
+        throw std::invalid_argument("QUIC inbox capacities must be positive");
     if (workers == 0) throw std::invalid_argument("QUIC receiver needs a worker");
     for (std::size_t i = 0; i < workers; ++i) {
         auto queue = std::make_unique<inbox>();
@@ -155,8 +157,8 @@ std::size_t worker_dispatcher::enqueue_batch(datagram_packet* packets, std::size
             if (owners[i] != worker) continue;
             owners[i] = inboxes_.size();
             auto& packet = packets[i];
-            if (queue.retired || queue.packets.size() >= inbox::max_packets
-                || packet.data.size() > inbox::max_bytes - queue.bytes) {
+            if (queue.retired || queue.packets.size() >= max_packets_
+                || packet.data.size() > max_bytes_ - queue.bytes) {
                 ++queue.dropped;
                 continue;
             }

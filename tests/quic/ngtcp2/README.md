@@ -227,3 +227,18 @@ These include process startup, handshake and transfer; they are not network RTT.
 `quic-throughput-workers-v4.txt` and `-v6.txt` preserve the listener acceptance
 and receiver-queue drop counters after each family. Inspect these to confirm
 owner coverage and account for overload rather than silently excluding it.
+
+### Configurable worker inbox capacities
+
+`settings.tuning.quic_inbox_packets` (default 16384, range 1..1048576) and
+`settings.tuning.quic_inbox_bytes` (default 16777216, range 1024..1073741824)
+limit each QUIC worker inbox independently. The byte limit counts datagram
+payload, excluding queue metadata and kernel socket storage. Allocation grows
+on demand; neither value reserves the full capacity at startup.
+
+The first exhausted limit drops the incoming packet. These settings apply to
+both backends when using multiple workers; a single worker reads its socket
+directly and has no dispatcher inbox. Restart after changing them: an existing
+receiver retains its original limits. Four workers per IPv4/IPv6 family can
+therefore queue up to 128 MiB of payload with the defaults. Socket receive
+buffers are separate and are not changed by these settings.

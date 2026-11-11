@@ -405,6 +405,14 @@ void CfgValueHelp::init() {
     add("settings.tuning.host_io_batch", "maximum bytes drained by one host I/O dispatch")
             .may_be_empty(false)
             .value_filter(VALUE_UINT_RANGE<16384,16777216>);
+    add("settings.tuning.quic_inbox_packets", "QUIC ingress packet limit per worker")
+            .help_quick("<number>: 1..1048576 packets per worker; restart required; multi-worker listeners only")
+            .may_be_empty(false)
+            .value_filter(VALUE_UINT_RANGE<1,1048576>);
+    add("settings.tuning.quic_inbox_bytes", "QUIC ingress payload byte limit per worker")
+            .help_quick("<bytes>: 1024..1073741824 per worker; allocated on demand; restart required; multi-worker listeners only")
+            .may_be_empty(false)
+            .value_filter(VALUE_UINT_RANGE<1024,1073741824>);
     add("settings.tuning.tls_write_chunk", "maximum plaintext bytes offered to one SSL_write")
             .may_be_empty(false)
             .value_filter(VALUE_UINT_RANGE<1024,1048576>);

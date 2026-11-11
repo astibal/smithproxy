@@ -868,7 +868,7 @@ TEST(QuicDatagramBatch, PreservesPayloadAndDestinationAcrossReusedSlots) {
 }
 
 TEST(QuicWorkerDispatcher, BatchPreservesOrderLimitsAndLevelTriggeredWakeups) {
-    quic::worker_dispatcher receiver(2);
+    quic::worker_dispatcher receiver(2, 1024, 4 * 1024 * 1024);
     std::array<quic::datagram_packet, 6> input;
     for (size_t i = 0; i < input.size(); ++i) {
         input[i].local = worker_test_address(i % 2 ? "198.18.20.1" : "198.18.20.2");
@@ -987,7 +987,7 @@ TEST(QuicWorkerDispatcher, PreservesOwnerAndMetadataAcrossClientAndPortChanges) 
 }
 
 TEST(QuicWorkerDispatcher, BoundsQueuesAndNeverStealsFromRetiredOwners) {
-    quic::worker_dispatcher receiver(2);
+    quic::worker_dispatcher receiver(2, 1024, 4 * 1024 * 1024);
     quic::datagram_packet packet;
     packet.local = worker_test_address("198.18.20.1");
     packet.peer = worker_test_address("10.0.0.1");
@@ -1106,5 +1106,26 @@ TEST(QuicWorkerDispatcher, DoesNotLoseWakeupsWhileProducerAndConsumerOverlap) {
     }
     EXPECT_FALSE(inbox_readable(receiver, owner));
     EXPECT_EQ(receiver.dropped(owner), 0U);
+}
+
+// Small independent ceilings make both saturation paths observable without
+// depending on production defaults. Draining must immediately restore room.
+TEST(QuicWorkerDispatcher, AppliesIndependentConfiguredCapacities) {
+    EXPECT_THROW(quic::worker_dispatcher(1, 0, 8), std::invalid_argument);
+    EXPECT_THROW(quic::worker_dispatcher(1, 3, 0), std::invalid_argument);
+    quic::worker_dispatcher receiver(1, 3, 8);
+    quic::datagram_packet packet;
+    packet.local = worker_test_address("198.18.20.1");
+    packet.data.resize(4);
+    ASSERT_TRUE(receiver.enqueue(packet));
+    ASSERT_TRUE(receiver.enqueue(packet));
+    EXPECT_FALSE(receiver.enqueue(packet)); // Byte cap, despite a free slot.
+    quic::datagram_packet output;
+    ASSERT_TRUE(receiver.pop(0, output));
+    packet.data.resize(1);
+    ASSERT_TRUE(receiver.enqueue(packet));
+    ASSERT_TRUE(receiver.enqueue(packet));
+    EXPECT_FALSE(receiver.enqueue(packet)); // Packet cap, despite free bytes.
+    EXPECT_EQ(receiver.dropped(0), 2U);
 }
 #endif

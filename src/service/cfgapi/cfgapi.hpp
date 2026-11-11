@@ -307,6 +307,10 @@ public:
     int num_workers_tls = 0;
     int num_workers_dtls = 0;
     int num_workers_quic = -1;
+    // Per-worker ingress ceilings, copied when QUIC listeners are created.
+    // Payload storage grows on demand; these values do not reserve memory.
+    int quic_inbox_packets = 16384;
+    int quic_inbox_bytes = 16 * 1024 * 1024;
     int num_workers_udp  = 0;
     int num_workers_socks = 0;
     int num_workers_http_connect = 0;

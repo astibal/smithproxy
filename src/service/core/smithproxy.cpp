@@ -172,7 +172,8 @@ bool SmithProxy::create_quic_listeners() {
     std::vector<std::unique_ptr<sx::quic::listener_service>> prepared;
     for (int family : {AF_INET, AF_INET6}) {
         auto receiver = workers > 1
-            ? std::make_shared<sx::quic::worker_dispatcher>(workers) : nullptr;
+            ? std::make_shared<sx::quic::worker_dispatcher>(workers,
+                CfgFactory::get()->quic_inbox_packets, CfgFactory::get()->quic_inbox_bytes) : nullptr;
         for (unsigned worker = 0; worker < workers; ++worker) {
             auto credentials = quic_credentials();
             auto service = std::make_unique<sx::quic::listener_service>(
