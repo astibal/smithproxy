@@ -22,6 +22,7 @@
 #include <unistd.h>
 #include <sslcertstore.hpp>
 #include <sslmitmcom.hpp>
+#include "service/quic/certificate_verifier.hpp"
 #endif
 
 namespace sx::quic {
@@ -140,8 +141,8 @@ listener_service::listener_service(std::uint16_t port, std::string certificate,
                                    bool capture_native,
                                    proxymaker::SessionSetupFactory setup_factory,
                                    std::optional<std::string> certificate_pem,
-                                   std::optional<std::string> private_key_pem)
-    : port_(port), certificate_(std::move(certificate)),
+                                   std::optional<std::string> private_key_pem, int address_family)
+    : address_family_(address_family), port_(port), certificate_(std::move(certificate)),
       private_key_(std::move(private_key)),
       certificate_pem_(std::move(certificate_pem)),
       private_key_pem_(std::move(private_key_pem)), transparent_(transparent),
@@ -251,7 +252,9 @@ bool listener_service::open_socket() {
     if (wake_fd_ < 0) {
         return fail_open(std::string("eventfd: ") + std::strerror(errno));
     }
-    udp_fd_ = ::socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
+    if (address_family_ != AF_INET && address_family_ != AF_INET6)
+        return fail_open("unsupported QUIC listener address family");
+    udp_fd_ = ::socket(address_family_, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
     if (udp_fd_ < 0) {
         return fail_open(std::string("socket: ") + std::strerror(errno));
     }
@@ -260,12 +263,18 @@ bool listener_service::open_socket() {
     if (::setsockopt(udp_fd_, SOL_SOCKET, SO_REUSEADDR, &enabled, sizeof(enabled)) != 0) {
         return fail_open(std::string("SO_REUSEADDR: ") + std::strerror(errno));
     }
+    if (address_family_ == AF_INET6
+        && ::setsockopt(udp_fd_, SOL_IPV6, IPV6_V6ONLY, &enabled, sizeof(enabled)) != 0)
+        return fail_open(std::string("IPV6_V6ONLY: ") + std::strerror(errno));
+    int const level = address_family_ == AF_INET ? SOL_IP : SOL_IPV6;
+    int const transparent_option = address_family_ == AF_INET ? IP_TRANSPARENT : IPV6_TRANSPARENT;
+    int const destination_option = address_family_ == AF_INET ? IP_RECVORIGDSTADDR : IPV6_RECVORIGDSTADDR;
     if (transparent_
-        && ::setsockopt(udp_fd_, SOL_IP, IP_TRANSPARENT, &enabled, sizeof(enabled)) != 0) {
+        && ::setsockopt(udp_fd_, level, transparent_option, &enabled, sizeof(enabled)) != 0) {
         return fail_open(std::string("IP_TRANSPARENT: ") + std::strerror(errno));
     }
     if (transparent_
-        && ::setsockopt(udp_fd_, SOL_IP, IP_RECVORIGDSTADDR,
+        && ::setsockopt(udp_fd_, level, destination_option,
                         &enabled, sizeof(enabled)) != 0) {
         return fail_open(std::string("IP_RECVORIGDSTADDR: ") + std::strerror(errno));
     }
@@ -275,18 +284,28 @@ bool listener_service::open_socket() {
         return fail_open(std::string("O_NONBLOCK: ") + std::strerror(errno));
     }
 
-    sockaddr_in address {};
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = htonl(INADDR_ANY);
-    address.sin_port = htons(port_);
-    if (::bind(udp_fd_, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
+    sockaddr_storage address {};
+    socklen_t address_size = 0;
+    if (address_family_ == AF_INET) {
+        auto* ipv4 = reinterpret_cast<sockaddr_in*>(&address);
+        ipv4->sin_family = AF_INET;
+        ipv4->sin_addr.s_addr = htonl(INADDR_ANY);
+        ipv4->sin_port = htons(port_);
+        address_size = sizeof(*ipv4);
+    } else {
+        auto* ipv6 = reinterpret_cast<sockaddr_in6*>(&address);
+        ipv6->sin6_family = AF_INET6;
+        ipv6->sin6_addr = in6addr_any;
+        ipv6->sin6_port = htons(port_);
+        address_size = sizeof(*ipv6);
+    }
+    if (::bind(udp_fd_, reinterpret_cast<sockaddr*>(&address), address_size) != 0)
         return fail_open(std::string("bind: ") + std::strerror(errno));
-    }
-    socklen_t address_size = sizeof(address);
-    if (::getsockname(udp_fd_, reinterpret_cast<sockaddr*>(&address), &address_size) != 0) {
+    if (::getsockname(udp_fd_, reinterpret_cast<sockaddr*>(&address), &address_size) != 0)
         return fail_open(std::string("getsockname: ") + std::strerror(errno));
-    }
-    bound_port_ = ntohs(address.sin_port);
+    bound_port_ = address_family_ == AF_INET
+        ? ntohs(reinterpret_cast<sockaddr_in*>(&address)->sin_port)
+        : ntohs(reinterpret_cast<sockaddr_in6*>(&address)->sin6_port);
     log().dia("socket ready on udp/*:%u transparent=%d", bound_port_, transparent_);
     return true;
 #else
@@ -737,8 +756,11 @@ void listener_service::progress_handshake(
 
     // The same upstream supplies the certificate and carries application data.
     // Keep this guard for resumed downstreams, which skip certificate callbacks.
-    if (verify_upstream_
-        && SSL_get_verify_result(value.upstream->native_handle()) != X509_V_OK) {
+    auto* verifier = certificate_verifier::get(value.upstream->native_handle());
+    int const verdict = verifier ? verifier->progress(value.upstream->native_handle())
+        : (SSL_get_verify_result(value.upstream->native_handle()) == X509_V_OK ? 1 : -1);
+    if (verify_upstream_ && verdict == 0) return;
+    if (verify_upstream_ && verdict < 0) {
         ++upstream_failures_;
         log().war("session %llu forwarding upstream verification failed",
                   static_cast<unsigned long long>(value.id));
@@ -937,6 +959,12 @@ static tls_snapshot snapshot_tls(SSL* ssl) {
     result.verify_peer = (SSL_get_verify_mode(ssl) & SSL_VERIFY_PEER) != 0;
     result.verify_result = SSL_get_verify_result(ssl);
     result.verify_error = X509_verify_cert_error_string(result.verify_result);
+    if (result.established) {
+        if (auto* verifier = certificate_verifier::get(ssl)) {
+            if (verifier->verdict() == 0) result.verify_error = "certificate policy pending";
+            else if (verifier->verdict() < 0) result.verify_error = "certificate policy rejected";
+        }
+    }
 
     // Before completion, OpenSSL may report a version that was not negotiated.
     if (!result.established) return result;
@@ -971,12 +999,17 @@ std::string listener_service::handshake_phase(session const& value) const {
             switch (job->second.state) {
             case certificate_state::queued: return "upstream-connect";
             case certificate_state::upstream_handshake: return "upstream-handshake";
+            case certificate_state::certificate_check: return "upstream-certificate-check";
             case certificate_state::certificate_ready: return "certificate-install";
             case certificate_state::failed: return "upstream-failed";
             }
         }
     }
     if (value.upstream && !value.upstream->handshake_complete()) return "upstream-handshake";
+    if (value.upstream) {
+        auto* verifier = certificate_verifier::get(value.upstream->native_handle());
+        if (verifier && verifier->verdict() == 0) return "upstream-certificate-check";
+    }
     if (value.downstream && !value.downstream->handshake_complete()) return "downstream-handshake";
     return value.upstream ? "bridge-setup" : "upstream-connect";
 }
@@ -1137,37 +1170,69 @@ int listener_service::client_hello_callback(SSL* ssl, int* alert, void* argument
     return SSL_CLIENT_HELLO_ERROR;
 }
 
+// Resolve policy once for this ClientHello and scope its session tickets to the
+// certificate rules. False rejects admission; callback re-entry reuses the snapshot.
 bool listener_service::prepare_tls_policy(SSL* downstream) {
-
     const bool associated = bind_capture_session(downstream) != 0;
-    if(!setup_factory_) return true; // Standalone transport fixtures have no policy provider.
-    if(!associated) return !transparent_; // Direct socket fixtures have no dispatcher tuple.
+    if (!setup_factory_) {
+        return true; // Standalone transport fixtures have no policy provider.
+    }
+    if (!associated) {
+        return !transparent_; // Direct socket fixtures have no dispatcher tuple.
+    }
 
     auto& binding = dispatcher_bindings_.at(downstream);
-    if(binding.setup) return true; // Callback re-entry must retain the same policy snapshot.
+    if (binding.setup) {
+        return true;
+    }
 
     auto const [source_host, source_port] = endpoint_parts(binding.client);
     auto const [target_host, target_port] = endpoint_parts(binding.destination);
-    if(source_host.empty() || target_host.empty()) return false;
+    if (source_host.empty() || target_host.empty()) {
+        return false;
+    }
 
     auto setup = setup_factory_(source_host, source_port);
-    if(setup) setup->ingress_ifindex(binding.ingress_ifindex);
+    if (setup) {
+        setup->ingress_ifindex(binding.ingress_ifindex);
+    }
     auto policy = setup ? setup->tls_policy(target_host, target_port) : std::nullopt;
-    if(!policy) return false;
+    if (!policy) {
+        return false;
+    }
 
     // QUIC requires TLS 1.3 key exchange and an application protocol. Refuse
     // incompatible profiles rather than silently relaxing either restriction.
-    if(!policy->use_pfs || policy->alpn_block) {
+    if (!policy->use_pfs || policy->alpn_block) {
         log().war("QUIC TLS profile rejects target=%s:%s: pfs=%d alpn-block=%d",
                   target_host.c_str(), target_port.c_str(), policy->use_pfs, policy->alpn_block);
         return false;
     }
 
-    if(policy->disable_reuse) {
+    // Tickets issued under a certificate exception must not bypass a stricter
+    // profile (including custom-only identity selection) after policy changes.
+    std::array<unsigned char, 13> const certificate_scope {{
+        'Q', 'C', 1,
+        static_cast<unsigned char>(policy->allow_self_signed),
+        static_cast<unsigned char>(policy->allow_invalid_certs),
+        static_cast<unsigned char>(policy->allow_untrusted_issuers),
+        static_cast<unsigned char>(policy->ct_enable),
+        static_cast<unsigned char>(policy->ocsp_stapling),
+        static_cast<unsigned char>(policy->ocsp_stapling_mode),
+        static_cast<unsigned char>(policy->ocsp_mode),
+        static_cast<unsigned char>(policy->sni_based_cert),
+        static_cast<unsigned char>(policy->ip_based_cert),
+        static_cast<unsigned char>(policy->only_custom_certs)
+    }};
+    if (SSL_set_session_id_context(downstream, certificate_scope.data(), certificate_scope.size()) != 1) {
+        return false;
+    }
+
+    if (policy->disable_reuse) {
         // Stop new tickets and isolate this handshake from tickets previously
         // issued under a permissive profile in the shared listener context.
         static constexpr unsigned char no_reuse[] = "smithproxy-quic-no-reuse";
-        if(SSL_set_num_tickets(downstream, 0) != 1 ||
+        if (SSL_set_num_tickets(downstream, 0) != 1 ||
            SSL_set_session_id_context(downstream, no_reuse, sizeof(no_reuse) - 1) != 1) {
             log().war("QUIC TLS profile cannot disable downstream session reuse");
             return false;
@@ -1243,7 +1308,8 @@ int listener_service::prepare_verified_certificate(SSL* downstream) {
         }
 
         if (job.state == certificate_state::queued
-            || job.state == certificate_state::upstream_handshake) return -1;
+            || job.state == certificate_state::upstream_handshake
+            || job.state == certificate_state::certificate_check) return -1;
         if (job.state == certificate_state::failed) return 0;
         if (!install_verified_certificate(downstream, job.result)) {
             ++upstream_failures_;
@@ -1334,6 +1400,9 @@ int listener_service::prepare_verified_certificate(SSL* downstream) {
     return -1;
 }
 
+// Advance each pending certificate request on the listener thread. A job keeps
+// its upstream connection for forwarding; only revocation checks leave this thread.
+// OpenSSL's downstream certificate callback consumes the ready/failed state later.
 void listener_service::progress_certificate_jobs() {
     for (auto& [downstream, job] : certificate_jobs_) {
         if (job.state == certificate_state::certificate_ready
@@ -1361,28 +1430,55 @@ void listener_service::progress_certificate_jobs() {
         job.state = certificate_state::upstream_handshake;
         job.upstream->progress_transport();
         if (job.upstream->closed()) {
+            log().war("QUIC upstream handshake rejected sni='%s' verify=%ld",
+                      job.server_name.c_str(), SSL_get_verify_result(job.upstream->native_handle()));
             hook_outcome(job.setup.get(), job.upstream->native_handle(), false,
                          "QUIC upstream handshake failed");
             ++upstream_failures_;
             job.state = certificate_state::failed;
             continue;
         }
-        if (!job.upstream->handshake_complete()) continue;
+        if (!job.upstream->handshake_complete()) {
+            continue;
+        }
+
+        // TLS completion alone is not admission: OCSP/CRL policy may still be
+        // pending in the pool. Keep the downstream certificate callback waiting.
+        auto* verifier = certificate_verifier::get(job.upstream->native_handle());
+        int const verdict = verifier ? verifier->progress(job.upstream->native_handle()) : 1;
+        if (verdict == 0) {
+            job.state = certificate_state::certificate_check;
+            continue;
+        }
+        if (verdict < 0) {
+            log().war("QUIC certificate policy rejected sni='%s'", job.server_name.c_str());
+            job.upstream->close(1);
+            ++upstream_failures_;
+            job.state = certificate_state::failed;
+            continue;
+        }
         if (hook_outcome(job.setup.get(), job.upstream->native_handle(), false)) {
             job.result = verify_and_spoof(job.upstream, job.destination, job.server_name);
         }
-        if (!job.result.certificate) ++upstream_failures_;
+        if (!job.result.certificate) {
+            ++upstream_failures_;
+        }
         job.state = job.result.certificate ? certificate_state::certificate_ready
                                            : certificate_state::failed;
     }
 }
 
+// Select the downstream identity only after authenticating the retained upstream.
+// Prefer a configured identity, then a cached/generated MITM certificate. An empty
+// result rejects the handshake and closes the upstream rather than forwarding data.
 listener_service::verified_certificate listener_service::verify_and_spoof(
     std::shared_ptr<openssl_connection> const& upstream,
     datagram_endpoint destination, std::string const& server_name) {
     verified_certificate verified;
+    auto* verifier = certificate_verifier::get(upstream->native_handle());
     if (!upstream->handshake_complete()
-        || SSL_get_verify_result(upstream->native_handle()) != X509_V_OK) {
+        || (verifier ? verifier->progress(upstream->native_handle()) != 1
+            : SSL_get_verify_result(upstream->native_handle()) != X509_V_OK)) {
         log().war("upstream verification failed sni='%s' target=%s verify=%ld",
                   server_name.c_str(), endpoint_text(destination).c_str(),
                   SSL_get_verify_result(upstream->native_handle()));
@@ -1417,11 +1513,17 @@ listener_service::verified_certificate listener_service::verify_and_spoof(
 
     SpoofOptions options;
     options.sni = server_name;
+    options.self_signed = verifier && !verifier->trusted();
     auto& factory = SSLFactory::factory();
     auto const store_key = SSLFactory::make_store_key(certificate, options);
     auto lock = std::scoped_lock(factory.lock());
+
+    // The factory owns its cached objects. Hold independent references so the
+    // selected identity survives cache eviction and the downstream handshake.
     auto retain = [&verified](X509* cert, EVP_PKEY* key) {
-        if (!cert || !key || X509_up_ref(cert) != 1) return false;
+        if (!cert || !key || X509_up_ref(cert) != 1) {
+            return false;
+        }
         if (EVP_PKEY_up_ref(key) != 1) {
             X509_free(cert);
             return false;
@@ -1430,10 +1532,46 @@ listener_service::verified_certificate listener_service::verify_and_spoof(
         verified.private_key = std::shared_ptr<EVP_PKEY>(key, EVP_PKEY_free);
         return true;
     };
+    // Match TLS selection order: SNI first, destination IP second. Custom-only
+    // policy must fail here if neither source provides a usable identity.
+    auto const policy = verifier ? verifier->policy() : proxymaker::QuicTlsPolicy {};
+    auto custom = [&]() -> std::optional<const CertificateChainCtx> {
+        if (policy.sni_based_cert) {
+            auto match = factory.find_custom("sni:" + server_name);
+            if (match) {
+                return match;
+            }
+        }
+        if (policy.ip_based_cert && destination.valid()) {
+            return factory.find_custom("ip:" + endpoint_parts(destination).first);
+        }
+        return std::nullopt;
+    }();
+    if (custom && retain(custom->chain.cert, custom->chain.key)) {
+        for (auto* issuer : custom->chain.issuers) {
+            if (!issuer) {
+                continue;
+            }
+            if (X509_up_ref(issuer) != 1) {
+                X509_free(certificate);
+                upstream->close(1);
+                return {};
+            }
+            verified.issuers.emplace_back(issuer, X509_free);
+        }
+        X509_free(certificate);
+        return verified;
+    }
+    if (policy.only_custom_certs) {
+        log().war("QUIC certificate policy rejected sni='%s': custom identity required", server_name.c_str());
+        X509_free(certificate);
+        upstream->close(1);
+        return {};
+    }
     auto cached = factory.find_mitm(store_key);
     bool ready = cached && retain(cached->chain.cert, cached->chain.key);
     if (!ready) {
-        auto forged = factory.spoof(certificate, false, nullptr);
+        auto forged = factory.spoof(certificate, options.self_signed, nullptr);
         if (forged && forged->chain.cert && forged->chain.key) {
             ready = retain(forged->chain.cert, forged->chain.key);
             // ptr_cache uses allocator state tied to the allocating thread.
@@ -1455,12 +1593,22 @@ listener_service::verified_certificate listener_service::verify_and_spoof(
     return verified;
 }
 
+// Install the selected leaf, key and intermediates on the downstream SSL.
+// SSL takes its own references; false prevents completing a partial identity.
 bool listener_service::install_verified_certificate(
     SSL* downstream, verified_certificate const& verified) {
-    return downstream && verified.certificate && verified.private_key
-        && SSL_use_certificate(downstream, verified.certificate.get()) == 1
-        && SSL_use_PrivateKey(downstream, verified.private_key.get()) == 1
-        && SSL_check_private_key(downstream) == 1;
+    if (!downstream || !verified.certificate || !verified.private_key
+        || SSL_use_certificate(downstream, verified.certificate.get()) != 1
+        || SSL_use_PrivateKey(downstream, verified.private_key.get()) != 1
+        || SSL_check_private_key(downstream) != 1 || SSL_clear_chain_certs(downstream) != 1) {
+        return false;
+    }
+    for (auto const& issuer : verified.issuers) {
+        if (SSL_add1_chain_cert(downstream, issuer.get()) != 1) {
+            return false;
+        }
+    }
+    return true;
 }
 
 std::shared_ptr<openssl_connection> listener_service::connect_upstream(
@@ -1486,7 +1634,11 @@ std::shared_ptr<openssl_connection> listener_service::connect_upstream(
         auto const [target_host, target_port] = endpoint_parts(target);
         auto connection = proxymaker::connect(setup, target_host, target_port, [&] {
             return connect_with_hooks(client_context_.get(), current->ai_addr,
-                                      current->ai_addrlen, host, &error, setup);
+                                      current->ai_addrlen, host, &error, setup, [&](SSL* ssl) {
+                auto policy = setup ? setup->tls_policy(target_host, target_port)
+                    : std::optional {proxymaker::QuicTlsPolicy {}};
+                return policy && (!verify_upstream_ || certificate_verifier::install(ssl, *policy));
+            });
         });
         if (connection) result = std::shared_ptr<openssl_connection>(std::move(connection));
     }
@@ -1503,7 +1655,11 @@ std::shared_ptr<openssl_connection> listener_service::connect_upstream(
     auto connection = proxymaker::connect(setup, host, port, [&] {
         return connect_with_hooks(
             client_context_.get(), reinterpret_cast<sockaddr const*>(&target.address),
-            target.size, server_name, &error, setup);
+            target.size, server_name, &error, setup, [&](SSL* ssl) {
+                auto policy = setup ? setup->tls_policy(host, port)
+                    : std::optional {proxymaker::QuicTlsPolicy {}};
+                return policy && (!verify_upstream_ || certificate_verifier::install(ssl, *policy));
+            });
     });
     return connection
         ? std::shared_ptr<openssl_connection>(std::move(connection))

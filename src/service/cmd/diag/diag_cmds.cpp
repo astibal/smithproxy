@@ -1826,8 +1826,9 @@ static void print_quic_sessions(DiagCli* cli, int flags, bool listener_summary, 
 
         if (listener_summary) {
             auto const counters = service->diagnostics();
-            cli_print(cli, "QUIC listener[%zu]: udp/*:%u, sessions: %zu, accepted: %llu, completed: %llu",
-                      listener, service->bound_port(), sessions.size(),
+            cli_print(cli, "QUIC listener[%zu]: udp/%s:%u, sessions: %zu, accepted: %llu, completed: %llu",
+                      listener, service->address_family() == AF_INET6 ? "[::]" : "0.0.0.0",
+                      service->bound_port(), sessions.size(),
                       static_cast<unsigned long long>(counters.accepted_sessions),
                       static_cast<unsigned long long>(counters.completed_sessions));
         }

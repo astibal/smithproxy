@@ -4,6 +4,7 @@
 #include <vector>
 #include <optional>
 #include <memory>
+#include <functional>
 #include <sys/socket.h>
 #include <openssl/ssl.h>
 
@@ -37,9 +38,13 @@ struct Hooks {
 };
 
 class openssl_connection;
+
+// Apply the hook offer, then configure the upstream SSL before it sends an
+// Initial. A rejected hook/configuration returns null and reports the error.
 std::unique_ptr<openssl_connection> connect_with_hooks(
     SSL_CTX* context, const sockaddr* peer, socklen_t size,
-    const std::string& server_name, std::string* error, proxymaker::SessionSetup* setup);
+    const std::string& server_name, std::string* error, proxymaker::SessionSetup* setup,
+    std::function<bool(SSL*)> const& configure = {});
 
 bool apply_hook_offer(SSL* ssl, const HookEvent& offer, const std::string& identity);
 

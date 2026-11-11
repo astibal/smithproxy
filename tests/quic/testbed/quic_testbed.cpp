@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include "../../tls/ocsp_fixture.hpp"
 
 #include "proxy/quic/openssl.hpp"
 #include "proxy/quic/wire.hpp"
@@ -157,6 +158,34 @@ bool create_test_pki() {
             return false;
         }
     }
+    auto intermediate_key = generate_rsa_key();
+    auto intermediate = generate_certificate(intermediate_key.get(), "Custom intermediate", ca.get(), ca_key.get(), 20, true);
+    auto custom = generate_certificate(leaf_key.get(), "localhost", intermediate.get(), intermediate_key.get(), 21, false);
+    if (!intermediate || !custom
+        || !write_certificate(pki_file("custom-cert.pem"), custom.get())
+        || !write_certificate(pki_file("custom-issuer.pem"), intermediate.get())) return false;
+    for (auto const* name : {"self_signed", "expired", "future", "untrusted"}) {
+        auto other_key = generate_rsa_key();
+        auto other_ca = generate_certificate(other_key.get(), "Untrusted CA", nullptr, nullptr, 10, true);
+        bool self = std::string(name) == "self_signed";
+        bool unknown = std::string(name) == "untrusted";
+        auto cert = generate_certificate(leaf_key.get(), "localhost",
+            self ? nullptr : unknown ? other_ca.get() : ca.get(),
+            self ? leaf_key.get() : unknown ? other_key.get() : ca_key.get(), 11, false);
+        if (!cert) return false;
+        if (std::string(name) == "expired") {
+            X509_gmtime_adj(X509_getm_notBefore(cert.get()), -172800);
+            X509_gmtime_adj(X509_getm_notAfter(cert.get()), -86400);
+        }
+        if (std::string(name) == "future") {
+            X509_gmtime_adj(X509_getm_notBefore(cert.get()), 86400);
+            X509_gmtime_adj(X509_getm_notAfter(cert.get()), 172800);
+        }
+        if (X509_sign(cert.get(), self ? leaf_key.get() : unknown ? other_key.get() : ca_key.get(),
+                      EVP_sha256()) <= 0
+            || !write_certificate(pki_file((std::string(name) + "-cert.pem").c_str()), cert.get())
+            || !write_key(pki_file((std::string(name) + "-key.pem").c_str()), leaf_key.get())) return false;
+    }
     return true;
 }
 
@@ -199,47 +228,96 @@ quic::unique_ssl_ctx make_verified_client_context() {
 
 class origin_server {
 public:
-    explicit origin_server(std::chrono::milliseconds initial_delay = 0ms, bool greeting = false)
+    explicit origin_server(std::chrono::milliseconds initial_delay = 0ms, bool greeting = false,
+                           std::string const& identity = {},
+                           std::optional<test_pki::ocsp_parameters> staple = {}, int family = AF_INET)
         : initial_delay_(initial_delay), greeting_(greeting) {
         context_ = quic::make_openssl_quic_context(true);
         if (!context_) return;
 
-        X509* source = nullptr;
-        BIO* input = BIO_new_file(pki_file("srv-cert.pem").c_str(), "r");
-        if (input) {
-            source = PEM_read_bio_X509(input, nullptr, nullptr, nullptr);
-            BIO_free(input);
-        }
-        if (!source) return;
+        if (!identity.empty()) {
+            if (SSL_CTX_use_certificate_chain_file(context_.get(),
+                    pki_file((identity + "-cert.pem").c_str()).c_str()) != 1
+                || SSL_CTX_use_PrivateKey_file(context_.get(),
+                    pki_file((identity + "-key.pem").c_str()).c_str(), SSL_FILETYPE_PEM) != 1) return;
+            certificate_fingerprint_ = fingerprint(SSL_CTX_get0_certificate(context_.get()));
+        } else {
+            X509* source = nullptr;
+            BIO* input = BIO_new_file(pki_file("srv-cert.pem").c_str(), "r");
+            if (input) {
+                source = PEM_read_bio_X509(input, nullptr, nullptr, nullptr);
+                BIO_free(input);
+            }
+            if (!source) return;
 
-        std::vector<std::string> additional_sans { "DNS:localhost" };
-        auto& factory = SSLFactory::factory();
-        std::optional<CertificateChainCtx> generated;
-        {
-            auto lock = std::scoped_lock(factory.lock());
-            generated = factory.spoof(source, false, &additional_sans);
-        }
-        X509_free(source);
-        if (!generated || !generated->chain.cert || !generated->chain.key) return;
+            std::vector<std::string> additional_sans { "DNS:localhost" };
+            auto& factory = SSLFactory::factory();
+            std::optional<CertificateChainCtx> generated;
+            {
+                auto lock = std::scoped_lock(factory.lock());
+                generated = factory.spoof(source, false, &additional_sans);
+            }
+            X509_free(source);
+            if (!generated || !generated->chain.cert || !generated->chain.key) return;
 
-        certificate_fingerprint_ = fingerprint(generated->chain.cert);
-        bool const installed = SSL_CTX_use_certificate(context_.get(), generated->chain.cert) == 1
-            && SSL_CTX_use_PrivateKey(context_.get(), generated->chain.key) == 1
-            && SSL_CTX_check_private_key(context_.get()) == 1;
-        X509_free(generated->chain.cert);
-        generated->nullify(); // SSLFactory::spoof() lends the factory's server key.
-        if (!installed) return;
+            certificate_fingerprint_ = fingerprint(generated->chain.cert);
+            bool const installed = SSL_CTX_use_certificate(context_.get(), generated->chain.cert) == 1
+                && SSL_CTX_use_PrivateKey(context_.get(), generated->chain.key) == 1
+                && SSL_CTX_check_private_key(context_.get()) == 1;
+            X509_free(generated->chain.cert);
+            generated->nullify(); // SSLFactory::spoof() lends the factory's server key.
+            if (!installed) return;
+        }
+        if (staple) {
+            BIO* cert_input = BIO_new_file(pki_file("ca-cert.pem").c_str(), "r");
+            BIO* key_input = BIO_new_file(pki_file("ca-key.pem").c_str(), "r");
+            unique_x509 issuer(cert_input ? PEM_read_bio_X509(cert_input, nullptr, nullptr, nullptr) : nullptr, X509_free);
+            unique_pkey key(key_input ? PEM_read_bio_PrivateKey(key_input, nullptr, nullptr, nullptr) : nullptr, EVP_PKEY_free);
+            BIO_free(cert_input);
+            BIO_free(key_input);
+            if (!issuer || !key) return;
+            auto [status, from, until, expected] = *staple;
+            auto response = test_pki::make_ocsp_response(issuer.get(), key.get(),
+                {{SSL_CTX_get0_certificate(context_.get()), status}}, from, until);
+            if (!response) return;
+            int size = i2d_OCSP_RESPONSE(response.get(), nullptr);
+            if (size <= 0) return;
+            staple_.resize(size);
+            auto* output = staple_.data();
+            if (i2d_OCSP_RESPONSE(response.get(), &output) != size) return;
+            SSL_CTX_set_tlsext_status_arg(context_.get(), this);
+            SSL_CTX_set_tlsext_status_cb(context_.get(), +[](SSL* ssl, void* arg) {
+                auto const& bytes = static_cast<origin_server*>(arg)->staple_;
+                auto* copy = static_cast<unsigned char*>(OPENSSL_memdup(bytes.data(), bytes.size()));
+                if (!copy) return SSL_TLSEXT_ERR_ALERT_FATAL;
+                if (SSL_set_tlsext_status_ocsp_resp(ssl, copy, bytes.size()) != 1) {
+                    OPENSSL_free(copy);
+                    return SSL_TLSEXT_ERR_ALERT_FATAL;
+                }
+                return SSL_TLSEXT_ERR_OK;
+            });
+        }
         SSL_CTX_set_alpn_select_cb(context_.get(), select_h3, nullptr);
 
-        fd_ = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        fd_ = socket(family, SOCK_DGRAM, IPPROTO_UDP);
         if (fd_ < 0 || !make_nonblocking(fd_)) return;
-        sockaddr_in address {};
-        address.sin_family = AF_INET;
-        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        if (bind(fd_, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) return;
-        socklen_t size = sizeof(address);
+        sockaddr_storage address {};
+        socklen_t size;
+        if (family == AF_INET) {
+            auto* ipv4 = reinterpret_cast<sockaddr_in*>(&address);
+            ipv4->sin_family = AF_INET;
+            ipv4->sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+            size = sizeof(*ipv4);
+        } else {
+            auto* ipv6 = reinterpret_cast<sockaddr_in6*>(&address);
+            ipv6->sin6_family = AF_INET6;
+            ipv6->sin6_addr = in6addr_loopback;
+            size = sizeof(*ipv6);
+        }
+        if (bind(fd_, reinterpret_cast<sockaddr*>(&address), size) != 0) return;
         if (getsockname(fd_, reinterpret_cast<sockaddr*>(&address), &size) != 0) return;
-        port_ = ntohs(address.sin_port);
+        port_ = family == AF_INET ? ntohs(reinterpret_cast<sockaddr_in*>(&address)->sin_port)
+            : ntohs(reinterpret_cast<sockaddr_in6*>(&address)->sin6_port);
         listener_ = quic::openssl_listener::create(context_.get(), fd_, false);
         if (!listener_) return;
         ready_ = true;
@@ -388,6 +466,7 @@ private:
     std::atomic_size_t greetings_sent_ = 0;
     std::vector<connection_state> connections_;
     std::vector<unsigned char> certificate_fingerprint_;
+    std::vector<unsigned char> staple_;
     std::atomic_size_t handshake_count_ = 0;
     std::atomic_size_t echoed_messages_ = 0;
     std::atomic_size_t received_bytes_ = 0;
@@ -884,6 +963,216 @@ TEST(QuicTestbed, ConcurrentVerifiedMitmSessionsAndStreams) {
     EXPECT_EQ(diagnostics.upstream_failures, 0U);
     EXPECT_EQ(diagnostics.alpn_failures, 0U);
 }
+
+quic::datagram_endpoint loopback_endpoint(int family, std::uint16_t port) {
+    quic::datagram_endpoint endpoint;
+    if (family == AF_INET) {
+        auto address = loopback(port);
+        std::memcpy(&endpoint.address, &address, sizeof(address));
+        endpoint.size = sizeof(address);
+    } else {
+        auto* address = reinterpret_cast<sockaddr_in6*>(&endpoint.address);
+        address->sin6_family = AF_INET6;
+        address->sin6_addr = in6addr_loopback;
+        address->sin6_port = htons(port);
+        endpoint.size = sizeof(*address);
+    }
+    return endpoint;
+}
+
+class CertificatePolicySetup final : public sx::proxymaker::SessionSetup {
+public:
+    sx::proxymaker::QuicTlsPolicy policy;
+    std::optional<sx::proxymaker::QuicTlsPolicy> tls_policy(
+        std::string const&, std::string const&) override { return policy; }
+    bool start(std::string const&, std::string const&) override { return true; }
+};
+
+class QuicCertificatePolicy : public ::testing::TestWithParam<std::string> {};
+
+TEST_P(QuicCertificatePolicy, EnforcesPolicyBeforeActivationAndData) {
+    auto name = GetParam();
+    int const family = name.find("_v6") != std::string::npos ? AF_INET6 : AF_INET;
+    if (family == AF_INET6) name.resize(name.size() - 3);
+    bool const allow = name.size() >= 6 && name.compare(name.size() - 6, 6, "_allow") == 0;
+    std::string identity;
+    for (auto const* kind : {"self_signed", "expired", "future", "untrusted"})
+        if (name.find(kind) == 0) identity = kind;
+    origin_server origin(0ms, false, identity, {}, family);
+    ASSERT_TRUE(origin.ready());
+    auto setup = std::make_shared<CertificatePolicySetup>();
+    setup->policy.allow_self_signed = allow && identity == "self_signed";
+    setup->policy.allow_invalid_certs = allow && (identity == "expired" || identity == "future");
+    setup->policy.allow_untrusted_issuers = allow && identity == "untrusted";
+    setup->policy.ct_enable = name == "require_ct";
+    setup->policy.ocsp_stapling = name == "require_staple";
+    setup->policy.ocsp_stapling_mode = name == "require_staple" ? 2 : 0;
+    setup->policy.only_custom_certs = name == "configured_identity_only";
+    setup->policy.sni_based_cert = setup->policy.ip_based_cert = false;
+    quic::lifecycle_options lifecycle;
+    lifecycle.handshake_timeout = 3s;
+    lifecycle.drain_timeout = 50ms;
+    quic::listener_service proxy(0, pki_file("srv-cert.pem"), pki_file("srv-key.pem"), false,
+        origin.port(), true, lifecycle, {}, family == AF_INET ? "127.0.0.1" : "::1", {}, false,
+        [setup](auto const&, auto const&) { return setup; }, {}, {}, family);
+    ASSERT_TRUE(proxy.prepare()) << proxy.last_error();
+    running_service runner(proxy);
+    auto context = make_verified_client_context();
+    ASSERT_NE(context, nullptr);
+    // Like the TLS matrix, distinguish proxy admission from downstream trust.
+    // Allowed upstream exceptions must retain an untrusted forged identity.
+    if (allow) SSL_CTX_set_verify(context.get(), SSL_VERIFY_NONE, nullptr);
+    auto const address = loopback_endpoint(family, proxy.bound_port());
+    auto client = quic::connect_openssl_quic(context.get(),
+        reinterpret_cast<sockaddr const*>(&address.address), address.size, test_sni);
+    ASSERT_NE(client, nullptr);
+    bool const accepted = allow || name == "baseline";
+    bool active = false;
+    auto const deadline = std::chrono::steady_clock::now() + 4s;
+    while (std::chrono::steady_clock::now() < deadline) {
+        client->drain_events();
+        for (auto const& snapshot : proxy.session_diagnostics()) {
+            active |= snapshot.state == "active";
+            if (!accepted) { EXPECT_EQ(snapshot.forwarded_bytes, 0U); }
+        }
+        if (accepted && client->handshake_complete() && active) break;
+        if (!accepted && proxy.diagnostics().upstream_failures > 0 && proxy.connection_count() == 0) break;
+        std::this_thread::sleep_for(1ms);
+    }
+    EXPECT_EQ(active, accepted);
+    EXPECT_EQ(client->handshake_complete(), accepted);
+    if (accepted) {
+        EXPECT_EQ(proxy.diagnostics().upstream_failures, 0U);
+        if (allow) {
+            unique_x509 peer(SSL_get1_peer_certificate(client->native_handle()), X509_free);
+            ASSERT_NE(peer, nullptr);
+            EXPECT_EQ(X509_NAME_cmp(X509_get_subject_name(peer.get()),
+                                    X509_get_issuer_name(peer.get())), 0);
+            unique_pkey public_key(X509_get_pubkey(peer.get()), EVP_PKEY_free);
+            ASSERT_NE(public_key, nullptr);
+            EXPECT_EQ(X509_verify(peer.get(), public_key.get()), 1);
+        }
+        auto flow = client->open_flow(mf::direction::bidirectional);
+        ASSERT_NE(flow.generation, 0U);
+        std::string received;
+        bool sent = false;
+        auto const transfer_deadline = std::chrono::steady_clock::now() + 2s;
+        while (received.size() < 4 && std::chrono::steady_clock::now() < transfer_deadline) {
+            client->drain_events();
+            if (!sent) sent = client->write(flow, "test", 4).size == 4;
+            unsigned char data[4];
+            auto read = client->read(flow, data, sizeof(data));
+            received.append(reinterpret_cast<char*>(data), read.size);
+            std::this_thread::sleep_for(1ms);
+        }
+        EXPECT_EQ(received, "test");
+        EXPECT_EQ(origin.handshake_count(), 1U);
+    } else {
+        EXPECT_GT(proxy.diagnostics().upstream_failures, 0U);
+        EXPECT_EQ(proxy.diagnostics().handshake_timeouts, 0U);
+        EXPECT_EQ(proxy.connection_count(), 0U);
+        EXPECT_EQ(origin.received_bytes(), 0U);
+    }
+    client->close();
+}
+
+INSTANTIATE_TEST_SUITE_P(TlsParity, QuicCertificatePolicy, ::testing::Values(
+    "baseline", "self_signed_reject", "self_signed_allow", "expired_reject", "expired_allow",
+    "future_reject", "future_allow", "untrusted_reject", "untrusted_allow", "require_staple",
+    "require_ct", "configured_identity_only",
+    "baseline_v6", "self_signed_reject_v6", "self_signed_allow_v6", "expired_reject_v6", "expired_allow_v6",
+    "future_reject_v6", "future_allow_v6", "untrusted_reject_v6", "untrusted_allow_v6", "require_staple_v6",
+    "require_ct_v6", "configured_identity_only_v6"),
+    [](auto const& info) { return info.param; });
+
+TEST(QuicTestbed, ConfiguredIdentityIncludesIntermediateChain) {
+    auto context = quic::make_openssl_quic_context(true);
+    ASSERT_EQ(SSL_CTX_use_certificate_chain_file(context.get(), pki_file("custom-cert.pem").c_str()), 1);
+    ASSERT_EQ(SSL_CTX_use_PrivateKey_file(context.get(), pki_file("srv-key.pem").c_str(), SSL_FILETYPE_PEM), 1);
+    BIO* input = BIO_new_file(pki_file("custom-issuer.pem").c_str(), "r");
+    unique_x509 issuer(input ? PEM_read_bio_X509(input, nullptr, nullptr, nullptr) : nullptr, X509_free);
+    BIO_free(input);
+    ASSERT_NE(issuer, nullptr);
+    CertificateChainCtx entry(SSL_CTX_get0_privatekey(context.get()), SSL_CTX_get0_certificate(context.get()), issuer.get());
+    auto& factory = SSLFactory::factory();
+    ASSERT_TRUE(factory.add_custom("sni:localhost", entry));
+    entry.nullify(); // add_custom retains its own references; context/issuer own these.
+    struct clear_cache {
+        ~clear_cache() { SSLFactory::factory().cache_custom().clear(); }
+    } cleanup;
+    auto const expected = fingerprint(SSL_CTX_get0_certificate(context.get()));
+    for (int family : {AF_INET, AF_INET6}) {
+        origin_server origin(0ms, false, {}, {}, family);
+        ASSERT_TRUE(origin.ready());
+        auto setup = std::make_shared<CertificatePolicySetup>();
+        setup->policy.only_custom_certs = true;
+        setup->policy.ip_based_cert = false;
+        quic::listener_service proxy(0, pki_file("srv-cert.pem"), pki_file("srv-key.pem"), false,
+            origin.port(), true, {}, {}, family == AF_INET ? "127.0.0.1" : "::1", {}, false,
+            [setup](auto const&, auto const&) { return setup; }, {}, {}, family);
+        ASSERT_TRUE(proxy.prepare());
+        running_service runner(proxy);
+        auto client_context = make_verified_client_context();
+        auto const address = loopback_endpoint(family, proxy.bound_port());
+        auto client = quic::connect_openssl_quic(client_context.get(),
+            reinterpret_cast<sockaddr const*>(&address.address), address.size, test_sni);
+        ASSERT_NE(client, nullptr);
+        ASSERT_TRUE(await_handshake(*client));
+        EXPECT_EQ(SSL_get_verify_result(client->native_handle()), X509_V_OK);
+        unique_x509 certificate(SSL_get1_peer_certificate(client->native_handle()), X509_free);
+        EXPECT_EQ(fingerprint(certificate.get()), expected);
+        EXPECT_GE(sk_X509_num(SSL_get_peer_cert_chain(client->native_handle())), 2);
+        client->close();
+    }
+}
+
+class QuicOcspPolicy : public ::testing::TestWithParam<std::tuple<test_pki::ocsp_parameters, int>> {};
+
+TEST_P(QuicOcspPolicy, UsesTlsRevocationRulesOnRealHandshake) {
+    auto const [parameters, family] = GetParam();
+    origin_server origin(0ms, false, {}, parameters, family);
+    ASSERT_TRUE(origin.ready());
+    auto setup = std::make_shared<CertificatePolicySetup>();
+    setup->policy.ocsp_stapling = true;
+    setup->policy.ocsp_stapling_mode = 2;
+    quic::lifecycle_options lifecycle;
+    lifecycle.handshake_timeout = 3s;
+    lifecycle.drain_timeout = 50ms;
+    quic::listener_service proxy(0, pki_file("srv-cert.pem"), pki_file("srv-key.pem"), false,
+        origin.port(), true, lifecycle, {}, family == AF_INET ? "127.0.0.1" : "::1", {}, false,
+        [setup](auto const&, auto const&) { return setup; }, {}, {}, family);
+    ASSERT_TRUE(proxy.prepare());
+    running_service runner(proxy);
+    auto context = make_verified_client_context();
+    auto const address = loopback_endpoint(family, proxy.bound_port());
+    auto client = quic::connect_openssl_quic(context.get(),
+        reinterpret_cast<sockaddr const*>(&address.address), address.size, test_sni);
+    ASSERT_NE(client, nullptr);
+    bool const accepted = std::get<3>(parameters) == 0;
+    bool active = false;
+    auto const deadline = std::chrono::steady_clock::now() + 4s;
+    while (std::chrono::steady_clock::now() < deadline) {
+        client->drain_events();
+        for (auto const& snapshot : proxy.session_diagnostics()) {
+            active |= snapshot.state == "active";
+            if (!accepted) { EXPECT_EQ(snapshot.forwarded_bytes, 0U); }
+        }
+        if (accepted && active) break;
+        if (!accepted && proxy.diagnostics().upstream_failures && !proxy.connection_count()) break;
+        std::this_thread::sleep_for(1ms);
+    }
+    EXPECT_EQ(active, accepted);
+    EXPECT_EQ(client->handshake_complete(), accepted);
+    EXPECT_EQ(proxy.diagnostics().handshake_timeouts, 0U);
+    if (!accepted) {
+        EXPECT_GT(proxy.diagnostics().upstream_failures, 0U);
+        EXPECT_EQ(proxy.connection_count(), 0U);
+    }
+    client->close();
+}
+
+INSTANTIATE_TEST_SUITE_P(TlsParity, QuicOcspPolicy, ::testing::Combine(
+    ::testing::ValuesIn(test_pki::ocsp_cases), ::testing::Values(AF_INET, AF_INET6)));
 
 TEST(QuicTestbed, RejectsSniNotPresentOnVerifiedOrigin) {
     origin_server origin;

@@ -392,6 +392,11 @@ source "$HERE/profile-plan.sh"
 case "$ONLY_SUITE" in
     ''|tls|transfer|tls-throughput|starttls|policy|routing|rtt|session-list|quic|smoke|privsep|tls-policy|tcp-churn|udp-churn|capture|lifecycle|corpus-regular|corpus-edge|corpus-insanity) ;;
     capture-traffic|capture-pcapng|quic-pcapng|corpus-regular.[1-4]|corpus-edge.[1-4]|corpus-insanity.[1-4]) ;;
+    quic-cert.*)
+        [[ " ${PATCH_RUNNER_QUIC_CERT_SECTIONS[*]} " == *" $ONLY_SUITE "* ]] || {
+            echo "Unknown certificate case: $ONLY_SUITE" >&2; exit 2;
+        }
+        ;;
     fuzz.*)
         fuzz_spec=${ONLY_SUITE#fuzz.}
         fuzz_area=${fuzz_spec%%.*}
@@ -607,7 +612,7 @@ run_distributed_sections() {
             "$bundle_local/build/smithproxy-cpu-monitor"
         chmod 0555 "$bundle_local/build/smithproxy-cpu-monitor" "$bundle_local/proxy-nightmare/build/pn"
     fi
-    if [[ " ${sections[*]} " == *" quic "* ]]; then
+    if [[ " ${sections[*]} " == *" quic"* ]]; then
         quic_curl_prefix=${CURL_HTTP3_PREFIX:-$ROOT/../curl-http3}
         quic_python_prefix=${QUIC_PYTHON_PREFIX:-$ROOT/../quic-python}
         [[ -x $quic_curl_prefix/bin/curl-h3 ]] || {
@@ -1000,7 +1005,7 @@ print(*(x.getsockname()[1] for x in s))'
         scp "${SCP_OPTIONS[@]}" "$HERE/vendor/pplay.py" "$REMOTE:$LAB_ROOT/pplay.py" >/dev/null
         scp "${SCP_OPTIONS[@]}" "$ROOT/etc/smithproxy.cfg" "$REMOTE:$LAB_ROOT/src/etc/" >/dev/null
         scp "${SCP_OPTIONS[@]}" -r "$ROOT/etc/msg/en/." "$REMOTE:$LAB_ROOT/src/etc/msg/en/" >/dev/null
-        if [[ $ONLY_SUITE == quic || $ONLY_SUITE == quic-pcapng ]]; then
+        if [[ $ONLY_SUITE == quic || $ONLY_SUITE == quic-pcapng || $ONLY_SUITE == quic-cert.* ]]; then
             [[ -x $QUIC_CURL_PREFIX/bin/curl-h3 ]] || {
                 echo "Missing HTTP/3 curl: $QUIC_CURL_PREFIX/bin/curl-h3" >&2
                 exit 2
@@ -1029,7 +1034,7 @@ print(*(x.getsockname()[1] for x in s))'
         cp "$HERE/vendor/pplay.py" "$LAB_ROOT/pplay.py"
         cp "$ROOT/etc/smithproxy.cfg" "$LAB_ROOT/src/etc/"
         cp -a "$ROOT/etc/msg/en/." "$LAB_ROOT/src/etc/msg/en/"
-        if [[ $ONLY_SUITE == quic || $ONLY_SUITE == quic-pcapng ]]; then
+        if [[ $ONLY_SUITE == quic || $ONLY_SUITE == quic-pcapng || $ONLY_SUITE == quic-cert.* ]]; then
             [[ -x $QUIC_CURL_PREFIX/bin/curl-h3 ]] || {
                 echo "Missing HTTP/3 curl: $QUIC_CURL_PREFIX/bin/curl-h3" >&2
                 exit 2
@@ -1086,7 +1091,7 @@ print(*(x.getsockname()[1] for x in s))'
             routing) LAB_ENV+=("ROUTING_TEST=1") ;;
             rtt) LAB_ENV+=("RTT_TEST=1") ;;
             session-list) LAB_ENV+=("SESSION_LIST_STRESS_TEST=1") ;;
-            quic|quic-pcapng) LAB_ENV+=("QUIC_TEST=1" "QUIC_LAB=1" "QUIC_KEYLOG_TEST=1"
+            quic|quic-pcapng|quic-cert.*) LAB_ENV+=("QUIC_TEST=1" "QUIC_LAB=1" "QUIC_KEYLOG_TEST=1"
                 "QUIC_CURL_BIN=$LAB_ROOT/curl-http3/bin/curl-h3"
                 "QUIC_PYTHONPATH=$QUIC_PYTHONPATH"
                 "SPQ1_DISSECTOR=$LAB_ROOT/runner/tools/spquic.lua") ;;
@@ -1135,6 +1140,7 @@ print(*(x.getsockname()[1] for x in s))'
         capture-pcapng|quic-pcapng) LAB_ENV+=("CAPTURE_GRE_FORMAT=pcapng") ;;
         capture-traffic|quic) LAB_ENV+=("CAPTURE_GRE_FORMAT=traffic") ;;
     esac
+    [[ $ONLY_SUITE != quic-cert.* ]] || LAB_ENV+=("BASE_TRAFFIC_TEST=0" "QUIC_TLS_PROFILE_TEST=${ONLY_SUITE#quic-cert.}")
     [[ $ONLY_SUITE != quic-pcapng ]] || LAB_ENV+=("QUIC_REMOTE_PCAPNG_TEST=1")
 
     set +e

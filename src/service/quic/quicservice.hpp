@@ -137,7 +137,8 @@ public:
                      bool capture_native = false,
                      proxymaker::SessionSetupFactory setup_factory = {},
                      std::optional<std::string> certificate_pem = std::nullopt,
-                     std::optional<std::string> private_key_pem = std::nullopt);
+                     std::optional<std::string> private_key_pem = std::nullopt,
+                     int address_family = AF_INET);
     ~listener_service();
 
     listener_service(listener_service const&) = delete;
@@ -153,6 +154,7 @@ public:
     void drain();
 
     bool ready() const { return ready_; }
+    int address_family() const { return address_family_; }
     std::uint16_t bound_port() const { return bound_port_; }
     std::string const& last_error() const { return last_error_; }
     std::size_t connection_count() const { return connection_count_; }
@@ -205,6 +207,7 @@ private:
     /** Record a fatal listener error and make ready() false. */
     void fail(std::string message);
 
+    int address_family_;                         ///< Separate IPv4/IPv6 sockets avoid mapped-address ambiguity.
     std::uint16_t port_;                         ///< Requested local service port.
     std::uint16_t bound_port_ = 0;               ///< Actual port, relevant when port_ is zero.
     std::string certificate_;                    ///< Bootstrap/default certificate chain.
@@ -226,7 +229,7 @@ private:
     std::atomic_size_t connection_count_ = 0;     ///< Sessions currently retained by the loop.
     mutable std::mutex snapshots_mutex_;          ///< Protects only copied diagnostics.
     std::vector<session_snapshot> snapshots_;     ///< Last worker-published view.
-    std::uint64_t next_session_id_ = 1;           ///< Worker-owned diagnostic ID source.
+    static inline std::atomic_uint64_t next_session_id_ {1}; ///< Unique across IPv4/IPv6 listeners.
 
     // Monotonic atomics back diagnostics(); writers live in the worker except
     // for certificate results, while readers may sample from management code.
@@ -293,8 +296,9 @@ private:
     struct verified_certificate {
         std::shared_ptr<X509> certificate;
         std::shared_ptr<EVP_PKEY> private_key;
+        std::vector<std::shared_ptr<X509>> issuers;
     };
-    enum class certificate_state { queued, upstream_handshake, certificate_ready, failed };
+    enum class certificate_state { queued, upstream_handshake, certificate_check, certificate_ready, failed };
     /** Worker-owned upstream and result for a suspended certificate callback. */
     struct certificate_job {
         std::shared_ptr<proxymaker::SessionSetup> setup;

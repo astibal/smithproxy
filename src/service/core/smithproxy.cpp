@@ -171,24 +171,26 @@ bool SmithProxy::create_tproxy_listeners() {
         if (!sx::quic::openssl_quic_available()) {
             _war("QUIC listener disabled: linked OpenSSL has no QUIC server support (OpenSSL 3.5+ required)");
         } else {
-            auto credentials = quic_credentials();
-            auto service = std::make_unique<sx::quic::listener_service>(
-                static_cast<std::uint16_t>(std::stoi(CfgFactory::get()->listen_quic_port)),
-                credentials.certificate_path, credentials.private_key_path,
-                true, 443, true, sx::quic::lifecycle_options {}, sx::quic::resource_limits {},
-                std::string {}, sx::multiflow::make_mitm_flow_proxy,
-                // Capture can be enabled after this listener starts. Keep the
-                // bounded pre-policy wire journal ready; only an approved
-                // stream logger may attach it to local or remote output.
-                true,
-                sx::proxymaker::make_quic_session_setup,
-                std::move(credentials.certificate_pem),
-                std::move(credentials.private_key_pem));
-            if (!service->prepare()) {
-                _err("Failed to setup QUIC listener: %s", service->last_error().c_str());
-                return false;
+            for (int family : {AF_INET, AF_INET6}) {
+                auto credentials = quic_credentials();
+                auto service = std::make_unique<sx::quic::listener_service>(
+                    static_cast<std::uint16_t>(std::stoi(CfgFactory::get()->listen_quic_port)),
+                    credentials.certificate_path, credentials.private_key_path,
+                    true, 443, true, sx::quic::lifecycle_options {}, sx::quic::resource_limits {},
+                    std::string {}, sx::multiflow::make_mitm_flow_proxy,
+                    // Capture can be enabled after this listener starts. Keep the
+                    // bounded pre-policy wire journal ready; only an approved
+                    // stream logger may attach it to local or remote output.
+                    true,
+                    sx::proxymaker::make_quic_session_setup,
+                    std::move(credentials.certificate_pem),
+                    std::move(credentials.private_key_pem), family);
+                if (!service->prepare()) {
+                    _err("Failed to setup QUIC listener: %s", service->last_error().c_str());
+                    return false;
+                }
+                quic_services.emplace_back(std::move(service));
             }
-            quic_services.emplace_back(std::move(service));
         }
     }
 
@@ -472,29 +474,31 @@ bool SmithProxy::create_listeners() {
                          "(OpenSSL 3.5+ required)");
                 } else {
                     if (CfgFactory::get()->num_workers_quic > 1) {
-                        _war("QUIC currently uses one event-loop thread; quic_workers=%d requested",
+                        _war("QUIC currently uses one event-loop thread per address family; quic_workers=%d requested",
                              CfgFactory::get()->num_workers_quic);
                     }
-                    auto credentials = quic_credentials();
-                    auto service = std::make_unique<sx::quic::listener_service>(
-                        static_cast<std::uint16_t>(std::stoi(CfgFactory::get()->listen_quic_port)),
-                        credentials.certificate_path, credentials.private_key_path,
-                        true, 443, true, sx::quic::lifecycle_options {},
-                        sx::quic::resource_limits {}, std::string {},
-                        sx::multiflow::make_mitm_flow_proxy,
-                        // Do not freeze the capture switch at listener creation:
-                        // later activation still needs handshake packets/secrets.
-                        // The bounded journal remains private until policy attaches
-                        // a logger (MitmProxy::toggle_tlog enforces the switch).
-                        true,
-                        sx::proxymaker::make_quic_session_setup,
-                        std::move(credentials.certificate_pem),
-                        std::move(credentials.private_key_pem));
-                    if (!service->prepare()) {
-                        _fat("Failed to setup QUIC listener: %s", service->last_error().c_str());
-                        return false;
+                    for (int family : {AF_INET, AF_INET6}) {
+                        auto credentials = quic_credentials();
+                        auto service = std::make_unique<sx::quic::listener_service>(
+                            static_cast<std::uint16_t>(std::stoi(CfgFactory::get()->listen_quic_port)),
+                            credentials.certificate_path, credentials.private_key_path,
+                            true, 443, true, sx::quic::lifecycle_options {},
+                            sx::quic::resource_limits {}, std::string {},
+                            sx::multiflow::make_mitm_flow_proxy,
+                            // Do not freeze the capture switch at listener creation:
+                            // later activation still needs handshake packets/secrets.
+                            // The bounded journal remains private until policy attaches
+                            // a logger (MitmProxy::toggle_tlog enforces the switch).
+                            true,
+                            sx::proxymaker::make_quic_session_setup,
+                            std::move(credentials.certificate_pem),
+                            std::move(credentials.private_key_pem), family);
+                        if (!service->prepare()) {
+                            _fat("Failed to setup QUIC listener: %s", service->last_error().c_str());
+                            return false;
+                        }
+                        quic_services.emplace_back(std::move(service));
                     }
-                    quic_services.emplace_back(std::move(service));
                     log_listener(quic_frm, quic_services);
                 }
             }
