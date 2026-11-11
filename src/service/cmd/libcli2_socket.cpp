@@ -193,13 +193,16 @@ int libcli2_socket_loop(libcli2::FdTransport& transport, Libcli2SocketOptions op
     };
     ConfigCli2Session config(std::move(options.config_access));
     context.user_data = &config;
+    // An installation without an enable password intentionally has no second
+    // authentication tier, so authenticated/local sessions start privileged.
+    if (options.enable_password.empty()) context.privilege = 15;
     config.register_commands(cli);
     cli.command("enable")
         .help("Enter privileged mode")
-        .available_if([](const libcli2::Context& value) { return value.privilege < 15 && value.mode == "0"; });
+        .available_if([](const libcli2::Context& value) { return value.privilege < 15; });
     cli.command("disable")
         .help("Leave privileged mode")
-        .available_if([](const libcli2::Context& value) { return value.privilege >= 15 && value.mode == "0"; })
+        .available_if([](const libcli2::Context& value) { return value.privilege >= 15; })
         .handler([](libcli2::Context& value, const libcli2::Invocation&) { value.privilege = 0; return 0; });
     cli.command("quit").help("Close this CLI session")
         .handler([](libcli2::Context&, const libcli2::Invocation&) { return 1; });
