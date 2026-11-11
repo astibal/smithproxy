@@ -462,6 +462,7 @@ if [[ $QUIC_THROUGHPUT_TEST == 1 ]]; then
             --ca-file "$ROOT/config/certs/ca-cert.pem" --pid "$(cat "$ROOT/data/proxy.pid")" \
             --bytes "${QUIC_THROUGHPUT_BYTES:-8388608}" \
             --repeats "${QUIC_THROUGHPUT_REPEATS:-3}" \
+            --cooldown-seconds "${QUIC_THROUGHPUT_COOLDOWN_SECONDS:-0}" \
             --concurrency "${QUIC_THROUGHPUT_CONCURRENCY:-1,4,16}" \
             --output "$ROOT/results/quic-throughput-v$family.json" > /dev/null
         python3 "$ROOT/runner/tests/tls-transfer-report.py" --label 'QUIC throughput' \
@@ -475,6 +476,7 @@ if [[ $QUIC_THROUGHPUT_TEST == 1 ]]; then
                 --ca-file "$ROOT/config/certs/origin-ca.pem" \
                 --bytes "${QUIC_THROUGHPUT_BYTES:-8388608}" \
                 --repeats "${QUIC_THROUGHPUT_REPEATS:-3}" \
+                --cooldown-seconds "${QUIC_THROUGHPUT_COOLDOWN_SECONDS:-0}" \
                 --concurrency "${QUIC_THROUGHPUT_CONCURRENCY:-1,4,16}" \
                 --output "$ROOT/results/quic-direct-throughput-v$family.json" > /dev/null
             python3 "$ROOT/runner/tests/tls-transfer-report.py" --label 'QUIC direct reference' \

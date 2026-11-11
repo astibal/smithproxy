@@ -2,6 +2,7 @@
 import argparse
 import concurrent.futures
 import json
+import math
 import pathlib
 import statistics
 import subprocess
@@ -83,6 +84,8 @@ def main():
     parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument("--concurrency", default="1,4,16")
     parser.add_argument("--timeout", type=int, default=120)
+    parser.add_argument("--cooldown-seconds", type=float, default=0,
+                        help="Wait outside timing before each sample to separate connection cleanup")
     parser.add_argument("--pid", type=int,
                         help="Smithproxy PID used for process CPU accounting")
     parser.add_argument("--tls-version", choices=("1.2", "1.3"))
@@ -94,6 +97,8 @@ def main():
         parser.error("H3 uses QUIC TLS configuration, not TCP TLS cipher switches")
     concurrencies = [int(value) for value in args.concurrency.split(",")]
 
+    if not math.isfinite(args.cooldown_seconds) or args.cooldown_seconds < 0:
+        parser.error("cooldown-seconds must be finite and nonnegative")
     if args.bytes <= 0 or args.repeats <= 0 or not concurrencies or min(concurrencies) <= 0:
         parser.error("bytes, repeats and concurrency must be positive")
 
@@ -110,6 +115,7 @@ def main():
 
         output = {"host": args.host, "protocol": args.protocol, "curl": args.curl,
                   "address_family": "IPv6" if ":" in args.host else "IPv4",
+                  "cooldown_seconds": args.cooldown_seconds,
                   "bytes_per_flow": args.bytes, "repeats": args.repeats,
                   "concurrency": concurrencies, "results": []}
         def checkpoint():
@@ -121,8 +127,13 @@ def main():
         checkpoint()
         for concurrency in concurrencies:
             for mode in ("download", "upload"):
-                samples = [transfer_once(args, mode, concurrency, payload_file, run)
-                           for run in range(args.repeats)]
+                samples = []
+                for run in range(args.repeats):
+                    # Optional isolation of connection cleanup; this wait is
+                    # outside transfer_once's wall-clock and CPU accounting.
+                    if args.cooldown_seconds:
+                        time.sleep(args.cooldown_seconds)
+                    samples.append(transfer_once(args, mode, concurrency, payload_file, run))
                 rates = [sample["mib_per_second"] for sample in samples]
                 result = {
                     "mode": mode,

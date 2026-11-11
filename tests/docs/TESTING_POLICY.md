@@ -111,6 +111,9 @@ namespace, with the origin CA and identical transfer sizes and concurrency.
 These `quic-direct-throughput-v*.json` references omit proxy CPU accounting
 and help distinguish fixture limits from forwarding overhead. Set
 `QUIC_THROUGHPUT_DIRECT_BASELINE=0` only for focused instrumentation runs.
+`QUIC_THROUGHPUT_COOLDOWN_SECONDS` optionally separates samples to investigate
+connection cleanup overhead; it defaults to zero. The pause is outside measured
+transfer time and CPU accounting, and the JSON records the selected interval.
 
 Repository tests must be registered in CTest instead of requiring knowledge of
 another ad-hoc command. Tests which intentionally require public network
