@@ -133,6 +133,13 @@ public:
             ++stats.errors.worker_worker_ngtcp2_input_metadata_failed;
             throw std::runtime_error("ngtcp2 input metadata failed");
         }
+        // Original destination identifies the target, not the ingress interface.
+        // Role-based admission needs pktinfo on both direct and dispatched A paths.
+        auto const interface_option = family == AF_INET ? IP_PKTINFO : IPV6_RECVPKTINFO;
+        if (socle::setsockopt(fd_, level, interface_option, &enabled, sizeof(enabled))) {
+            ++stats.errors.worker_input_interface_metadata_failed;
+            throw std::runtime_error("ngtcp2 input interface metadata failed");
+        }
         output_.value = open_output_socket(family);
     }
 
