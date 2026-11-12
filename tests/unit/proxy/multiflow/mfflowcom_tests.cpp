@@ -9,6 +9,7 @@
 #include "proxy/multiflow/mfflowcom.hpp"
 #include "proxy/connection_transport.hpp"
 #include <tcpcom.hpp>
+#include <masterproxy.hpp>
 #include <udpcom.hpp>
 
 namespace mf = sx::multiflow;
@@ -125,4 +126,47 @@ TEST(MFFlowCom, ConnectionStartMetadataPreservesOrdinaryTcpAndUdp) {
     EXPECT_EQ(info.at("transport"), "tcp");
     sx::proxy::add_connection_transport(info, udp);
     EXPECT_EQ(info.at("transport"), "udp");
+}
+
+// Exercise the same parent accounting used by the production stream bridge:
+// the last write and child removal happen inside a single master pump.
+
+namespace {
+class finishing_flow_proxy final : public baseProxy {
+public:
+    finishing_flow_proxy(std::shared_ptr<mf::fake_connection> connection, mf::flow_handle flow,
+                         unsigned char side)
+        : baseProxy(new TCPCom()), side_(side) {
+        auto* com = new mf::MFFlowCom(std::move(connection), flow);
+        output_ = std::make_unique<baseHostCX>(com, com->token());
+        output_->opening(false);
+        output_->writebuf()->append("last payload", 12);
+        stats().do_rate_meter = false;
+    }
+    int handle_sockets_once(baseCom*) override {
+        EXPECT_TRUE(handle_cx_write(side_, output_.get()));
+        state().dead(true);
+        return 1;
+    }
+private:
+    unsigned char side_;
+    std::unique_ptr<baseHostCX> output_;
+};
+}
+
+TEST(MFFlowCom, ParentBytesSurviveFinalWriteAndChildRemovalInSamePump) {
+    for (auto side : {'l', 'r'}) {
+        auto connection = std::make_shared<mf::fake_connection>();
+        auto flow = connection->open_flow(mf::direction::bidirectional);
+        MasterProxy master(new TCPCom());
+        master.add_proxy(std::make_unique<finishing_flow_proxy>(connection, flow, side));
+        master.handle_sockets_once(master.com());
+        EXPECT_TRUE(master.proxies().empty());
+        EXPECT_EQ(master.stats().bytes_up(), side == 'r' ? 12U : 0U);
+        EXPECT_EQ(master.stats().bytes_down(), side == 'l' ? 12U : 0U);
+        auto const sent = connection->consume_send(flow);
+        EXPECT_EQ(std::string(sent.begin(), sent.end()), "last payload");
+        master.handle_sockets_once(master.com());
+        EXPECT_EQ(master.stats().bytes_up() + master.stats().bytes_down(), 12U);
+    }
 }

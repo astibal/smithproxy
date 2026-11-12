@@ -559,6 +559,8 @@ public:
         result.lored_classifications = {"test-service"};
         result.upload_bps = 1024;
         result.download_bps = 2048;
+        result.upload_bytes = 4096;
+        result.download_bytes = 8192;
         result.traffic_available = true;
         return result;
     }
@@ -729,6 +731,8 @@ static void exercise_proxy_stream(bool use_workers, bool check_sampling = false)
     EXPECT_TRUE(snapshots.front().stream_summary.traffic_available);
     EXPECT_EQ(snapshots.front().stream_summary.upload_bps, 1024U);
     EXPECT_EQ(snapshots.front().stream_summary.download_bps, 2048U);
+    EXPECT_EQ(snapshots.front().stream_summary.upload_bytes, 4096U);
+    EXPECT_EQ(snapshots.front().stream_summary.download_bytes, 8192U);
     auto details = proxy.request_session_details([owner = proxy_thread.get_id()](MitmProxy*) {
         return std::optional<std::string>(std::this_thread::get_id() == owner
             ? "rendered on owner" : "wrong thread");
@@ -775,6 +779,8 @@ static void exercise_proxy_stream(bool use_workers, bool check_sampling = false)
             EXPECT_TRUE(snapshot.stream_summary.traffic_available);
             EXPECT_EQ(snapshot.stream_summary.upload_bps, 0U);
             EXPECT_EQ(snapshot.stream_summary.download_bps, 0U);
+            EXPECT_EQ(snapshot.stream_summary.upload_bytes, 4096U);
+            EXPECT_EQ(snapshot.stream_summary.download_bytes, 8192U);
             EXPECT_TRUE(snapshot.downstream_tls.ended);
             EXPECT_TRUE(snapshot.upstream_tls.ended);
             EXPECT_STREQ(snapshot.downstream_tls.handshake_status(), "completed");

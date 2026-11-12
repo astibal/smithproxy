@@ -30,6 +30,8 @@ struct flow_summary {
     std::uint64_t upload_bps = 0;
     std::uint64_t download_bps = 0;
     bool traffic_available = false;
+    std::uint64_t upload_bytes = 0;
+    std::uint64_t download_bytes = 0;
 };
 
 /** Common lifecycle surface for direct and Smithproxy-aware flow bridges. */

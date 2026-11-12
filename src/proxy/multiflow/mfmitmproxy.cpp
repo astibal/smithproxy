@@ -1,4 +1,5 @@
 #include "proxy/multiflow/mfmitmproxy.hpp"
+#include <common/meter.hpp>
 
 #include "proxy/mitmhost.hpp"
 #include "proxy/mitmproxy.hpp"
@@ -110,14 +111,24 @@ public:
         process_events(false, upstream_->drain_events());
         if (closed_) return 0;
 
-        auto const before = total_bytes();
+        std::uint64_t uploaded = 0;
+        std::uint64_t downloaded = 0;
         for (auto& [id, current] : pairs_) {
             (void)id;
+            // Parent counters survive removal of a child inside pump(). They
+            // count successful writes, independently of the child's rate meter.
+            auto const& stats = current.master->stats();
+            auto const up_before = stats.bytes_up();
+            auto const down_before = stats.bytes_down();
             current.master->pump();
+            uploaded += stats.bytes_up() - up_before;
+            downloaded += stats.bytes_down() - down_before;
         }
-        auto const after = total_bytes();
+        auto const now = socle::meter::clock::now();
+        if (uploaded) upload_.update(uploaded, now);
+        if (downloaded) download_.update(downloaded, now);
         retire_finished();
-        return after >= before ? after - before : 0;
+        return uploaded + downloaded;
     }
 
     std::size_t pair_count() const override { return pairs_.size(); }
@@ -166,8 +177,13 @@ public:
                                                sift_summary_->lored_classifications.end());
         }
 
-        // Policies include retired streams; rates and filters describe live children.
+        // Traffic and policies survive stream retirement; filters describe live children.
         result.traffic_available = true;
+        auto const now = socle::meter::clock::now();
+        result.upload_bps = upload_.get(now) * 8;
+        result.download_bps = download_.get(now) * 8;
+        result.upload_bytes = upload_.total();
+        result.download_bytes = download_.total();
         for (const auto& [id, current] : pairs_) {
             auto lock = std::scoped_lock(current.master->proxy_lock());
             for (const auto& proxy : current.master->proxies()) {
@@ -180,10 +196,6 @@ public:
                 for (const auto& [name, filter] : mitm->filters_) {
                     filters.insert(name);
                 }
-
-                // Child meters use bytes per second; the CLI displays bits per second.
-                result.upload_bps += mitm->stats().mtr_up.get() * 8;
-                result.download_bps += mitm->stats().mtr_down.get() * 8;
             }
         }
 
@@ -377,20 +389,6 @@ private:
         });
     }
 
-    std::uint64_t total_bytes() const {
-        std::uint64_t result = 0;
-        for (auto const& [id, current] : pairs_) {
-            (void)id;
-            auto lock = std::scoped_lock(current.master->proxy_lock());
-            for (auto const& proxy : current.master->proxies()) {
-                if (proxy) {
-                    result += proxy->stats().mtr_up.total() + proxy->stats().mtr_down.total();
-                }
-            }
-        }
-        return result;
-    }
-
     void retire_finished() {
         for (auto& [id, current] : pairs_) {
             auto lock = std::scoped_lock(current.master->proxy_lock());
@@ -442,6 +440,8 @@ private:
     std::set<int> policies_;
     std::size_t limit_rejections_ = 0;
     bool closed_ = false;
+    socle::meter upload_;
+    socle::meter download_;
 };
 
 } // namespace

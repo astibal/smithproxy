@@ -675,6 +675,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/proxy/multiflow/mfflowcom_tests.cpp
                 src/proxy/multiflow/mfproxy.cpp
                 tests/unit/proxy/multiflow/mfproxy_tests.cpp
+                socle/common/tests/meter_tests.cpp
                 src/proxy/quic/wire.cpp
                 tests/unit/proxy/quic/wire_tests.cpp
                 src/proxy/quic/h3capture.cpp
@@ -1003,6 +1004,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/proxy/multiflow/mfflowcom_tests.cpp
                 src/proxy/multiflow/mfproxy.cpp
                 tests/unit/proxy/multiflow/mfproxy_tests.cpp
+                socle/common/tests/meter_tests.cpp
                 src/proxy/quic/wire.cpp
                 tests/unit/proxy/quic/wire_tests.cpp
                 src/proxy/quic/h3capture.cpp

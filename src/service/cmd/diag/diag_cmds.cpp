@@ -1879,6 +1879,11 @@ static void print_quic_sessions(DiagCli* cli, int flags, bool listener_summary, 
                 session.client.c_str(), target.c_str(), policies.c_str());
             if (verbosity > iINF) title_text += "\n    ";
             title_text += "up/dw: " + speed;
+            if (traffic.traffic_available) {
+                title_text += string_format("  transferred up/dw: %llu/%llu B",
+                    static_cast<unsigned long long>(traffic.upload_bytes),
+                    static_cast<unsigned long long>(traffic.download_bytes));
+            }
             if (verbosity > iINF) {
                 for (const auto policy : traffic.policies) {
                     title_text += MitmProxy::policy_diagnostics(policy);

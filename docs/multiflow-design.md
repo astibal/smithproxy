@@ -391,9 +391,14 @@ code to observe `EAGAIN`, `ECONNRESET` or EOF.
 proxy sessions. QUIC rows use the same decorated title and indented details,
 including the listener-local session ID, endpoints, SNI, ALPN and stream counters.
 The CLI reads worker-published snapshots, never live QUIC connection objects.
+QUIC upload/download rates use the shared `socle::meter` at connection scope:
+four one-second intervals, including the current interval and recently completed
+streams, with elapsed-interval normalization during startup. The displayed
+`transferred up/dw` totals count accepted stream payload writes, not UDP wire
+overhead, and remain visible after stream retirement and during draining.
 
 `diag proxy quic list` remains available with listener counters and totals.
-The unified list respects `active` (traffic within five seconds), excludes QUIC
+The unified list respects `active` (nonzero metered traffic), excludes QUIC
 from `ssh`, and includes it in `tls` and `io-all`. TCP OS-buffer filters do not
 include QUIC because those measurements are not available in its snapshot.
 
