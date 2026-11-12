@@ -174,3 +174,78 @@ rough node, the production adapter retires abandoned connections and their CID
 routes after a bounded close-delivery period. Certificate rejection, lifecycle,
 capture and policy behavior are verified by the shared service tests rather
 than reimplemented in the adapter.
+
+### Datagram batching regression checks
+
+The QUIC receiver reads at most 16 datagrams per nonblocking `recvmmsg` call.
+Each slot has room for a full UDP payload and separate original-destination and
+interface metadata. The shared QUIC dispatcher uses this receiver for either
+backend; ngtcp2 also uses it on B. Ordinary socle UDP transport is unchanged.
+Receive storage costs about 1 MiB per receiver, allocated once rather than on
+each packet. No call waits for a batch to fill.
+
+ngtcp2 generates at most 64 packets per connection turn and submits them with
+`sendmmsg`. Only the unsent suffix is retained on socket pressure. Packet bytes
+and paths remain intact until sent; capture observes only successful sends.
+Normal TX batch storage is temporary, not a permanent 64-packet allocation per
+connection. The single-worker A:B ownership and existing pacing are unchanged.
+
+To exercise partial batch completion and EAGAIN deterministically, build the
+optional test interposer outside the daemon build:
+
+```sh
+cc -shared -fPIC -o /path/to/batch-send-faults.so \
+  tests/quic/ngtcp2/batch-send-faults.c -ldl -pthread
+SMITHPROXY_QUIC_BACKEND=ngtcp2 LD_PRELOAD=/path/to/batch-send-faults.so \
+  /path/to/build/quic_testbed
+```
+
+Check that the final fault counters include both blocked and shortened sends.
+Keep the interposer out of throughput runs. Also run the ordinary testbed with
+both backends and the namespace harness's `quic` and `quic-pcapng` suites to
+verify transparent tuples, IPv4/IPv6, payload integrity and decrypted captures.
+
+### Dispatcher inbox batching and multi-worker measurements
+
+The receiver groups its packet batch by destination owner and locks each inbox
+once. A worker takes up to 64 owned datagrams under one lock, then processes them
+outside the lock. Queue packet/byte limits and per-owner ordering are unchanged.
+The eventfd remains readable while any queued packet remains; draining the last
+packet clears it under the producer's lock. There is no hidden local packet
+cache that could outlive the wakeup.
+
+The throughput harness accepts `QUIC_THROUGHPUT_DESTINATIONS=4` (default `1`).
+It adds disposable origin aliases .2/.3/.4/.5 and ::2/::3/::4/::5 and distributes
+flows round-robin. With `QUIC_WORKERS=4`, these addresses cover all four owners;
+raising concurrency against one address alone does not test multi-worker load.
+Use identical fixture settings for the baseline and candidate binaries, and
+reverse the execution order for a second block. Suggested concurrent flow counts
+are 4,16,64 with 16 MiB per flow, alongside the usual single-destination control.
+
+Each throughput sample now records client completion durations and p50/p95.
+These include process startup, handshake and transfer; they are not network RTT.
+`quic-throughput-workers-v4.txt` and `-v6.txt` preserve the listener acceptance
+and receiver-queue drop counters after each family. Inspect these to confirm
+owner coverage and account for overload rather than silently excluding it.
+
+### Configurable worker inbox capacities
+
+`settings.tuning.quic_inbox_packets` (default 16384, range 1..1048576) and
+`settings.tuning.quic_inbox_bytes` (default 16777216, range 1024..1073741824)
+limit each QUIC worker inbox independently. The byte limit counts datagram
+payload, excluding queue metadata and kernel socket storage. Allocation grows
+on demand; neither value reserves the full capacity at startup.
+
+The first exhausted limit drops the incoming packet. These settings apply to
+both backends when using multiple workers; a single worker reads its socket
+directly and has no dispatcher inbox. Restart after changing them: an existing
+receiver retains its original limits. Four workers per IPv4/IPv6 family can
+therefore queue up to 128 MiB of payload with the defaults. Socket receive
+buffers are separate and are not changed by these settings.
+
+The A-side listener socket uses `settings.tuning.quic_listener_rcvbuf` (default
+1048576 bytes, range 0..1073741824). Zero keeps the OS default. Restart after
+changing it. Workers of the same address family share this socket and its receive
+buffer; B-side sockets are unaffected. Listener diagnostics show both the request
+and the kernel-reported size, which may be clamped and includes doubled accounting
+on Linux. This kernel memory is separate from the worker inbox budget.

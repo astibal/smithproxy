@@ -447,30 +447,20 @@ bool associate_input_packet(openssl_listener::dispatcher_state& state,
                               {packet.peer, packet.local, packet.association});
 }
 
-bool receive_socket_datagram(int fd, openssl_listener::dispatcher_state::packet& packet) {
-    // Allocate only the received payload when handing a packet to a worker.
-    // Initialising a fresh 64KiB vector per 1200-byte datagram wastes bandwidth.
-    std::array<unsigned char, 65536> payload;
-    std::array<unsigned char, 256> control {};
-    sockaddr_storage peer {};
-    iovec vector { payload.data(), payload.size() };
-    msghdr message {};
-    message.msg_name = &peer;
-    message.msg_namelen = sizeof(peer);
-    message.msg_iov = &vector;
-    message.msg_iovlen = 1;
-    message.msg_control = control.data();
-    message.msg_controllen = control.size();
-    auto const received = detail::retry_on_eintr(
-        [&] { return ::recvmsg(fd, &message, MSG_DONTWAIT); });
-    if (received < 0) return false;
+// Decode one message identically for scalar and batched QUIC reception.
+// Reset metadata: a reused packet must never inherit another packet's tuple.
+bool decode_socket_datagram(int fd, msghdr& message, unsigned char const* payload,
+                            size_t received, datagram_packet& packet) {
+    packet.peer = {};
+    packet.local = {};
+    packet.association = 0;
     if ((message.msg_flags & (MSG_TRUNC | MSG_CTRUNC)) != 0) {
         errno = EMSGSIZE;
         return false;
     }
-    packet.data.assign(payload.begin(), payload.begin() + received);
+    packet.data.assign(payload, payload + received);
     if (!socle_detail::copy_socket_address(
-            packet.peer.address, &peer, message.msg_namelen)) {
+            packet.peer.address, message.msg_name, message.msg_namelen)) {
         errno = EPROTO;
         return false;
     }
@@ -514,6 +504,26 @@ bool receive_socket_datagram(int fd, openssl_listener::dispatcher_state::packet&
 #endif
     }
     return true;
+}
+
+bool receive_socket_datagram(int fd, openssl_listener::dispatcher_state::packet& packet) {
+    // Allocate only the received payload when handing a packet to a worker.
+    // Initialising a fresh 64KiB vector per 1200-byte datagram wastes bandwidth.
+    std::array<unsigned char, 65536> payload;
+    std::array<unsigned char, 256> control {};
+    sockaddr_storage peer {};
+    iovec vector { payload.data(), payload.size() };
+    msghdr message {};
+    message.msg_name = &peer;
+    message.msg_namelen = sizeof(peer);
+    message.msg_iov = &vector;
+    message.msg_iovlen = 1;
+    message.msg_control = control.data();
+    message.msg_controllen = control.size();
+    auto const received = detail::retry_on_eintr(
+        [&] { return ::recvmsg(fd, &message, MSG_DONTWAIT); });
+    if (received < 0) return false;
+    return decode_socket_datagram(fd, message, payload.data(), received, packet);
 }
 
 bool inject_bio_datagram(BIO* bio, openssl_listener::dispatcher_state::packet const& packet) {
@@ -665,6 +675,50 @@ bool flush_socket_output(openssl_listener::dispatcher_state& state,
 }
 
 } // namespace
+
+// Keep full UDP-sized slots off the worker stack. Payload bytes need no
+// initialization: only the length returned by the kernel is ever consumed.
+struct datagram_receiver::storage {
+    struct slot {
+        std::array<unsigned char, 65536> payload;
+        alignas(cmsghdr) std::array<unsigned char, 256> control;
+        sockaddr_storage peer;
+    };
+    std::array<slot, capacity> slots;
+    std::array<iovec, capacity> vectors;
+    std::array<mmsghdr, capacity> messages;
+};
+
+datagram_receiver::datagram_receiver() : storage_(new storage) {}
+datagram_receiver::~datagram_receiver() = default;
+
+int datagram_receiver::receive(int fd, std::function<void(datagram_packet&&)> const& consume) {
+    auto& batch = *storage_;
+    for (size_t i = 0; i < capacity; ++i) {
+        auto& slot = batch.slots[i];
+        auto& message = batch.messages[i];
+        message = {};
+        batch.vectors[i] = {slot.payload.data(), slot.payload.size()};
+        message.msg_hdr.msg_name = &slot.peer;
+        message.msg_hdr.msg_namelen = sizeof(slot.peer);
+        message.msg_hdr.msg_iov = &batch.vectors[i];
+        message.msg_hdr.msg_iovlen = 1;
+        message.msg_hdr.msg_control = slot.control.data();
+        message.msg_hdr.msg_controllen = slot.control.size();
+    }
+    auto count = detail::retry_on_eintr([&] {
+        return ::recvmmsg(fd, batch.messages.data(), capacity, MSG_DONTWAIT, nullptr);
+    });
+    if (count < 0) return -1;
+    datagram_packet packet;
+    for (ssize_t i = 0; i < count; ++i) {
+        auto& message = batch.messages[i];
+        // A malformed slot must not discard later valid packets in this batch.
+        if (decode_socket_datagram(fd, message.msg_hdr, batch.slots[i].payload.data(),
+                                   message.msg_len, packet)) consume(std::move(packet));
+    }
+    return static_cast<int>(count);
+}
 
 bool receive_datagram(int fd, datagram_packet& packet) {
     return receive_socket_datagram(fd, packet);
@@ -1417,10 +1471,12 @@ bool openssl_listener::receive_input_batch() {
 
     // Bound each pass so a hot UDP socket cannot starve established streams,
     // certificate jobs, shutdown, or management snapshots.
-    for (std::size_t count = 0; count < 64; ++count) {
+    std::array<datagram_packet, datagram_batch_limit> packets;
+    auto available = dispatcher.source ? dispatcher.source(packets.data(), packets.size()) : packets.size();
+    for (std::size_t count = 0; count < available; ++count) {
         dispatcher_state::packet packet;
         if (dispatcher.source) {
-            if (!dispatcher.source(packet)) break;
+            packet = std::move(packets[count]);
         } else if (!receive_socket_datagram(dispatcher.socket_fd, packet)) {
             if (detail::datagram_receive_would_block(errno)) break;
             last_error_ = std::string("recvmsg: ") + std::strerror(errno);

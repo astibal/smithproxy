@@ -274,6 +274,17 @@ if [[ $QUIC_TEST == 1 ]]; then
             echo 'FAIL: prepare the native HTTP/3 benchmark runtime first' >&2
             exit 1
         }
+        # Spread flows by destination IP so the real QUIC dispatcher selects
+        # different proxy workers. Aliases live only in this disposable lab.
+        case ${QUIC_THROUGHPUT_DESTINATIONS:-1} in
+            1) ;;
+            4)
+                for last in 3 4 5; do
+                    ip -n "$SERVER" addr add "198.18.20.$last/24" dev eth0
+                    ip -n "$SERVER" -6 addr add "fd00:20::$last/64" dev eth0 nodad
+                done ;;
+            *) echo 'QUIC_THROUGHPUT_DESTINATIONS must be 1 or 4' >&2; exit 2 ;;
+        esac
         # Preserve the endpoint versions and hashes with the measured results.
         native_prefix=$(dirname -- "$(dirname -- "$NATIVE_H3_SERVER_BIN")")
         cp -a "$native_prefix/share/native-h3" "$ROOT/results/native-h3-runtime"
@@ -485,8 +496,13 @@ if [[ $QUIC_THROUGHPUT_TEST == 1 ]]; then
     for family in 4 6; do
         host=198.18.20.2
         [[ $family != 6 ]] || host=fd00:20::2
+        hosts=$host
+        if [[ ${QUIC_THROUGHPUT_DESTINATIONS:-1} == 4 ]]; then
+            hosts=198.18.20.2,198.18.20.3,198.18.20.4,198.18.20.5
+            [[ $family != 6 ]] || hosts=fd00:20::2,fd00:20::3,fd00:20::4,fd00:20::5
+        fi
         ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/tls-transfer.py" \
-            --protocol h3 --curl "$QUIC_CURL_BIN" --host "$host" "${QUIC_TRANSFER_ARGS[@]}" \
+            --hosts "$hosts" --protocol h3 --curl "$QUIC_CURL_BIN" --host "$host" "${QUIC_TRANSFER_ARGS[@]}" \
             --ca-file "$ROOT/config/certs/ca-cert.pem" --pid "$(cat "$ROOT/data/proxy.pid")" \
             --bytes "${QUIC_THROUGHPUT_BYTES:-67108864}" \
             --repeats "${QUIC_THROUGHPUT_REPEATS:-3}" \
@@ -495,6 +511,8 @@ if [[ $QUIC_THROUGHPUT_TEST == 1 ]]; then
             --output "$ROOT/results/quic-throughput-v$family.json" > /dev/null
         python3 "$ROOT/runner/tests/tls-transfer-report.py" --label 'QUIC throughput' \
             "$ROOT/results/quic-throughput-v$family.json"
+        ip netns exec "$NS" python3 "$ROOT/runner/tests/quic-transparency.py" cli \
+            > "$ROOT/results/quic-throughput-workers-v$family.txt"
         # The same native client/origin pair bounds what this fixture can deliver.
         # Starting in the proxy namespace reaches the origin directly, without
         # changing transparent interception rules or trusting the MITM CA.

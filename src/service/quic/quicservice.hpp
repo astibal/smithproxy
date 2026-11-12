@@ -140,7 +140,8 @@ public:
                      proxymaker::SessionSetupFactory setup_factory = {},
                      std::optional<std::string> certificate_pem = std::nullopt,
                      std::optional<std::string> private_key_pem = std::nullopt,
-                     int address_family = AF_INET);
+                     int address_family = AF_INET,
+                     int receive_buffer = 1024 * 1024);
     ~listener_service();
 
     listener_service(listener_service const&) = delete;
@@ -163,6 +164,9 @@ public:
 
     bool ready() const { return ready_; }
     int address_family() const { return address_family_; }
+    // Kernel-reported bytes, sampled during prepare; shared workers see one socket.
+    int receive_buffer() const { return receive_buffer_actual_; }
+    int receive_buffer_requested() const { return receive_buffer_requested_; }
     std::uint16_t bound_port() const { return bound_port_; }
     std::string const& last_error() const { return last_error_; }
     std::size_t connection_count() const { return connection_count_; }
@@ -217,6 +221,8 @@ private:
 
     std::shared_ptr<worker_dispatcher> dispatcher_; ///< Shared ingress, never shared SSL state.
     std::size_t worker_index_ = 0;                ///< Stable index throughout this generation.
+    const int receive_buffer_requested_;         ///< Zero leaves the kernel default unchanged.
+    int receive_buffer_actual_ = 0;              ///< SO_RCVBUF readback, including kernel accounting.
     int address_family_;                         ///< Separate IPv4/IPv6 sockets avoid mapped-address ambiguity.
     std::uint16_t port_;                         ///< Requested local service port.
     std::uint16_t bound_port_ = 0;               ///< Actual port, relevant when port_ is zero.

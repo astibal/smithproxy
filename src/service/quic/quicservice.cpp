@@ -116,8 +116,10 @@ listener_service::listener_service(std::uint16_t port, std::string certificate,
                                    bool capture_native,
                                    proxymaker::SessionSetupFactory setup_factory,
                                    std::optional<std::string> certificate_pem,
-                                   std::optional<std::string> private_key_pem, int address_family)
-    : address_family_(address_family), port_(port), certificate_(std::move(certificate)),
+                                   std::optional<std::string> private_key_pem, int address_family,
+                                   int receive_buffer)
+    : receive_buffer_requested_(receive_buffer), address_family_(address_family),
+      port_(port), certificate_(std::move(certificate)),
       private_key_(std::move(private_key)),
       certificate_pem_(std::move(certificate_pem)),
       private_key_pem_(std::move(private_key_pem)), transparent_(transparent),
@@ -242,6 +244,7 @@ bool listener_service::open_socket() {
         }
     };
     close_open_descriptors();
+    receive_buffer_actual_ = 0;
     auto fail_open = [this, &close_open_descriptors](std::string message) {
         close_open_descriptors();
         fail(std::move(message));
@@ -254,6 +257,10 @@ bool listener_service::open_socket() {
     if (dispatcher_ && dispatcher_->socket_fd() >= 0) {
         udp_fd_ = ::fcntl(dispatcher_->socket_fd(), F_DUPFD_CLOEXEC, 0);
         if (udp_fd_ < 0) return fail_open("cannot duplicate QUIC receiver socket");
+        socklen_t buffer_size = sizeof(receive_buffer_actual_);
+        if (::getsockopt(udp_fd_, SOL_SOCKET, SO_RCVBUF,
+                         &receive_buffer_actual_, &buffer_size) != 0)
+            return fail_open(std::string("SO_RCVBUF readback: ") + std::strerror(errno));
         sockaddr_storage bound {};
         socklen_t size = sizeof(bound);
         if (::getsockname(udp_fd_, reinterpret_cast<sockaddr*>(&bound), &size) != 0)
@@ -269,6 +276,21 @@ bool listener_service::open_socket() {
     if (udp_fd_ < 0) {
         return fail_open(std::string("socket: ") + std::strerror(errno));
     }
+
+    // Set only the original A socket, before traffic arrives. Worker duplicates
+    // share its receive queue; B sockets keep their independent OS defaults.
+    if (receive_buffer_requested_ < 0)
+        return fail_open("negative QUIC listener receive buffer");
+    if (receive_buffer_requested_ > 0
+        && ::setsockopt(udp_fd_, SOL_SOCKET, SO_RCVBUF,
+                        &receive_buffer_requested_, sizeof(receive_buffer_requested_)) != 0)
+        return fail_open(std::string("SO_RCVBUF: ") + std::strerror(errno));
+    // Read back rather than assume: kernels may clamp the request, and Linux
+    // reports twice the requested size to include its bookkeeping allowance.
+    socklen_t buffer_size = sizeof(receive_buffer_actual_);
+    if (::getsockopt(udp_fd_, SOL_SOCKET, SO_RCVBUF,
+                     &receive_buffer_actual_, &buffer_size) != 0)
+        return fail_open(std::string("SO_RCVBUF readback: ") + std::strerror(errno));
 
     int enabled = 1;
     if (::setsockopt(udp_fd_, SOL_SOCKET, SO_REUSEADDR, &enabled, sizeof(enabled)) != 0) {
@@ -317,7 +339,8 @@ bool listener_service::open_socket() {
     bound_port_ = address_family_ == AF_INET
         ? ntohs(reinterpret_cast<sockaddr_in*>(&address)->sin_port)
         : ntohs(reinterpret_cast<sockaddr_in6*>(&address)->sin6_port);
-    log().dia("socket ready on udp/*:%u transparent=%d", bound_port_, transparent_);
+    log().dia("socket ready on udp/*:%u transparent=%d rcvbuf requested=%d actual=%d",
+              bound_port_, transparent_, receive_buffer_requested_, receive_buffer_actual_);
     return true;
 #else
     fail("OpenSSL was built without QUIC server support (requires OpenSSL 3.5+)");
@@ -376,8 +399,8 @@ bool listener_service::prepare() {
             fail("cannot retain QUIC receiver socket");
             return false;
         }
-        source = [this](datagram_packet& packet) {
-            return dispatcher_->pop(worker_index_, packet);
+        source = [this](datagram_packet* packets, size_t capacity) {
+            return dispatcher_->pop_batch(worker_index_, packets, capacity);
         };
     }
     listener_ = make_worker_transport(
