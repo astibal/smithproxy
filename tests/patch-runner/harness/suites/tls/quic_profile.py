@@ -28,7 +28,10 @@ def enable_diagnostics():
         cli.settimeout(.5)
         time.sleep(.1)
         cli.recv(65536)
-        for command in ("enable", "debug set com.quic 6"):
+        # Child topics have independent levels; certificate rejection evidence
+        # lives in cb.info/cb.verify rather than the transport root logger.
+        for command in ("enable", "debug set com.quic 6",
+                        "debug set com.quic.cb.info 6", "debug set com.quic.cb.verify 6"):
             cli.sendall(command.encode() + b"\r\n")
             time.sleep(.1)
             response = cli.recv(65536)

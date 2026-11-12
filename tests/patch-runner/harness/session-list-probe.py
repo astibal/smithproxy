@@ -16,6 +16,13 @@ def is_cli_prompt(data, markers):
     return CLI_PROMPT.fullmatch(tail) is not None and any(
         tail.endswith(marker) for marker in markers)
 
+def enter_privileged_mode(prompt, send):
+    """Accept a root CLI directly; elevate only an unprivileged session."""
+    initial = prompt(b"# ", b"> ")
+    if is_cli_prompt(initial, (b"> ",)):
+        send(b"enable\r\n")
+        prompt(b"# ")
+
 def percentile(values, fraction):
     ordered = sorted(values)
     return ordered[round((len(ordered) - 1) * fraction)]
@@ -54,7 +61,7 @@ def main():
                 raise RuntimeError("CLI response exceeded 64 MiB")
             if is_cli_prompt(data, markers):
                 return bytes(data)
-    prompt(b"> "); sock.sendall(b"enable\r\n"); prompt(b"# ")
+    enter_privileged_mode(prompt, sock.sendall)
     rows = []
     for sample in range(a.samples):
         level = 6 if sample % 2 == 0 else 8
