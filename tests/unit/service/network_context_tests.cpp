@@ -217,6 +217,16 @@ TEST(NetworkCtx, StartAttemptCanAlwaysBeStoppedCleanly) {
     EXPECT_GE(running_stats.synchronization_attempts,
               running_stats.synchronization_successes);
 
+    const auto diagnostic = sx::net::network_interfaces_json();
+    EXPECT_EQ(diagnostic.at("schema_version"), 1);
+    EXPECT_EQ(diagnostic.at("generation"), snapshot->generation);
+    EXPECT_EQ(diagnostic.at("synchronization").at("attempts"),
+              running_stats.synchronization_attempts);
+    EXPECT_EQ(diagnostic.at("totals").at("interfaces"), snapshot->interfaces.size());
+    EXPECT_EQ(diagnostic.at("totals").at("addresses"), snapshot->addresses.size());
+    EXPECT_TRUE(diagnostic.contains("sampled_at_unix_ms"));
+    EXPECT_TRUE(diagnostic.contains("last_error_code"));
+
     monitor.stop();
     EXPECT_FALSE(monitor.running());
     EXPECT_FALSE(monitor.stats().running);
