@@ -17,9 +17,9 @@ from aioquic.quic.configuration import QuicConfiguration
 from aioquic.quic.events import ConnectionTerminated, HandshakeCompleted
 
 
-from certificate_cases import CERTIFICATE_PROFILES, rejects
+from certificate_cases import CERTIFICATE_PROFILES, HANDSHAKE_PROFILES, rejects
 
-PROFILES = ("baseline", "no_reuse", "no_pfs", "no_alpn", "old_ticket", *CERTIFICATE_PROFILES)
+PROFILES = (*HANDSHAKE_PROFILES, *CERTIFICATE_PROFILES)
 
 
 def enable_diagnostics():

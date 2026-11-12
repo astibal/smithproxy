@@ -12,7 +12,12 @@ certs = config / 'certs'
 certs.mkdir(parents=True, exist_ok=True)
 data.mkdir(exist_ok=True)
 def openssl(*args):
-    subprocess.run(['openssl', *map(str, args)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # x509 derives its serial filename from -CA and limits that path internally.
+    # Run inside the certificate directory so deeply nested lab names still work.
+    arguments = [str(arg.relative_to(certs)) if isinstance(arg, pathlib.Path) else str(arg)
+                 for arg in args]
+    subprocess.run(['openssl', *arguments], cwd=certs, check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 openssl('req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '2', '-subj', '/CN=Runner Test CA', '-keyout', certs/'ca-key.pem', '-out', certs/'ca-cert.pem', '-addext', 'basicConstraints=critical,CA:TRUE', '-addext', 'keyUsage=critical,keyCertSign,cRLSign')
 # A separate origin CA proves that the client received a forged proxy certificate.
 openssl('req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '2', '-subj', '/CN=Runner Origin CA', '-keyout', certs/'origin-ca-key.pem', '-out', certs/'origin-ca.pem', '-addext', 'basicConstraints=critical,CA:TRUE', '-addext', 'keyUsage=critical,keyCertSign,cRLSign')

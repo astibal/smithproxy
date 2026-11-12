@@ -17,7 +17,7 @@
 #include <utility>
 #include <vector>
 
-#include "proxy/multiflow/multiflow.hpp"
+#include "proxy/quic/connection.hpp"
 #include "proxy/quic/hooks.hpp"
 
 #if OPENSSL_VERSION_NUMBER >= 0x30500000L && !defined(OPENSSL_NO_QUIC)
@@ -173,7 +173,7 @@ unique_ssl make_openssl_quic_client_engine(SSL_CTX* context, int family);
  * It assumes single-thread worker affinity, as required by the initial MF
  * design. The adapter owns the connection and every exposed stream SSL object.
  */
-class openssl_connection final : public multiflow::connection {
+class openssl_connection final : public transport_connection {
 public:
     /** Take ownership of a QUIC connection SSL and, optionally, its UDP fd. */
     enum class event_driver { connection, owner };

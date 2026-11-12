@@ -407,6 +407,7 @@ add_executable(smithproxy
         src/proxy/quic/h3capture.cpp
         src/proxy/quic/spq1.cpp
         src/proxy/quic/openssl.cpp
+        src/proxy/quic/transport.cpp
         src/proxy/quic/hooks.cpp
         src/service/quic/quicservice.cpp
         src/service/quic/worker_dispatcher.cpp
@@ -680,6 +681,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/proxy/quic/spq1_tests.cpp
                 tests/unit/proxy/quic/qpack_vendor_tests.cpp
                 src/proxy/quic/openssl.cpp
+        src/proxy/quic/transport.cpp
         src/proxy/quic/hooks.cpp
                 tests/unit/proxy/quic/openssl_tests.cpp
                 src/proxy/ssh/sshprotocol.cpp
@@ -1005,6 +1007,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/proxy/quic/spq1_tests.cpp
                 tests/unit/proxy/quic/qpack_vendor_tests.cpp
                 src/proxy/quic/openssl.cpp
+        src/proxy/quic/transport.cpp
         src/proxy/quic/hooks.cpp
                 tests/unit/proxy/quic/openssl_tests.cpp
                 src/service/quic/quicservice.cpp
@@ -1021,6 +1024,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 src/proxy/quic/h3capture.cpp
                 src/proxy/quic/spq1.cpp
                 src/proxy/quic/openssl.cpp
+        src/proxy/quic/transport.cpp
         src/proxy/quic/hooks.cpp
                 src/service/quic/quicservice.cpp
                 src/service/quic/worker_dispatcher.cpp
@@ -1365,6 +1369,7 @@ if(SMITHPROXY_FUZZING)
 
     add_executable(quic_lifecycle_fuzzer
             src/proxy/quic/openssl.cpp
+        src/proxy/quic/transport.cpp
         src/proxy/quic/hooks.cpp
             src/proxy/quic/wire.cpp
             tests/fuzz/proxy/quic/lifecycle_fuzzer.cpp)
@@ -1539,4 +1544,34 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/install.cmake)
 if("${USE_EXPERIMENT}" STREQUAL "Y")
     message(" >> !!! EXPERIMENTS ENABLED !!!" )
     message(" >> - software you built and install contain code which is probably not for general use" )
+endif()
+
+# The alternative backend remains an opt-in experiment. It reuses the daemon's
+# listener service, certificate policy and stream MitmProxy; no private TLS build
+# or distribution-specific path belongs in the source tree.
+option(SMITHPROXY_ENABLE_NGTCP2 "Build the experimental ngtcp2 QUIC backend" OFF)
+if(SMITHPROXY_ENABLE_NGTCP2)
+    find_path(NGTCP2_INCLUDE_DIR ngtcp2/ngtcp2.h REQUIRED)
+    find_path(NGTCP2_CRYPTO_INCLUDE_DIR ngtcp2/ngtcp2_crypto_ossl.h REQUIRED)
+    find_library(NGTCP2_LIBRARY ngtcp2 REQUIRED)
+    find_library(NGTCP2_CRYPTO_LIBRARY ngtcp2_crypto_ossl REQUIRED)
+    get_property(quic_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(quic_target IN LISTS quic_targets)
+        get_target_property(quic_sources ${quic_target} SOURCES)
+        if("src/proxy/quic/transport.cpp" IN_LIST quic_sources)
+            target_sources(${quic_target} PRIVATE src/proxy/quic/ngtcp2.cpp src/proxy/quic/ngtcp2_worker.cpp)
+            target_compile_definitions(${quic_target} PRIVATE SMITHPROXY_ENABLE_NGTCP2=1)
+            target_include_directories(${quic_target} PRIVATE ${NGTCP2_INCLUDE_DIR} ${NGTCP2_CRYPTO_INCLUDE_DIR})
+            target_link_libraries(${quic_target} ${NGTCP2_CRYPTO_LIBRARY} ${NGTCP2_LIBRARY})
+        endif()
+    endforeach()
+    if(TARGET quic_testbed)
+        # Run the same service/certificate/lifecycle corpus through the alternate
+        # transport; clients and origins remain OpenSSL interoperability peers.
+        add_test(NAME integration.quic_ngtcp2_testbed COMMAND quic_testbed)
+        set_tests_properties(integration.quic_ngtcp2_testbed PROPERTIES
+            ENVIRONMENT "SMITHPROXY_QUIC_BACKEND=ngtcp2"
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+            LABELS "native;integration;quic;ngtcp2" TIMEOUT 300)
+    endif()
 endif()
