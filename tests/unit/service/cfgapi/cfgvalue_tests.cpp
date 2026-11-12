@@ -112,3 +112,37 @@ TEST(CfgFactorySerialization, LargeConfigurationCannotBlockOnPipeCapacity) {
     }
     free(output);
 }
+
+// Configuration input must not wrap negative sizes or disable the hard bounds.
+TEST(CfgValue, QuicInboxTuningHasBoundedSizesAndRestartHelp) {
+    for (auto const* path : {"settings.tuning.quic_inbox_packets",
+                             "settings.tuning.quic_inbox_bytes"}) {
+        auto value = CfgValueHelp::get().find(path);
+        ASSERT_TRUE(value) << path;
+        auto const& spec = value->get();
+        auto const& validate = spec.value_filter().back();
+        EXPECT_FALSE(validate("-1").accepted());
+        EXPECT_FALSE(validate("0").accepted());
+        EXPECT_FALSE(validate("2147483647").accepted());
+        EXPECT_TRUE(validate("16384").accepted());
+        EXPECT_NE(spec.help_quick().find("restart"), std::string::npos);
+    }
+    auto bytes = CfgValueHelp::get().find("settings.tuning.quic_inbox_bytes");
+    EXPECT_FALSE(bytes->get().value_filter().back()("1023").accepted());
+    EXPECT_TRUE(bytes->get().value_filter().back()("1073741824").accepted());
+    auto packets = CfgValueHelp::get().find("settings.tuning.quic_inbox_packets");
+    EXPECT_TRUE(packets->get().value_filter().back()("1").accepted());
+    EXPECT_FALSE(packets->get().value_filter().back()("1048577").accepted());
+}
+
+// Zero deliberately opts out; all positive requests remain bounded before setsockopt.
+TEST(CfgValue, QuicListenerReceiveBufferAllowsSystemDefault) {
+    auto value = CfgValueHelp::get().find("settings.tuning.quic_listener_rcvbuf");
+    ASSERT_TRUE(value);
+    auto const& validate = value->get().value_filter().back();
+    for (auto input : {"0", "1", "1048576", "1073741824"})
+        EXPECT_TRUE(validate(input).accepted()) << input;
+    for (auto input : {"-1", "1073741825", "2147483647"})
+        EXPECT_FALSE(validate(input).accepted()) << input;
+    EXPECT_NE(value->get().help_quick().find("restart"), std::string::npos);
+}

@@ -1834,6 +1834,8 @@ static void print_quic_sessions(DiagCli* cli, int flags, bool listener_summary, 
             cli_print(cli, "  worker: %zu/%zu, receiver queue drops: %llu",
                       service->worker_index() + 1, service->worker_count(),
                       static_cast<unsigned long long>(service->dropped_datagrams()));
+            cli_print(cli, "  A socket receive buffer: requested=%d, actual=%d bytes (shared by workers)",
+                      service->receive_buffer_requested(), service->receive_buffer());
         }
 
         for (auto const& session : sessions) {

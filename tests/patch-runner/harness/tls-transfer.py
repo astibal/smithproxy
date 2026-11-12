@@ -2,6 +2,7 @@
 import argparse
 import concurrent.futures
 import json
+import ipaddress
 import math
 import os
 import pathlib
@@ -27,20 +28,20 @@ def child_cpu_seconds():
     return usage.ru_utime + usage.ru_stime
 
 
-def native_command(args, mode, payload_file):
+def native_command(args, mode, payload_file, host):
     """Use the independent C++ endpoint; the driver never handles payload data."""
     command = [args.h3_client, "-q", "--exit-on-all-streams-close",
                "--handshake-timeout=10s", f"--timeout={args.timeout}s",
                "--sni=origin.runner.lab"]
     if mode == "upload":
         command += ["--http-method=POST", "-d", str(payload_file)]
-    return command + [args.host, "443", f"https://origin.runner.lab/bulk/{args.bytes}"]
+    return command + [host, "443", f"https://origin.runner.lab/bulk/{args.bytes}"]
 
 
-def curl_command(args, mode, payload_file, run):
+def curl_command(args, mode, payload_file, run, host):
     """Keep curl as the TLS client and an independent native H3 cross-check."""
     url = f"https://origin.runner.lab/bulk/{args.bytes}?run={run}"
-    resolved_host = f"[{args.host}]" if ":" in args.host else args.host
+    resolved_host = f"[{host}]" if ":" in host else host
     command = [
         args.curl, "--noproxy", "*", "--fail", "--silent", "--show-error",
         "--http3-only" if args.protocol == "h3" else "--http1.1", "--max-time", str(args.timeout),
@@ -61,8 +62,10 @@ def curl_command(args, mode, payload_file, run):
 
 def transfer_once(args, mode, concurrency, payload_file, run):
     """Time a checked transfer batch and report CPU at each measured endpoint."""
-    command = (native_command(args, mode, payload_file) if args.h3_client
-               else curl_command(args, mode, payload_file, run))
+    commands = [(native_command(args, mode, payload_file, args.hosts[i % len(args.hosts)])
+                 if args.h3_client else curl_command(args, mode, payload_file, run,
+                                                    args.hosts[i % len(args.hosts)]))
+                for i in range(concurrency)]
     environment = dict(os.environ)
     if args.h3_client:
         environment["SSL_CERT_FILE"] = args.ca_file
@@ -71,14 +74,19 @@ def transfer_once(args, mode, concurrency, payload_file, run):
     server_before = {pid: process_cpu_seconds(pid) for pid in server_pids}
     client_before = child_cpu_seconds()
     cpu_started = process_cpu_seconds(args.pid)
+    def run_client(command):
+        # Completion latency includes process launch and handshake, not just RTT.
+        start = time.monotonic()
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, env=environment, timeout=args.timeout)
+        return result, time.monotonic() - start
+
     started = time.monotonic()
     with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
-        results = list(pool.map(
-            lambda _: subprocess.run(command, stdout=subprocess.PIPE,
-                                     stderr=subprocess.PIPE, text=True,
-                                     env=environment, timeout=args.timeout),
-            range(concurrency)))
+        completed = list(pool.map(run_client, commands))
     elapsed = time.monotonic() - started
+    results = [result for result, _ in completed]
+    latencies = sorted(duration for _, duration in completed)
     cpu_elapsed = (process_cpu_seconds(args.pid) - cpu_started
                    if cpu_started is not None else None)
     client_elapsed = child_cpu_seconds() - client_before
@@ -116,7 +124,10 @@ def transfer_once(args, mode, concurrency, payload_file, run):
     mib = args.bytes * concurrency / (1024 * 1024)
     result = {"seconds": elapsed, "mib_per_second": mib / elapsed, "flows": flows,
               "client_cpu_seconds": client_elapsed,
-              "client_cpu_percent": client_elapsed / elapsed * 100}
+              "client_cpu_percent": client_elapsed / elapsed * 100,
+              "completion_p50_seconds": statistics.median(latencies),
+              "completion_p95_seconds": latencies[math.ceil(.95 * len(latencies)) - 1],
+              "completion_seconds": [duration for _, duration in completed]}
     if cpu_elapsed is not None:
         result["proxy_cpu_seconds"] = cpu_elapsed
         result["proxy_cpu_seconds_per_gib"] = cpu_elapsed / (mib / 1024)
@@ -137,6 +148,7 @@ def main():
     parser.add_argument("--origin-pid-file", type=pathlib.Path,
                         help="Native origin worker PID manifest for CPU accounting")
     parser.add_argument("--host", default="198.18.20.2")
+    parser.add_argument("--hosts", help="Comma-separated same-family destinations, round-robin per flow")
     parser.add_argument("--ca-file", required=True)
     parser.add_argument("--bytes", type=int, default=64 * 1024 * 1024)
     parser.add_argument("--repeats", type=int, default=5)
@@ -155,6 +167,10 @@ def main():
         parser.error("H3 uses QUIC TLS configuration, not TCP TLS cipher switches")
     if args.h3_client and args.protocol != "h3":
         parser.error("--h3-client requires --protocol h3")
+    args.hosts = args.hosts.split(",") if args.hosts else [args.host]
+    if len(args.hosts) > 1 and len({ipaddress.ip_address(host).version for host in args.hosts}) != 1:
+        parser.error("all destinations must use the same address family")
+    args.host = args.hosts[0]
     concurrencies = [int(value) for value in args.concurrency.split(",")]
 
     if not math.isfinite(args.cooldown_seconds) or args.cooldown_seconds < 0:
@@ -170,10 +186,10 @@ def main():
             output.truncate(args.bytes)
 
         # Warm both TLS directions and the origin's worker path.
-        transfer_once(args, "download", 1, payload_file, "warmup-download")
-        transfer_once(args, "upload", 1, payload_file, "warmup-upload")
+        transfer_once(args, "download", len(args.hosts), payload_file, "warmup-download")
+        transfer_once(args, "upload", len(args.hosts), payload_file, "warmup-upload")
 
-        output = {"host": args.host, "protocol": args.protocol, "curl": args.curl,
+        output = {"host": args.host, "hosts": args.hosts, "protocol": args.protocol, "curl": args.curl,
                   "client": args.h3_client or args.curl,
                   "origin": (json.loads(args.origin_pid_file.read_text())
                              if args.origin_pid_file else None),

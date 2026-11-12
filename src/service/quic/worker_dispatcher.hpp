@@ -21,7 +21,11 @@ namespace sx::quic {
  */
 class worker_dispatcher final {
 public:
-    explicit worker_dispatcher(std::size_t workers);
+    // Capacities are per owner and fixed for this receiver's lifetime. Settings
+    // changes take effect when listeners are recreated, never during enqueue.
+    explicit worker_dispatcher(std::size_t workers,
+                               std::size_t max_packets = 16384,
+                               std::size_t max_bytes = 16 * 1024 * 1024);
     ~worker_dispatcher();
     worker_dispatcher(worker_dispatcher const&) = delete;
     worker_dispatcher& operator=(worker_dispatcher const&) = delete;
@@ -42,8 +46,14 @@ public:
     int wake_fd(std::size_t worker) const;
     /** Move one packet out, clearing the wakeup only when the inbox is empty. */
     bool pop(std::size_t worker, datagram_packet& packet);
+    /** Move at most capacity packets under one lock, then process outside it. */
+    std::size_t pop_batch(std::size_t worker, datagram_packet* packets, std::size_t capacity);
     /** Route one packet; false records overload or an already retired owner. */
     bool enqueue(datagram_packet packet);
+    /** Route at most datagram_batch_limit packets, locking each owner once.
+     * Returns accepted packets; rejected packets increment that owner's drops.
+     */
+    std::size_t enqueue_batch(datagram_packet* packets, std::size_t count);
     std::uint64_t dropped(std::size_t worker) const;
     int error() const { return error_.load(); }
 
@@ -54,6 +64,8 @@ private:
     /** Publish fatal receive errors and wake every worker to leave its poll. */
     void fail(int error);
 
+    const std::size_t max_packets_;
+    const std::size_t max_bytes_;
     std::vector<std::unique_ptr<inbox>> inboxes_;
     int socket_fd_ = -1;
     int stop_fd_ = -1;
