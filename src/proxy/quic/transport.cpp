@@ -62,7 +62,16 @@ private:
 
 transport_backend configured_transport_backend() {
     auto* name = std::getenv("SMITHPROXY_QUIC_BACKEND");
-    if (!name || std::string(name) == "openssl") return transport_backend::openssl;
+    // An OpenSSL-only build is an explicit packaging choice. Otherwise prefer
+    // ngtcp2; an invalid runtime selection must fail instead of falling back.
+    if (!name) {
+#ifdef SMITHPROXY_ENABLE_NGTCP2
+        return transport_backend::ngtcp2;
+#else
+        return transport_backend::openssl;
+#endif
+    }
+    if (std::string(name) == "openssl") return transport_backend::openssl;
 #ifdef SMITHPROXY_ENABLE_NGTCP2
     if (std::string(name) == "ngtcp2") return transport_backend::ngtcp2;
 #endif

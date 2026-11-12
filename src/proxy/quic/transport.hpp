@@ -6,7 +6,8 @@ namespace sx::quic {
 #if SMITHPROXY_OPENSSL_QUIC
 
 enum class transport_backend { openssl, ngtcp2, unavailable };
-/** Experimental process selection; unset means the existing OpenSSL backend. */
+// Select ngtcp2 by default when built; OpenSSL remains an explicit alternative.
+// Unknown or unavailable selections return unavailable, never a silent fallback.
 transport_backend configured_transport_backend();
 /** Create TLS contexts with the same central trust/CT store for either backend. */
 unique_ssl_ctx make_transport_context(transport_backend backend, bool server);

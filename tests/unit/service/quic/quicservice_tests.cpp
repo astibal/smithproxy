@@ -13,6 +13,8 @@
 #include <proxy/quic_observer.hpp>
 
 #include <chrono>
+#include <cstdlib>
+#include <optional>
 #include <ctime>
 #include <filesystem>
 #include <thread>
@@ -26,6 +28,53 @@
 #endif
 
 namespace quic = sx::quic;
+
+#if SMITHPROXY_OPENSSL_QUIC
+// Restore the process selection before service tests start their worker threads.
+class QuicBackendSelection : public ::testing::Test {
+protected:
+    std::optional<std::string> previous_;
+
+    void SetUp() override {
+        if (auto* value = std::getenv("SMITHPROXY_QUIC_BACKEND")) previous_ = value;
+    }
+
+    void TearDown() override {
+        if (previous_) setenv("SMITHPROXY_QUIC_BACKEND", previous_->c_str(), 1);
+        else unsetenv("SMITHPROXY_QUIC_BACKEND");
+    }
+};
+
+TEST_F(QuicBackendSelection, UsesTheBuildDefaultWithoutAnOverride) {
+    ASSERT_EQ(unsetenv("SMITHPROXY_QUIC_BACKEND"), 0);
+#ifdef SMITHPROXY_ENABLE_NGTCP2
+    EXPECT_EQ(quic::configured_transport_backend(), quic::transport_backend::ngtcp2);
+#else
+    EXPECT_EQ(quic::configured_transport_backend(), quic::transport_backend::openssl);
+#endif
+}
+
+TEST_F(QuicBackendSelection, AllowsExplicitOpenSsl) {
+    ASSERT_EQ(setenv("SMITHPROXY_QUIC_BACKEND", "openssl", 1), 0);
+    EXPECT_EQ(quic::configured_transport_backend(), quic::transport_backend::openssl);
+}
+
+TEST_F(QuicBackendSelection, RequiresCompiledSupportForExplicitNgtcp2) {
+    ASSERT_EQ(setenv("SMITHPROXY_QUIC_BACKEND", "ngtcp2", 1), 0);
+#ifdef SMITHPROXY_ENABLE_NGTCP2
+    EXPECT_EQ(quic::configured_transport_backend(), quic::transport_backend::ngtcp2);
+#else
+    EXPECT_EQ(quic::configured_transport_backend(), quic::transport_backend::unavailable);
+#endif
+}
+
+TEST_F(QuicBackendSelection, RejectsUnknownAndEmptyOverrides) {
+    for (auto* name : {"unknown", ""}) {
+        ASSERT_EQ(setenv("SMITHPROXY_QUIC_BACKEND", name, 1), 0);
+        EXPECT_EQ(quic::configured_transport_backend(), quic::transport_backend::unavailable);
+    }
+}
+#endif
 
 TEST(QuicCertificateCallbackIdentity, RejectsReusedBorrowedHandles) {
     EXPECT_TRUE(quic::detail::same_certificate_callback_identity(

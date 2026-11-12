@@ -1548,10 +1548,10 @@ if("${USE_EXPERIMENT}" STREQUAL "Y")
     message(" >> - software you built and install contain code which is probably not for general use" )
 endif()
 
-# The alternative backend remains an opt-in experiment. It reuses the daemon's
-# listener service, certificate policy and stream MitmProxy; no private TLS build
-# or distribution-specific path belongs in the source tree.
-option(SMITHPROXY_ENABLE_NGTCP2 "Build the experimental ngtcp2 QUIC backend" OFF)
+# ngtcp2 is the default QUIC transport. Explicitly disabling it retains an
+# OpenSSL-only build; missing ngtcp2 dependencies must not silently select that
+# fallback. Private TLS builds and distribution-specific paths stay outside git.
+option(SMITHPROXY_ENABLE_NGTCP2 "Build the default ngtcp2 QUIC backend" ON)
 if(SMITHPROXY_ENABLE_NGTCP2)
     find_path(NGTCP2_INCLUDE_DIR ngtcp2/ngtcp2.h REQUIRED)
     find_path(NGTCP2_CRYPTO_INCLUDE_DIR ngtcp2/ngtcp2_crypto_ossl.h REQUIRED)
