@@ -60,16 +60,22 @@ std::unique_ptr<openssl_connection> connect_with_hooks(
     auto connection = connect_openssl_quic(
         context, peer, size, server_name, offer.alpn, error, &offer, configure, port);
     if(!connection) {
-        HookEvent failed;
-        failed.kind = HookEvent::Kind::failed;
-        failed.sni = server_name;
-        failed.error = error && !error->empty() ? *error : "QUIC upstream creation failed";
-        dispatch(setup, failed);
+        hook_failure(setup, server_name, error && !error->empty()
+            ? *error : "QUIC upstream creation failed");
     }
 
     return connection;
 }
 #endif
+
+bool hook_failure(proxymaker::SessionSetup* setup, std::string const& name,
+                  std::string const& error) {
+    HookEvent event;
+    event.kind = HookEvent::Kind::failed;
+    event.sni = name;
+    event.error = error;
+    return dispatch(setup, event);
+}
 
 bool apply_hook_offer(SSL* ssl, const HookEvent& offer, const std::string& identity) {
 

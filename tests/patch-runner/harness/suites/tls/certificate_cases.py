@@ -1,5 +1,9 @@
 """Certificate policy cases shared by TCP/TLS and QUIC integration suites."""
 
+# Admission/resumption cases use the same QUIC driver as certificate policy.
+# Keep them discoverable by test-patch.sh, not only by direct Python invocation.
+HANDSHAKE_PROFILES = ("baseline", "no_reuse", "no_pfs", "no_alpn", "old_ticket")
+
 CERTIFICATE_PROFILES = {
     "self_signed_reject": {},
     "self_signed_allow": {"allow_self_signed": True},
@@ -27,6 +31,5 @@ def rejects(name):
 
 
 if __name__ == "__main__":
-    print("quic-cert.baseline")
-    for name in CERTIFICATE_PROFILES:
+    for name in (*HANDSHAKE_PROFILES, *CERTIFICATE_PROFILES):
         print("quic-cert." + name)

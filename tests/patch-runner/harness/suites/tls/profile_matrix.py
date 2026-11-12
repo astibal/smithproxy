@@ -125,7 +125,11 @@ def start_origins(certificates):
 def prepare_certificates(certificates):
     """Disposable negative identities; never alter the system trust store."""
     def openssl(*args):
-        result = subprocess.run(["openssl", *map(str, args)], cwd=certificates,
+        # x509 also limits its derived CA serial path; cwd alone does not help
+        # while absolute certificate filenames are still passed on the command.
+        arguments = [str(arg.relative_to(certificates)) if isinstance(arg, Path) else str(arg)
+                     for arg in args]
+        result = subprocess.run(["openssl", *arguments], cwd=certificates,
                                 capture_output=True, text=True)
         if result.returncode:
             raise RuntimeError(f"openssl {args[0]} failed: {result.stderr.strip()}")

@@ -1,7 +1,7 @@
 #ifndef SMITHPROXY_QUICSERVICE_HPP
 #define SMITHPROXY_QUICSERVICE_HPP
 
-#include "proxy/quic/openssl.hpp"
+#include "proxy/quic/transport.hpp"
 #include "proxy/proxymaker_connect.hpp"
 #include "proxy/multiflow/mfmitmproxy.hpp"
 
@@ -186,10 +186,10 @@ private:
     bool open_socket();
 #if SMITHPROXY_OPENSSL_QUIC
     /** Test/non-transparent connector which resolves SNI as a host name. */
-    std::shared_ptr<openssl_connection> connect_upstream(
+    std::shared_ptr<transport_connection> connect_upstream(
         std::string const& host, proxymaker::SessionSetup* setup);
     /** Production connector to the captured original destination. */
-    std::shared_ptr<openssl_connection> connect_upstream(
+    std::shared_ptr<transport_connection> connect_upstream(
         datagram_endpoint const& target, std::string const& server_name,
         proxymaker::SessionSetup* setup);
     /** OpenSSL trampoline; return -1 while nonblocking preparation is pending. */
@@ -206,7 +206,7 @@ private:
     bool progress_certificate_jobs();
     /** Verify the final upstream identity and derive its downstream certificate. */
     verified_certificate verify_and_spoof(
-        std::shared_ptr<openssl_connection> const& upstream,
+        std::shared_ptr<transport_connection> const& upstream,
         datagram_endpoint destination, std::string const& server_name);
     /** Install already-owned key material back on the listener thread. */
     bool install_verified_certificate(SSL* downstream,
@@ -262,8 +262,8 @@ private:
 #if SMITHPROXY_OPENSSL_QUIC
     unique_ssl_ctx context_;                     ///< Downstream QUIC server context.
     unique_ssl_ctx client_context_;              ///< Verified upstream QUIC client context.
-    unique_ssl upstream_engine_;                 ///< One outgoing listener/engine/socket per worker.
-    std::unique_ptr<openssl_listener> listener_; ///< Adapter over udp_fd_.
+    transport_backend backend_ = transport_backend::openssl;
+    std::unique_ptr<worker_transport> listener_; ///< Both legs, owned by this worker.
     /** Session phases are explicit so shutdown resources remain bounded. */
     enum class session_state { handshake, active, draining };
     /** All state owned by one downstream/upstream connection pair. */
@@ -274,8 +274,8 @@ private:
         std::chrono::steady_clock::time_point created = std::chrono::steady_clock::now();
         std::chrono::steady_clock::time_point last_activity = created;
         std::chrono::steady_clock::time_point draining_since {};
-        std::shared_ptr<openssl_connection> downstream;
-        std::shared_ptr<openssl_connection> upstream;
+        std::shared_ptr<transport_connection> downstream;
+        std::shared_ptr<transport_connection> upstream;
         multiflow::flow_summary stream_summary;
         std::vector<std::string> sift_classifications; ///< Retained after the stream bridge closes.
         std::string last_handshake_phase;
@@ -302,7 +302,7 @@ private:
         std::string server_name;
         std::uint64_t callback_generation = 0;
         std::chrono::steady_clock::time_point created = std::chrono::steady_clock::now();
-        std::shared_ptr<openssl_connection> connection;
+        std::shared_ptr<transport_connection> connection;
     };
     std::map<SSL*, staged_upstream> staged_upstreams_; ///< Key is borrowed downstream SSL.
     /** Retained certificate material for the downstream callback. */
@@ -321,7 +321,7 @@ private:
         std::string server_name;
         std::uint64_t callback_generation = 0;
         std::chrono::steady_clock::time_point created = std::chrono::steady_clock::now();
-        std::shared_ptr<openssl_connection> upstream;
+        std::shared_ptr<transport_connection> upstream;
         certificate_state state = certificate_state::queued;
     };
     std::map<SSL*, certificate_job> certificate_jobs_; ///< Bounded pending verifications.

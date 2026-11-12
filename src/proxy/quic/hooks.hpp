@@ -46,6 +46,9 @@ std::unique_ptr<openssl_connection> connect_with_hooks(
     const std::string& server_name, std::string* error, proxymaker::SessionSetup* setup,
     std::function<bool(SSL*)> const& configure = {}, SSL* port = nullptr);
 
+// Report a failed transport allocation/configuration before a live TLS object exists.
+bool hook_failure(proxymaker::SessionSetup*, std::string const& name, std::string const& error);
+
 bool apply_hook_offer(SSL* ssl, const HookEvent& offer, const std::string& identity);
 
 bool hook_start(proxymaker::SessionSetup* setup, HookEvent& event);
