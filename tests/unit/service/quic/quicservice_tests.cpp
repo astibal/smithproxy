@@ -1,3 +1,8 @@
+#include <vars.hpp>
+#include "proxy/quic/error_stats.hpp"
+#ifdef SMITHPROXY_ENABLE_NGTCP2
+#include "proxy/quic/ngtcp2.hpp"
+#endif
 #include <gtest/gtest.h>
 
 #include "service/quic/quicservice.hpp"
@@ -898,7 +903,7 @@ TEST(QuicDatagramBatch, PreservesPayloadAndDestinationAcrossReusedSlots) {
         EXPECT_EQ(receiver.receive(fd, [&](quic::datagram_packet&& packet) {
             auto expected = worker_test_address((received + round) % 2 ? "127.0.0.1" : "127.0.0.2",
                                                  ntohs(bound.sin_port));
-            EXPECT_EQ(packet.data, std::vector<unsigned char>(100 + received,
+            EXPECT_EQ(std::vector<unsigned char>(packet.data.data(), packet.data.data() + packet.data.size()), std::vector<unsigned char>(100 + received,
                        static_cast<unsigned char>(received + round)));
             EXPECT_EQ(std::memcmp(&packet.local.address, &expected.address, expected.size), 0);
             EXPECT_TRUE(packet.peer.valid());
@@ -915,7 +920,8 @@ TEST(QuicWorkerDispatcher, BatchPreservesOrderLimitsAndLevelTriggeredWakeups) {
     std::array<quic::datagram_packet, 6> input;
     for (size_t i = 0; i < input.size(); ++i) {
         input[i].local = worker_test_address(i % 2 ? "198.18.20.1" : "198.18.20.2");
-        input[i].data = {static_cast<unsigned char>(i)};
+        input[i].data = buffer(1, 1);
+        input[i].data[0] = static_cast<unsigned char>(i);
     }
     auto first = receiver.owner(input[0].local);
     auto second = receiver.owner(input[1].local);
@@ -925,11 +931,11 @@ TEST(QuicWorkerDispatcher, BatchPreservesOrderLimitsAndLevelTriggeredWakeups) {
     EXPECT_EQ(receiver.pop_batch(first, output.data(), 0), 0U);
     ASSERT_TRUE(inbox_readable(receiver, first));
     ASSERT_EQ(receiver.pop_batch(first, output.data(), output.size()), 2U);
-    EXPECT_EQ(output[0].data, (std::vector<unsigned char>{0}));
-    EXPECT_EQ(output[1].data, (std::vector<unsigned char>{2}));
+    EXPECT_EQ(std::vector<unsigned char>(output[0].data.data(), output[0].data.data() + output[0].data.size()), (std::vector<unsigned char>{0}));
+    EXPECT_EQ(std::vector<unsigned char>(output[1].data.data(), output[1].data.data() + output[1].data.size()), (std::vector<unsigned char>{2}));
     EXPECT_TRUE(inbox_readable(receiver, first));
     ASSERT_EQ(receiver.pop_batch(first, output.data(), output.size()), 1U);
-    EXPECT_EQ(output[0].data, (std::vector<unsigned char>{4}));
+    EXPECT_EQ(std::vector<unsigned char>(output[0].data.data(), output[0].data.data() + output[0].data.size()), (std::vector<unsigned char>{4}));
     EXPECT_FALSE(inbox_readable(receiver, first));
     EXPECT_TRUE(inbox_readable(receiver, second));
     receiver.retire(second);
@@ -941,7 +947,7 @@ TEST(QuicWorkerDispatcher, BatchPreservesOrderLimitsAndLevelTriggeredWakeups) {
     // A batch may fit only partially. Byte limits still apply per packet.
     for (auto& packet : input) {
         packet.local = worker_test_address("198.18.20.2");
-        packet.data.resize(1024 * 1024);
+        packet.data = buffer(1024 * 1024, 1024 * 1024);
     }
     EXPECT_EQ(receiver.enqueue_batch(input.data(), input.size()), 4U);
     EXPECT_EQ(receiver.dropped(first), 2U);
@@ -959,7 +965,7 @@ TEST(QuicWorkerDispatcher, ConcurrentBatchesDoNotLoseWakeupsOrReorderOwners) {
             for (unsigned i = 0; i < width; ++i) {
                 unsigned sequence = batch * width + i;
                 packets[i].local = worker_test_address(("198.18.20." + std::to_string(2 + sequence % 4)).c_str());
-                packets[i].data.resize(sizeof(sequence));
+                packets[i].data = buffer(sizeof(sequence), sizeof(sequence));
                 std::memcpy(packets[i].data.data(), &sequence, sizeof(sequence));
             }
             accepted += receiver.enqueue_batch(packets.data(), packets.size());
@@ -1012,7 +1018,8 @@ TEST(QuicWorkerDispatcher, PreservesOwnerAndMetadataAcrossClientAndPortChanges) 
         packet.local = first;
         packet.peer = worker_test_address(i ? "10.0.0.2" : "10.0.0.1", 1000 + i);
         packet.ingress_ifindex = 7;
-        packet.data = {static_cast<unsigned char>(i)};
+        packet.data = buffer(1, 1);
+        packet.data[0] = static_cast<unsigned char>(i);
         ASSERT_TRUE(receiver.enqueue(std::move(packet)));
     }
     EXPECT_TRUE(inbox_readable(receiver, owner));
@@ -1020,7 +1027,7 @@ TEST(QuicWorkerDispatcher, PreservesOwnerAndMetadataAcrossClientAndPortChanges) 
     for (unsigned i = 0; i < 2; ++i) {
         quic::datagram_packet packet;
         ASSERT_TRUE(receiver.pop(owner, packet));
-        EXPECT_EQ(packet.data, (std::vector<unsigned char>{static_cast<unsigned char>(i)}));
+        EXPECT_EQ(std::vector<unsigned char>(packet.data.data(), packet.data.data() + packet.data.size()), (std::vector<unsigned char>{static_cast<unsigned char>(i)}));
         EXPECT_EQ(packet.ingress_ifindex, 7U);
         EXPECT_EQ(receiver.owner(packet.local), owner);
         EXPECT_EQ(inbox_readable(receiver, owner), i == 0);
@@ -1034,7 +1041,7 @@ TEST(QuicWorkerDispatcher, BoundsQueuesAndNeverStealsFromRetiredOwners) {
     quic::datagram_packet packet;
     packet.local = worker_test_address("198.18.20.1");
     packet.peer = worker_test_address("10.0.0.1");
-    packet.data.resize(65536);
+    packet.data = buffer(65536, 65536);
     auto const owner = receiver.owner(packet.local);
     for (int i = 0; i < 64; ++i) ASSERT_TRUE(receiver.enqueue(packet));
     EXPECT_FALSE(receiver.enqueue(packet));
@@ -1077,7 +1084,7 @@ TEST(QuicWorkerDispatcher, ReceivesOriginalDestinationsIntoDistinctWorkerInboxes
         quic::datagram_packet packet;
         ASSERT_TRUE(receiver.pop(worker, packet));
         EXPECT_EQ(receiver.owner(packet.local), worker);
-        EXPECT_EQ(packet.data, (std::vector<unsigned char>{73}));
+        EXPECT_EQ(std::vector<unsigned char>(packet.data.data(), packet.data.data() + packet.data.size()), (std::vector<unsigned char>{73}));
         EXPECT_TRUE(packet.peer.valid());
     }
     receiver.stop();
@@ -1119,7 +1126,7 @@ TEST(QuicWorkerDispatcher, PreservesIpv6DestinationAndIngressInterface) {
               address.sin6_port);
     EXPECT_EQ(receiver.owner(packet.local), owner);
     EXPECT_GT(packet.ingress_ifindex, 0U);
-    EXPECT_EQ(packet.data, (std::vector<unsigned char>{91}));
+    EXPECT_EQ(std::vector<unsigned char>(packet.data.data(), packet.data.data() + packet.data.size()), (std::vector<unsigned char>{91}));
     receiver.stop();
     EXPECT_EQ(receiver.error(), 0);
 }
@@ -1134,7 +1141,8 @@ TEST(QuicWorkerDispatcher, DoesNotLoseWakeupsWhileProducerAndConsumerOverlap) {
             quic::datagram_packet packet;
             packet.local = destination;
             packet.peer = worker_test_address("10.0.0.1");
-            packet.data = {static_cast<unsigned char>(i)};
+            packet.data = buffer(1, 1);
+        packet.data[0] = static_cast<unsigned char>(i);
             receiver.enqueue(std::move(packet));
             std::this_thread::yield();
         }
@@ -1145,7 +1153,7 @@ TEST(QuicWorkerDispatcher, DoesNotLoseWakeupsWhileProducerAndConsumerOverlap) {
         ASSERT_EQ(::poll(&descriptor, 1, 1000), 1);
         quic::datagram_packet packet;
         ASSERT_TRUE(receiver.pop(owner, packet));
-        EXPECT_EQ(packet.data, (std::vector<unsigned char>{static_cast<unsigned char>(i)}));
+        EXPECT_EQ(std::vector<unsigned char>(packet.data.data(), packet.data.data() + packet.data.size()), (std::vector<unsigned char>{static_cast<unsigned char>(i)}));
     }
     EXPECT_FALSE(inbox_readable(receiver, owner));
     EXPECT_EQ(receiver.dropped(owner), 0U);
@@ -1159,16 +1167,77 @@ TEST(QuicWorkerDispatcher, AppliesIndependentConfiguredCapacities) {
     quic::worker_dispatcher receiver(1, 3, 8);
     quic::datagram_packet packet;
     packet.local = worker_test_address("198.18.20.1");
-    packet.data.resize(4);
+    packet.data = buffer(4, 4);
     ASSERT_TRUE(receiver.enqueue(packet));
     ASSERT_TRUE(receiver.enqueue(packet));
     EXPECT_FALSE(receiver.enqueue(packet)); // Byte cap, despite a free slot.
     quic::datagram_packet output;
     ASSERT_TRUE(receiver.pop(0, output));
-    packet.data.resize(1);
+    packet.data = buffer(1, 1);
     ASSERT_TRUE(receiver.enqueue(packet));
     ASSERT_TRUE(receiver.enqueue(packet));
     EXPECT_FALSE(receiver.enqueue(packet)); // Packet cap, despite free bytes.
     EXPECT_EQ(receiver.dropped(0), 2U);
+}
+#endif
+
+// Error evidence outlives the failed receiver; diagnostics enumerate the same count.
+TEST(QuicErrorStats, FailedConstructionRemainsVisible) {
+    auto const before = quic::stats.errors.dispatcher_create_quic_receiver_needs_a_worker.load();
+    EXPECT_THROW(quic::worker_dispatcher(0), std::invalid_argument);
+    bool found = false;
+    quic::stats.errors.visit([&](char const* name, std::uint64_t count) {
+        if (std::string_view(name) == "dispatcher_create_quic_receiver_needs_a_worker") {
+            found = true;
+            EXPECT_EQ(count, before + 1);
+        }
+    });
+    EXPECT_TRUE(found);
+}
+
+#ifdef SMITHPROXY_ENABLE_NGTCP2
+// TLS can call a keylog hook before the connection back-reference is attached.
+TEST(QuicErrorStats, KeylogRejectsMissingCallbackOwner) {
+    auto const missing = quic::stats.errors.ngtcp2_keylog_missing_argument.load();
+    auto const detached = quic::stats.errors.ngtcp2_keylog_missing_connection.load();
+    quic::ng::connection::record_keylog(nullptr, "unused");
+    quic::unique_ssl_ctx ctx(SSL_CTX_new(TLS_method()));
+    ASSERT_TRUE(ctx);
+    quic::unique_ssl ssl(SSL_new(ctx.get()));
+    ASSERT_TRUE(ssl);
+    quic::ng::connection::record_keylog(ssl.get(), "unused");
+    ngtcp2_crypto_conn_ref ref {};
+    SSL_set_app_data(ssl.get(), &ref);
+    quic::ng::connection::record_keylog(ssl.get(), "unused");
+    SSL_set_app_data(ssl.get(), nullptr);
+    EXPECT_EQ(quic::stats.errors.ngtcp2_keylog_missing_argument.load(), missing + 1);
+    EXPECT_EQ(quic::stats.errors.ngtcp2_keylog_missing_connection.load(), detached + 2);
+}
+#endif
+
+#if SMITHPROXY_OPENSSL_QUIC
+// Reusing a moved packet must never overwrite the payload now owned by its inbox.
+TEST(QuicSocketReceive, ReusedMovedPacketOwnsFreshPayload) {
+    auto socket = socle::raw::fd(::socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP));
+    ASSERT_GE(socket.value, 0);
+    sockaddr_in local {};
+    local.sin_family = AF_INET;
+    local.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ASSERT_EQ(::bind(socket.value, reinterpret_cast<sockaddr*>(&local), sizeof(local)), 0);
+    socklen_t length = sizeof(local);
+    ASSERT_EQ(::getsockname(socket.value, reinterpret_cast<sockaddr*>(&local), &length), 0);
+
+    auto receive = [&](char const* payload, quic::datagram_packet& packet) {
+        EXPECT_EQ(::sendto(socket.value, payload, 4, 0,
+                          reinterpret_cast<sockaddr*>(&local), sizeof(local)), 4);
+        EXPECT_TRUE(quic::receive_datagram(socket.value, packet));
+    };
+    quic::datagram_packet packet;
+    receive("one!", packet);
+    auto retained = std::move(packet);
+    receive("two!", packet);
+    EXPECT_EQ(retained.data.string_view(), "one!");
+    EXPECT_EQ(packet.data.string_view(), "two!");
+    EXPECT_NE(retained.data.data(), packet.data.data());
 }
 #endif

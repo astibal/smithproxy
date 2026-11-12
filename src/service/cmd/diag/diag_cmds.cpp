@@ -1,3 +1,4 @@
+#include "proxy/quic/error_stats.hpp"
 #include <service/core/session_interfaces.hpp>
 /*
     Smithproxy- transparent proxy with SSL inspection capabilities.
@@ -1803,6 +1804,13 @@ static void print_quic_sessions(DiagCli* cli, int flags, bool listener_summary, 
     const bool tls_details = listener_summary || verbosity >= iDEB ||
                              flag_check<int>(flags, SL_TLS_DETAILS);
 
+    if (listener_summary || verbosity >= iDIA) {
+        cli_print(cli, "QUIC errors: process-lifetime site counters (nonzero only)");
+        sx::quic::stats.errors.visit([&](char const* name, std::uint64_t count) {
+            if (count) cli_print(cli, "  %s: %llu", name, static_cast<unsigned long long>(count));
+        });
+    }
+
     const auto decor = cli->context.decor();
     auto const& services = SmithProxy::instance().quic_services;
     std::size_t total = 0;
@@ -1817,9 +1825,11 @@ static void print_quic_sessions(DiagCli* cli, int flags, bool listener_summary, 
                     stream_details = pending.get();
                 }
                 catch (const std::exception& error) {
+                    ++sx::quic::stats.errors.cli_stream_details_exception;
                     cli->context.print(decor.error(std::string("QUIC stream details: ") + error.what()));
                 }
             } else {
+                ++sx::quic::stats.errors.cli_stream_details_timeout;
                 cli->context.print(decor.error("QUIC stream details timed out"));
             }
         }

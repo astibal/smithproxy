@@ -1,3 +1,4 @@
+#include "proxy/quic/error_stats.hpp"
 #include "service/quic/worker_dispatcher.hpp"
 
 #if SMITHPROXY_OPENSSL_QUIC
@@ -30,16 +31,27 @@ struct worker_dispatcher::inbox {
 worker_dispatcher::worker_dispatcher(std::size_t workers, std::size_t max_packets,
                                      std::size_t max_bytes)
     : max_packets_(max_packets), max_bytes_(max_bytes) {
-    if (!max_packets_ || !max_bytes_)
+    if (!max_packets_ || !max_bytes_) {
+        ++stats.errors.dispatcher_create_quic_inbox_capacities_must_be_positive;
         throw std::invalid_argument("QUIC inbox capacities must be positive");
-    if (workers == 0) throw std::invalid_argument("QUIC receiver needs a worker");
+    }
+    if (workers == 0) {
+        ++stats.errors.dispatcher_create_quic_receiver_needs_a_worker;
+        throw std::invalid_argument("QUIC receiver needs a worker");
+    }
     for (std::size_t i = 0; i < workers; ++i) {
         auto queue = std::make_unique<inbox>();
-        if (queue->wake < 0) throw std::system_error(errno, std::generic_category(), "QUIC inbox eventfd");
+        if (queue->wake < 0) {
+            ++stats.errors.dispatcher_create_quic_inbox_eventfd;
+            throw std::system_error(errno, std::generic_category(), "QUIC inbox eventfd");
+        }
         inboxes_.push_back(std::move(queue));
     }
     stop_fd_ = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
-    if (stop_fd_ < 0) throw std::system_error(errno, std::generic_category(), "QUIC receiver eventfd");
+    if (stop_fd_ < 0) {
+        ++stats.errors.dispatcher_create_quic_receiver_eventfd;
+        throw std::system_error(errno, std::generic_category(), "QUIC receiver eventfd");
+    }
 }
 
 worker_dispatcher::~worker_dispatcher() {
@@ -80,6 +92,8 @@ bool worker_dispatcher::start() {
     try {
         thread_ = std::thread([this] { run(); });
     } catch (std::system_error const& error) {
+        ++stats.errors.dispatcher_start_exception;
+        ++stats.errors.dispatcher_start_failure;
         fail(error.code().value());
         return false;
     }
@@ -140,7 +154,10 @@ bool worker_dispatcher::enqueue(datagram_packet packet) {
 }
 
 std::size_t worker_dispatcher::enqueue_batch(datagram_packet* packets, std::size_t count) {
-    if (count > datagram_batch_limit) throw std::invalid_argument("QUIC inbox batch too large");
+    if (count > datagram_batch_limit) {
+        ++stats.errors.dispatcher_enqueue_batch_quic_inbox_batch_too_large;
+        throw std::invalid_argument("QUIC inbox batch too large");
+    }
     // A small fixed routing array avoids per-batch maps and allocations. Mark
     // handled slots with size(), which cannot name a worker. Relative order
     // within each owner's queue is the same as the receive order.
@@ -188,11 +205,13 @@ void worker_dispatcher::run() {
         auto const ready = ::poll(descriptors, 2, -1);
         if (ready < 0) {
             if (errno == EINTR) continue;
+            ++stats.errors.dispatcher_run_poll_error;
             fail(errno);
             break;
         }
         if (stopping_ || descriptors[1].revents) break;
         if (descriptors[0].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+            ++stats.errors.dispatcher_run_socket_error;
             fail(EIO);
             break;
         }
@@ -205,6 +224,7 @@ void worker_dispatcher::run() {
             enqueue_batch(packets.data(), valid);
             if (count < 0) {
                 if (detail::datagram_receive_would_block(errno)) break;
+                ++stats.errors.dispatcher_run_receive_failure;
                 fail(errno);
                 return;
             }

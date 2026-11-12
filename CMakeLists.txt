@@ -681,8 +681,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/proxy/quic/spq1_tests.cpp
                 tests/unit/proxy/quic/qpack_vendor_tests.cpp
                 src/proxy/quic/openssl.cpp
-        src/proxy/quic/transport.cpp
-        src/proxy/quic/hooks.cpp
+                src/proxy/quic/transport.cpp
+                src/proxy/quic/hooks.cpp
                 tests/unit/proxy/quic/openssl_tests.cpp
                 src/proxy/ssh/sshprotocol.cpp
                 tests/unit/proxy/ssh/sshprotocol_test.cpp
@@ -1007,8 +1007,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/proxy/quic/spq1_tests.cpp
                 tests/unit/proxy/quic/qpack_vendor_tests.cpp
                 src/proxy/quic/openssl.cpp
-        src/proxy/quic/transport.cpp
-        src/proxy/quic/hooks.cpp
+                src/proxy/quic/transport.cpp
+                src/proxy/quic/hooks.cpp
                 tests/unit/proxy/quic/openssl_tests.cpp
                 src/service/quic/quicservice.cpp
                 src/service/quic/worker_dispatcher.cpp
@@ -1024,8 +1024,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 src/proxy/quic/h3capture.cpp
                 src/proxy/quic/spq1.cpp
                 src/proxy/quic/openssl.cpp
-        src/proxy/quic/transport.cpp
-        src/proxy/quic/hooks.cpp
+                src/proxy/quic/transport.cpp
+                src/proxy/quic/hooks.cpp
                 src/service/quic/quicservice.cpp
                 src/service/quic/worker_dispatcher.cpp
                 tests/quic/testbed/quic_test_node.cpp
@@ -1369,8 +1369,8 @@ if(SMITHPROXY_FUZZING)
 
     add_executable(quic_lifecycle_fuzzer
             src/proxy/quic/openssl.cpp
-        src/proxy/quic/transport.cpp
-        src/proxy/quic/hooks.cpp
+            src/proxy/quic/transport.cpp
+            src/proxy/quic/hooks.cpp
             src/proxy/quic/wire.cpp
             tests/fuzz/proxy/quic/lifecycle_fuzzer.cpp)
     target_link_libraries(quic_lifecycle_fuzzer socle_lib pthread crypto ssl)

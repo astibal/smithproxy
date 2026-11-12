@@ -1,3 +1,6 @@
+#include "proxy/quic/error_stats.hpp"
+#include <privileged_socket.hpp>
+#include <vars.hpp>
 #include "service/quic/quicservice.hpp"
 
 #include "proxy/quic/spq1.hpp"
@@ -133,8 +136,10 @@ listener_service::listener_service(std::uint16_t port, std::string certificate,
 void listener_service::assign_worker(std::shared_ptr<worker_dispatcher> dispatcher,
                                     std::size_t index) {
 #if SMITHPROXY_OPENSSL_QUIC
-    if (ready_ || !dispatcher || index >= dispatcher->size())
+    if (ready_ || !dispatcher || index >= dispatcher->size()) {
+        ++stats.errors.listener_assign_worker_invalid_quic_worker_assignment;
         throw std::logic_error("invalid QUIC worker assignment");
+    }
     dispatcher_ = std::move(dispatcher);
     worker_index_ = index;
 #endif
@@ -206,6 +211,7 @@ void listener_service::process_detail_requests() {
 #endif
             request.result.set_value(std::move(result));
         } catch (...) {
+            ++stats.errors.listener_process_detail_requests_exception;
             request.result.set_exception(std::current_exception());
         }
     }
@@ -247,73 +253,97 @@ bool listener_service::open_socket() {
     receive_buffer_actual_ = 0;
     auto fail_open = [this, &close_open_descriptors](std::string message) {
         close_open_descriptors();
+        ++stats.errors.listener_open_socket_failure;
         fail(std::move(message));
         return false;
     };
     wake_fd_ = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
     if (wake_fd_ < 0) {
+        ++stats.errors.listener_open_socket_eventfd;
         return fail_open(std::string("eventfd: ") + std::strerror(errno));
     }
     if (dispatcher_ && dispatcher_->socket_fd() >= 0) {
         udp_fd_ = ::fcntl(dispatcher_->socket_fd(), F_DUPFD_CLOEXEC, 0);
-        if (udp_fd_ < 0) return fail_open("cannot duplicate QUIC receiver socket");
+        if (udp_fd_ < 0) {
+            ++stats.errors.listener_open_socket_cannot_duplicate_quic_receiver_socket;
+            return fail_open("cannot duplicate QUIC receiver socket");
+        }
         socklen_t buffer_size = sizeof(receive_buffer_actual_);
         if (::getsockopt(udp_fd_, SOL_SOCKET, SO_RCVBUF,
-                         &receive_buffer_actual_, &buffer_size) != 0)
+                         &receive_buffer_actual_, &buffer_size) != 0) {
+            ++stats.errors.listener_shared_socket_receive_buffer_readback;
             return fail_open(std::string("SO_RCVBUF readback: ") + std::strerror(errno));
+        }
         sockaddr_storage bound {};
         socklen_t size = sizeof(bound);
-        if (::getsockname(udp_fd_, reinterpret_cast<sockaddr*>(&bound), &size) != 0)
+        if (::getsockname(udp_fd_, reinterpret_cast<sockaddr*>(&bound), &size) != 0) {
+            ++stats.errors.listener_open_socket_cannot_inspect_quic_receiver_socket;
             return fail_open("cannot inspect QUIC receiver socket");
+        }
         bound_port_ = bound.ss_family == AF_INET
             ? ntohs(reinterpret_cast<sockaddr_in*>(&bound)->sin_port)
             : ntohs(reinterpret_cast<sockaddr_in6*>(&bound)->sin6_port);
         return true;
     }
-    if (address_family_ != AF_INET && address_family_ != AF_INET6)
+    if (address_family_ != AF_INET && address_family_ != AF_INET6) {
+        ++stats.errors.listener_open_socket_unsupported_quic_listener_address_family;
         return fail_open("unsupported QUIC listener address family");
-    udp_fd_ = ::socket(address_family_, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
+    }
+    udp_fd_ = socle::socket(address_family_, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
     if (udp_fd_ < 0) {
+        ++stats.errors.listener_open_socket_socket;
         return fail_open(std::string("socket: ") + std::strerror(errno));
     }
 
     // Set only the original A socket, before traffic arrives. Worker duplicates
     // share its receive queue; B sockets keep their independent OS defaults.
-    if (receive_buffer_requested_ < 0)
+    if (receive_buffer_requested_ < 0) {
+        ++stats.errors.listener_open_socket_negative_quic_listener_receive_buffer;
         return fail_open("negative QUIC listener receive buffer");
+    }
     if (receive_buffer_requested_ > 0
-        && ::setsockopt(udp_fd_, SOL_SOCKET, SO_RCVBUF,
-                        &receive_buffer_requested_, sizeof(receive_buffer_requested_)) != 0)
+        && socle::setsockopt(udp_fd_, SOL_SOCKET, SO_RCVBUF,
+                        &receive_buffer_requested_, sizeof(receive_buffer_requested_)) != 0) {
+        ++stats.errors.listener_open_socket_so_rcvbuf;
         return fail_open(std::string("SO_RCVBUF: ") + std::strerror(errno));
+    }
     // Read back rather than assume: kernels may clamp the request, and Linux
     // reports twice the requested size to include its bookkeeping allowance.
     socklen_t buffer_size = sizeof(receive_buffer_actual_);
     if (::getsockopt(udp_fd_, SOL_SOCKET, SO_RCVBUF,
-                     &receive_buffer_actual_, &buffer_size) != 0)
+                     &receive_buffer_actual_, &buffer_size) != 0) {
+        ++stats.errors.listener_open_socket_receive_buffer_readback;
         return fail_open(std::string("SO_RCVBUF readback: ") + std::strerror(errno));
+    }
 
     int enabled = 1;
-    if (::setsockopt(udp_fd_, SOL_SOCKET, SO_REUSEADDR, &enabled, sizeof(enabled)) != 0) {
+    if (socle::setsockopt(udp_fd_, SOL_SOCKET, SO_REUSEADDR, &enabled, sizeof(enabled)) != 0) {
+        ++stats.errors.listener_open_socket_so_reuseaddr;
         return fail_open(std::string("SO_REUSEADDR: ") + std::strerror(errno));
     }
     if (address_family_ == AF_INET6
-        && ::setsockopt(udp_fd_, SOL_IPV6, IPV6_V6ONLY, &enabled, sizeof(enabled)) != 0)
+        && socle::setsockopt(udp_fd_, SOL_IPV6, IPV6_V6ONLY, &enabled, sizeof(enabled)) != 0) {
+        ++stats.errors.listener_open_socket_ipv6_v6only;
         return fail_open(std::string("IPV6_V6ONLY: ") + std::strerror(errno));
+    }
     int const level = address_family_ == AF_INET ? SOL_IP : SOL_IPV6;
     int const transparent_option = address_family_ == AF_INET ? IP_TRANSPARENT : IPV6_TRANSPARENT;
     int const destination_option = address_family_ == AF_INET ? IP_RECVORIGDSTADDR : IPV6_RECVORIGDSTADDR;
     if (transparent_
-        && ::setsockopt(udp_fd_, level, transparent_option, &enabled, sizeof(enabled)) != 0) {
+        && socle::setsockopt(udp_fd_, level, transparent_option, &enabled, sizeof(enabled)) != 0) {
+        ++stats.errors.listener_open_socket_ip_transparent;
         return fail_open(std::string("IP_TRANSPARENT: ") + std::strerror(errno));
     }
     if (transparent_
-        && ::setsockopt(udp_fd_, level, destination_option,
+        && socle::setsockopt(udp_fd_, level, destination_option,
                         &enabled, sizeof(enabled)) != 0) {
+        ++stats.errors.listener_open_socket_ip_recvorigdstaddr;
         return fail_open(std::string("IP_RECVORIGDSTADDR: ") + std::strerror(errno));
     }
 
     auto const flags = ::fcntl(udp_fd_, F_GETFL, 0);
     if (flags < 0 || ::fcntl(udp_fd_, F_SETFL, flags | O_NONBLOCK) != 0) {
+        ++stats.errors.listener_open_socket_o_nonblock;
         return fail_open(std::string("O_NONBLOCK: ") + std::strerror(errno));
     }
 
@@ -332,10 +362,14 @@ bool listener_service::open_socket() {
         ipv6->sin6_port = htons(port_);
         address_size = sizeof(*ipv6);
     }
-    if (::bind(udp_fd_, reinterpret_cast<sockaddr*>(&address), address_size) != 0)
+    if (socle::bind(udp_fd_, reinterpret_cast<sockaddr*>(&address), address_size) != 0) {
+        ++stats.errors.listener_open_socket_bind;
         return fail_open(std::string("bind: ") + std::strerror(errno));
-    if (::getsockname(udp_fd_, reinterpret_cast<sockaddr*>(&address), &address_size) != 0)
+    }
+    if (::getsockname(udp_fd_, reinterpret_cast<sockaddr*>(&address), &address_size) != 0) {
+        ++stats.errors.listener_open_socket_getsockname;
         return fail_open(std::string("getsockname: ") + std::strerror(errno));
+    }
     bound_port_ = address_family_ == AF_INET
         ? ntohs(reinterpret_cast<sockaddr_in*>(&address)->sin_port)
         : ntohs(reinterpret_cast<sockaddr_in6*>(&address)->sin6_port);
@@ -343,6 +377,7 @@ bool listener_service::open_socket() {
               bound_port_, transparent_, receive_buffer_requested_, receive_buffer_actual_);
     return true;
 #else
+    ++stats.errors.listener_open_socket_openssl_was_built_without_quic_server_support_requires_openssl_3_5;
     fail("OpenSSL was built without QUIC server support (requires OpenSSL 3.5+)");
     return false;
 #endif
@@ -368,6 +403,7 @@ bool listener_service::prepare() {
     context_ = make_transport_context(backend_, true);
     client_context_ = make_transport_context(backend_, false);
     if (!context_ || !client_context_) {
+        ++stats.errors.listener_prepare_cannot_create_quic_context_check_backend_availability;
         fail("cannot create QUIC context (check backend availability): " + openssl_error_stack());
         return false;
     }
@@ -379,6 +415,7 @@ bool listener_service::prepare() {
             && SSL_CTX_use_PrivateKey_file(context_.get(), private_key_.c_str(), SSL_FILETYPE_PEM) == 1
             && SSL_CTX_check_private_key(context_.get()) == 1;
     if (!credentials_loaded) {
+        ++stats.errors.listener_prepare_cannot_load_quic_certificate_key;
         fail("cannot load QUIC certificate/key: " + openssl_error_stack());
         return false;
     }
@@ -396,6 +433,7 @@ bool listener_service::prepare() {
     datagram_source source;
     if (dispatcher_) {
         if (!dispatcher_->attach_socket(udp_fd_)) {
+            ++stats.errors.listener_prepare_cannot_retain_quic_receiver_socket;
             fail("cannot retain QUIC receiver socket");
             return false;
         }
@@ -409,6 +447,7 @@ bool listener_service::prepare() {
         [this](datagram_view const& datagram) { observe_datagram(datagram); },
         std::move(source), limits_.max_sessions);
     if (!listener_) {
+        ++stats.errors.listener_prepare_cannot_create_quic_worker_transport;
         fail("cannot create QUIC worker transport: " + openssl_error_stack());
         return false;
     }
@@ -428,6 +467,7 @@ void listener_service::run() {
     log().inf("listener loop started on udp/*:%u worker=%zu/%zu", bound_port_,
               worker_index_, worker_count());
     if (dispatcher_ && !dispatcher_->start()) {
+        ++stats.errors.listener_run_cannot_start_quic_receiver;
         fail("cannot start QUIC receiver");
         dispatcher_->retire(worker_index_);
         return;
@@ -436,6 +476,7 @@ void listener_service::run() {
     bool application_progress = false;
     while (!stopping_) {
         if (dispatcher_ && dispatcher_->error() != 0) {
+            ++stats.errors.listener_run_quic_receiver;
             fail(std::string("QUIC receiver: ") + std::strerror(dispatcher_->error()));
             break;
         }
@@ -452,6 +493,7 @@ void listener_service::run() {
         if (!listener_->handle_events() && !stopping_) {
             auto detail = listener_->last_error();
             if (detail.empty()) detail = openssl_error_stack();
+            ++stats.errors.listener_run_quic_listener_event_failure;
             fail("QUIC listener event failure: " + detail);
             break;
         }
@@ -462,7 +504,7 @@ void listener_service::run() {
         // During live reconfiguration, keep servicing established sessions but
         // stop admitting new ones until the listener can leave naturally.
         application_progress = progress_certificate_jobs();
-        if (!draining_) application_progress |= accept_connections();
+        if (!draining_) application_progress = accept_connections() || application_progress;
         auto const now = std::chrono::steady_clock::now();
         // Revisit productive sessions without sleeping, but give every A:B
         // pair its turn. Reads, FIN/reset and lifecycle changes count too.
@@ -470,12 +512,12 @@ void listener_service::run() {
             auto const before = linked.forwarded_bytes;
             auto const previous_state = linked.state;
             progress_session(linked, now);
-            application_progress |= linked.forwarded_bytes != before
+            application_progress = application_progress || linked.forwarded_bytes != before
                 || linked.state != previous_state;
             if (linked.downstream)
-                application_progress |= linked.downstream->take_application_progress();
+                application_progress = linked.downstream->take_application_progress() || application_progress;
             if (linked.upstream)
-                application_progress |= linked.upstream->take_application_progress();
+                application_progress = linked.upstream->take_application_progress() || application_progress;
             if (!flush_session_output(linked)) {
                 stopping_ = true;
                 break;
@@ -489,7 +531,7 @@ void listener_service::run() {
         // visits their application consumers before considering a sleep.
 
         // Publish only after removing objects whose grace period has elapsed.
-        application_progress |= reap_expired(now);
+        application_progress = reap_expired(now) || application_progress;
         publish_session_snapshots(now);
         process_detail_requests();
         if (draining_ && sessions_.empty() && certificate_jobs_.empty() &&
@@ -540,6 +582,7 @@ bool listener_service::wait_for_work() {
               sessions_.size(), certificate_jobs_.size());
     auto const polled = ::ppoll(descriptors.data(), descriptors.size(), timeout.count() < 0 ? nullptr : &deadline, nullptr);
     if (polled < 0 && errno != EINTR) {
+        ++stats.errors.listener_wait_for_work_poll;
         fail(std::string("poll: ") + std::strerror(errno));
         return false;
     }
@@ -946,6 +989,7 @@ bool listener_service::flush_session_output(session& value) {
     if (listener_->flush_output(value.client_endpoint, value.target_endpoint,
                                 value.capture_association)) return true;
 
+    ++stats.errors.listener_flush_session_output_quic_connection_output_failure;
     fail("QUIC connection output failure: " + listener_->last_error());
     return false;
 }
@@ -955,6 +999,7 @@ bool listener_service::progress_upstream_engine() {
     if (listener_->handle_upstream()) return true;
     auto detail = listener_->last_error();
     if (detail.empty()) detail = openssl_error_stack();
+    ++stats.errors.listener_progress_upstream_engine_quic_upstream_transport_failure;
     fail("QUIC upstream transport failure: " + detail);
     return false;
 }
@@ -973,7 +1018,7 @@ bool listener_service::reap_expired(std::chrono::steady_clock::time_point now) {
     auto const removed = before - sessions_.size();
     connection_count_ -= removed;
     completed_sessions_ += removed;
-    snapshots_dirty_ |= removed != 0;
+    if (removed != 0) snapshots_dirty_ = true;
     bool transport_cleanup = removed != 0;
 
     // A verified upstream can outlive a client that disappeared before accept.
@@ -1268,6 +1313,7 @@ int listener_service::client_hello_callback(SSL* ssl, int* alert, void* argument
     try {
         if(service && service->prepare_tls_policy(ssl)) return SSL_CLIENT_HELLO_SUCCESS;
     } catch (...) {
+        ++stats.errors.listener_client_hello_callback_exception;
         // No C++ exception may cross OpenSSL's callback boundary.
         log().err("QUIC TLS policy preparation raised an exception");
     }
@@ -1384,7 +1430,16 @@ int listener_service::bind_capture_session(SSL* downstream) {
 
 int listener_service::certificate_callback(SSL* ssl, void* argument) {
     auto* service = static_cast<listener_service*>(argument);
-    return service ? service->prepare_verified_certificate(ssl) : 0;
+    if (!service || !ssl) {
+        ++stats.errors.listener_certificate_callback_missing_context;
+        return 0;
+    }
+    try {
+        return service->prepare_verified_certificate(ssl);
+    } catch (...) {
+        ++stats.errors.listener_certificate_callback_exception;
+        return 0; // Fail closed; never unwind through a TLS C callback.
+    }
 }
 
 int listener_service::prepare_verified_certificate(SSL* downstream) {
@@ -1607,7 +1662,9 @@ listener_service::verified_certificate listener_service::verify_and_spoof(
         return verified;
     }
 
-    X509* certificate = SSL_get1_peer_certificate(upstream->native_handle());
+    socle::raw::var<X509*> peer_certificate {SSL_get1_peer_certificate(upstream->native_handle()),
+        [](auto*& value) { X509_free(value); }};
+    auto* certificate = peer_certificate.value; // Borrowed for identity checks and cache lookup.
     if (!certificate) {
         upstream->close(1);
         return verified;
@@ -1621,7 +1678,7 @@ listener_service::verified_certificate listener_service::verify_and_spoof(
         : X509_check_host(certificate, server_name.c_str(), server_name.size(), 0, nullptr);
     if (identity_matches != 1) {
         log().war("upstream identity mismatch sni='%s'", server_name.c_str());
-        X509_free(certificate);
+
         upstream->close(1);
         return verified;
     }
@@ -1668,18 +1725,18 @@ listener_service::verified_certificate listener_service::verify_and_spoof(
                 continue;
             }
             if (X509_up_ref(issuer) != 1) {
-                X509_free(certificate);
+
                 upstream->close(1);
                 return {};
             }
             verified.issuers.emplace_back(issuer, X509_free);
         }
-        X509_free(certificate);
+
         return verified;
     }
     if (policy.only_custom_certs) {
         log().war("QUIC certificate policy rejected sni='%s': custom identity required", server_name.c_str());
-        X509_free(certificate);
+
         upstream->close(1);
         return {};
     }
@@ -1696,7 +1753,7 @@ listener_service::verified_certificate listener_service::verify_and_spoof(
             forged->nullify(); // SSLFactory::spoof() returns def_sr_key as borrowed.
         }
     }
-    X509_free(certificate);
+
     if (!ready) {
         log().err("certificate spoof failed sni='%s'", server_name.c_str());
         upstream->close(1);
@@ -1712,14 +1769,23 @@ listener_service::verified_certificate listener_service::verify_and_spoof(
 // SSL takes its own references; false prevents completing a partial identity.
 bool listener_service::install_verified_certificate(
     SSL* downstream, verified_certificate const& verified) {
-    if (!downstream || !verified.certificate || !verified.private_key
-        || SSL_use_certificate(downstream, verified.certificate.get()) != 1
-        || SSL_use_PrivateKey(downstream, verified.private_key.get()) != 1
-        || SSL_check_private_key(downstream) != 1 || SSL_clear_chain_certs(downstream) != 1) {
+    bool const identity_available = downstream && verified.certificate && verified.private_key;
+    if (!identity_available) {
+        ++stats.errors.listener_certificate_identity_missing;
+        return false;
+    }
+
+    bool const leaf_installed = SSL_use_certificate(downstream, verified.certificate.get()) == 1
+        && SSL_use_PrivateKey(downstream, verified.private_key.get()) == 1;
+    bool const chain_ready = leaf_installed && SSL_check_private_key(downstream) == 1
+        && SSL_clear_chain_certs(downstream) == 1;
+    if (!chain_ready) {
+        ++stats.errors.listener_certificate_install_failed;
         return false;
     }
     for (auto const& issuer : verified.issuers) {
         if (SSL_add1_chain_cert(downstream, issuer.get()) != 1) {
+            ++stats.errors.listener_certificate_issuer_failed;
             return false;
         }
     }

@@ -1,3 +1,6 @@
+#include "proxy/quic/error_stats.hpp"
+#include <vars.hpp>
+#include <privileged_socket.hpp>
 #include "proxy/quic/ngtcp2.hpp"
 #include "proxy/quic/transport.hpp"
 #include <sslcertstore.hpp>
@@ -14,43 +17,51 @@
 
 namespace sx::quic {
 namespace {
-// Own only worker-created sockets; the shared downstream fd remains borrowed.
-struct socket_owner {
-    int fd = -1;
-    ~socket_owner() { if (fd >= 0) ::close(fd); }
-};
+// Worker-created descriptors use socle's RAII value wrapper. The downstream
+// descriptor is borrowed; only output and temporary route-lookup FDs are owned.
+using owned_socket = socle::raw::unique<int>;
+void close_socket(int& fd) { if (fd >= 0) ::close(fd); }
 
 // The outbound socket is shared by all B legs on this worker, never connected
 // to a single peer. Original-destination metadata supplies each received path.
 int open_output_socket(int family) {
-    socket_owner socket;
-    socket.fd = ::socket(family, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-    if (socket.fd < 0) throw std::runtime_error("ngtcp2 output socket failed");
+    owned_socket socket {socle::socket(family, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0), close_socket};
+    if (socket.value < 0) {
+        ++stats.errors.worker_open_output_socket_ngtcp2_output_socket_failed;
+        throw std::runtime_error("ngtcp2 output socket failed");
+    }
     int one = 1;
     int level = family == AF_INET ? IPPROTO_IP : IPPROTO_IPV6;
     int original = family == AF_INET ? IP_RECVORIGDSTADDR : IPV6_RECVORIGDSTADDR;
-    if (setsockopt(socket.fd, level, original, &one, sizeof(one)))
+    if (socle::setsockopt(socket.value, level, original, &one, sizeof(one))) {
+        ++stats.errors.worker_open_output_socket_ngtcp2_output_metadata_failed;
         throw std::runtime_error("ngtcp2 output metadata failed");
+    }
     datagram_endpoint local;
     local.address.ss_family = family;
     local.size = family == AF_INET ? sizeof(sockaddr_in) : sizeof(sockaddr_in6);
-    if (::bind(socket.fd, reinterpret_cast<sockaddr*>(&local.address), local.size))
+    if (socle::bind(socket.value, reinterpret_cast<sockaddr*>(&local.address), local.size)) {
+        ++stats.errors.worker_open_output_socket_ngtcp2_output_bind_failed;
         throw std::runtime_error("ngtcp2 output bind failed");
-    return std::exchange(socket.fd, -1);
+    }
+    return socket.release();
 }
 
 // Ask the kernel for the route's local IP without sending a datagram. This is
 // only an unsent UDP route lookup, not another TLS/QUIC connection. Its temporary
 // port is replaced by the shared worker socket's port before creating B.
 datagram_endpoint outgoing_path(int fd, sockaddr const* peer, socklen_t size) {
-    socket_owner lookup;
-    lookup.fd = ::socket(peer->sa_family, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+    owned_socket lookup {socle::socket(peer->sa_family, SOCK_DGRAM | SOCK_CLOEXEC, 0), close_socket};
     datagram_endpoint local, bound;
     local.size = bound.size = sizeof(sockaddr_storage);
-    if (lookup.fd < 0 || ::connect(lookup.fd, peer, size)
-        || getsockname(lookup.fd, reinterpret_cast<sockaddr*>(&local.address), &local.size)
-        || getsockname(fd, reinterpret_cast<sockaddr*>(&bound.address), &bound.size))
+    bool const route_selected = lookup.value >= 0 && ::connect(lookup.value, peer, size) == 0;
+    bool const addresses_known = route_selected
+        && getsockname(lookup.value, reinterpret_cast<sockaddr*>(&local.address), &local.size) == 0
+        && getsockname(fd, reinterpret_cast<sockaddr*>(&bound.address), &bound.size) == 0;
+    if (!addresses_known) {
+        ++stats.errors.worker_outgoing_path_ngtcp2_output_route_lookup_failed;
         throw std::runtime_error("ngtcp2 output route lookup failed");
+    }
     if (peer->sa_family == AF_INET)
         reinterpret_cast<sockaddr_in*>(&local.address)->sin_port = reinterpret_cast<sockaddr_in*>(&bound.address)->sin_port;
     else
@@ -107,6 +118,7 @@ class ngtcp2_worker final : public worker_transport {
         ng::timestamp retirement = 0;
         std::set<std::string> cids;
     };
+    // Borrowed routing aliases; entries_ owns their targets until erase_routes().
     using routes = std::unordered_map<std::string, entry*>;
 public:
     ngtcp2_worker(SSL_CTX* server, int fd, int family, datagram_observer observer,
@@ -117,9 +129,11 @@ public:
         int enabled = 1;
         auto level = family == AF_INET ? IPPROTO_IP : IPPROTO_IPV6;
         auto option = family == AF_INET ? IP_RECVORIGDSTADDR : IPV6_RECVORIGDSTADDR;
-        if (setsockopt(fd_, level, option, &enabled, sizeof(enabled)))
+        if (socle::setsockopt(fd_, level, option, &enabled, sizeof(enabled))) {
+            ++stats.errors.worker_worker_ngtcp2_input_metadata_failed;
             throw std::runtime_error("ngtcp2 input metadata failed");
-        output_.fd = open_output_socket(family);
+        }
+        output_.value = open_output_socket(family);
     }
 
     // Separate A/B passes match the service's existing scheduling. TLS resume
@@ -150,16 +164,19 @@ public:
             return {};
         }
         try {
-            if (!tls || !peer || size > sizeof(sockaddr_storage))
+            if (!tls || !peer || size > sizeof(sockaddr_storage)) {
+                ++stats.errors.worker_connect_invalid_ngtcp2_peer;
                 throw std::runtime_error("invalid ngtcp2 peer");
+            }
             datagram_endpoint remote;
             remote.size = size;
             std::memcpy(&remote.address, peer, size);
-            return create(tls, false, outgoing_path(output_.fd, peer, size), remote, 0, nullptr, ng::now(),
+            return create(tls, false, outgoing_path(output_.value, peer, size), remote, 0, nullptr, ng::now(),
                 [&](SSL* ssl) {
                     return configure_upstream_tls(ssl, name, offer, configure);
                 });
         } catch (std::exception const& e) {
+            ++stats.errors.worker_connect_exception;
             if (error) *error = e.what();
             hook_failure(setup, name, e.what());
             return {};
@@ -183,7 +200,7 @@ public:
         return std::chrono::nanoseconds(earliest > ts ? earliest - ts : 0);
     }
     short desired_socket_events() const override { return POLLIN | (blocked(true) ? POLLOUT : 0); }
-    int upstream_fd() const override { return output_.fd; }
+    int upstream_fd() const override { return output_.value; }
     short upstream_events() const override { return POLLIN | (blocked(false) ? POLLOUT : 0); }
     std::string last_error() const override { return error_; }
     datagram_endpoint current_peer() const override { return current_ ? current_->peer : datagram_endpoint {}; }
@@ -202,8 +219,18 @@ private:
             std::string key(reinterpret_cast<char const*>(cid.data), cid.datalen);
             if (add) {
                 auto [it, inserted] = map.emplace(key, owner);
-                if (!inserted && it->second != owner) throw std::runtime_error("ngtcp2 CID collision");
-                owner->cids.insert(std::move(key));
+                if (!inserted && it->second != owner) {
+                    ++stats.errors.worker_router_ngtcp2_cid_collision;
+                    throw std::runtime_error("ngtcp2 CID collision");
+                }
+                try {
+                    owner->cids.insert(key);
+                } catch (...) {
+                    ++stats.errors.worker_register_cid_exception;
+                    if (inserted) map.erase(it);
+                    ++stats.errors.worker_register_cid_rethrow;
+                    throw;
+                }
             } else {
                 map.erase(key);
                 owner->cids.erase(key);
@@ -236,13 +263,16 @@ private:
             owner->connection = std::make_shared<ng::connection>(tls, downstream, local, peer,
                 initial, router(owner), started, std::move(configure), std::move(observer),
                 [this, owner] { current_ = owner; });
+            auto result = owner->connection;
+            entries_.push_back(std::move(value));
+            return result;
         } catch (...) {
+            ++stats.errors.worker_create_exception;
             erase_routes(*owner);
+            if (current_ == owner) current_ = nullptr;
+            ++stats.errors.worker_create_throw;
             throw;
         }
-        auto result = owner->connection;
-        entries_.push_back(std::move(value));
-        return result;
     }
 
     // Resolve an existing CID, or admit a v1 Initial on A. Unknown B packets
@@ -293,7 +323,7 @@ private:
             for (size_t n = 0; n < count; ++n) receive(packets[n], downstream, ts);
             return;
         }
-        int fd = downstream ? fd_ : output_.fd;
+        int fd = downstream ? fd_ : output_.value;
         for (size_t n = 0; n < ng::packet_batch_limit;) {
             auto count = receiver_.receive(fd, [&](datagram_packet&& packet) {
                 receive(packet, downstream, ts);
@@ -307,7 +337,7 @@ private:
     // TLS may resume without a fresh datagram. Reinstall each owner's tuple
     // before callbacks, then service its timers and bounded packet output.
     void progress_connections(bool downstream, ng::timestamp ts) {
-        int fd = downstream ? fd_ : output_.fd;
+        int fd = downstream ? fd_ : output_.value;
         for (auto& value : entries_) {
             if (value->downstream != downstream) continue;
             current_ = value.get();
@@ -327,6 +357,7 @@ private:
             retire(ts);
             return true;
         } catch (std::exception const& e) {
+            ++stats.errors.worker_progress_exception;
             error_ = e.what();
             return false;
         }
@@ -369,7 +400,7 @@ private:
 
     SSL_CTX* server_;
     int fd_;
-    socket_owner output_;
+    owned_socket output_ {-1, close_socket};
     datagram_receiver receiver_;
     datagram_source source_;
     datagram_observer observer_;
@@ -388,7 +419,10 @@ private:
 unique_ssl_ctx make_ngtcp2_context(bool server) {
     static std::once_flag initialized;
     std::call_once(initialized, [] {
-        if (ngtcp2_crypto_ossl_init()) throw std::runtime_error("ngtcp2 crypto initialization failed");
+        if (ngtcp2_crypto_ossl_init()) {
+            ++stats.errors.worker_make_ngtcp2_context_ngtcp2_crypto_initialization_failed;
+            throw std::runtime_error("ngtcp2 crypto initialization failed");
+        }
     });
     unique_ssl_ctx context(SSL_CTX_new(server ? TLS_server_method() : TLS_client_method()));
     if (!context || SSL_CTX_set_min_proto_version(context.get(), TLS1_3_VERSION) != 1
@@ -407,6 +441,7 @@ std::unique_ptr<worker_transport> make_ngtcp2_worker(
     try {
         return std::make_unique<ngtcp2_worker>(server, fd, family, std::move(observer), std::move(source), limit);
     } catch (...) {
+        ++stats.errors.worker_make_worker_exception;
         return {};
     }
 }

@@ -1,9 +1,11 @@
+#include "proxy/quic/error_stats.hpp"
 #pragma once
 
 #include "proxy/proxymaker_connect.hpp"
 #include "service/tpool.hpp"
 
 #include <sslcom.hpp>
+#include <vars.hpp>
 #include <atomic>
 
 namespace sx::quic {
@@ -30,12 +32,10 @@ public:
 
     // Snapshot chains own their references; SSLCom releases the other retained
     // certificates and the snapshot's memory-only SSL object.
-    ~certificate_verifier() override {
-        sk_X509_pop_free(chain_, X509_free);
-    }
+    ~certificate_verifier() override = default;
 
     // Supply the retained chain to SSLCom's OCSP/CRL helpers. Borrowed by callers.
-    STACK_OF(X509)* verified_peer_chain() const override { return chain_; }
+    STACK_OF(X509)* verified_peer_chain() const override { return chain_.value; }
 
     // Keep certificate selection consistent with the policy used for admission.
     proxymaker::QuicTlsPolicy const& policy() const { return policy_; }
@@ -50,20 +50,27 @@ public:
     // Look up the verifier attached before the upstream handshake; may be null
     // for connections that intentionally bypass verification in the testbed.
     static certificate_verifier* get(SSL* ssl) {
+        if (!ssl || index() < 0) return nullptr;
         return static_cast<certificate_verifier*>(SSL_get_ex_data(ssl, index()));
     }
 
     // Attach ownership and verification callbacks before the first ClientHello.
     // False aborts connection setup; once attached, SSL also owns failure cleanup.
     static bool install(SSL* ssl, proxymaker::QuicTlsPolicy const& policy) {
+        if (!ssl) {
+            ++stats.errors.verifier_install_missing_ssl;
+            return false;
+        }
         auto verifier = std::make_unique<certificate_verifier>(policy);
         if (index() < 0 || SSL_set_ex_data(ssl, index(), verifier.get()) != 1) {
+            ++stats.errors.verifier_install_attachment_failed;
             return false;
         }
 
         auto* value = verifier.release();
         value->owner_ = ssl;
         if (SSL_set_ex_data(ssl, SSLCom::extdata_index(), value) != 1) {
+            ++stats.errors.verifier_install_callback_state_failed;
             return false;
         }
         SSL_set_verify(ssl, SSL_VERIFY_PEER, SSLCom::ssl_client_vrfy_callback);
@@ -79,12 +86,14 @@ public:
 
         if (policy.ocsp_stapling || policy.ocsp_mode > 0) {
             if (SSL_set_tlsext_status_type(ssl, TLSEXT_STATUSTYPE_ocsp) != 1) {
+                ++stats.errors.verifier_install_stapling_failed;
                 return false;
             }
         }
         if (policy.ct_enable) {
             if (SSL_enable_ct(ssl, SSL_CT_VALIDATION_STRICT) != 1
                 || SSL_set_ct_validation_callback(ssl, SSLCom::ct_verify_callback, value) != 1) {
+                ++stats.errors.verifier_install_ct_failed;
                 return false;
             }
         }
@@ -95,6 +104,10 @@ public:
     // already run during TLS; revocation is submitted once and polled thereafter.
     // Returns 0 while pending, 1 on acceptance, or -1 on any failure.
     int progress(SSL* ssl) {
+        if (!ssl) {
+            ++stats.errors.verifier_progress_missing_ssl;
+            return finish(-1);
+        }
         if (started_) {
             return verdict();
         }
@@ -109,9 +122,13 @@ public:
             SSL_set_msg_callback(ssl, nullptr);
             SSL_set_msg_callback_arg(ssl, nullptr);
         }
-        if (callback_binding_failed_) return finish(-1);
+        if (callback_binding_failed_) {
+            ++stats.errors.verifier_progress_callback_binding_failed;
+            return finish(-1);
+        }
         exception_ = SSL_get_verify_result(ssl) != X509_V_OK;
         if (!is_verify_status_opt_allowed()) {
+            ++stats.errors.verifier_progress_policy_rejected;
             return finish(-1);
         }
         if (!opt.ocsp.stapling_enabled && opt.ocsp.mode == 0) {
@@ -120,6 +137,7 @@ public:
 
         auto snapshot = make_revocation_snapshot(ssl);
         if (!snapshot || !enqueue_revocation(std::move(snapshot))) {
+            ++stats.errors.verifier_progress_revocation_setup_failed;
             return finish(-1);
         }
         return 0;
@@ -132,6 +150,11 @@ private:
     static void bind_callback_state(int, int, int, const void*, std::size_t,
                                     SSL* callback_ssl, void* argument) {
         auto* verifier = static_cast<certificate_verifier*>(argument);
+        if (!verifier || !callback_ssl) {
+            ++stats.errors.verifier_callback_missing_context;
+            if (verifier) verifier->callback_binding_failed_ = true;
+            return;
+        }
         if (callback_ssl != verifier->owner_
             && SSL_set_ex_data(callback_ssl, SSLCom::extdata_index(), verifier) != 1)
             verifier->callback_binding_failed_ = true;
@@ -147,6 +170,7 @@ private:
             return true;
         }
         if (X509_up_ref(source) != 1) {
+            ++stats.errors.verifier_certificate_ref_failed;
             return false;
         }
         target = source;
@@ -164,10 +188,12 @@ private:
 
         auto* copy = static_cast<unsigned char*>(OPENSSL_memdup(staple, size));
         if (!copy) {
+            ++stats.errors.verifier_staple_allocation_failed;
             return false;
         }
         if (SSL_set_tlsext_status_ocsp_resp(target, copy, size) != 1) {
             OPENSSL_free(copy);
+            ++stats.errors.verifier_staple_install_failed;
             return false;
         }
         // SSL owns the response buffer after successful installation.
@@ -182,24 +208,29 @@ private:
         snapshot->verify_reset(static_cast<verify_status_t>(verify_get()));
         snapshot->sslcom_ssl = SSL_new(factory()->default_tls_client_cx());
         if (!snapshot->sslcom_ssl) {
+            ++stats.errors.verifier_snapshot_ssl_failed;
             return nullptr;
         }
         if (SSL_set_ex_data(snapshot->sslcom_ssl, SSLCom::extdata_index(), snapshot.get()) != 1) {
+            ++stats.errors.verifier_snapshot_binding_failed;
             return nullptr;
         }
 
         if (!retain_certificate(sslcom_target_cert, snapshot->sslcom_target_cert)
             || !retain_certificate(sslcom_target_issuer, snapshot->sslcom_target_issuer)
             || !retain_certificate(sslcom_target_issuer_issuer, snapshot->sslcom_target_issuer_issuer)) {
+            ++stats.errors.verifier_snapshot_certificate_ref_failed;
             return nullptr;
         }
         if (auto* chain = SSL_get0_verified_chain(ssl)) {
-            snapshot->chain_ = X509_chain_up_ref(chain);
-            if (!snapshot->chain_) {
+            snapshot->chain_.value = X509_chain_up_ref(chain);
+            if (!snapshot->chain_.value) {
+                ++stats.errors.verifier_snapshot_chain_failed;
                 return nullptr;
             }
         }
         if (!copy_staple(ssl, snapshot->sslcom_ssl)) {
+            ++stats.errors.verifier_snapshot_staple_failed;
             return nullptr;
         }
         return snapshot;
@@ -232,6 +263,7 @@ private:
                     && snapshot->is_verify_status_opt_allowed();
                 verdict = accepted ? 1 : -1;
             } catch (...) {
+                ++stats.errors.certificate_verifier_execute_exception;
                 // A worker failure must never turn into certificate acceptance.
                 verdict = -1;
             }
@@ -250,12 +282,25 @@ private:
     // Bound retained certificate material even if revocation responders stall.
     // True means the existing pool accepted ownership; false rejects admission.
     bool enqueue_revocation(std::unique_ptr<certificate_verifier> snapshot) {
+        socle::raw::unique<bool> reserved {false, [](bool& held) { if (held) --pending_; }};
         if (pending_.fetch_add(1) >= max_pending_revocations) {
             --pending_;
+            ++stats.errors.verifier_revocation_capacity_exhausted;
             return false;
         }
-        auto task = std::make_unique<revocation_task>(std::move(snapshot), result_);
-        return sx::tp::ThreadPool::instance::get().enqueue(std::move(task)) > 0;
+        // Until a task exists, this guard owns the reserved pending slot.
+        // Allocation or queue exceptions must not permanently consume capacity.
+        reserved.value = true;
+        try {
+            auto task = std::make_unique<revocation_task>(std::move(snapshot), result_);
+            reserved.release(); // The task destructor now releases the slot.
+            if (sx::tp::ThreadPool::instance::get().enqueue(std::move(task)) > 0) return true;
+            ++stats.errors.verifier_revocation_queue_rejected;
+            return false;
+        } catch (...) {
+            ++stats.errors.verifier_revocation_enqueue_exception;
+            return false;
+        }
     }
 
     // Allocate the SSL-owned attachment slot once, including its destruction hook.
@@ -274,7 +319,8 @@ private:
     }
 
     proxymaker::QuicTlsPolicy policy_;
-    STACK_OF(X509)* chain_ = nullptr;
+    socle::raw::var<STACK_OF(X509)*> chain_ {nullptr,
+        [](auto*& value) { sk_X509_pop_free(value, X509_free); }};
     bool started_ = false;
     bool exception_ = false;
     std::shared_ptr<std::atomic_int> result_ = std::make_shared<std::atomic_int>(0);

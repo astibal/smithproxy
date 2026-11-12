@@ -1,6 +1,8 @@
 #ifndef SMITHPROXY_QUIC_OPENSSL_HPP
 #define SMITHPROXY_QUIC_OPENSSL_HPP
 
+#include <buffer.hpp>
+
 #include <openssl/opensslv.h>
 #include <openssl/ssl.h>
 
@@ -46,7 +48,7 @@ struct datagram_endpoint {
 
 /** Owned UDP payload and its original tuple, safe to hand to another worker. */
 struct datagram_packet {
-    std::vector<unsigned char> data;
+    buffer data;
     datagram_endpoint peer;
     datagram_endpoint local;
     std::uint64_t association = 0;

@@ -7,6 +7,7 @@
 #include <ngtcp2/ngtcp2_crypto.h>
 #include <ngtcp2/ngtcp2_crypto_ossl.h>
 #include <array>
+#include <vars.hpp>
 #include <deque>
 #include <functional>
 #include <map>
@@ -41,8 +42,8 @@ public:
     bool send_blocked() const { return !pending_output_.empty(); }
     bool established() const;
     bool ended() const { return closed_; }
-    ngtcp2_conn* native() const { return conn_; }
-    SSL* native_handle() const override { return ssl_; }
+    ngtcp2_conn* native() const { return conn_.value; }
+    SSL* native_handle() const override { return ssl_.value; }
     datagram_endpoint peer_endpoint() const override { return remote_; }
     bool handshake_complete() const override { return established(); }
     bool closed() const override { return closed_; }
@@ -71,7 +72,7 @@ private:
     // RX uses used as a read cursor; TX uses it as a submission cursor. TX
     // storage remains immutable and alive until the acknowledged range covers it.
     struct chunk {
-        std::vector<unsigned char> bytes;
+        buffer bytes;
         uint64_t offset = 0;
         size_t used = 0;
     };
@@ -141,14 +142,23 @@ private:
     datagram_observer observer_;
     std::function<void()> activate_;
     std::shared_ptr<keylog_store> keylog_;
-    ngtcp2_conn* conn_ = nullptr;
-    SSL* ssl_ = nullptr;
-    ngtcp2_crypto_ossl_ctx* crypto_ = nullptr;
     ngtcp2_crypto_conn_ref reference_ {};
     std::map<int64_t, stream> streams_;
     std::vector<multiflow::event> events_;
     int64_t next_tx_ = 0;
     std::deque<output_packet> pending_output_;
+
+    // Reverse member destruction releases TLS, then QUIC, then crypto glue.
+    // These owners also unwind partial constructor failures without a catch.
+    socle::raw::var<ngtcp2_crypto_ossl_ctx*> crypto_ {nullptr,
+        [](auto*& value) { ngtcp2_crypto_ossl_ctx_del(value); }};
+    socle::raw::var<ngtcp2_conn*> conn_ {nullptr,
+        [](auto*& value) { ngtcp2_conn_del(value); }};
+    socle::raw::var<SSL*> ssl_ {nullptr, [](auto*& value) {
+        if (!value) return;
+        SSL_set_app_data(value, nullptr);
+        SSL_free(value);
+    }};
 };
 
 } // namespace sx::quic::ng
