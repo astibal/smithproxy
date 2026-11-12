@@ -136,6 +136,9 @@ unique_ssl_ctx make_openssl_quic_context(bool server) {
     if (context && !SSLFactory::factory().set_verify_locations(context.get())) {
         return nullptr;
     }
+    if (context && !server && SSLFactory::factory().is_ct_available()
+        && SSL_CTX_set_ctlog_list_file(context.get(), SSLFactory::factory().ctlogfile().c_str()) != 1)
+        return nullptr;
     // Capture only the intercepted/downstream leg. Upstream secrets describe
     // a different QUIC connection and must not be mixed into its wire capture.
     // The callback always runs so production can retain secrets internally;
@@ -933,7 +936,7 @@ std::unique_ptr<openssl_connection> connect_openssl_quic(
 std::unique_ptr<openssl_connection> connect_openssl_quic(
     SSL_CTX* context, const sockaddr* peer, socklen_t peer_size,
     std::string const& server_name, std::string const& alpn, std::string* error,
-    HookEvent const* offer) {
+    HookEvent const* offer, std::function<bool(SSL*)> const& configure) {
     auto fail = [error](std::string message) {
         if (error) *error = std::move(message);
         return std::unique_ptr<openssl_connection> {};
@@ -988,6 +991,8 @@ std::unique_ptr<openssl_connection> connect_openssl_quic(
     if(offer && !apply_hook_offer(ssl.get(), *offer, server_name)) {
         return close_and_fail("configure QUIC hook settings: " + openssl_error_stack());
     }
+
+    if (configure && !configure(ssl.get())) return close_and_fail("QUIC certificate policy setup failed");
 
     auto connection = std::make_unique<openssl_connection>(std::move(ssl), fd);
     connection->drain_events();

@@ -325,6 +325,11 @@ if [[ ${QUIC_LAB:-0} == 1 ]]; then
         ip netns exec "$NS" iptables -t mangle -A PREROUTING \
             -i "$input" -p udp --dport 443 \
             -j TPROXY --on-port 0 --tproxy-mark "$TPROXY_MARK/1"
+        if ((IPV6_ENABLED)); then
+            ip netns exec "$NS" ip6tables -t mangle -A PREROUTING \
+                -i "$input" -p udp --dport 443 \
+                -j TPROXY --on-port 0 --tproxy-mark "$TPROXY_MARK/1"
+        fi
     done
 fi
 ip netns exec "$NS" nft -f - <<NFT
@@ -365,12 +370,13 @@ table ip6 smithproxy6 {
         type filter hook forward priority filter; policy drop;
     }
     chain prerouting {
-        type filter hook prerouting priority mangle; policy accept;
+        type filter hook prerouting priority $NFT_PREROUTING_PRIORITY; policy accept;
+        $MARKED_PACKET_RULE
         meta l4proto tcp socket transparent 1 counter meta mark set $TPROXY_MARK accept
         iifname != { $INPUT_SET } return
         fib daddr type local return
         tcp dport 443 counter tproxy to :$TLS_PORT meta mark set $TPROXY_MARK accept
-        udp dport 443 counter tproxy to :$QUIC_PORT meta mark set $TPROXY_MARK accept
+        $QUIC_TPROXY_RULE
         meta l4proto tcp counter tproxy to :$PLAIN_PORT meta mark set $TPROXY_MARK accept
         meta l4proto udp counter tproxy to :$PLAIN_PORT meta mark set $TPROXY_MARK accept
     }

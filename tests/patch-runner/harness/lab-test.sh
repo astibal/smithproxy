@@ -257,9 +257,17 @@ if [[ $QUIC_TEST == 1 ]]; then
         echo "FAIL: SPQ1_DISSECTOR is not readable: ${SPQ1_DISSECTOR:-<unset>}" >&2
         exit 1
     }
+    QUIC_ORIGIN_IDENTITY=origin
+    case ${QUIC_TLS_PROFILE_TEST:-} in
+        self_signed_*) QUIC_ORIGIN_IDENTITY=self_signed ;;
+        expired_*) QUIC_ORIGIN_IDENTITY=expired ;;
+        future_*) QUIC_ORIGIN_IDENTITY=future ;;
+        untrusted_*) QUIC_ORIGIN_IDENTITY=untrusted ;;
+    esac
     ip netns exec "$SERVER" python3 -u "$ROOT/runner/tests/h3-origin.py" \
-        --certificate "$ROOT/config/certs/origin-cert.pem" \
-        --key "$ROOT/config/certs/origin-key.pem" \
+        --host6 fd00:20::2 \
+        --certificate "$ROOT/config/certs/$QUIC_ORIGIN_IDENTITY-cert.pem" \
+        --key "$ROOT/config/certs/$QUIC_ORIGIN_IDENTITY-key.pem" \
         > "$ROOT/results/h3-origin.log" 2>&1 &
     H3_ORIGIN_PID=$!
     for attempt in $(seq 1 100); do
@@ -449,6 +457,7 @@ if [[ -n ${QUIC_TLS_PROFILE_TEST:-} ]]; then
     ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/suites/tls/quic_profile.py" \
         --profile "$QUIC_TLS_PROFILE_TEST" --ca-file "$ROOT/config/certs/ca-cert.pem" \
         --proxy-log "$ROOT/data/messages.default.log" \
+        --origin-log "$ROOT/results/h3-origin.log" \
         --output "$ROOT/results/quic-tls-profile.json"
     exit 0
 fi
@@ -575,8 +584,8 @@ if [[ $QUIC_TEST == 1 ]]; then
     grep -q 'smithproxy-h3-origin path=/beta?item=2' "$QUIC_RESULT/beta.txt"
     grep -q 'smithproxy-h3-origin path=/gamma/deep' "$QUIC_RESULT/gamma.txt"
     grep -q 'smithproxy-h3-origin path=/hold?stream=4' "$QUIC_RESULT/hold.txt"
-    grep -q 'SNI: origin.runner.lab' "$QUIC_CLI"
-    grep -q 'ALPN: downstream=h3 upstream=h3' "$QUIC_CLI"
+    grep -q 'sni: origin.runner.lab' "$QUIC_RESULT/cli-quic.txt"
+    grep -q 'ALPN: downstream=h3 upstream=h3' "$QUIC_RESULT/cli-quic.txt"
     echo 'PASS4 QUIC/H3 traffic: verified certificate, SNI, ALPN and four multiplexed requests'
     echo 'PASS4 QUIC diagnostics: active session and streams visible in dedicated CLI'
     # Let normal peer close and the bounded QUIC drain finish while webhook

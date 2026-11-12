@@ -1826,8 +1826,9 @@ static void print_quic_sessions(DiagCli* cli, int flags, bool listener_summary, 
 
         if (listener_summary) {
             auto const counters = service->diagnostics();
-            cli_print(cli, "QUIC listener[%zu]: udp/*:%u, sessions: %zu, accepted: %llu, completed: %llu",
-                      listener, service->bound_port(), sessions.size(),
+            cli_print(cli, "QUIC listener[%zu]: udp/%s:%u, sessions: %zu, accepted: %llu, completed: %llu",
+                      listener, service->address_family() == AF_INET6 ? "[::]" : "0.0.0.0",
+                      service->bound_port(), sessions.size(),
                       static_cast<unsigned long long>(counters.accepted_sessions),
                       static_cast<unsigned long long>(counters.completed_sessions));
         }
@@ -1891,6 +1892,8 @@ static void print_quic_sessions(DiagCli* cli, int flags, bool listener_summary, 
                           listener, static_cast<unsigned long long>(session.id), session.state.c_str(),
                           static_cast<unsigned long long>(session.age_ms),
                           static_cast<unsigned long long>(session.idle_ms));
+                cli_print(cli, "    handshake phase: %s%s%s", session.handshake_phase.c_str(),
+                          session.end_reason.empty() ? "" : "  ended: ", session.end_reason.c_str());
                 cli_print(cli, "    streams: %zu  queued: %zuB  forwarded: %lluB  rejected: %zu",
                           session.streams, session.queued_bytes,
                           static_cast<unsigned long long>(session.forwarded_bytes),

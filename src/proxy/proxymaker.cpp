@@ -418,6 +418,8 @@ namespace sx::proxymaker {
             std::optional<QuicTlsPolicy> tls_policy(
                 std::string const& host, std::string const& port) override {
 
+                if (tls_policy_) return tls_policy_;
+
                 // Reuse normal ordered UDP policy matching. These temporary
                 // contexts have no sockets and never perform transport I/O.
                 auto const& source = details_["info"]["source"];
@@ -444,11 +446,22 @@ namespace sx::proxymaker {
 
                 QuicTlsPolicy result;
                 if(auto const& profile = rule->profile_tls) {
+                    result.allow_self_signed = profile->allow_self_signed;
+                    result.allow_invalid_certs = profile->allow_invalid_certs;
+                    result.allow_untrusted_issuers = profile->allow_untrusted_issuers;
+                    result.ct_enable = profile->opt_ct_enable;
+                    result.ocsp_stapling = profile->ocsp_stapling;
+                    result.ocsp_stapling_mode = profile->ocsp_stapling_mode;
+                    result.ocsp_mode = profile->ocsp_mode;
+                    result.sni_based_cert = profile->mitm_cert_sni_search;
+                    result.ip_based_cert = profile->mitm_cert_ip_search;
+                    result.only_custom_certs = profile->mitm_cert_searched_only;
                     result.use_pfs = profile->left_use_pfs && profile->right_use_pfs;
                     result.alpn_block = profile->opt_alpn_block;
                     result.disable_reuse = profile->left_disable_reuse;
                 }
-                return result;
+                tls_policy_ = result;
+                return tls_policy_;
             }
 
             ~QuicSessionSetup() override {
@@ -534,6 +547,7 @@ namespace sx::proxymaker {
             std::shared_ptr<sx::http::webhooks::webhook_control_t> control_ =
                 std::make_shared<sx::http::webhooks::webhook_control_t>();
             std::unique_ptr<sx::proxy::QuicObserver> observer_;
+            std::optional<QuicTlsPolicy> tls_policy_;
             bool started_ = false;
             bool notified_ = false;
             bool allowed_ = false;

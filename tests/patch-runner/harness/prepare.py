@@ -58,13 +58,19 @@ if lab_ocsp_count != 1 or lab_ct_count != 1:
 quic_profile = os.environ.get('QUIC_TLS_PROFILE_TEST')
 if quic_profile:
     # Keep config generation independent of the optional aioquic dependency.
+    from suites.tls.certificate_cases import CERTIFICATE_PROFILES
+    from suites.tls.profile_matrix import prepare_certificates
+    if quic_profile in CERTIFICATE_PROFILES:
+        prepare_certificates(certs)
     options = {
+        **CERTIFICATE_PROFILES,
         'baseline': {},
         'old_ticket': {},
         'no_reuse': {'left_disable_reuse': True, 'right_disable_reuse': True},
         'no_pfs': {'use_pfs': False, 'left_use_pfs': False, 'right_use_pfs': False},
         'no_alpn': {'alpn_block': True},
     }[quic_profile]
+    options = {"failed_certcheck_replacement": False, **options}
     start = text.index('    default = {', text.index('tls_profiles = {'))
     end = text.index('\n    }', start)
     profile = text[start:end]
@@ -180,9 +186,9 @@ if quic_test:
     {
         name = "runner-quic-udp-capture";
         proto = "udp";
-        src = [ "any" ];
+        src = [ "any", "any6" ];
         sport = [ "all" ];
-        dst = [ "any" ];
+        dst = [ "any", "any6" ];
         dport = [ "quic_runner_443" ];
         tls_profile = "default";
         detection_profile = "detect";

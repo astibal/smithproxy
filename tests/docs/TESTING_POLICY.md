@@ -82,6 +82,16 @@ The coordinator must always wait for every scheduled worker and aggregate every
 section result, including when the final worker makes the active-worker count
 zero. Missing section results or an incomplete aggregate report fail the run.
 
+Certificate admission cases are shared by TCP/TLS and QUIC in
+`harness/suites/tls/certificate_cases.py`. Every case is mandatory in the TLS
+profile matrix and as an independently reported `quic-cert.*` traffic section.
+Both transports exercise every certificate policy over IPv4 and IPv6.
+These cover rejection and explicit allowance of self-signed, expired, future,
+and untrusted-issuer certificates, plus CT, required stapling and custom-only
+identity policy. A timeout alone is not evidence of certificate rejection.
+QUIC native tests additionally require no activation/application data on rejection
+and one retained upstream on acceptance.
+
 TLS throughput is measurement-only: it has no minimum MiB/s gate. `PASS` means
 that every configured TLS/HTTP transfer completed correctly; handshake,
 process, protocol or transfer-integrity failure is still a hard `FAIL`. Reports
