@@ -1015,6 +1015,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/service/quic/quicservice_tests.cpp
                 tests/quic/testbed/quic_testbed.cpp
         )
+        # Lifecycle probes are absent from the production binary and class layout.
+        target_compile_definitions(quic_testbed PRIVATE SMITHPROXY_QUIC_LIFECYCLE_PROBE)
         target_link_libraries(quic_testbed gtest smithproxy_qpack socle_lib pthread crypto ssl)
 
         add_executable(quic_test_node

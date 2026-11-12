@@ -1386,6 +1386,63 @@ TEST(QuicTestbed, ActivatesAfterDelayedDownstreamFinished) {
     exercise_pending_downstream(true);
 }
 
+// Each thread owns one bounded journal. No logging, allocation or cross-thread
+// locking occurs while recording; merge and format only after the worker joins.
+struct lifecycle_journal {
+    using clock = std::chrono::steady_clock;
+    struct record {
+        clock::time_point observed, logical;
+        char const* event;
+        std::uint64_t id;
+        std::array<char, 48> phase {};
+        std::array<char, 24> state {};
+        std::array<char, 120> reason {};
+    };
+    std::vector<record> records;
+    std::size_t dropped = 0;
+
+    lifecycle_journal() { records.reserve(8192); }
+
+    // Truncate text rather than allocate in the timed path. The event names
+    // are string literals, and every other string is copied before returning.
+    void append(char const* event, std::uint64_t id, clock::time_point logical,
+                std::string_view phase = {}, std::string_view state = {},
+                std::string_view reason = {}) {
+        if (records.size() == records.capacity()) { ++dropped; return; }
+        record item {clock::now(), logical, event, id};
+        auto copy = [](auto& destination, std::string_view source) {
+            auto const size = std::min(destination.size() - 1, source.size());
+            if (size) std::memcpy(destination.data(), source.data(), size);
+        };
+        copy(item.phase, phase);
+        copy(item.state, state);
+        copy(item.reason, reason);
+        records.push_back(item);
+    }
+
+    // Includes logical worker time and actual observation time to expose work
+    // or scheduling delays between setting the deadline and publishing it.
+    std::string timeline(lifecycle_journal const& reader, clock::time_point started) const {
+        auto merged = records;
+        merged.insert(merged.end(), reader.records.begin(), reader.records.end());
+        std::stable_sort(merged.begin(), merged.end(), [](auto const& a, auto const& b) {
+            return a.observed < b.observed;
+        });
+        std::ostringstream out;
+        out << "Lifecycle journal: dropped worker=" << dropped << " reader=" << reader.dropped << '\n';
+        out << "actual_us logical_us event session phase state reason\n";
+        auto us = [started](auto time) {
+            return std::chrono::duration_cast<std::chrono::microseconds>(time - started).count();
+        };
+        for (auto const& item : merged) {
+            out << us(item.observed) << ' ' << us(item.logical) << ' ' << item.event << ' '
+                << item.id << ' ' << item.phase.data() << ' ' << item.state.data()
+                << ' ' << item.reason.data() << '\n';
+        }
+        return out.str();
+    }
+};
+
 TEST(QuicTestbed, PendingUpstreamTimeoutPreservesLifecycleDiagnostics) {
     origin_server origin(600ms);
     ASSERT_TRUE(origin.ready());
@@ -1395,6 +1452,11 @@ TEST(QuicTestbed, PendingUpstreamTimeoutPreservesLifecycleDiagnostics) {
     quic::listener_service proxy(0, pki_file("srv-cert.pem"), pki_file("srv-key.pem"), false,
                                  origin.port(), true, lifecycle, {}, "127.0.0.1");
     ASSERT_TRUE(proxy.prepare());
+    lifecycle_journal worker_journal, reader_journal;
+    auto const started = std::chrono::steady_clock::now();
+    proxy.set_lifecycle_probe([&](auto event, auto id, auto logical, auto phase, auto state, auto reason) {
+        worker_journal.append(event, id, logical, phase, state, reason);
+    });
     running_service runner(proxy);
     auto context = make_verified_client_context();
     ASSERT_NE(context, nullptr);
@@ -1404,9 +1466,26 @@ TEST(QuicTestbed, PendingUpstreamTimeoutPreservesLifecycleDiagnostics) {
     ASSERT_NE(client, nullptr);
     bool pending = false, draining = false;
     auto const deadline = std::chrono::steady_clock::now() + 2s;
+    auto previous_read = std::chrono::steady_clock::now();
+    std::chrono::steady_clock::duration max_read_gap {}, max_client_progress {};
+    bool saw_any_draining = false;
     while (std::chrono::steady_clock::now() < deadline) {
+        auto const client_started = std::chrono::steady_clock::now();
+        reader_journal.append("client-progress-begin", 0, client_started);
         client->drain_events();
-        for (auto const& snapshot : proxy.session_diagnostics()) {
+        auto const read_started = std::chrono::steady_clock::now();
+        max_client_progress = std::max(max_client_progress, read_started - client_started);
+        reader_journal.append("read-begin", 0, read_started);
+        auto snapshots = proxy.session_diagnostics();
+        auto const read_finished = std::chrono::steady_clock::now();
+        max_read_gap = std::max(max_read_gap, read_finished - previous_read);
+        previous_read = read_finished;
+        reader_journal.append("read-end", 0, read_started);
+        for (auto const& snapshot : snapshots) {
+            // Record before the phase filter: a rejected snapshot is evidence too.
+            reader_journal.append("read-snapshot", snapshot.id, read_finished,
+                                  snapshot.handshake_phase, snapshot.state, snapshot.end_reason);
+            saw_any_draining = saw_any_draining || snapshot.state == "draining";
             EXPECT_NE(snapshot.state, "active");
             if (snapshot.handshake_phase != "upstream-handshake") continue;
             EXPECT_TRUE(snapshot.upstream_tls.available);
@@ -1418,15 +1497,37 @@ TEST(QuicTestbed, PendingUpstreamTimeoutPreservesLifecycleDiagnostics) {
                 EXPECT_TRUE(snapshot.upstream_tls.ended);
             }
         }
-        if (proxy.diagnostics().completed_sessions) break;
+        if (proxy.diagnostics().completed_sessions) {
+            reader_journal.append("read-completed", 0, std::chrono::steady_clock::now());
+            break;
+        }
         std::this_thread::sleep_for(1ms);
     }
+    // Sample final counters before stop(), which itself performs cleanup.
+    auto const counters = proxy.diagnostics();
+    auto const connections = proxy.connection_count();
+    auto const origin_handshakes = origin.handshake_count();
+    runner.stop(); // Join before inspecting the worker-owned journal or last_error.
+    auto us = [](auto elapsed) {
+        return std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+    };
+    std::ostringstream evidence;
+    evidence << "max_read_gap_us=" << us(max_read_gap)
+             << " max_client_progress_us=" << us(max_client_progress)
+             << " saw_any_draining=" << saw_any_draining
+             << " worker_error='" << proxy.last_error() << "'\n"
+             << worker_journal.timeline(reader_journal, started);
+    SCOPED_TRACE(evidence.str());
+    if (!draining || ::testing::Test::HasFailure() || std::getenv("SMITHPROXY_LIFECYCLE_TIMELINE"))
+        std::cerr << evidence.str();
+    EXPECT_EQ(worker_journal.dropped, 0U);
+    EXPECT_EQ(reader_journal.dropped, 0U);
     EXPECT_TRUE(pending);
     EXPECT_TRUE(draining);
-    EXPECT_EQ(proxy.diagnostics().handshake_timeouts, 1U);
-    EXPECT_EQ(proxy.diagnostics().handshake_failures, 0U);
-    EXPECT_EQ(proxy.connection_count(), 0U);
-    EXPECT_EQ(origin.handshake_count(), 0U);
+    EXPECT_EQ(counters.handshake_timeouts, 1U);
+    EXPECT_EQ(counters.handshake_failures, 0U);
+    EXPECT_EQ(connections, 0U);
+    EXPECT_EQ(origin_handshakes, 0U);
 }
 
 TEST(QuicTestbed, StopCancelsPendingUpstreamWithoutWaitingForOrigin) {

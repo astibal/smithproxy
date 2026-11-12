@@ -532,6 +532,10 @@ void listener_service::run() {
             staged_upstreams_.empty() && pending_captures_.empty() &&
             dispatcher_bindings_.empty()) stopping_ = true;
     }
+#ifdef SMITHPROXY_QUIC_LIFECYCLE_PROBE
+    probe_lifecycle("worker-exit", 0, std::chrono::steady_clock::now(), {},
+                    stopping_ ? "stopping" : "failed", last_error_);
+#endif
     cleanup_sessions();
     if (dispatcher_) dispatcher_->retire(worker_index_);
     process_detail_requests();
@@ -1006,6 +1010,10 @@ bool listener_service::reap_expired(std::chrono::steady_clock::time_point now) {
     sessions_.erase(std::remove_if(sessions_.begin(), sessions_.end(), [&](auto& value) {
         auto const expired = value.state == session_state::draining
             && now - value.draining_since >= lifecycle_.drain_timeout;
+#ifdef SMITHPROXY_QUIC_LIFECYCLE_PROBE
+        if (expired) probe_lifecycle("reap", value.id, now, value.last_handshake_phase,
+                                     "draining", value.end_reason);
+#endif
         if (expired && value.capture_association != 0) {
             capture_routes_.erase(value.capture_association);
         }
@@ -1214,6 +1222,13 @@ void listener_service::publish_session_snapshots(
     }
     std::lock_guard<std::mutex> lock(snapshots_mutex_);
     snapshots_.swap(result);
+#ifdef SMITHPROXY_QUIC_LIFECYCLE_PROBE
+    // Captured while holding the publication lock, before readers can see it.
+    for (auto const& item : snapshots_) {
+        probe_lifecycle("publish", item.id, now, item.handshake_phase, item.state, item.end_reason);
+    }
+    if (snapshots_.empty()) probe_lifecycle("publish-empty", 0, now, {}, {}, {});
+#endif
 }
 
 void listener_service::start_draining(session& value,
@@ -1222,6 +1237,9 @@ void listener_service::start_draining(session& value,
     if (value.state == session_state::draining) return;
 
     value.last_handshake_phase = handshake_phase(value);
+#ifdef SMITHPROXY_QUIC_LIFECYCLE_PROBE
+    probe_lifecycle("drain-enter", value.id, now, value.last_handshake_phase, "handshake/active", reason);
+#endif
     value.end_reason = reason;
     if (value.downstream) {
         auto const key = value.downstream->handle_native();
@@ -1257,6 +1275,9 @@ void listener_service::start_draining(session& value,
     value.state = session_state::draining;
     snapshots_dirty_ = true;
     value.draining_since = now;
+#ifdef SMITHPROXY_QUIC_LIFECYCLE_PROBE
+    probe_lifecycle("drain-state", value.id, now, value.last_handshake_phase, "draining", value.end_reason);
+#endif
     if (value.proxy) {
         value.stream_summary = value.proxy->summary();
         // No streams forward data once the bridge has shut down.
@@ -1273,6 +1294,10 @@ void listener_service::start_draining(session& value,
 void listener_service::cleanup_sessions() {
     completed_sessions_ += sessions_.size();
     for (auto& linked : sessions_) {
+#ifdef SMITHPROXY_QUIC_LIFECYCLE_PROBE
+        probe_lifecycle("cleanup", linked.id, std::chrono::steady_clock::now(),
+                        handshake_phase(linked), "cleanup", linked.end_reason);
+#endif
         if(linked.proxy) linked.proxy->shutdown();
         if (linked.downstream) linked.downstream->close();
         if (linked.upstream) linked.upstream->close();
