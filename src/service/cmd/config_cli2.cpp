@@ -13,6 +13,17 @@ const ConfigCli2Session& session(const libcli2::Context& context) {
     return *static_cast<const ConfigCli2Session*>(context.user_data);
 }
 
+bool writable(const libcli2::Context& context, ConfigMutation mutation) {
+    return session(context).can_mutate(context.privilege, mutation);
+}
+
+bool require_write_access(libcli2::Context& context, ConfigMutation mutation,
+                          std::string_view member = {}) {
+    if (session(context).can_mutate(context.privilege, mutation, member)) return true;
+    context.print(libcli2::Style::error, "privileged mode is required to change configuration");
+    return false;
+}
+
 bool parse_index(std::string_view text, int& result) {
     if (text.size() < 3 || text.front() != '[' || text.back() != ']') return false;
     const std::string number(text.substr(1, text.size() - 2));
@@ -46,6 +57,14 @@ std::string entry_name(const libconfig::Setting& setting) {
 }  // namespace
 
 ConfigCli2Session::ConfigCli2Session(ConfigCli2Access access) : access_(std::move(access)) {}
+
+bool ConfigCli2Session::can_mutate(int session_privilege, ConfigMutation mutation,
+                                   std::string_view member) const {
+    if (!active_) return false;
+    if (access_.authorize_mutation)
+        return access_.authorize_mutation(path(), member, mutation, session_privilege);
+    return session_privilege >= 15;
+}
 
 std::string ConfigCli2Session::path() const {
     std::unique_lock<std::recursive_mutex> lock;
@@ -225,7 +244,9 @@ void ConfigCli2Session::register_commands(libcli2::Cli& cli) {
 
     cli.command("set")
         .help("Set a property in the current section")
-        .available_if([](const libcli2::Context& context) { return session(context).active(); })
+        .available_if([](const libcli2::Context& context) {
+            return writable(context, ConfigMutation::set);
+        })
         .argument({"property", "Property name", true, false, {}, {},
                    [](const libcli2::CompletionRequest& request) { return session(request.context).properties(); }})
         .argument({"value", "New value", true, true, {}, {},
@@ -243,6 +264,8 @@ void ConfigCli2Session::register_commands(libcli2::Cli& cli) {
                 std::vector<std::string>(call.arguments.begin() + 1, call.arguments.end()));
         }, {"y", "Y"})
         .handler([](libcli2::Context& context, const libcli2::Invocation& call) {
+            if (call.arguments.empty() ||
+                !require_write_access(context, ConfigMutation::set, call.arguments.front())) return -1;
             auto& state = session(context);
             if (!state.access_.set || call.arguments.size() < 2) return -1;
             std::vector<std::string> values(call.arguments.begin() + 1, call.arguments.end());
@@ -256,7 +279,9 @@ void ConfigCli2Session::register_commands(libcli2::Cli& cli) {
 
     cli.command("toggle")
         .help("Toggle values in a list property")
-        .available_if([](const libcli2::Context& context) { return session(context).active(); })
+        .available_if([](const libcli2::Context& context) {
+            return writable(context, ConfigMutation::toggle);
+        })
         .argument({"property", "List property name", true, false, {}, {},
                    [](const libcli2::CompletionRequest& request) { return session(request.context).toggle_properties(); }})
         .argument({"value", "Value to add or remove", true, true, {}, {},
@@ -267,6 +292,8 @@ void ConfigCli2Session::register_commands(libcli2::Cli& cli) {
                        return state.access_.values(state.path(), request.arguments.front());
                    }})
         .handler([](libcli2::Context& context, const libcli2::Invocation& call) {
+            if (call.arguments.empty() ||
+                !require_write_access(context, ConfigMutation::toggle, call.arguments.front())) return -1;
             auto& state = session(context);
             if (!state.access_.toggle || call.arguments.size() < 2) return -1;
             std::vector<std::string> values(call.arguments.begin() + 1, call.arguments.end());
@@ -282,7 +309,7 @@ void ConfigCli2Session::register_commands(libcli2::Cli& cli) {
         .help("Create a new entry from the section template")
         .available_if([](const libcli2::Context& context) {
             const auto& state = session(context);
-            return state.active() && static_cast<bool>(state.access_.add) && state.access_.can_add &&
+            return writable(context, ConfigMutation::add) && static_cast<bool>(state.access_.add) && state.access_.can_add &&
                    state.access_.can_add(state.path());
         })
         .argument({"arguments", "Optional entry name", false, true, {}, {},
@@ -292,6 +319,7 @@ void ConfigCli2Session::register_commands(libcli2::Cli& cli) {
                                                           : std::vector<libcli2::CompletionItem>{};
                    }})
         .handler([](libcli2::Context& context, const libcli2::Invocation& call) {
+            if (!require_write_access(context, ConfigMutation::add)) return -1;
             auto& state = session(context);
             std::string error;
             if (!state.access_.add || !state.access_.add(state.path(), call.arguments, error)) {
@@ -305,7 +333,7 @@ void ConfigCli2Session::register_commands(libcli2::Cli& cli) {
         .help("Remove one or more entries")
         .available_if([](const libcli2::Context& context) {
             const auto& state = session(context);
-            return state.active() && static_cast<bool>(state.access_.remove) && state.access_.collection_kind &&
+            return writable(context, ConfigMutation::remove) && static_cast<bool>(state.access_.remove) && state.access_.collection_kind &&
                    state.access_.collection_kind(state.path()) != ConfigCollectionKind::none;
         })
         .argument({"entry", "Entry name or list index", true, true, {}, {},
@@ -314,6 +342,7 @@ void ConfigCli2Session::register_commands(libcli2::Cli& cli) {
                        return state.current_children();
                    }})
         .handler([](libcli2::Context& context, const libcli2::Invocation& call) {
+            if (!require_write_access(context, ConfigMutation::remove)) return -1;
             auto& state = session(context);
             std::string error;
             if (!state.access_.remove || !state.access_.remove(state.path(), call.arguments, error)) {
@@ -327,7 +356,7 @@ void ConfigCli2Session::register_commands(libcli2::Cli& cli) {
         .help("Move a list entry")
         .available_if([](const libcli2::Context& context) {
             const auto& state = session(context);
-            return state.active() && static_cast<bool>(state.access_.move) && state.access_.can_move &&
+            return writable(context, ConfigMutation::move) && static_cast<bool>(state.access_.move) && state.access_.can_move &&
                    state.access_.can_move(state.path());
         })
         .argument({"source", "Entry to move", true, false, {}, {},
@@ -349,6 +378,7 @@ void ConfigCli2Session::register_commands(libcli2::Cli& cli) {
                        return state.current_children();
                    }})
         .handler([](libcli2::Context& context, const libcli2::Invocation& call) {
+            if (!require_write_access(context, ConfigMutation::move)) return -1;
             auto& state = session(context);
             if (!state.access_.move || call.arguments.size() < 2) return -1;
             const auto& operation = call.arguments[1];
