@@ -67,17 +67,19 @@ inline logan_lite& transport() {
     return value;
 }
 
+// Constructing a lightweight logger alone does not register its topic. Resolve
+// each level now so CLI selection works before the first packet or failure.
 inline void initialize() {
-    (void)log();
-    (void)info();
-    (void)alpn();
-    (void)message();
-    (void)session();
-    (void)verify();
-    (void)mitm();
-    (void)ocsp();
-    (void)stream();
-    (void)transport();
+    (void)log().level();
+    (void)info().level();
+    (void)alpn().level();
+    (void)message().level();
+    (void)session().level();
+    (void)verify().level();
+    (void)mitm().level();
+    (void)ocsp().level();
+    (void)stream().level();
+    (void)transport().level();
 }
 
 } // namespace logging
