@@ -166,6 +166,8 @@ private:
     void launch_listener_group(LiveListener listener);
     void stop_listener_group(LiveListener listener);
 
+    /** Prepare QUIC receiver/worker groups for startup and live replacement. */
+    bool create_quic_listeners();
     bool create_tproxy_listeners();
     void launch_tproxy_listeners();
     void stop_tproxy_listeners();

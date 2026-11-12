@@ -33,7 +33,7 @@ Profiles:
               With --remote, both ports bind to the remote host's loopback.
 
 Options:
-  --suite NAME       Run only one suite. Besides tls, transfer, tls-throughput,
+  --suite NAME       Run only one suite. Besides tls, transfer, tls-throughput, quic-throughput,
                      starttls, policy, routing,
                      rtt, session-list and quic,
                      distributed sections are available: smoke, privsep, tls-policy, routing,
@@ -99,6 +99,12 @@ Common environment variables:
   RTT_MAX_LIMIT_MS               General RTT maximum gate (default: 250).
   RTT_HANDSHAKE_P95_LIMIT_MS     Handshake P95 gate (default: 500).
   RTT_HANDSHAKE_MAX_LIMIT_MS     Handshake maximum gate (default: 2000).
+  QUIC_THROUGHPUT_BYTES          Bytes per H3 flow (default: 64 MiB).
+  QUIC_THROUGHPUT_CLIENT         Native ngtcp2 client (default: native) or curl.
+  QUIC_THROUGHPUT_ORIGIN_WORKERS Native server processes sharing UDP 443 (default: 4).
+  QUIC_THROUGHPUT_REPEATS        Samples per direction/concurrency (default: 3).
+  QUIC_THROUGHPUT_CONCURRENCY    Independent H3 connections (default: 1,4,16).
+  QUIC_WORKERS                  QUIC workers per address family (default: 1).
   TLS_THROUGHPUT_BYTES           Bytes per measured E2E flow (default: 64 MiB).
   TLS_THROUGHPUT_REPEATS         Samples per direction/concurrency (default: 3).
   TLS_THROUGHPUT_CONCURRENCY     Measured flow counts (default: 1,4,16).
@@ -108,6 +114,7 @@ Common environment variables:
   TCP_CHURN_SYNCHRONIZED         Release every TCP wave from one barrier (default: 0).
   CURL_HTTP3_PREFIX              curl installation whose bin/curl-h3 supports HTTP/3.
   QUIC_PYTHON_PREFIX             Prepared aioquic runtime copied to test targets.
+  NATIVE_H3_PREFIX               Native ngtcp2/nghttp3 benchmark runtime.
   FUZZ_RECENT_SEEDS              Recent seeds per fuzz area (default: 4).
   FUZZ_ARCHIVE_SEEDS             Rotating archived seeds per area (default: 4).
   FUZZ_ROTATION_DAYS             Archive rotation period (default: 7).
@@ -390,7 +397,7 @@ FUZZ_AREAS=(h1 h2 tls socks5 dns quic redis mqtt smtp imap pop3 ftp ssh websocke
 # shellcheck source=profile-plan.sh
 source "$HERE/profile-plan.sh"
 case "$ONLY_SUITE" in
-    ''|tls|transfer|tls-throughput|starttls|policy|routing|rtt|session-list|quic|smoke|privsep|tls-policy|tcp-churn|udp-churn|capture|lifecycle|corpus-regular|corpus-edge|corpus-insanity) ;;
+    ''|tls|transfer|tls-throughput|quic-throughput|starttls|policy|routing|rtt|session-list|quic|smoke|privsep|tls-policy|tcp-churn|udp-churn|capture|lifecycle|corpus-regular|corpus-edge|corpus-insanity) ;;
     capture-traffic|capture-pcapng|quic-pcapng|corpus-regular.[1-4]|corpus-edge.[1-4]|corpus-insanity.[1-4]) ;;
     quic-cert.*)
         [[ " ${PATCH_RUNNER_QUIC_CERT_SECTIONS[*]} " == *" $ONLY_SUITE "* ]] || {
@@ -562,7 +569,7 @@ run_distributed_sections() {
         mapfile -t sections < <(patch_runner_profile_sections "$PROFILE")
     fi
     for section in "${sections[@]}"; do
-        [[ $section == smoke || $section == rtt || $section == tls-throughput ]] || main_sections+=("$section")
+        [[ $section == smoke || $section == rtt || $section == tls-throughput || $section == quic-throughput ]] || main_sections+=("$section")
     done
 
     mkdir -p "$REPORT/sections" "$REPORT/targets" "$WORK_DIR/sections" \
@@ -620,15 +627,29 @@ run_distributed_sections() {
             STATUS=FAIL; TEST_RC=2
             return
         }
-        [[ -f $quic_python_prefix/aioquic/__init__.py ]] || {
-            echo "Missing QUIC Python runtime: $quic_python_prefix (run $HERE/prepare-quic-runtime.sh)" >&2
+        cp -a "$quic_curl_prefix" "$bundle_local/curl-http3"
+        for section in "${sections[@]}"; do
+            if [[ $section == quic || $section == quic-pcapng || $section == quic-cert.* ]]; then
+                [[ -f $quic_python_prefix/aioquic/__init__.py ]] || {
+                    echo "Missing QUIC Python runtime: $quic_python_prefix (run $HERE/prepare-quic-runtime.sh)" >&2
+                    STATUS=FAIL; TEST_RC=2
+                    return
+                }
+                cp -a "$quic_python_prefix" "$bundle_local/quic-python"
+                break
+            fi
+        done
+    else
+        mkdir -p "$bundle_local/curl-http3"
+    fi
+    if [[ " ${sections[*]} " == *" quic-throughput "* ]]; then
+        native_h3_prefix=${NATIVE_H3_PREFIX:-$ROOT/../native-h3}
+        [[ -x $native_h3_prefix/bin/h3-client && -x $native_h3_prefix/bin/h3-server ]] || {
+            echo "Missing native H3 runtime: $native_h3_prefix (run $HERE/prepare-native-h3.sh)" >&2
             STATUS=FAIL; TEST_RC=2
             return
         }
-        cp -a "$quic_curl_prefix" "$bundle_local/curl-http3"
-        cp -a "$quic_python_prefix" "$bundle_local/quic-python"
-    else
-        mkdir -p "$bundle_local/curl-http3"
+        cp -a "$native_h3_prefix" "$bundle_local/native-h3"
     fi
     {
         printf 'PATCH_RUN_COMMIT=%q\n' "$COMMIT"
@@ -678,6 +699,10 @@ run_distributed_sections() {
     if [[ " ${sections[*]} " == *" tls-throughput "* ]]; then
         printf 'tls-throughput\ttls-throughput\t-\n' > "$manifest_dir/tls-throughput.tsv"
         printf '%s\n' "${TARGETS[0]}" > "$REPORT/sections/tls-throughput.target"
+    fi
+    if [[ " ${sections[*]} " == *" quic-throughput "* ]]; then
+        printf 'quic-throughput\tquic-throughput\t-\n' > "$manifest_dir/quic-throughput.tsv"
+        printf '%s\n' "${TARGETS[0]}" > "$REPORT/sections/quic-throughput.target"
     fi
     index=0
     for section in "${main_sections[@]}"; do
@@ -788,6 +813,12 @@ run_distributed_sections() {
             run_batch "${TARGETS[0]}" tls-throughput "$manifest_dir/tls-throughput.tsv" 1
             rc=$(<"$REPORT/sections/tls-throughput.rc")
             echo "SECTION DONE: tls-throughput target=${TARGETS[0]} rc=$rc"
+        fi
+        if [[ " ${sections[*]} " == *" quic-throughput "* ]]; then
+            echo "SECTION START: quic-throughput target=${TARGETS[0]} (exclusive, measurement only)"
+            run_batch "${TARGETS[0]}" quic-throughput "$manifest_dir/quic-throughput.tsv" 1
+            rc=$(<"$REPORT/sections/quic-throughput.rc")
+            echo "SECTION DONE: quic-throughput target=${TARGETS[0]} rc=$rc"
         fi
         for target in "${TARGETS[@]}"; do
             manifest=${target_manifest[$target]}
@@ -989,6 +1020,7 @@ print(*(x.getsockname()[1] for x in s))'
     LAB_ROOT=$WORK_DIR/labs/$RUN_ID-$TAG
     QUIC_CURL_PREFIX=${CURL_HTTP3_PREFIX:-$ROOT/../curl-http3}
     QUIC_PYTHON_PREFIX=${QUIC_PYTHON_PREFIX:-$ROOT/../quic-python}
+    NATIVE_H3_PREFIX=${NATIVE_H3_PREFIX:-$ROOT/../native-h3}
     QUIC_PYTHONPATH=$QUIC_PYTHON_PREFIX
     [[ -z $REMOTE ]] || QUIC_PYTHONPATH=$LAB_ROOT/quic-python
 
@@ -1005,18 +1037,20 @@ print(*(x.getsockname()[1] for x in s))'
         scp "${SCP_OPTIONS[@]}" "$HERE/vendor/pplay.py" "$REMOTE:$LAB_ROOT/pplay.py" >/dev/null
         scp "${SCP_OPTIONS[@]}" "$ROOT/etc/smithproxy.cfg" "$REMOTE:$LAB_ROOT/src/etc/" >/dev/null
         scp "${SCP_OPTIONS[@]}" -r "$ROOT/etc/msg/en/." "$REMOTE:$LAB_ROOT/src/etc/msg/en/" >/dev/null
-        if [[ $ONLY_SUITE == quic || $ONLY_SUITE == quic-pcapng || $ONLY_SUITE == quic-cert.* ]]; then
+        if [[ $ONLY_SUITE == quic || $ONLY_SUITE == quic-pcapng || $ONLY_SUITE == quic-throughput || $ONLY_SUITE == quic-cert.* ]]; then
             [[ -x $QUIC_CURL_PREFIX/bin/curl-h3 ]] || {
                 echo "Missing HTTP/3 curl: $QUIC_CURL_PREFIX/bin/curl-h3" >&2
                 exit 2
             }
-            [[ -f $QUIC_PYTHON_PREFIX/aioquic/__init__.py ]] || {
+            [[ $ONLY_SUITE == quic-throughput || -f $QUIC_PYTHON_PREFIX/aioquic/__init__.py ]] || {
                 echo "Missing QUIC Python runtime: $QUIC_PYTHON_PREFIX (run $HERE/prepare-quic-runtime.sh)" >&2
                 exit 2
             }
             ssh "${SSH_OPTIONS[@]}" "$REMOTE" "mkdir -p '$LAB_ROOT/curl-http3' '$LAB_ROOT/quic-python' '$LAB_ROOT/runner/tools'"
             scp "${SCP_OPTIONS[@]}" -r "$QUIC_CURL_PREFIX/." "$REMOTE:$LAB_ROOT/curl-http3/" >/dev/null
-            scp "${SCP_OPTIONS[@]}" -r "$QUIC_PYTHON_PREFIX/." "$REMOTE:$LAB_ROOT/quic-python/" >/dev/null
+            if [[ $ONLY_SUITE != quic-throughput ]]; then
+                scp "${SCP_OPTIONS[@]}" -r "$QUIC_PYTHON_PREFIX/." "$REMOTE:$LAB_ROOT/quic-python/" >/dev/null
+            fi
             scp "${SCP_OPTIONS[@]}" "$ROOT/tools/wireshark/spquic.lua" \
                 "$REMOTE:$LAB_ROOT/runner/tools/spquic.lua" >/dev/null
         fi
@@ -1034,18 +1068,32 @@ print(*(x.getsockname()[1] for x in s))'
         cp "$HERE/vendor/pplay.py" "$LAB_ROOT/pplay.py"
         cp "$ROOT/etc/smithproxy.cfg" "$LAB_ROOT/src/etc/"
         cp -a "$ROOT/etc/msg/en/." "$LAB_ROOT/src/etc/msg/en/"
-        if [[ $ONLY_SUITE == quic || $ONLY_SUITE == quic-pcapng || $ONLY_SUITE == quic-cert.* ]]; then
+        if [[ $ONLY_SUITE == quic || $ONLY_SUITE == quic-pcapng || $ONLY_SUITE == quic-throughput || $ONLY_SUITE == quic-cert.* ]]; then
             [[ -x $QUIC_CURL_PREFIX/bin/curl-h3 ]] || {
                 echo "Missing HTTP/3 curl: $QUIC_CURL_PREFIX/bin/curl-h3" >&2
                 exit 2
             }
-            [[ -f $QUIC_PYTHON_PREFIX/aioquic/__init__.py ]] || {
+            [[ $ONLY_SUITE == quic-throughput || -f $QUIC_PYTHON_PREFIX/aioquic/__init__.py ]] || {
                 echo "Missing QUIC Python runtime: $QUIC_PYTHON_PREFIX (run $HERE/prepare-quic-runtime.sh)" >&2
                 exit 2
             }
             mkdir -p "$LAB_ROOT/curl-http3" "$LAB_ROOT/runner/tools"
             cp -a "$QUIC_CURL_PREFIX/." "$LAB_ROOT/curl-http3/"
             cp "$ROOT/tools/wireshark/spquic.lua" "$LAB_ROOT/runner/tools/spquic.lua"
+        fi
+    fi
+
+    if [[ $ONLY_SUITE == quic-throughput ]]; then
+        [[ -x $NATIVE_H3_PREFIX/bin/h3-client && -x $NATIVE_H3_PREFIX/bin/h3-server ]] || {
+            echo "Missing native H3 runtime: $NATIVE_H3_PREFIX (run $HERE/prepare-native-h3.sh)" >&2
+            exit 2
+        }
+        if [[ -n $REMOTE ]]; then
+            ssh "${SSH_OPTIONS[@]}" "$REMOTE" "mkdir -p '$LAB_ROOT/native-h3'"
+            scp "${SCP_OPTIONS[@]}" -r "$NATIVE_H3_PREFIX/." "$REMOTE:$LAB_ROOT/native-h3/" >/dev/null
+        else
+            mkdir -p "$LAB_ROOT/native-h3"
+            cp -a "$NATIVE_H3_PREFIX/." "$LAB_ROOT/native-h3/"
         fi
     fi
 
@@ -1066,6 +1114,9 @@ print(*(x.getsockname()[1] for x in s))'
         TCP_CHURN_PARALLEL \
         TLS_TRANSFER_BYTES TLS_TRANSFER_REPEATS TLS_TRANSFER_CONCURRENCY \
         TLS_THROUGHPUT_BYTES TLS_THROUGHPUT_REPEATS TLS_THROUGHPUT_CONCURRENCY \
+        QUIC_THROUGHPUT_BYTES QUIC_THROUGHPUT_REPEATS QUIC_THROUGHPUT_CONCURRENCY QUIC_WORKERS \
+        QUIC_THROUGHPUT_DIRECT_BASELINE QUIC_THROUGHPUT_COOLDOWN_SECONDS \
+        QUIC_THROUGHPUT_CLIENT QUIC_THROUGHPUT_ORIGIN_WORKERS \
         CHURN_MIN_PORT CHURN_MAX_PORT; do
         [[ -z ${!variable:-} ]] || LAB_ENV+=("$variable=${!variable}")
     done
@@ -1091,7 +1142,7 @@ print(*(x.getsockname()[1] for x in s))'
             routing) LAB_ENV+=("ROUTING_TEST=1") ;;
             rtt) LAB_ENV+=("RTT_TEST=1") ;;
             session-list) LAB_ENV+=("SESSION_LIST_STRESS_TEST=1") ;;
-            quic|quic-pcapng|quic-cert.*) LAB_ENV+=("QUIC_TEST=1" "QUIC_LAB=1" "QUIC_KEYLOG_TEST=1"
+            quic|quic-pcapng|quic-throughput|quic-cert.*) LAB_ENV+=("QUIC_TEST=1" "QUIC_LAB=1" "QUIC_KEYLOG_TEST=1"
                 "QUIC_CURL_BIN=$LAB_ROOT/curl-http3/bin/curl-h3"
                 "QUIC_PYTHONPATH=$QUIC_PYTHONPATH"
                 "SPQ1_DISSECTOR=$LAB_ROOT/runner/tools/spquic.lua") ;;
@@ -1140,6 +1191,9 @@ print(*(x.getsockname()[1] for x in s))'
         capture-pcapng|quic-pcapng) LAB_ENV+=("CAPTURE_GRE_FORMAT=pcapng") ;;
         capture-traffic|quic) LAB_ENV+=("CAPTURE_GRE_FORMAT=traffic") ;;
     esac
+    [[ $ONLY_SUITE != quic-throughput ]] || LAB_ENV+=("BASE_TRAFFIC_TEST=0" "QUIC_THROUGHPUT_TEST=1" "QUIC_KEYLOG_TEST=0"
+        "NATIVE_H3_CLIENT_BIN=$LAB_ROOT/native-h3/bin/h3-client"
+        "NATIVE_H3_SERVER_BIN=$LAB_ROOT/native-h3/bin/h3-server")
     [[ $ONLY_SUITE != quic-cert.* ]] || LAB_ENV+=("BASE_TRAFFIC_TEST=0" "QUIC_TLS_PROFILE_TEST=${ONLY_SUITE#quic-cert.}")
     [[ $ONLY_SUITE != quic-pcapng ]] || LAB_ENV+=("QUIC_REMOTE_PCAPNG_TEST=1")
 
@@ -1155,7 +1209,7 @@ print(*(x.getsockname()[1] for x in s))'
             TEST_RC=$?
         elif ((QUIET)); then
             "${SSH_RUN[@]}" "$REMOTE" "${REMOTE_SUDO}env$ENV_STRING '$LAB_ROOT/runner/tests/lab-test.sh' '$LAB_ROOT'" \
-                2>&1 | tee "$REPORT/test.log" | grep --line-buffered -E '(^PASS[46]? |^FAIL[46]?:| (PASS|FLAKY_PASS|FAIL|XFAIL|XPASS)[46]?$|^(TCP churn:|UDP churn:|TLS transfer:|TLS throughput:|family=IPv|Capture matrix summary:|RTT summary:|Session-list summary:)|^RESULT:)'
+                2>&1 | tee "$REPORT/test.log" | grep --line-buffered -E '(^PASS[46]? |^FAIL[46]?:| (PASS|FLAKY_PASS|FAIL|XFAIL|XPASS)[46]?$|^(TCP churn:|UDP churn:|TLS transfer:|TLS throughput:|QUIC throughput:|family=IPv|Capture matrix summary:|RTT summary:|Session-list summary:)|^RESULT:)'
             TEST_RC=${PIPESTATUS[0]}
         else
             "${SSH_RUN[@]}" "$REMOTE" "${REMOTE_SUDO}env$ENV_STRING '$LAB_ROOT/runner/tests/lab-test.sh' '$LAB_ROOT'" \
@@ -1170,7 +1224,7 @@ print(*(x.getsockname()[1] for x in s))'
             TEST_RC=$?
         elif ((QUIET)); then
             "${LOCAL_RUN[@]}" "${LAB_ENV[@]}" "$LAB_ROOT/runner/tests/lab-test.sh" "$LAB_ROOT" \
-                2>&1 | tee "$REPORT/test.log" | grep --line-buffered -E '(^PASS[46]? |^FAIL[46]?:| (PASS|FLAKY_PASS|FAIL|XFAIL|XPASS)[46]?$|^(TCP churn:|UDP churn:|TLS transfer:|TLS throughput:|family=IPv|Capture matrix summary:|RTT summary:|Session-list summary:)|^RESULT:)'
+                2>&1 | tee "$REPORT/test.log" | grep --line-buffered -E '(^PASS[46]? |^FAIL[46]?:| (PASS|FLAKY_PASS|FAIL|XFAIL|XPASS)[46]?$|^(TCP churn:|UDP churn:|TLS transfer:|TLS throughput:|QUIC throughput:|family=IPv|Capture matrix summary:|RTT summary:|Session-list summary:)|^RESULT:)'
             TEST_RC=${PIPESTATUS[0]}
         else
             "${LOCAL_RUN[@]}" "${LAB_ENV[@]}" "$LAB_ROOT/runner/tests/lab-test.sh" "$LAB_ROOT" \
@@ -1230,6 +1284,7 @@ CAPTURE_MATRIX_SUMMARY=$(grep -E '^Capture matrix summary:' "$REPORT/test.log" 2
 RTT_SUMMARY=$(grep -E '^RTT summary:' "$REPORT/test.log" 2>/dev/null | tail -2 | paste -sd ';' - || true)
 TLS_TRANSFER_SUMMARY=$(grep -E '^TLS transfer:' "$REPORT/test.log" 2>/dev/null | paste -sd ';' - || true)
 TLS_THROUGHPUT_SUMMARY=$(grep -E '^TLS throughput:' "$REPORT/test.log" 2>/dev/null | paste -sd ';' - || true)
+QUIC_THROUGHPUT_SUMMARY=$(grep -E '^QUIC throughput:' "$REPORT/test.log" 2>/dev/null | paste -sd ';' - || true)
 FUZZ_SEED_SUMMARY=
 if compgen -G "$REPORT/sections/fuzz.*.seeds" >/dev/null; then
     FUZZ_SEED_SUMMARY=$(cat "$REPORT"/sections/fuzz.*.seeds | tr ',' '\n' | sed '/^$/d' | sort -u | paste -sd, -)
@@ -1340,6 +1395,7 @@ MEASUREMENT_LINES=()
 [[ -z $RTT_SUMMARY ]] || MEASUREMENT_LINES+=("RTT: $RTT_SUMMARY")
 [[ -z $TLS_TRANSFER_SUMMARY ]] || MEASUREMENT_LINES+=("TLS transfer: $TLS_TRANSFER_SUMMARY")
 [[ -z $TLS_THROUGHPUT_SUMMARY ]] || MEASUREMENT_LINES+=("TLS throughput: $TLS_THROUGHPUT_SUMMARY")
+[[ -z $QUIC_THROUGHPUT_SUMMARY ]] || MEASUREMENT_LINES+=("QUIC throughput: $QUIC_THROUGHPUT_SUMMARY")
 [[ -z $FUZZ_DYNAMIC_SEED ]] || MEASUREMENT_LINES+=("Dynamic fuzz seed: $FUZZ_DYNAMIC_SEED")
 [[ -z $FUZZ_SEED_SUMMARY ]] || MEASUREMENT_LINES+=("Fuzz seeds exercised: $FUZZ_SEED_SUMMARY")
 if ((${#MEASUREMENT_LINES[@]})); then
@@ -1443,6 +1499,7 @@ cat > "$REPORT/summary.json" <<EOF
   "rtt": "${RTT_SUMMARY//\"/\\\"}",
   "tls_transfer": "${TLS_TRANSFER_SUMMARY//\"/\\\"}",
   "tls_throughput": "${TLS_THROUGHPUT_SUMMARY//\"/\\\"}",
+  "quic_throughput": "${QUIC_THROUGHPUT_SUMMARY//\"/\\\"}",
   "line_coverage": "${LINE_COVERAGE//\"/\\\"}"
 }
 EOF

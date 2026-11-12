@@ -42,8 +42,8 @@ fresh targets must not depend on a host-installed `aioquic` package.
 
 Every section owns its namespaces, interfaces, ports, config, traffic and
 result directory. The smoke gate runs first. RTT runs alone after smoke so its
-latency verdict is not polluted by deliberate load. End-to-end TLS throughput
-then runs alone for comparable IPv4/IPv6 download and upload measurements.
+latency verdict is not polluted by deliberate load. End-to-end TLS and QUIC
+throughput then run separately for IPv4/IPv6 download and upload measurements.
 Functional, corpus and fuzz sections then consume the configured worker pool.
 
 Cleanup verification compares stable host addresses and routes before and
@@ -92,10 +92,28 @@ identity policy. A timeout alone is not evidence of certificate rejection.
 QUIC native tests additionally require no activation/application data on rejection
 and one retained upstream on acceptance.
 
-TLS throughput is measurement-only: it has no minimum MiB/s gate. `PASS` means
-that every configured TLS/HTTP transfer completed correctly; handshake,
+TLS and QUIC throughput are measurement-only: there is no minimum MiB/s gate. `PASS` means
+that every configured HTTP transfer completed correctly; handshake,
 process, protocol or transfer-integrity failure is still a hard `FAIL`. Reports
 must retain per-family, per-direction and per-concurrency throughput values.
+`quic-throughput` is mandatory in traffic/full and uses `--http3-only` with
+capture disabled. Both protocols use the same timing/CPU accounting harness,
+including handshake time, and verify the negotiated HTTP version and byte count.
+QUIC defaults to 8 MiB per connection, three repeats and concurrency 1,4,16;
+TLS defaults to 64 MiB. Set the respective `*_THROUGHPUT_BYTES` variables to
+the same value for direct comparisons. JSON retains every sample and proxy
+CPU seconds/GiB. These are end-to-end lab rates, not isolated proxy capacity:
+the QUIC origin uses aioquic and may itself be the bottleneck. Its download
+queue is bounded to 256 KiB per stream and uploads require the expected size
+and SHA-256 before returning success.
+The QUIC suite also measures the same client/origin directly from the proxy
+namespace, with the origin CA and identical transfer sizes and concurrency.
+These `quic-direct-throughput-v*.json` references omit proxy CPU accounting
+and help distinguish fixture limits from forwarding overhead. Set
+`QUIC_THROUGHPUT_DIRECT_BASELINE=0` only for focused instrumentation runs.
+`QUIC_THROUGHPUT_COOLDOWN_SECONDS` optionally separates samples to investigate
+connection cleanup overhead; it defaults to zero. The pause is outside measured
+transfer time and CPU accounting, and the JSON records the selected interval.
 
 Repository tests must be registered in CTest instead of requiring knowledge of
 another ad-hoc command. Tests which intentionally require public network

@@ -1345,10 +1345,17 @@ static void exercise_pending_downstream(bool release_finished) {
             }
             if (snapshot.upstream_tls.established && !snapshot.downstream_tls.established
                 && snapshot.state != "draining") {
-                saw_pending_downstream = true;
                 EXPECT_EQ(snapshot.state, "handshake");
-                EXPECT_EQ(snapshot.handshake_phase, "downstream-handshake");
                 EXPECT_EQ(snapshot.streams, 0U);
+                // A shared engine can complete B after certificate jobs ran.
+                // TLS completion alone does not mean admission/install is done.
+                if (snapshot.handshake_phase != "downstream-handshake") {
+                    EXPECT_TRUE(snapshot.handshake_phase == "upstream-certificate-check"
+                                || snapshot.handshake_phase == "certificate-install")
+                        << snapshot.handshake_phase;
+                    continue;
+                }
+                saw_pending_downstream = true;
                 if (release_finished && relay.dropped() != 0) relay.release_client_finished();
             }
         }

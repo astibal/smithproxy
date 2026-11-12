@@ -158,8 +158,12 @@ if os.environ.get('POLICY_TEST') == '1':
     text, count = re.subn(r'(policy\s*=\s*\()', r'\1\n' + policy_cases, text, count=1)
     if address_count != 1 or port_count != 1 or count != 1: raise RuntimeError('cannot inject policy suite objects/rules')
 if quic_test:
+    # Content-profile switches do not disable transport/stream admission
+    # webhooks. Throughput must exclude those synchronous HTTP round trips too.
+    quic_throughput = os.environ.get('QUIC_THROUGHPUT_TEST') == '1'
+    webhook_enabled = 'FALSE' if quic_throughput else 'TRUE'
     text = text.replace('settings = {', 'settings = {\n'
-                        '    webhook = { enabled = TRUE; tls_verify = FALSE; '
+                        f'    webhook = {{ enabled = {webhook_enabled}; tls_verify = FALSE; '
                         'url = "http://127.0.0.1:59090/"; };', 1)
     if os.environ.get('QUIC_LAB') != '1':
         raise RuntimeError('QUIC_TEST requires QUIC_LAB=1')
@@ -178,6 +182,9 @@ if quic_test:
         write_limit_server = 0;
     }
 '''
+    if quic_throughput:
+        profile = profile.replace('write_payload = TRUE', 'write_payload = FALSE')
+        profile = profile.replace('webhook_enable = TRUE', 'webhook_enable = FALSE')
     text, profile_count = re.subn(
         r'(content_profiles\s*=\s*\{)', r'\1\n' + profile,
         text, count=1,
@@ -291,10 +298,15 @@ text = re.sub(r'(plaintext_workers|ssl_workers|udp_workers) = 0',r'\1 = 1',text)
 if 'dtls_workers' not in text:
     text = text.replace('ssl_workers = 1;', 'ssl_workers = 1;\n    dtls_workers = 1;', 1)
 if os.environ.get('QUIC_LAB') == '1':
-    # QUIC has no main-thread fallback: zero workers leaves the configured
-    # port without a listener. Keep the isolated H3 lab deterministic with a
-    # single worker; production deployments can scale this independently.
-    text = text.replace('quic_workers = -1', 'quic_workers = 1')
+    # Default to the direct single-worker path; allow explicit receiver/worker
+    # coverage without changing the shipped production configuration.
+    quic_workers = int(os.environ.get('QUIC_WORKERS', '1'))
+    if quic_workers < 1:
+        raise ValueError('QUIC_WORKERS must be positive')
+    text, worker_count = re.subn(r'quic_workers\s*=\s*-?\d+',
+                                f'quic_workers = {quic_workers}', text, count=1)
+    if worker_count != 1:
+        raise RuntimeError('cannot configure QUIC workers in lab configuration')
 text = re.sub(r'\s*auth_profile = "resolve";', '', text)
 text = text.replace('nameservers = [ "8.8.8.8", "8.8.4.4" ]','nameservers = [ "198.18.20.2" ]')
 gre_capture_dst = os.environ.get('GRE_CAPTURE_DST')

@@ -44,7 +44,7 @@ class openssl_connection;
 std::unique_ptr<openssl_connection> connect_with_hooks(
     SSL_CTX* context, const sockaddr* peer, socklen_t size,
     const std::string& server_name, std::string* error, proxymaker::SessionSetup* setup,
-    std::function<bool(SSL*)> const& configure = {});
+    std::function<bool(SSL*)> const& configure = {}, SSL* port = nullptr);
 
 bool apply_hook_offer(SSL* ssl, const HookEvent& offer, const std::string& identity);
 
