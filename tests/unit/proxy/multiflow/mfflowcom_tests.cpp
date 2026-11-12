@@ -7,6 +7,9 @@
 
 #include "proxy/multiflow/fake.hpp"
 #include "proxy/multiflow/mfflowcom.hpp"
+#include "proxy/connection_transport.hpp"
+#include <tcpcom.hpp>
+#include <udpcom.hpp>
 
 namespace mf = sx::multiflow;
 
@@ -98,4 +101,28 @@ TEST(MFFlowCom, ShutdownFinishesOnlyOwnedFlow) {
     EXPECT_FALSE(first_com.writable(first_com.token()));
     EXPECT_TRUE(second_com.writable(second_com.token()));
     EXPECT_TRUE(connection->contains(second));
+}
+
+TEST(MFFlowCom, ConnectionStartMetadataUsesThePhysicalCarrier) {
+    for (auto const carrier : {mf::outer_transport::udp, mf::outer_transport::tcp}) {
+        auto connection = std::make_shared<mf::fake_connection>(64 * 1024, carrier);
+        auto flow = connection->open_flow(mf::direction::bidirectional);
+        mf::MFFlowCom com(connection, flow);
+        nlohmann::json info = nlohmann::json::object();
+
+        sx::proxy::add_connection_transport(info, com);
+
+        EXPECT_EQ(info.at("transport"), carrier == mf::outer_transport::udp ? "udp" : "tcp");
+        EXPECT_EQ(com.l4_proto(), SOCK_STREAM);
+    }
+}
+
+TEST(MFFlowCom, ConnectionStartMetadataPreservesOrdinaryTcpAndUdp) {
+    TCPCom tcp;
+    UDPCom udp;
+    nlohmann::json info = nlohmann::json::object();
+    sx::proxy::add_connection_transport(info, tcp);
+    EXPECT_EQ(info.at("transport"), "tcp");
+    sx::proxy::add_connection_transport(info, udp);
+    EXPECT_EQ(info.at("transport"), "udp");
 }

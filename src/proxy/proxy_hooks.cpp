@@ -3,6 +3,7 @@
 #include <proxy/mitmproxy.hpp>
 #include <proxy/content_webhook_metadata.hpp>
 #include <proxy/connection_start.hpp>
+#include <proxy/connection_transport.hpp>
 #include <proxy/httpconnect/httpconnectrequest.hpp>
 #include <proxy/httpconnect/httpconnectreply.hpp>
 #include <proxy/directional_content.hpp>
@@ -380,10 +381,7 @@ nlohmann::json ProxyHooks::start_details(const MitmProxy& proxy, const StartDeta
     info["destination"] = endpoint(proxy.first_right());
 
     if (auto* left = proxy.first_left(); left && left->com()) {
-        const auto type = left->com()->l4_proto();
-
-        if (type == SOCK_STREAM) info["transport"] = "tcp";
-        else if (type == SOCK_DGRAM) info["transport"] = "udp";
+        add_connection_transport(info, *left->com());
     }
     if (auto protocol = proxy.session_protocol(); !protocol.empty())
         info["protocol"] = std::string(protocol);
