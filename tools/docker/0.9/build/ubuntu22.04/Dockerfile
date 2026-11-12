@@ -1,5 +1,9 @@
 FROM ubuntu:22.04
 
+# Default packages use ngtcp2; legacy builds require an explicit build argument.
+ARG SMITHPROXY_ENABLE_NGTCP2=ON
+ENV SMITHPROXY_ENABLE_NGTCP2=${SMITHPROXY_ENABLE_NGTCP2}
+
 ARG FTP_UPLOAD_PWD=""
 ARG FTP_UPLOAD_USER=""
 ARG FTP_UPLOAD_PATH=""
@@ -18,6 +22,8 @@ RUN apt update && apt -y install git && DEBIAN_FRONTEND=noninteractive apt insta
 RUN echo "Getting git branch: ${SX_BRANCH}"; git clone --depth 1 --recursive https://github.com/astibal/smithproxy.git -b ${SX_BRANCH} smithproxy
 
 RUN cd smithproxy && ./tools/linux-deps.sh
+
+RUN apt-get install -y --no-install-recommends devscripts debhelper
 
 RUN cd /app/smithproxy/tools/pkg-scripts/deb && ./createdeb-0.9.sh
 

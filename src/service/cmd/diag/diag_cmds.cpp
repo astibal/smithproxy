@@ -1,3 +1,4 @@
+#include "proxy/quic/error_stats.hpp"
 #include <service/core/session_interfaces.hpp>
 /*
     Smithproxy- transparent proxy with SSL inspection capabilities.
@@ -1803,6 +1804,13 @@ static void print_quic_sessions(DiagCli* cli, int flags, bool listener_summary, 
     const bool tls_details = listener_summary || verbosity >= iDEB ||
                              flag_check<int>(flags, SL_TLS_DETAILS);
 
+    if (listener_summary || verbosity >= iDIA) {
+        cli_print(cli, "QUIC errors: process-lifetime site counters (nonzero only)");
+        sx::quic::stats.errors.visit([&](char const* name, std::uint64_t count) {
+            if (count) cli_print(cli, "  %s: %llu", name, static_cast<unsigned long long>(count));
+        });
+    }
+
     const auto decor = cli->context.decor();
     auto const& services = SmithProxy::instance().quic_services;
     std::size_t total = 0;
@@ -1817,19 +1825,27 @@ static void print_quic_sessions(DiagCli* cli, int flags, bool listener_summary, 
                     stream_details = pending.get();
                 }
                 catch (const std::exception& error) {
+                    ++sx::quic::stats.errors.cli_stream_details_exception;
                     cli->context.print(decor.error(std::string("QUIC stream details: ") + error.what()));
                 }
             } else {
+                ++sx::quic::stats.errors.cli_stream_details_timeout;
                 cli->context.print(decor.error("QUIC stream details timed out"));
             }
         }
 
         if (listener_summary) {
             auto const counters = service->diagnostics();
-            cli_print(cli, "QUIC listener[%zu]: udp/*:%u, sessions: %zu, accepted: %llu, completed: %llu",
-                      listener, service->bound_port(), sessions.size(),
+            cli_print(cli, "QUIC listener[%zu]: udp/%s:%u, sessions: %zu, accepted: %llu, completed: %llu",
+                      listener, service->address_family() == AF_INET6 ? "[::]" : "0.0.0.0",
+                      service->bound_port(), sessions.size(),
                       static_cast<unsigned long long>(counters.accepted_sessions),
                       static_cast<unsigned long long>(counters.completed_sessions));
+            cli_print(cli, "  worker: %zu/%zu, receiver queue drops: %llu",
+                      service->worker_index() + 1, service->worker_count(),
+                      static_cast<unsigned long long>(service->dropped_datagrams()));
+            cli_print(cli, "  A socket receive buffer: requested=%d, actual=%d bytes (shared by workers)",
+                      service->receive_buffer_requested(), service->receive_buffer());
         }
 
         for (auto const& session : sessions) {
@@ -1891,6 +1907,8 @@ static void print_quic_sessions(DiagCli* cli, int flags, bool listener_summary, 
                           listener, static_cast<unsigned long long>(session.id), session.state.c_str(),
                           static_cast<unsigned long long>(session.age_ms),
                           static_cast<unsigned long long>(session.idle_ms));
+                cli_print(cli, "    handshake phase: %s%s%s", session.handshake_phase.c_str(),
+                          session.end_reason.empty() ? "" : "  ended: ", session.end_reason.c_str());
                 cli_print(cli, "    streams: %zu  queued: %zuB  forwarded: %lluB  rejected: %zu",
                           session.streams, session.queued_bytes,
                           static_cast<unsigned long long>(session.forwarded_bytes),

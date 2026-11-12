@@ -5,6 +5,7 @@ import argparse
 import asyncio
 import json
 import socket
+import ssl
 import sys
 import time
 from pathlib import Path
@@ -16,7 +17,9 @@ from aioquic.quic.configuration import QuicConfiguration
 from aioquic.quic.events import ConnectionTerminated, HandshakeCompleted
 
 
-PROFILES = ("baseline", "no_reuse", "no_pfs", "no_alpn", "old_ticket")
+from certificate_cases import CERTIFICATE_PROFILES, HANDSHAKE_PROFILES, rejects
+
+PROFILES = (*HANDSHAKE_PROFILES, *CERTIFICATE_PROFILES)
 
 
 def enable_diagnostics():
@@ -25,7 +28,10 @@ def enable_diagnostics():
         cli.settimeout(.5)
         time.sleep(.1)
         cli.recv(65536)
-        for command in ("enable", "debug set com.quic 6"):
+        # Child topics have independent levels; certificate rejection evidence
+        # lives in cb.info/cb.verify rather than the transport root logger.
+        for command in ("enable", "debug set com.quic 6",
+                        "debug set com.quic.cb.info 6", "debug set com.quic.cb.verify 6"):
             cli.sendall(command.encode() + b"\r\n")
             time.sleep(.1)
             response = cli.recv(65536)
@@ -69,15 +75,20 @@ class Client(QuicConnectionProtocol):
         return await self.result
 
 
-async def measure(args):
+async def measure(args, host):
     tickets, results = [], []
     marker = "QUIC TLS profile rejects target="
+    certificate_markers = ("QUIC upstream handshake rejected", "QUIC certificate policy rejected")
+    origin_before = args.origin_log.read_text().count("REQUEST stream=") if args.origin_log else 0
     for attempt in range(3):
         before = args.proxy_log.read_text().count(marker)
+        certificate_before = sum(args.proxy_log.read_text().count(text) for text in certificate_markers)
         config = QuicConfiguration(is_client=True, alpn_protocols=["h3"],
                                    server_name="origin.runner.lab")
         config.load_verify_locations(cafile=args.ca_file)
-        if attempt and tickets:
+        if args.profile.endswith("_allow"):
+            config.verify_mode = ssl.CERT_NONE
+        if attempt and tickets and args.profile not in CERTIFICATE_PROFILES:
             # Reuse the original permissive ticket for both policy probes.
             config.session_ticket = tickets[0] if args.profile == "old_ticket" else tickets[-1]
         local_port = 23450 + attempt if args.profile == "old_ticket" else 0
@@ -86,7 +97,7 @@ async def measure(args):
         client = None
         try:
             async with asyncio.timeout(10):
-                async with connect("198.18.20.2", 443, configuration=config,
+                async with connect(host, 443, configuration=config,
                                    create_protocol=Client, session_ticket_handler=tickets.append,
                                    local_port=local_port, wait_connected=False) as client:
                     client.transmit()
@@ -106,10 +117,21 @@ async def measure(args):
                     client.result.exception()
 
         result["policy_rejections"] = args.proxy_log.read_text().count(marker) - before
+        result["certificate_rejections"] = sum(args.proxy_log.read_text().count(text)
+                                                 for text in certificate_markers) - certificate_before
         results.append(result)
         args.output.write_text(json.dumps(results, indent=2) + "\n")
 
-    if args.profile in ("no_pfs", "no_alpn"):
+    if args.profile in CERTIFICATE_PROFILES:
+        if rejects(args.profile):
+            # Never count a silent timeout as a successful certificate rejection.
+            passed = all(item.get("error") == "ConnectionError"
+                         and "body" not in item and item.get("resumed") is None
+                         and item["certificate_rejections"] > 0 for item in results)
+            passed = passed and args.origin_log is not None and args.origin_log.read_text().count("REQUEST stream=") == origin_before
+        else:
+            passed = all("body" in item and item.get("resumed") is False for item in results)
+    elif args.profile in ("no_pfs", "no_alpn"):
         # OpenSSL's early QUIC rejection may be silent on the wire. A timeout
         # alone is never success: require the matching server-side policy
         # rejection for every attempt, with no completed handshake or body.
@@ -122,8 +144,17 @@ async def measure(args):
             expected = [False, False, True]
         passed = all("body" in item for item in results)
         passed = passed and [item.get("resumed") for item in results] == expected
-    print(f"{'PASS' if passed else 'FAIL'} QUIC TLS profile {args.profile}: {results}", flush=True)
+    print(f"{'PASS' if passed else 'FAIL'} QUIC TLS profile {args.profile} host={host}: {results}", flush=True)
     return 0 if passed else 1
+
+
+async def run(args):
+    output = args.output
+    verdict = 0
+    for family, host in ((4, "198.18.20.2"), (6, "fd00:20::2")):
+        args.output = output.with_name(output.stem + str(family) + output.suffix)
+        verdict |= await measure(args, host)
+    return verdict
 
 
 if __name__ == "__main__":
@@ -134,5 +165,6 @@ if __name__ == "__main__":
     parser.add_argument("--profile", choices=PROFILES, required=True)
     parser.add_argument("--ca-file", required=True)
     parser.add_argument("--proxy-log", type=Path, required=True)
+    parser.add_argument("--origin-log", type=Path)
     parser.add_argument("--output", type=Path, required=True)
-    raise SystemExit(asyncio.run(measure(parser.parse_args())))
+    raise SystemExit(asyncio.run(run(parser.parse_args())))

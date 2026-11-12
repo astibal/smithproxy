@@ -1,12 +1,22 @@
+#include <vars.hpp>
+#include <privileged_socket.hpp>
+#include "proxy/quic/error_stats.hpp"
+#include "proxy/quic/log.hpp"
+#ifdef SMITHPROXY_ENABLE_NGTCP2
+#include "proxy/quic/ngtcp2.hpp"
+#endif
 #include <gtest/gtest.h>
 
 #include "service/quic/quicservice.hpp"
+#include "service/quic/worker_dispatcher.hpp"
 
 #include "proxy/multiflow/mfflowcom.hpp"
 #include <sslcertstore.hpp>
 #include <proxy/quic_observer.hpp>
 
 #include <chrono>
+#include <cstdlib>
+#include <optional>
 #include <ctime>
 #include <filesystem>
 #include <thread>
@@ -14,11 +24,70 @@
 #if SMITHPROXY_OPENSSL_QUIC
 #include <arpa/inet.h>
 #include <fcntl.h>
+#include <poll.h>
+#include <net/if.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #endif
 
 namespace quic = sx::quic;
+
+#if SMITHPROXY_OPENSSL_QUIC
+// Restore the process selection before service tests start their worker threads.
+class QuicBackendSelection : public ::testing::Test {
+protected:
+    std::optional<std::string> previous_;
+
+    void SetUp() override {
+        if (auto* value = std::getenv("SMITHPROXY_QUIC_BACKEND")) previous_ = value;
+    }
+
+    void TearDown() override {
+        if (previous_) setenv("SMITHPROXY_QUIC_BACKEND", previous_->c_str(), 1);
+        else unsetenv("SMITHPROXY_QUIC_BACKEND");
+    }
+};
+
+TEST_F(QuicBackendSelection, UsesTheBuildDefaultWithoutAnOverride) {
+    ASSERT_EQ(unsetenv("SMITHPROXY_QUIC_BACKEND"), 0);
+#ifdef SMITHPROXY_ENABLE_NGTCP2
+    EXPECT_EQ(quic::configured_transport_backend(), quic::transport_backend::ngtcp2);
+#else
+    EXPECT_EQ(quic::configured_transport_backend(), quic::transport_backend::openssl);
+#endif
+}
+
+TEST_F(QuicBackendSelection, AllowsExplicitOpenSsl) {
+    ASSERT_EQ(setenv("SMITHPROXY_QUIC_BACKEND", "openssl", 1), 0);
+    EXPECT_EQ(quic::configured_transport_backend(), quic::transport_backend::openssl);
+}
+
+TEST_F(QuicBackendSelection, RequiresCompiledSupportForExplicitNgtcp2) {
+    ASSERT_EQ(setenv("SMITHPROXY_QUIC_BACKEND", "ngtcp2", 1), 0);
+#ifdef SMITHPROXY_ENABLE_NGTCP2
+    EXPECT_EQ(quic::configured_transport_backend(), quic::transport_backend::ngtcp2);
+#else
+    EXPECT_EQ(quic::configured_transport_backend(), quic::transport_backend::unavailable);
+#endif
+}
+
+TEST_F(QuicBackendSelection, RejectsUnknownAndEmptyOverrides) {
+    for (auto* name : {"unknown", ""}) {
+        ASSERT_EQ(setenv("SMITHPROXY_QUIC_BACKEND", name, 1), 0);
+        EXPECT_EQ(quic::configured_transport_backend(), quic::transport_backend::unavailable);
+    }
+}
+#endif
+
+TEST(QuicLogging, RegistersEveryTopicBeforeTraffic) {
+    quic::logging::initialize();
+    auto logger = logan::get();
+    for (auto* topic : {"com.quic", "com.quic.cb.info", "com.quic.cb.alpn",
+                        "com.quic.cb.msg", "com.quic.cb.session", "com.quic.cb.verify",
+                        "com.quic.mitm", "com.quic.ocsp", "com.quic.stream", "com.quic.transport"}) {
+        EXPECT_NE(logger->topic_db_.find(topic), logger->topic_db_.end()) << topic;
+    }
+}
 
 TEST(QuicCertificateCallbackIdentity, RejectsReusedBorrowedHandles) {
     EXPECT_TRUE(quic::detail::same_certificate_callback_identity(
@@ -84,6 +153,49 @@ TEST_F(QuicListenerService, PreparesAndStopsLoopbackListener) {
     runner.join();
     EXPECT_TRUE(service.last_error().empty()) << service.last_error();
     EXPECT_EQ(service.connection_count(), 0U);
+}
+
+// Compare with a real kernel socket: neither clamping nor Linux's doubled
+// accounting should turn this into a test of the host's sysctl configuration.
+TEST_F(QuicListenerService, ReceiveBufferMatchesKernelAndSharedWorkers) {
+#if SMITHPROXY_OPENSSL_QUIC
+    if (!quic::openssl_quic_available()) GTEST_SKIP();
+    for (int family : {AF_INET, AF_INET6}) {
+        for (int requested : {0, 65536, 1048576}) {
+            SCOPED_TRACE(std::to_string(family) + ":" + std::to_string(requested));
+            int reference = ::socket(family, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
+            ASSERT_GE(reference, 0);
+            int set_result = requested == 0 ? 0 : ::setsockopt(
+                reference, SOL_SOCKET, SO_RCVBUF, &requested, sizeof(requested));
+            int expected = 0;
+            socklen_t size = sizeof(expected);
+            int get_result = ::getsockopt(reference, SOL_SOCKET, SO_RCVBUF, &expected, &size);
+            ::close(reference);
+            ASSERT_EQ(set_result, 0);
+            ASSERT_EQ(get_result, 0);
+
+            auto receiver = std::make_shared<quic::worker_dispatcher>(2);
+            auto make_service = [&]() {
+                return std::make_unique<quic::listener_service>(0,
+                    "etc/certs/default/srv-cert.pem", "etc/certs/default/srv-key.pem",
+                    false, 443, false, quic::lifecycle_options {}, quic::resource_limits {},
+                    std::string {}, quic::flow_proxy_factory {}, false,
+                    sx::proxymaker::SessionSetupFactory {}, std::nullopt, std::nullopt,
+                    family, requested);
+            };
+            auto first = make_service();
+            first->assign_worker(receiver, 0);
+            ASSERT_TRUE(first->prepare()) << first->last_error();
+            auto second = make_service();
+            second->assign_worker(receiver, 1);
+            ASSERT_TRUE(second->prepare()) << second->last_error();
+            EXPECT_EQ(first->receive_buffer_requested(), requested);
+            EXPECT_EQ(first->receive_buffer(), expected);
+            EXPECT_EQ(second->receive_buffer(), expected);
+            EXPECT_EQ(first->bound_port(), second->bound_port());
+        }
+    }
+#endif
 }
 
 TEST_F(QuicListenerService, DetailsWithoutRunningListenerCompleteImmediately) {
@@ -226,7 +338,7 @@ TEST_F(QuicListenerService, DeniedSetupPreventsProbeAndForwardingDatagrams) {
         ASSERT_NE(client_context, nullptr);
         SSL_CTX_set_verify(client_context.get(), SSL_VERIFY_NONE, nullptr);
 
-        const int origin_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        const int origin_fd = socle::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         ASSERT_GE(origin_fd, 0);
         struct socket_guard {
             int fd;
@@ -236,7 +348,7 @@ TEST_F(QuicListenerService, DeniedSetupPreventsProbeAndForwardingDatagrams) {
         sockaddr_in origin {};
         origin.sin_family = AF_INET;
         origin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        ASSERT_EQ(bind(origin_fd, reinterpret_cast<sockaddr*>(&origin), sizeof(origin)), 0);
+        ASSERT_EQ(socle::bind(origin_fd, reinterpret_cast<sockaddr*>(&origin), sizeof(origin)), 0);
         socklen_t size = sizeof(origin);
         ASSERT_EQ(getsockname(origin_fd, reinterpret_cast<sockaddr*>(&origin), &size), 0);
 
@@ -286,12 +398,12 @@ TEST_F(QuicListenerService, CleansUpHandshakeTimeout) {
     ASSERT_NE(client_context, nullptr);
     SSL_CTX_set_verify(client_context.get(), SSL_VERIFY_NONE, nullptr);
 
-    auto const silent_origin_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    auto const silent_origin_fd = socle::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     ASSERT_GE(silent_origin_fd, 0);
     sockaddr_in silent_origin {};
     silent_origin.sin_family = AF_INET;
     silent_origin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    ASSERT_EQ(bind(silent_origin_fd, reinterpret_cast<sockaddr*>(&silent_origin),
+    ASSERT_EQ(socle::bind(silent_origin_fd, reinterpret_cast<sockaddr*>(&silent_origin),
                    sizeof(silent_origin)), 0);
     socklen_t silent_origin_size = sizeof(silent_origin);
     ASSERT_EQ(getsockname(silent_origin_fd, reinterpret_cast<sockaddr*>(&silent_origin),
@@ -407,14 +519,28 @@ TEST_F(QuicListenerService, RejectsSessionsBeyondConfiguredLimit) {
     if(external) external->close();
 }
 
+// A busy application must not make management sampling run at packet frequency.
+struct bridge_sampling_probe {
+    std::atomic_bool busy = false;
+    std::atomic_size_t pumps = 0;
+    std::atomic_size_t summaries = 0;
+};
+
 // The listener must retain bridge diagnostics independently of bridge lifetime.
 class classified_test_bridge final : public sx::multiflow::flow_proxy {
 public:
     classified_test_bridge(std::shared_ptr<sx::multiflow::connection> left,
                            std::shared_ptr<sx::multiflow::connection> right,
-                           sx::multiflow::proxy_limits limits)
-        : bridge_(std::move(left), std::move(right), limits) {}
-    std::size_t pump_once(std::size_t size) override { return bridge_.pump_once(size); }
+                           sx::multiflow::proxy_limits limits,
+                           std::shared_ptr<bridge_sampling_probe> probe = {})
+        : bridge_(std::move(left), std::move(right), limits), probe_(std::move(probe)) {}
+    std::size_t pump_once(std::size_t size) override {
+        auto const moved = bridge_.pump_once(size);
+        if (!probe_) return moved;
+        ++probe_->pumps;
+        // Keep the worker productive without depending on machine throughput.
+        return probe_->busy ? moved + 1 : moved;
+    }
     std::size_t pair_count() const override { return bridge_.pair_count(); }
     std::size_t queued_bytes() const override { return bridge_.queued_bytes(); }
     std::size_t limit_rejections() const override { return bridge_.limit_rejections(); }
@@ -426,6 +552,7 @@ public:
         return {};
     }
     sx::multiflow::flow_summary summary() const override {
+        if (probe_) ++probe_->summaries;
         sx::multiflow::flow_summary result;
         result.policies = {2, 3};
         result.filters = {"test-filter"};
@@ -437,9 +564,10 @@ public:
     }
 private:
     sx::multiflow::MFProxy bridge_;
+    std::shared_ptr<bridge_sampling_probe> probe_;
 };
 
-TEST_F(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
+static void exercise_proxy_stream(bool use_workers, bool check_sampling = false) {
     auto origin_context = quic::make_openssl_quic_context(true);
     auto client_context = quic::make_openssl_quic_context(false);
     ASSERT_NE(origin_context, nullptr);
@@ -451,13 +579,13 @@ TEST_F(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
     SSL_CTX_set_alpn_select_cb(origin_context.get(), select_h3_for_origin, nullptr);
     SSL_CTX_set_verify(client_context.get(), SSL_VERIFY_NONE, nullptr);
 
-    auto const origin_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    auto const origin_fd = socle::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     ASSERT_GE(origin_fd, 0);
     ASSERT_TRUE(nonblocking(origin_fd));
     sockaddr_in origin_address {};
     origin_address.sin_family = AF_INET;
     origin_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    ASSERT_EQ(bind(origin_fd, reinterpret_cast<sockaddr*>(&origin_address),
+    ASSERT_EQ(socle::bind(origin_fd, reinterpret_cast<sockaddr*>(&origin_address),
                    sizeof(origin_address)), 0);
     socklen_t origin_size = sizeof(origin_address);
     ASSERT_EQ(getsockname(origin_fd, reinterpret_cast<sockaddr*>(&origin_address),
@@ -466,26 +594,54 @@ TEST_F(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
     ASSERT_NE(origin_listener, nullptr);
 
     quic::lifecycle_options lifecycle;
-    lifecycle.idle_timeout = std::chrono::milliseconds(100);
+    lifecycle.idle_timeout = std::chrono::milliseconds(300);
     lifecycle.drain_timeout = std::chrono::milliseconds(100);
+    auto probe = check_sampling ? std::make_shared<bridge_sampling_probe>() : nullptr;
     quic::listener_service proxy(0, "etc/certs/default/srv-cert.pem",
                                  "etc/certs/default/srv-key.pem", false,
                                  ntohs(origin_address.sin_port), false, lifecycle,
                                  {}, "127.0.0.1",
-                                 [](auto left, auto right, auto limits, auto) {
+                                 [probe](auto left, auto right, auto limits, auto) {
                                      return std::make_unique<classified_test_bridge>(
-                                         std::move(left), std::move(right), limits);
+                                         std::move(left), std::move(right), limits, probe);
                                  });
+    std::shared_ptr<quic::worker_dispatcher> receiver;
+    std::unique_ptr<quic::listener_service> sibling;
+    if (use_workers) {
+        receiver = std::make_shared<quic::worker_dispatcher>(2);
+        quic::datagram_endpoint target;
+        auto* address = reinterpret_cast<sockaddr_in*>(&target.address);
+        address->sin_family = AF_INET;
+        address->sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        target.size = sizeof(*address);
+        auto const owner = receiver->owner(target);
+        proxy.assign_worker(receiver, owner);
+        sibling = std::make_unique<quic::listener_service>(0,
+            "etc/certs/default/srv-cert.pem", "etc/certs/default/srv-key.pem",
+            false, ntohs(origin_address.sin_port), false, lifecycle, quic::resource_limits{},
+            "127.0.0.1");
+        sibling->assign_worker(receiver, 1 - owner);
+    }
     ASSERT_TRUE(proxy.prepare()) << proxy.last_error();
+    if (sibling) {
+        ASSERT_TRUE(sibling->prepare()) << sibling->last_error();
+        ASSERT_EQ(sibling->bound_port(), proxy.bound_port());
+    }
+    std::thread sibling_thread;
+    if (sibling) sibling_thread = std::thread([&] { sibling->run(); });
     std::thread proxy_thread([&proxy]() { proxy.run(); });
     struct thread_guard {
         quic::listener_service& service;
         std::thread& thread;
+        quic::listener_service* sibling;
+        std::thread& sibling_thread;
         ~thread_guard() {
             service.stop();
+            if (sibling) sibling->stop();
             if (thread.joinable()) thread.join();
+            if (sibling_thread.joinable()) sibling_thread.join();
         }
-    } guard { proxy, proxy_thread };
+    } guard { proxy, proxy_thread, sibling.get(), sibling_thread };
 
     sockaddr_in proxy_address {};
     proxy_address.sin_family = AF_INET;
@@ -585,6 +741,26 @@ TEST_F(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
     EXPECT_GT(snapshots.front().forwarded_bytes, 0U);
     EXPECT_NE(snapshots.front().target, "-");
 
+    if (probe) {
+        auto const pumps = probe->pumps.load();
+        auto const summaries = probe->summaries.load();
+        auto const started = std::chrono::steady_clock::now();
+        probe->busy = true;
+        while (std::chrono::steady_clock::now() - started < std::chrono::milliseconds(250)) {
+            external->drain_events();
+            ASSERT_TRUE(origin_listener->handle_events());
+            origin->drain_events();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        auto const elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - started).count();
+        auto const samples = probe->summaries.load() - summaries;
+        EXPECT_GE(probe->pumps.load() - pumps, 20U);
+        EXPECT_GT(samples, 0U); // Diagnostics still refresh while traffic is busy.
+        EXPECT_LE(samples, static_cast<std::size_t>(elapsed / 100 + 2));
+        probe->busy = false;
+    }
+
     auto const close_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     bool saw_draining = false;
     while (std::chrono::steady_clock::now() < close_deadline
@@ -615,6 +791,11 @@ TEST_F(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
     EXPECT_EQ(diagnostics.accepted_sessions, 1U);
     EXPECT_EQ(diagnostics.completed_sessions, 1U);
     EXPECT_EQ(diagnostics.idle_timeouts, 1U);
+    if (sibling) {
+        EXPECT_EQ(sibling->diagnostics().accepted_sessions, 0U);
+        EXPECT_EQ(sibling->dropped_datagrams(), 0U);
+        EXPECT_EQ(proxy.dropped_datagrams(), 0U);
+    }
 
     external->close();
     proxy.stop();
@@ -622,6 +803,18 @@ TEST_F(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
     origin->close();
     close(origin_fd);
 }
+TEST_F(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
+    exercise_proxy_stream(false);
+}
+
+TEST_F(QuicListenerService, ReceiverKeepsStreamAndLifecycleOnSelectedWorker) {
+    exercise_proxy_stream(true);
+}
+
+TEST_F(QuicListenerService, BusyWorkerSamplesDiagnosticsAndPublishesLifecycle) {
+    exercise_proxy_stream(false, true);
+}
+
 namespace {
 
 class HookSessionSetup final : public sx::proxymaker::SessionSetup {
@@ -717,3 +910,433 @@ TEST(QuicTlsSnapshot, DistinguishesAbsentPendingCompletedAndEndedHandshakes) {
     tls.ended = true;
     EXPECT_STREQ(tls.handshake_status(), "completed");
 }
+
+#if SMITHPROXY_OPENSSL_QUIC
+namespace {
+quic::datagram_endpoint worker_test_address(const char* host, std::uint16_t port = 443) {
+    quic::datagram_endpoint result;
+    auto* address = reinterpret_cast<sockaddr_in*>(&result.address);
+    address->sin_family = AF_INET;
+    address->sin_port = htons(port);
+    inet_pton(AF_INET, host, &address->sin_addr);
+    result.size = sizeof(*address);
+    return result;
+}
+
+quic::datagram_endpoint worker_test_address6(const char* host, std::uint16_t port = 443) {
+    quic::datagram_endpoint result;
+    auto* address = reinterpret_cast<sockaddr_in6*>(&result.address);
+    address->sin6_family = AF_INET6;
+    address->sin6_port = htons(port);
+    inet_pton(AF_INET6, host, &address->sin6_addr);
+    result.size = sizeof(*address);
+    return result;
+}
+
+bool inbox_readable(quic::worker_dispatcher const& receiver, std::size_t worker) {
+    pollfd descriptor {receiver.wake_fd(worker), POLLIN, 0};
+    return ::poll(&descriptor, 1, 0) == 1 && (descriptor.revents & POLLIN);
+}
+}
+
+// Receive two batches through the same storage. Alternating local addresses
+// expose stale ancillary metadata; the final probe must return without waiting.
+TEST(QuicDatagramBatch, PreservesPayloadAndDestinationAcrossReusedSlots) {
+    int fd = ::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    ASSERT_GE(fd, 0);
+    struct socket_guard { int fd; ~socket_guard() { ::close(fd); } } guard {fd};
+    int enabled = 1;
+    ASSERT_EQ(::setsockopt(fd, SOL_IP, IP_RECVORIGDSTADDR, &enabled, sizeof(enabled)), 0);
+    sockaddr_in bound {};
+    bound.sin_family = AF_INET;
+    ASSERT_EQ(::bind(fd, reinterpret_cast<sockaddr*>(&bound), sizeof(bound)), 0);
+    socklen_t length = sizeof(bound);
+    ASSERT_EQ(::getsockname(fd, reinterpret_cast<sockaddr*>(&bound), &length), 0);
+    quic::datagram_receiver receiver;
+    for (unsigned round = 0; round < 2; ++round) {
+        for (unsigned i = 0; i < quic::datagram_receiver::capacity; ++i) {
+            auto target = worker_test_address((i + round) % 2 ? "127.0.0.1" : "127.0.0.2",
+                                               ntohs(bound.sin_port));
+            std::vector<unsigned char> payload(100 + i, static_cast<unsigned char>(i + round));
+            ASSERT_EQ(::sendto(fd, payload.data(), payload.size(), 0,
+                reinterpret_cast<sockaddr*>(&target.address), target.size), payload.size());
+        }
+        unsigned received = 0;
+        EXPECT_EQ(receiver.receive(fd, [&](quic::datagram_packet&& packet) {
+            auto expected = worker_test_address((received + round) % 2 ? "127.0.0.1" : "127.0.0.2",
+                                                 ntohs(bound.sin_port));
+            EXPECT_EQ(std::vector<unsigned char>(packet.data.data(), packet.data.data() + packet.data.size()), std::vector<unsigned char>(100 + received,
+                       static_cast<unsigned char>(received + round)));
+            EXPECT_EQ(std::memcmp(&packet.local.address, &expected.address, expected.size), 0);
+            EXPECT_TRUE(packet.peer.valid());
+            ++received;
+        }), quic::datagram_receiver::capacity);
+        EXPECT_EQ(received, quic::datagram_receiver::capacity);
+    }
+    EXPECT_EQ(receiver.receive(fd, [](quic::datagram_packet&&) { ADD_FAILURE(); }), -1);
+    EXPECT_TRUE(errno == EAGAIN || errno == EWOULDBLOCK);
+}
+
+TEST(QuicWorkerDispatcher, BatchPreservesOrderLimitsAndLevelTriggeredWakeups) {
+    quic::worker_dispatcher receiver(2, 1024, 4 * 1024 * 1024);
+    std::array<quic::datagram_packet, 6> input;
+    for (size_t i = 0; i < input.size(); ++i) {
+        input[i].local = worker_test_address(i % 2 ? "198.18.20.1" : "198.18.20.2");
+        input[i].data = buffer(1, 1);
+        input[i].data[0] = static_cast<unsigned char>(i);
+    }
+    auto first = receiver.owner(input[0].local);
+    auto second = receiver.owner(input[1].local);
+    ASSERT_NE(first, second);
+    ASSERT_EQ(receiver.enqueue_batch(input.data(), input.size()), input.size());
+    std::array<quic::datagram_packet, 2> output;
+    EXPECT_EQ(receiver.pop_batch(first, output.data(), 0), 0U);
+    ASSERT_TRUE(inbox_readable(receiver, first));
+    ASSERT_EQ(receiver.pop_batch(first, output.data(), output.size()), 2U);
+    EXPECT_EQ(std::vector<unsigned char>(output[0].data.data(), output[0].data.data() + output[0].data.size()), (std::vector<unsigned char>{0}));
+    EXPECT_EQ(std::vector<unsigned char>(output[1].data.data(), output[1].data.data() + output[1].data.size()), (std::vector<unsigned char>{2}));
+    EXPECT_TRUE(inbox_readable(receiver, first));
+    ASSERT_EQ(receiver.pop_batch(first, output.data(), output.size()), 1U);
+    EXPECT_EQ(std::vector<unsigned char>(output[0].data.data(), output[0].data.data() + output[0].data.size()), (std::vector<unsigned char>{4}));
+    EXPECT_FALSE(inbox_readable(receiver, first));
+    EXPECT_TRUE(inbox_readable(receiver, second));
+    receiver.retire(second);
+    EXPECT_FALSE(inbox_readable(receiver, second));
+    input[0].local = worker_test_address("198.18.20.1");
+    EXPECT_EQ(receiver.enqueue_batch(input.data(), 1), 0U);
+    EXPECT_EQ(receiver.dropped(second), 1U);
+
+    // A batch may fit only partially. Byte limits still apply per packet.
+    for (auto& packet : input) {
+        packet.local = worker_test_address("198.18.20.2");
+        packet.data = buffer(1024 * 1024, 1024 * 1024);
+    }
+    EXPECT_EQ(receiver.enqueue_batch(input.data(), input.size()), 4U);
+    EXPECT_EQ(receiver.dropped(first), 2U);
+    EXPECT_TRUE(inbox_readable(receiver, first));
+}
+
+TEST(QuicWorkerDispatcher, ConcurrentBatchesDoNotLoseWakeupsOrReorderOwners) {
+    quic::worker_dispatcher receiver(4);
+    constexpr unsigned batches = 512, width = 16;
+    std::atomic_bool done {false};
+    std::atomic_size_t accepted {0};
+    std::thread producer([&] {
+        for (unsigned batch = 0; batch < batches; ++batch) {
+            std::array<quic::datagram_packet, width> packets;
+            for (unsigned i = 0; i < width; ++i) {
+                unsigned sequence = batch * width + i;
+                packets[i].local = worker_test_address(("198.18.20." + std::to_string(2 + sequence % 4)).c_str());
+                packets[i].data = buffer(sizeof(sequence), sizeof(sequence));
+                std::memcpy(packets[i].data.data(), &sequence, sizeof(sequence));
+            }
+            accepted += receiver.enqueue_batch(packets.data(), packets.size());
+        }
+        done = true;
+    });
+    std::array<int, 4> previous {-1, -1, -1, -1};
+    std::array<pollfd, 4> events;
+    for (size_t worker = 0; worker < events.size(); ++worker)
+        events[worker] = {receiver.wake_fd(worker), POLLIN, 0};
+    size_t consumed = 0;
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (done && consumed == accepted) break;
+        ::poll(events.data(), events.size(), 10);
+        for (size_t worker = 0; worker < events.size(); ++worker) {
+            if (!(events[worker].revents & POLLIN)) continue;
+            std::array<quic::datagram_packet, 7> packets;
+            auto count = receiver.pop_batch(worker, packets.data(), packets.size());
+            for (size_t i = 0; i < count; ++i) {
+                unsigned sequence = 0;
+                std::memcpy(&sequence, packets[i].data.data(), sizeof(sequence));
+                EXPECT_GT(static_cast<int>(sequence), previous[worker]);
+                EXPECT_EQ(receiver.owner(packets[i].local), worker);
+                previous[worker] = sequence;
+            }
+            consumed += count;
+        }
+    }
+    producer.join();
+    EXPECT_EQ(consumed, accepted.load());
+    size_t drops = 0;
+    for (size_t worker = 0; worker < events.size(); ++worker) {
+        drops += receiver.dropped(worker);
+        EXPECT_FALSE(inbox_readable(receiver, worker));
+        EXPECT_GE(previous[worker], 0);
+    }
+    EXPECT_EQ(consumed + drops, batches * width);
+}
+
+TEST(QuicWorkerDispatcher, PreservesOwnerAndMetadataAcrossClientAndPortChanges) {
+    quic::worker_dispatcher receiver(4);
+    auto first = worker_test_address("198.18.20.1");
+    auto second = worker_test_address("198.18.20.2");
+    auto const owner = receiver.owner(first);
+    ASSERT_NE(owner, receiver.owner(second));
+    EXPECT_EQ(owner, receiver.owner(worker_test_address("198.18.20.1", 8443)));
+    for (unsigned i = 0; i < 2; ++i) {
+        quic::datagram_packet packet;
+        packet.local = first;
+        packet.peer = worker_test_address(i ? "10.0.0.2" : "10.0.0.1", 1000 + i);
+        packet.ingress_ifindex = 7;
+        packet.data = buffer(1, 1);
+        packet.data[0] = static_cast<unsigned char>(i);
+        ASSERT_TRUE(receiver.enqueue(std::move(packet)));
+    }
+    EXPECT_TRUE(inbox_readable(receiver, owner));
+    EXPECT_FALSE(inbox_readable(receiver, receiver.owner(second)));
+    for (unsigned i = 0; i < 2; ++i) {
+        quic::datagram_packet packet;
+        ASSERT_TRUE(receiver.pop(owner, packet));
+        EXPECT_EQ(std::vector<unsigned char>(packet.data.data(), packet.data.data() + packet.data.size()), (std::vector<unsigned char>{static_cast<unsigned char>(i)}));
+        EXPECT_EQ(packet.ingress_ifindex, 7U);
+        EXPECT_EQ(receiver.owner(packet.local), owner);
+        EXPECT_EQ(inbox_readable(receiver, owner), i == 0);
+    }
+    quic::datagram_packet packet;
+    EXPECT_FALSE(receiver.pop(owner, packet));
+}
+
+TEST(QuicWorkerDispatcher, BoundsQueuesAndNeverStealsFromRetiredOwners) {
+    quic::worker_dispatcher receiver(2, 1024, 4 * 1024 * 1024);
+    quic::datagram_packet packet;
+    packet.local = worker_test_address("198.18.20.1");
+    packet.peer = worker_test_address("10.0.0.1");
+    packet.data = buffer(65536, 65536);
+    auto const owner = receiver.owner(packet.local);
+    for (int i = 0; i < 64; ++i) ASSERT_TRUE(receiver.enqueue(packet));
+    EXPECT_FALSE(receiver.enqueue(packet));
+    EXPECT_EQ(receiver.dropped(owner), 1U);
+    quic::datagram_packet received;
+    ASSERT_TRUE(receiver.pop(owner, received));
+    EXPECT_TRUE(receiver.enqueue(packet));
+    receiver.retire(owner);
+    EXPECT_FALSE(receiver.enqueue(packet));
+    EXPECT_FALSE(inbox_readable(receiver, owner));
+    EXPECT_FALSE(receiver.pop(1 - owner, received));
+    EXPECT_EQ(receiver.dropped(owner), 2U);
+}
+
+TEST(QuicWorkerDispatcher, ReceivesOriginalDestinationsIntoDistinctWorkerInboxes) {
+    int const fd = ::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    ASSERT_GE(fd, 0);
+    struct socket_guard { int fd; ~socket_guard() { ::close(fd); } } guard {fd};
+    int enabled = 1;
+    ASSERT_EQ(::setsockopt(fd, SOL_IP, IP_RECVORIGDSTADDR, &enabled, sizeof(enabled)), 0);
+    sockaddr_in address {};
+    address.sin_family = AF_INET;
+    ASSERT_EQ(::bind(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
+    socklen_t size = sizeof(address);
+    ASSERT_EQ(::getsockname(fd, reinterpret_cast<sockaddr*>(&address), &size), 0);
+    quic::worker_dispatcher receiver(2);
+    ASSERT_TRUE(receiver.attach_socket(fd));
+    ASSERT_TRUE(receiver.start());
+    for (auto host : {"127.0.0.1", "127.0.0.2"}) {
+        auto const target = worker_test_address(host, ntohs(address.sin_port));
+        unsigned char payload = 73;
+        ASSERT_EQ(::sendto(fd, &payload, 1, 0,
+            reinterpret_cast<sockaddr const*>(&target.address), target.size), 1);
+    }
+    pollfd descriptors[] {{receiver.wake_fd(0), POLLIN, 0}, {receiver.wake_fd(1), POLLIN, 0}};
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while ((!inbox_readable(receiver, 0) || !inbox_readable(receiver, 1))
+           && std::chrono::steady_clock::now() < deadline) ::poll(descriptors, 2, 10);
+    for (std::size_t worker = 0; worker < 2; ++worker) {
+        quic::datagram_packet packet;
+        ASSERT_TRUE(receiver.pop(worker, packet));
+        EXPECT_EQ(receiver.owner(packet.local), worker);
+        EXPECT_EQ(std::vector<unsigned char>(packet.data.data(), packet.data.data() + packet.data.size()), (std::vector<unsigned char>{73}));
+        EXPECT_TRUE(packet.peer.valid());
+    }
+    receiver.stop();
+    EXPECT_EQ(receiver.error(), 0);
+}
+
+TEST(QuicWorkerDispatcher, PreservesIpv6DestinationAndIngressInterface) {
+    int const fd = ::socket(AF_INET6, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    ASSERT_GE(fd, 0);
+    struct socket_guard { int fd; ~socket_guard() { ::close(fd); } } guard {fd};
+    int enabled = 1;
+    ASSERT_EQ(::setsockopt(fd, SOL_IPV6, IPV6_RECVORIGDSTADDR, &enabled, sizeof(enabled)), 0);
+    ASSERT_EQ(::setsockopt(fd, SOL_IPV6, IPV6_RECVPKTINFO, &enabled, sizeof(enabled)), 0);
+    sockaddr_in6 address {};
+    address.sin6_family = AF_INET6;
+    ASSERT_EQ(::bind(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
+    socklen_t size = sizeof(address);
+    ASSERT_EQ(::getsockname(fd, reinterpret_cast<sockaddr*>(&address), &size), 0);
+
+    quic::worker_dispatcher receiver(4);
+    EXPECT_NE(receiver.owner(worker_test_address6("fd00::1")),
+              receiver.owner(worker_test_address6("fd00::2")));
+    EXPECT_EQ(receiver.owner(worker_test_address6("fd00::1", 443)),
+              receiver.owner(worker_test_address6("fd00::1", 8443)));
+    ASSERT_TRUE(receiver.attach_socket(fd));
+    ASSERT_TRUE(receiver.start());
+    auto const target = worker_test_address6("::1", ntohs(address.sin6_port));
+    auto const owner = receiver.owner(target);
+    unsigned char payload = 91;
+    ASSERT_EQ(::sendto(fd, &payload, 1, 0,
+        reinterpret_cast<sockaddr const*>(&target.address), target.size), 1);
+    pollfd descriptor {receiver.wake_fd(owner), POLLIN, 0};
+    ASSERT_EQ(::poll(&descriptor, 1, 1000), 1);
+    quic::datagram_packet packet;
+    ASSERT_TRUE(receiver.pop(owner, packet));
+    EXPECT_EQ(packet.local.address.ss_family, AF_INET6);
+    EXPECT_EQ(packet.peer.address.ss_family, AF_INET6);
+    EXPECT_EQ(reinterpret_cast<sockaddr_in6 const*>(&packet.local.address)->sin6_port,
+              address.sin6_port);
+    EXPECT_EQ(receiver.owner(packet.local), owner);
+    EXPECT_GT(packet.ingress_ifindex, 0U);
+    EXPECT_EQ(std::vector<unsigned char>(packet.data.data(), packet.data.data() + packet.data.size()), (std::vector<unsigned char>{91}));
+    receiver.stop();
+    EXPECT_EQ(receiver.error(), 0);
+}
+
+TEST(QuicWorkerDispatcher, DoesNotLoseWakeupsWhileProducerAndConsumerOverlap) {
+    quic::worker_dispatcher receiver(2);
+    auto const destination = worker_test_address("198.18.20.1");
+    auto const owner = receiver.owner(destination);
+    constexpr unsigned count = 500;
+    std::thread producer([&] {
+        for (unsigned i = 0; i < count; ++i) {
+            quic::datagram_packet packet;
+            packet.local = destination;
+            packet.peer = worker_test_address("10.0.0.1");
+            packet.data = buffer(1, 1);
+        packet.data[0] = static_cast<unsigned char>(i);
+            receiver.enqueue(std::move(packet));
+            std::this_thread::yield();
+        }
+    });
+    struct thread_guard { std::thread& thread; ~thread_guard() { thread.join(); } } guard {producer};
+    for (unsigned i = 0; i < count; ++i) {
+        pollfd descriptor {receiver.wake_fd(owner), POLLIN, 0};
+        ASSERT_EQ(::poll(&descriptor, 1, 1000), 1);
+        quic::datagram_packet packet;
+        ASSERT_TRUE(receiver.pop(owner, packet));
+        EXPECT_EQ(std::vector<unsigned char>(packet.data.data(), packet.data.data() + packet.data.size()), (std::vector<unsigned char>{static_cast<unsigned char>(i)}));
+    }
+    EXPECT_FALSE(inbox_readable(receiver, owner));
+    EXPECT_EQ(receiver.dropped(owner), 0U);
+}
+
+// Small independent ceilings make both saturation paths observable without
+// depending on production defaults. Draining must immediately restore room.
+TEST(QuicWorkerDispatcher, AppliesIndependentConfiguredCapacities) {
+    EXPECT_THROW(quic::worker_dispatcher(1, 0, 8), std::invalid_argument);
+    EXPECT_THROW(quic::worker_dispatcher(1, 3, 0), std::invalid_argument);
+    quic::worker_dispatcher receiver(1, 3, 8);
+    quic::datagram_packet packet;
+    packet.local = worker_test_address("198.18.20.1");
+    packet.data = buffer(4, 4);
+    ASSERT_TRUE(receiver.enqueue(packet));
+    ASSERT_TRUE(receiver.enqueue(packet));
+    EXPECT_FALSE(receiver.enqueue(packet)); // Byte cap, despite a free slot.
+    quic::datagram_packet output;
+    ASSERT_TRUE(receiver.pop(0, output));
+    packet.data = buffer(1, 1);
+    ASSERT_TRUE(receiver.enqueue(packet));
+    ASSERT_TRUE(receiver.enqueue(packet));
+    EXPECT_FALSE(receiver.enqueue(packet)); // Packet cap, despite free bytes.
+    EXPECT_EQ(receiver.dropped(0), 2U);
+}
+#endif
+
+// Error evidence outlives the failed receiver; diagnostics enumerate the same count.
+TEST(QuicErrorStats, FailedConstructionRemainsVisible) {
+    auto const before = quic::stats.errors.dispatcher_create_quic_receiver_needs_a_worker.load();
+    EXPECT_THROW(quic::worker_dispatcher(0), std::invalid_argument);
+    bool found = false;
+    quic::stats.errors.visit([&](char const* name, std::uint64_t count) {
+        if (std::string_view(name) == "dispatcher_create_quic_receiver_needs_a_worker") {
+            found = true;
+            EXPECT_EQ(count, before + 1);
+        }
+    });
+    EXPECT_TRUE(found);
+}
+
+#ifdef SMITHPROXY_ENABLE_NGTCP2
+// Exercise actual ancillary delivery: enabling original-destination metadata
+// alone leaves the ingress interface unknown and rejects role-scoped policy.
+TEST(QuicNgtcp2Metadata, ReceivesIngressInterfaceForBothAddressFamilies) {
+    auto const loopback = if_nametoindex("lo");
+    ASSERT_NE(loopback, 0U);
+    quic::unique_ssl_ctx context(SSL_CTX_new(TLS_method()));
+    ASSERT_TRUE(context);
+
+    for (int family : {AF_INET, AF_INET6}) {
+        socle::raw::unique<int> socket {
+            socle::socket(family, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0),
+            quic::close_descriptor};
+        ASSERT_GE(socket.value, 0);
+        quic::datagram_endpoint endpoint;
+        endpoint.address.ss_family = family;
+        if (family == AF_INET) {
+            endpoint.size = sizeof(sockaddr_in);
+            reinterpret_cast<sockaddr_in*>(&endpoint.address)->sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        } else {
+            endpoint.size = sizeof(sockaddr_in6);
+            reinterpret_cast<sockaddr_in6*>(&endpoint.address)->sin6_addr = in6addr_loopback;
+        }
+        auto* address = reinterpret_cast<sockaddr*>(&endpoint.address);
+        ASSERT_EQ(socle::bind(socket.value, address, endpoint.size), 0);
+        ASSERT_EQ(getsockname(socket.value, address, &endpoint.size), 0);
+        auto worker = quic::make_worker_transport(quic::transport_backend::ngtcp2,
+            context.get(), context.get(), socket.value, family, false, {}, {}, 16);
+        ASSERT_TRUE(worker);
+
+        char const payload = 'x';
+        ASSERT_EQ(sendto(socket.value, &payload, sizeof(payload), 0, address, endpoint.size), 1);
+        quic::datagram_packet packet;
+        ASSERT_TRUE(quic::receive_datagram(socket.value, packet));
+        EXPECT_EQ(packet.ingress_ifindex, loopback) << "address family " << family;
+    }
+}
+
+// TLS can call a keylog hook before the connection back-reference is attached.
+TEST(QuicErrorStats, KeylogRejectsMissingCallbackOwner) {
+    auto const missing = quic::stats.errors.ngtcp2_keylog_missing_argument.load();
+    auto const detached = quic::stats.errors.ngtcp2_keylog_missing_connection.load();
+    quic::ng::connection::record_keylog(nullptr, "unused");
+    quic::unique_ssl_ctx ctx(SSL_CTX_new(TLS_method()));
+    ASSERT_TRUE(ctx);
+    quic::unique_ssl ssl(SSL_new(ctx.get()));
+    ASSERT_TRUE(ssl);
+    quic::ng::connection::record_keylog(ssl.get(), "unused");
+    ngtcp2_crypto_conn_ref ref {};
+    SSL_set_app_data(ssl.get(), &ref);
+    quic::ng::connection::record_keylog(ssl.get(), "unused");
+    SSL_set_app_data(ssl.get(), nullptr);
+    EXPECT_EQ(quic::stats.errors.ngtcp2_keylog_missing_argument.load(), missing + 1);
+    EXPECT_EQ(quic::stats.errors.ngtcp2_keylog_missing_connection.load(), detached + 2);
+}
+#endif
+
+#if SMITHPROXY_OPENSSL_QUIC
+// Reusing a moved packet must never overwrite the payload now owned by its inbox.
+TEST(QuicSocketReceive, ReusedMovedPacketOwnsFreshPayload) {
+    auto socket = socle::raw::fd(::socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP));
+    ASSERT_GE(socket.value, 0);
+    sockaddr_in local {};
+    local.sin_family = AF_INET;
+    local.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ASSERT_EQ(::bind(socket.value, reinterpret_cast<sockaddr*>(&local), sizeof(local)), 0);
+    socklen_t length = sizeof(local);
+    ASSERT_EQ(::getsockname(socket.value, reinterpret_cast<sockaddr*>(&local), &length), 0);
+
+    auto receive = [&](char const* payload, quic::datagram_packet& packet) {
+        EXPECT_EQ(::sendto(socket.value, payload, 4, 0,
+                          reinterpret_cast<sockaddr*>(&local), sizeof(local)), 4);
+        EXPECT_TRUE(quic::receive_datagram(socket.value, packet));
+    };
+    quic::datagram_packet packet;
+    receive("one!", packet);
+    auto retained = std::move(packet);
+    receive("two!", packet);
+    EXPECT_EQ(retained.data.string_view(), "one!");
+    EXPECT_EQ(packet.data.string_view(), "two!");
+    EXPECT_NE(retained.data.data(), packet.data.data());
+}
+#endif

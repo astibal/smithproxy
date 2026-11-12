@@ -17,6 +17,12 @@ import threading
 from pathlib import Path
 
 
+try:
+    from .certificate_cases import CERTIFICATE_PROFILES, rejects
+except ImportError:
+    from certificate_cases import CERTIFICATE_PROFILES, rejects
+
+
 PROFILES = {
     "baseline": {},
     "no_left_reuse": {"left_disable_reuse": True},
@@ -27,16 +33,7 @@ PROFILES = {
     "no_pfs": {"use_pfs": False},
     "no_alpn": {"alpn_block": True},
     "bypass": {"inspect": False},
-    "self_signed_reject": {},
-    "self_signed_allow": {"allow_self_signed": True},
-    "expired_reject": {},
-    "expired_allow": {"allow_invalid_certs": True},
-    "untrusted_reject": {},
-    "untrusted_allow": {"allow_untrusted_issuers": True},
-    "require_staple": {"ocsp_stapling": True, "ocsp_stapling_mode": 2},
-    "require_ct": {"ct_enable": True},
-    "configured_identity_only": {"only_custom_certs": True,
-                                 "sni_based_cert": False, "ip_based_cert": False},
+    **CERTIFICATE_PROFILES,
 }
 VERSIONS = (ssl.TLSVersion.TLSv1_2, ssl.TLSVersion.TLSv1_3)
 
@@ -114,7 +111,7 @@ def start_origins(certificates):
         for name, _, version, port in cases():
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             context.minimum_version = context.maximum_version = version
-            identity = next((kind for kind in ("self_signed", "expired", "untrusted")
+            identity = next((kind for kind in ("self_signed", "expired", "future", "untrusted")
                              if name.startswith(kind)), "origin")
             context.load_cert_chain(certificates / f"{identity}-cert.pem", certificates / f"{identity}-key.pem")
             context.set_alpn_protocols(["http/1.1"])
@@ -128,9 +125,16 @@ def start_origins(certificates):
 def prepare_certificates(certificates):
     """Disposable negative identities; never alter the system trust store."""
     def openssl(*args):
-        subprocess.run(["openssl", *map(str, args)], check=True, capture_output=True)
+        # x509 also limits its derived CA serial path; cwd alone does not help
+        # while absolute certificate filenames are still passed on the command.
+        arguments = [str(arg.relative_to(certificates)) if isinstance(arg, Path) else str(arg)
+                     for arg in args]
+        result = subprocess.run(["openssl", *arguments], cwd=certificates,
+                                capture_output=True, text=True)
+        if result.returncode:
+            raise RuntimeError(f"openssl {args[0]} failed: {result.stderr.strip()}")
 
-    for name in ("self_signed", "expired", "untrusted"):
+    for name in ("self_signed", "expired", "future", "untrusted"):
         key = certificates / f"{name}-key.pem"
         request = certificates / f"{name}.csr"
         cert = certificates / f"{name}-cert.pem"
@@ -140,21 +144,22 @@ def prepare_certificates(certificates):
         if name == "self_signed":
             openssl("x509", "-req", "-in", request, "-signkey", key, "-days", "2",
                     "-extfile", certificates / "origin.ext", "-out", cert)
-        elif name == "expired":
+        elif name in ("expired", "future"):
             # `openssl ca` supports fixed validity dates on older releases too.
-            (certificates / "expired-index").write_text("")
-            (certificates / "expired-serial").write_text("1000\n")
-            config = certificates / "expired-ca.cnf"
+            (certificates / f"{name}-index").write_text("")
+            (certificates / f"{name}-serial").write_text("1000\n")
+            config = certificates / f"{name}-ca.cnf"
             config.write_text(
                 "[ca]\ndefault_ca=issuer\n[issuer]\n"
-                f"database={certificates / 'expired-index'}\n"
-                f"serial={certificates / 'expired-serial'}\nnew_certs_dir={certificates}\n"
-                f"certificate={certificates / 'origin-ca.pem'}\n"
-                f"private_key={certificates / 'origin-ca-key.pem'}\n"
+                # openssl ca has a short internal output filename buffer.
+                # Relative paths also work in deeply nested runner workspaces.
+                f"database={name}-index\nserial={name}-serial\nnew_certs_dir=.\n"
+                "certificate=origin-ca.pem\nprivate_key=origin-ca-key.pem\n"
                 "default_md=sha256\npolicy=names\n[names]\ncommonName=supplied\n"
             )
             openssl("ca", "-batch", "-notext", "-config", config, "-in", request,
-                    "-startdate", "20200101000000Z", "-enddate", "20200102000000Z",
+                    "-startdate", "20200101000000Z" if name == "expired" else "20990101000000Z",
+                    "-enddate", "20200102000000Z" if name == "expired" else "20990102000000Z",
                     "-extfile", certificates / "origin.ext", "-out", cert)
         else:
             # The proxy CA is deliberately absent from the upstream CA bundle.
@@ -204,7 +209,7 @@ def probe(host, port, version, ca_file, bypass=False, certificate_exception=Fals
 def check(name, options, version, observations):
     errors = []
     no_pfs = any(options.get(key) is False for key in ("use_pfs", "left_use_pfs", "right_use_pfs"))
-    reject = name.endswith("_reject") or name in ("require_staple", "require_ct", "configured_identity_only")
+    reject = rejects(name)
     if reject or (no_pfs and version == ssl.TLSVersion.TLSv1_3):
         # Fresh TLS 1.3 requires (EC)DHE. A TLS-1.3-only peer cannot comply.
         if len(observations) != 1 or observations[0].get("error") not in ("SSLError", "SSLEOFError", "ConnectionResetError"):

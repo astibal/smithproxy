@@ -12,7 +12,12 @@ certs = config / 'certs'
 certs.mkdir(parents=True, exist_ok=True)
 data.mkdir(exist_ok=True)
 def openssl(*args):
-    subprocess.run(['openssl', *map(str, args)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # x509 derives its serial filename from -CA and limits that path internally.
+    # Run inside the certificate directory so deeply nested lab names still work.
+    arguments = [str(arg.relative_to(certs)) if isinstance(arg, pathlib.Path) else str(arg)
+                 for arg in args]
+    subprocess.run(['openssl', *arguments], cwd=certs, check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 openssl('req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '2', '-subj', '/CN=Runner Test CA', '-keyout', certs/'ca-key.pem', '-out', certs/'ca-cert.pem', '-addext', 'basicConstraints=critical,CA:TRUE', '-addext', 'keyUsage=critical,keyCertSign,cRLSign')
 # A separate origin CA proves that the client received a forged proxy certificate.
 openssl('req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '2', '-subj', '/CN=Runner Origin CA', '-keyout', certs/'origin-ca-key.pem', '-out', certs/'origin-ca.pem', '-addext', 'basicConstraints=critical,CA:TRUE', '-addext', 'keyUsage=critical,keyCertSign,cRLSign')
@@ -58,13 +63,19 @@ if lab_ocsp_count != 1 or lab_ct_count != 1:
 quic_profile = os.environ.get('QUIC_TLS_PROFILE_TEST')
 if quic_profile:
     # Keep config generation independent of the optional aioquic dependency.
+    from suites.tls.certificate_cases import CERTIFICATE_PROFILES
+    from suites.tls.profile_matrix import prepare_certificates
+    if quic_profile in CERTIFICATE_PROFILES:
+        prepare_certificates(certs)
     options = {
+        **CERTIFICATE_PROFILES,
         'baseline': {},
         'old_ticket': {},
         'no_reuse': {'left_disable_reuse': True, 'right_disable_reuse': True},
         'no_pfs': {'use_pfs': False, 'left_use_pfs': False, 'right_use_pfs': False},
         'no_alpn': {'alpn_block': True},
     }[quic_profile]
+    options = {"failed_certcheck_replacement": False, **options}
     start = text.index('    default = {', text.index('tls_profiles = {'))
     end = text.index('\n    }', start)
     profile = text[start:end]
@@ -80,13 +91,22 @@ if os.environ.get('TLS_PROFILE_TEST') == '1':
     prepare_certificates(certs)
     text = configure(text)
 
-tls_write_chunk = os.environ.get('TLS_WRITE_CHUNK')
-if tls_write_chunk is not None:
-    if not tls_write_chunk.isdigit() or not 1024 <= int(tls_write_chunk) <= 1048576:
-        raise ValueError('TLS_WRITE_CHUNK must be between 1024 and 1048576')
-    text = text.replace('settings = {', f'''settings = {{
-    tuning = {{ tls_write_chunk = {tls_write_chunk}; }};
-''', 1)
+# Keep all tuning overrides in one group, including mixed TLS/QUIC runs.
+tuning_overrides = []
+for variable, key, lower, upper in (
+    ('TLS_WRITE_CHUNK', 'tls_write_chunk', 1024, 1048576),
+    ('QUIC_INBOX_PACKETS', 'quic_inbox_packets', 1, 1048576),
+    ('QUIC_INBOX_BYTES', 'quic_inbox_bytes', 1024, 1073741824),
+):
+    value = os.environ.get(variable)
+    if value is None:
+        continue
+    if not value.isdigit() or not lower <= int(value) <= upper:
+        raise ValueError(f'{variable} must be between {lower} and {upper}')
+    tuning_overrides.append(f'{key} = {int(value)};')
+if tuning_overrides:
+    tuning = ' '.join(tuning_overrides)
+    text = text.replace('settings = {', 'settings = {\n    tuning = { ' + tuning + ' };\n', 1)
 ssl_use_ktls = os.environ.get('SSL_USE_KTLS')
 if ssl_use_ktls is not None:
     if ssl_use_ktls not in ('0', '1'):
@@ -152,8 +172,12 @@ if os.environ.get('POLICY_TEST') == '1':
     text, count = re.subn(r'(policy\s*=\s*\()', r'\1\n' + policy_cases, text, count=1)
     if address_count != 1 or port_count != 1 or count != 1: raise RuntimeError('cannot inject policy suite objects/rules')
 if quic_test:
+    # Content-profile switches do not disable transport/stream admission
+    # webhooks. Throughput must exclude those synchronous HTTP round trips too.
+    quic_throughput = os.environ.get('QUIC_THROUGHPUT_TEST') == '1'
+    webhook_enabled = 'FALSE' if quic_throughput else 'TRUE'
     text = text.replace('settings = {', 'settings = {\n'
-                        '    webhook = { enabled = TRUE; tls_verify = FALSE; '
+                        f'    webhook = {{ enabled = {webhook_enabled}; tls_verify = FALSE; '
                         'url = "http://127.0.0.1:59090/"; };', 1)
     if os.environ.get('QUIC_LAB') != '1':
         raise RuntimeError('QUIC_TEST requires QUIC_LAB=1')
@@ -172,6 +196,9 @@ if quic_test:
         write_limit_server = 0;
     }
 '''
+    if quic_throughput:
+        profile = profile.replace('write_payload = TRUE', 'write_payload = FALSE')
+        profile = profile.replace('webhook_enable = TRUE', 'webhook_enable = FALSE')
     text, profile_count = re.subn(
         r'(content_profiles\s*=\s*\{)', r'\1\n' + profile,
         text, count=1,
@@ -180,9 +207,9 @@ if quic_test:
     {
         name = "runner-quic-udp-capture";
         proto = "udp";
-        src = [ "any" ];
+        src = [ "any", "any6" ];
         sport = [ "all" ];
-        dst = [ "any" ];
+        dst = [ "any", "any6" ];
         dport = [ "quic_runner_443" ];
         tls_profile = "default";
         detection_profile = "detect";
@@ -285,10 +312,15 @@ text = re.sub(r'(plaintext_workers|ssl_workers|udp_workers) = 0',r'\1 = 1',text)
 if 'dtls_workers' not in text:
     text = text.replace('ssl_workers = 1;', 'ssl_workers = 1;\n    dtls_workers = 1;', 1)
 if os.environ.get('QUIC_LAB') == '1':
-    # QUIC has no main-thread fallback: zero workers leaves the configured
-    # port without a listener. Keep the isolated H3 lab deterministic with a
-    # single worker; production deployments can scale this independently.
-    text = text.replace('quic_workers = -1', 'quic_workers = 1')
+    # Default to the direct single-worker path; allow explicit receiver/worker
+    # coverage without changing the shipped production configuration.
+    quic_workers = int(os.environ.get('QUIC_WORKERS', '1'))
+    if quic_workers < 1:
+        raise ValueError('QUIC_WORKERS must be positive')
+    text, worker_count = re.subn(r'quic_workers\s*=\s*-?\d+',
+                                f'quic_workers = {quic_workers}', text, count=1)
+    if worker_count != 1:
+        raise RuntimeError('cannot configure QUIC workers in lab configuration')
 text = re.sub(r'\s*auth_profile = "resolve";', '', text)
 text = text.replace('nameservers = [ "8.8.8.8", "8.8.4.4" ]','nameservers = [ "198.18.20.2" ]')
 gre_capture_dst = os.environ.get('GRE_CAPTURE_DST')

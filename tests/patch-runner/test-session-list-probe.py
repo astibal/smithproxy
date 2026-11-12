@@ -29,6 +29,25 @@ class PromptRecognitionTest(unittest.TestCase):
             with self.subTest(prompt=prompt):
                 self.assertTrue(PROBE.is_cli_prompt(prompt, (b"# ", b"> ")))
 
+    def test_login_accepts_initial_privileged_prompt(self):
+        sent = []
+        def prompt(*markers):
+            response = b"\x1b[36msmithproxy(lab)\x1b[0m# "
+            self.assertTrue(PROBE.is_cli_prompt(response, markers))
+            return response
+        PROBE.enter_privileged_mode(prompt, sent.append)
+        self.assertEqual(sent, [])
+
+    def test_login_elevates_initial_unprivileged_prompt(self):
+        responses = iter((b"smithproxy(lab)> ", b"smithproxy(lab)# "))
+        sent = []
+        def prompt(*markers):
+            response = next(responses)
+            self.assertTrue(PROBE.is_cli_prompt(response, markers))
+            return response
+        PROBE.enter_privileged_mode(prompt, sent.append)
+        self.assertEqual(sent, [b"enable\r\n"])
+
     def test_honors_expected_privilege_marker(self):
         prompt = b"smithproxy(lab)> "
         self.assertTrue(PROBE.is_cli_prompt(prompt, (b"> ",)))

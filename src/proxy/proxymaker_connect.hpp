@@ -12,6 +12,16 @@ namespace sx::proxymaker {
 
 // The handshake needs only these profile values, not a mutable policy object.
 struct QuicTlsPolicy {
+    bool allow_self_signed = false;
+    bool allow_invalid_certs = false;
+    bool allow_untrusted_issuers = false;
+    bool ct_enable = false;
+    bool ocsp_stapling = false;
+    int ocsp_stapling_mode = 0;
+    int ocsp_mode = 0;
+    bool sni_based_cert = true;
+    bool ip_based_cert = true;
+    bool only_custom_certs = false;
     bool use_pfs = true;
     bool alpn_block = false;
     bool disable_reuse = false;  // Downstream; upstream has no ticket cache.

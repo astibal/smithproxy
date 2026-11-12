@@ -19,6 +19,8 @@ SET(SOCLE_DIR "socle")
 SET(SOCLE_COMMON_DIR "socle/common")
 
 project(smithproxy C CXX)
+
+include(${PROJECT_SOURCE_DIR}/cmake/QuicBackend.cmake)
 include(CTest)
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}")
 
@@ -407,8 +409,10 @@ add_executable(smithproxy
         src/proxy/quic/h3capture.cpp
         src/proxy/quic/spq1.cpp
         src/proxy/quic/openssl.cpp
+        src/proxy/quic/transport.cpp
         src/proxy/quic/hooks.cpp
         src/service/quic/quicservice.cpp
+        src/service/quic/worker_dispatcher.cpp
         src/proxy/startstoptls.hpp
         src/proxy/startstoptls.cpp
 
@@ -679,7 +683,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/proxy/quic/spq1_tests.cpp
                 tests/unit/proxy/quic/qpack_vendor_tests.cpp
                 src/proxy/quic/openssl.cpp
-        src/proxy/quic/hooks.cpp
+                src/proxy/quic/transport.cpp
+                src/proxy/quic/hooks.cpp
                 tests/unit/proxy/quic/openssl_tests.cpp
                 src/proxy/ssh/sshprotocol.cpp
                 tests/unit/proxy/ssh/sshprotocol_test.cpp
@@ -699,6 +704,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 src/proxy/filters/statsfilter.cpp
                 tests/unit/proxy/filters/statsfilter_tests.cpp
                 src/service/quic/quicservice.cpp
+                src/service/quic/worker_dispatcher.cpp
                 tests/unit/service/quic/quicservice_tests.cpp
 
                 src/ext/hpack/hpack.hpp
@@ -1003,12 +1009,16 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/proxy/quic/spq1_tests.cpp
                 tests/unit/proxy/quic/qpack_vendor_tests.cpp
                 src/proxy/quic/openssl.cpp
-        src/proxy/quic/hooks.cpp
+                src/proxy/quic/transport.cpp
+                src/proxy/quic/hooks.cpp
                 tests/unit/proxy/quic/openssl_tests.cpp
                 src/service/quic/quicservice.cpp
+                src/service/quic/worker_dispatcher.cpp
                 tests/unit/service/quic/quicservice_tests.cpp
                 tests/quic/testbed/quic_testbed.cpp
         )
+        # Lifecycle probes are absent from the production binary and class layout.
+        target_compile_definitions(quic_testbed PRIVATE SMITHPROXY_QUIC_LIFECYCLE_PROBE)
         target_link_libraries(quic_testbed gtest smithproxy_qpack socle_lib pthread crypto ssl)
 
         add_executable(quic_test_node
@@ -1018,8 +1028,10 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 src/proxy/quic/h3capture.cpp
                 src/proxy/quic/spq1.cpp
                 src/proxy/quic/openssl.cpp
-        src/proxy/quic/hooks.cpp
+                src/proxy/quic/transport.cpp
+                src/proxy/quic/hooks.cpp
                 src/service/quic/quicservice.cpp
+                src/service/quic/worker_dispatcher.cpp
                 tests/quic/testbed/quic_test_node.cpp
         )
         target_link_libraries(quic_test_node smithproxy_qpack socle_lib pthread crypto ssl)
@@ -1123,6 +1135,11 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
 
             find_package(Python3 COMPONENTS Interpreter)
             if(Python3_Interpreter_FOUND)
+                add_test(NAME unit.quic_build_defaults
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/packaging/test_quic_build.py)
+                set_tests_properties(unit.quic_build_defaults PROPERTIES
+                        LABELS "native;unit;packaging" TIMEOUT 30)
                 add_test(NAME unit.capture_output_gate
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/tests/patch-runner/harness/test-capture-output.py)
@@ -1361,7 +1378,8 @@ if(SMITHPROXY_FUZZING)
 
     add_executable(quic_lifecycle_fuzzer
             src/proxy/quic/openssl.cpp
-        src/proxy/quic/hooks.cpp
+            src/proxy/quic/transport.cpp
+            src/proxy/quic/hooks.cpp
             src/proxy/quic/wire.cpp
             tests/fuzz/proxy/quic/lifecycle_fuzzer.cpp)
     target_link_libraries(quic_lifecycle_fuzzer socle_lib pthread crypto ssl)
@@ -1535,4 +1553,26 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/install.cmake)
 if("${USE_EXPERIMENT}" STREQUAL "Y")
     message(" >> !!! EXPERIMENTS ENABLED !!!" )
     message(" >> - software you built and install contain code which is probably not for general use" )
+endif()
+
+if(SMITHPROXY_ENABLE_NGTCP2)
+    get_property(quic_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(quic_target IN LISTS quic_targets)
+        get_target_property(quic_sources ${quic_target} SOURCES)
+        if("src/proxy/quic/transport.cpp" IN_LIST quic_sources)
+            target_sources(${quic_target} PRIVATE src/proxy/quic/ngtcp2.cpp src/proxy/quic/ngtcp2_worker.cpp)
+            target_compile_definitions(${quic_target} PRIVATE SMITHPROXY_ENABLE_NGTCP2=1)
+            target_include_directories(${quic_target} PRIVATE ${NGTCP2_INCLUDE_DIR} ${NGTCP2_CRYPTO_INCLUDE_DIR})
+            target_link_libraries(${quic_target} ${NGTCP2_CRYPTO_LIBRARY} ${NGTCP2_LIBRARY})
+        endif()
+    endforeach()
+    if(TARGET quic_testbed)
+        # Run the same service/certificate/lifecycle corpus through the default
+        # transport; clients and origins remain OpenSSL interoperability peers.
+        add_test(NAME integration.quic_ngtcp2_testbed COMMAND quic_testbed)
+        set_tests_properties(integration.quic_ngtcp2_testbed PROPERTIES
+            ENVIRONMENT "SMITHPROXY_QUIC_BACKEND=ngtcp2"
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+            LABELS "native;integration;quic;ngtcp2" TIMEOUT 300)
+    endif()
 endif()

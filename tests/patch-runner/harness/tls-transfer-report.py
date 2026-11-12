@@ -14,6 +14,10 @@ for result in data["results"]:
         cpu = (f" proxy_cpu={result['median_proxy_cpu_seconds_per_gib']:.3f}s/GiB"
                f" range={result['min_proxy_cpu_seconds_per_gib']:.3f}-"
                f"{result['max_proxy_cpu_seconds_per_gib']:.3f}s/GiB")
+    for endpoint in ("client", "origin", "origin_busiest"):
+        key = f"median_{endpoint}_cpu_percent"
+        if key in result:
+            cpu += f" {endpoint}_cpu={result[key]:.1f}%"
     print(
         f"{args.label}: family={family} mode={result['mode']} concurrency={result['concurrency']} "
         f"median={result['median_mib_per_second']:.1f}MiB/s "

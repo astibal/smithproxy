@@ -247,7 +247,7 @@ int run_client(std::string const& directory, std::string const& address,
     }
     if (!connection->handshake_complete() || connection->negotiated_alpn() != "h3") {
         std::unique_ptr<X509, decltype(&X509_free)> failed_certificate(
-            SSL_get1_peer_certificate(connection->native_handle()), X509_free);
+            SSL_get1_peer_certificate(connection->handle_native()), X509_free);
         char subject[512] = "-";
         char issuer[512] = "-";
         if (failed_certificate) {
@@ -258,13 +258,13 @@ int run_client(std::string const& directory, std::string const& address,
         }
         std::cerr << "client handshake failed: closed=" << connection->closed()
                   << " alpn=" << connection->negotiated_alpn()
-                  << " verify=" << SSL_get_verify_result(connection->native_handle())
+                  << " verify=" << SSL_get_verify_result(connection->handle_native())
                   << " subject=" << subject << " issuer=" << issuer
                   << " errors=" << quic::openssl_error_stack() << '\n';
         return 3;
     }
     std::unique_ptr<X509, decltype(&X509_free)> certificate(
-        SSL_get1_peer_certificate(connection->native_handle()), X509_free);
+        SSL_get1_peer_certificate(connection->handle_native()), X509_free);
     if (!certificate
         || X509_check_host(certificate.get(), sni.c_str(), sni.size(), 0, nullptr) != 1) {
         std::cerr << "client certificate identity failed\n";

@@ -55,6 +55,7 @@
 #include <service/httpd/httpd.hpp>
 #include <service/cfgapi/cfgapi.hpp>
 #include <service/network_context.hpp>
+#include <service/quic/worker_dispatcher.hpp>
 #include "service/http/webhooks.hpp"
 #include "proxy/nbrhood.hpp"
 #include "proxy/multiflow/mfmitmproxy.hpp"
@@ -156,6 +157,51 @@ void SmithProxy::create_api_thread() {
 #endif
 }
 
+bool SmithProxy::create_quic_listeners() {
+    auto const requested = CfgFactory::get()->num_workers_quic;
+    if (requested < 0) return true;
+    if (!sx::quic::openssl_quic_available()) {
+        _war("QUIC listener disabled: OpenSSL 3.5+ QUIC server support is required");
+        return true;
+    }
+#if SMITHPROXY_OPENSSL_QUIC
+    // Keep the single-worker fast path; larger configurations use the same
+    // receiver -> owned inbox -> single-thread worker split as ordinary UDP.
+    auto const maximum = 4 * std::max(1U, std::thread::hardware_concurrency());
+    auto const workers = std::min(static_cast<unsigned>(std::max(1, requested)), maximum);
+    std::vector<std::unique_ptr<sx::quic::listener_service>> prepared;
+    for (int family : {AF_INET, AF_INET6}) {
+        auto receiver = workers > 1
+            ? std::make_shared<sx::quic::worker_dispatcher>(workers,
+                CfgFactory::get()->quic_inbox_packets, CfgFactory::get()->quic_inbox_bytes) : nullptr;
+        for (unsigned worker = 0; worker < workers; ++worker) {
+            auto credentials = quic_credentials();
+            auto service = std::make_unique<sx::quic::listener_service>(
+                static_cast<std::uint16_t>(std::stoi(CfgFactory::get()->listen_quic_port)),
+                credentials.certificate_path, credentials.private_key_path,
+                true, 443, true, sx::quic::lifecycle_options {}, sx::quic::resource_limits {},
+                std::string {}, sx::multiflow::make_mitm_flow_proxy,
+                // Keep pre-policy capture ready for later activation. A stream
+                // policy still decides whether any logger receives the journal.
+                true, sx::proxymaker::make_quic_session_setup,
+                std::move(credentials.certificate_pem),
+                std::move(credentials.private_key_pem), family,
+                CfgFactory::get()->quic_listener_rcvbuf);
+            if (receiver) service->assign_worker(receiver, worker);
+            if (!service->prepare()) {
+                _err("Failed to setup QUIC worker %u: %s", worker, service->last_error().c_str());
+                return false;
+            }
+            prepared.push_back(std::move(service));
+        }
+    }
+    // Publish only complete groups. Failed preparation releases every socket
+    // without leaving a partial set of workers for the launch phase.
+    for (auto& service : prepared) quic_services.push_back(std::move(service));
+#endif
+    return true;
+}
+
 bool SmithProxy::create_tproxy_listeners() {
     plain_proxies = NetworkServiceFactory::prepare_listener<theAcceptor, TCPCom>(
         std::stoi(CfgFactory::get()->listen_tcp_port), "tcp",
@@ -167,30 +213,7 @@ bool SmithProxy::create_tproxy_listeners() {
         std::stoi(CfgFactory::get()->listen_udp_port), "udp",
         CfgFactory::get()->num_workers_udp, proxyType::transparent());
 
-    if (CfgFactory::get()->num_workers_quic >= 0) {
-        if (!sx::quic::openssl_quic_available()) {
-            _war("QUIC listener disabled: linked OpenSSL has no QUIC server support (OpenSSL 3.5+ required)");
-        } else {
-            auto credentials = quic_credentials();
-            auto service = std::make_unique<sx::quic::listener_service>(
-                static_cast<std::uint16_t>(std::stoi(CfgFactory::get()->listen_quic_port)),
-                credentials.certificate_path, credentials.private_key_path,
-                true, 443, true, sx::quic::lifecycle_options {}, sx::quic::resource_limits {},
-                std::string {}, sx::multiflow::make_mitm_flow_proxy,
-                // Capture can be enabled after this listener starts. Keep the
-                // bounded pre-policy wire journal ready; only an approved
-                // stream logger may attach it to local or remote output.
-                true,
-                sx::proxymaker::make_quic_session_setup,
-                std::move(credentials.certificate_pem),
-                std::move(credentials.private_key_pem));
-            if (!service->prepare()) {
-                _err("Failed to setup QUIC listener: %s", service->last_error().c_str());
-                return false;
-            }
-            quic_services.emplace_back(std::move(service));
-        }
-    }
+    if (!create_quic_listeners()) return false;
 
     return !((plain_proxies.empty() && CfgFactory::get()->num_workers_tcp >= 0) ||
              (ssl_proxies.empty() && CfgFactory::get()->num_workers_tls >= 0) ||
@@ -218,7 +241,9 @@ void SmithProxy::launch_tproxy_listeners() {
     for (auto& service : quic_services) {
         auto* service_ptr = service.get();
         auto thread = std::make_shared<std::thread>([service_ptr]() { service_ptr->run(); });
-        pthread_setname_np(thread->native_handle(), string_format("sxy_quic_%d", tenant).c_str());
+        pthread_setname_np(thread->native_handle(),
+            string_format("q%d_%d_%zu", tenant, service->address_family() == AF_INET ? 4 : 6,
+                          service->worker_index()).c_str());
         quic_threads.push_back(std::move(thread));
     }
 }
@@ -466,38 +491,8 @@ bool SmithProxy::create_listeners() {
 
             log_listener(udp_frm, udp_proxies);
 
-            if (CfgFactory::get()->num_workers_quic >= 0) {
-                if (!sx::quic::openssl_quic_available()) {
-                    _war("QUIC listener disabled: linked OpenSSL has no QUIC server support "
-                         "(OpenSSL 3.5+ required)");
-                } else {
-                    if (CfgFactory::get()->num_workers_quic > 1) {
-                        _war("QUIC currently uses one event-loop thread; quic_workers=%d requested",
-                             CfgFactory::get()->num_workers_quic);
-                    }
-                    auto credentials = quic_credentials();
-                    auto service = std::make_unique<sx::quic::listener_service>(
-                        static_cast<std::uint16_t>(std::stoi(CfgFactory::get()->listen_quic_port)),
-                        credentials.certificate_path, credentials.private_key_path,
-                        true, 443, true, sx::quic::lifecycle_options {},
-                        sx::quic::resource_limits {}, std::string {},
-                        sx::multiflow::make_mitm_flow_proxy,
-                        // Do not freeze the capture switch at listener creation:
-                        // later activation still needs handshake packets/secrets.
-                        // The bounded journal remains private until policy attaches
-                        // a logger (MitmProxy::toggle_tlog enforces the switch).
-                        true,
-                        sx::proxymaker::make_quic_session_setup,
-                        std::move(credentials.certificate_pem),
-                        std::move(credentials.private_key_pem));
-                    if (!service->prepare()) {
-                        _fat("Failed to setup QUIC listener: %s", service->last_error().c_str());
-                        return false;
-                    }
-                    quic_services.emplace_back(std::move(service));
-                    log_listener(quic_frm, quic_services);
-                }
-            }
+            if (!create_quic_listeners()) return false;
+            log_listener(quic_frm, quic_services);
 
 
             if ((plain_proxies.empty() && CfgFactory::get()->num_workers_tcp >= 0) ||
@@ -627,7 +622,6 @@ void SmithProxy::run() {
     std::string friendly_thread_name_udp = string_format("sxy_udp_%d",CfgFactory::get()->tenant_index);
     std::string friendly_thread_name_tls = string_format("sxy_tls_%d",CfgFactory::get()->tenant_index);
     std::string friendly_thread_name_dls = string_format("sxy_dls_%d",CfgFactory::get()->tenant_index);
-    std::string friendly_thread_name_quic = string_format("sxy_quic_%d",CfgFactory::get()->tenant_index);
     std::string friendly_thread_name_skx = string_format("sxy_skx_%d",CfgFactory::get()->tenant_index);
     std::string friendly_thread_name_sku = string_format("sxy_sku_%d",CfgFactory::get()->tenant_index);
     std::string friendly_thread_name_hcx = string_format("sxy_hcx_%d",CfgFactory::get()->tenant_index);
@@ -691,7 +685,10 @@ void SmithProxy::run() {
             _inf("Starting: QUIC listener");
             auto* service_ptr = service.get();
             auto thread = std::make_shared<std::thread>([service_ptr]() { service_ptr->run(); });
-            pthread_setname_np(thread->native_handle(), friendly_thread_name_quic.c_str());
+            pthread_setname_np(thread->native_handle(),
+                string_format("q%d_%d_%zu", CfgFactory::get()->tenant_index,
+                              service->address_family() == AF_INET ? 4 : 6,
+                              service->worker_index()).c_str());
             quic_threads.push_back(std::move(thread));
         }
     }

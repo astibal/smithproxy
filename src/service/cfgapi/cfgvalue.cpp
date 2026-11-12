@@ -254,10 +254,16 @@ void CfgValueHelp::init() {
             .may_be_empty(false)
             .value_filter(HW_FILTER);
 
-    add("settings.quic_workers", "experimental QUIC listener thread count")
+    add("settings.quic_workers", "QUIC session worker count per address family")
             .live_action("QUIC", CfgValue::live_apply_t::workers_tproxy)
-            .help_quick("<number>: -1 disabled, 0 or 1 enables one event loop")
-            .may_be_empty(false);
+            .help_quick("<number>: -1 disabled, 0 or 1 one worker, N workers per IPv4/IPv6 (max 4xCPU)")
+            .may_be_empty(false)
+            .value_filter([](std::string const& value) {
+                if (value == "-1") return CfgValue::filter_retval::accept(value);
+                return VALUE_UINT_RANGE_GEN([] { return 0LL; }, [] {
+                    return 4LL * std::max(1U, std::thread::hardware_concurrency());
+                }, value);
+            });
 
     add("settings.socks_workers", "SOCKS proxy traffic thread count")
             .live_action("SOCKS", CfgValue::live_apply_t::workers_socks)
@@ -399,6 +405,18 @@ void CfgValueHelp::init() {
     add("settings.tuning.host_io_batch", "maximum bytes drained by one host I/O dispatch")
             .may_be_empty(false)
             .value_filter(VALUE_UINT_RANGE<16384,16777216>);
+    add("settings.tuning.quic_listener_rcvbuf", "QUIC A-side socket receive buffer request")
+            .help_quick("<bytes>: 0..1073741824; default 1048576; 0 keeps OS default; shared per address family; restart required")
+            .may_be_empty(false)
+            .value_filter(VALUE_UINT_RANGE<0,1073741824>);
+    add("settings.tuning.quic_inbox_packets", "QUIC ingress packet limit per worker")
+            .help_quick("<number>: 1..1048576 packets per worker; restart required; multi-worker listeners only")
+            .may_be_empty(false)
+            .value_filter(VALUE_UINT_RANGE<1,1048576>);
+    add("settings.tuning.quic_inbox_bytes", "QUIC ingress payload byte limit per worker")
+            .help_quick("<bytes>: 1024..1073741824 per worker; allocated on demand; restart required; multi-worker listeners only")
+            .may_be_empty(false)
+            .value_filter(VALUE_UINT_RANGE<1024,1073741824>);
     add("settings.tuning.tls_write_chunk", "maximum plaintext bytes offered to one SSL_write")
             .may_be_empty(false)
             .value_filter(VALUE_UINT_RANGE<1024,1048576>);

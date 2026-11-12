@@ -17,6 +17,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -26,6 +27,24 @@
 
 namespace quic = sx::quic;
 namespace mf = sx::multiflow;
+
+#if SMITHPROXY_OPENSSL_QUIC
+TEST(OpenSslQuicKeylog, RepublishesCompleteSecretsOnlyWhenTheyChange) {
+    quic::keylog_store store;
+    EXPECT_TRUE(store.snapshot().empty());
+    store.append("handshake-secret");
+    EXPECT_EQ(store.snapshot(), (std::vector<std::string>{"handshake-secret"}));
+    EXPECT_TRUE(store.snapshot(1).empty());
+
+    // A later key update must produce a complete block, including the earlier
+    // handshake material needed to decrypt the same capture independently.
+    store.append("application-secret");
+    EXPECT_EQ(store.snapshot(1),
+              (std::vector<std::string>{"handshake-secret", "application-secret"}));
+    store.append("application-secret");
+    EXPECT_TRUE(store.snapshot(2).empty());
+}
+#endif
 
 TEST(OpenSslQuicSocketIo, TreatsKernelQueueExhaustionAsBackpressure) {
     using result = quic::detail::datagram_send_result;
@@ -229,6 +248,23 @@ std::pair<int, std::string> tshark_quic_stream_data(std::string const& path) {
 
 } // namespace
 
+TEST(OpenSslQuicDispatcher, ResolvesOutputPeerOnlyWhenItsTupleIsUnambiguous) {
+    quic::detail::datagram_route_table routes;
+    auto const peer = loopback_endpoint(12345);
+    routes.remember({1}, {peer, loopback_endpoint(443), 7});
+    routes.remember({2}, {peer, loopback_endpoint(443), 7});
+    ASSERT_TRUE(routes.resolve_peer(peer));
+    EXPECT_EQ(routes.resolve_peer(peer)->association, 7U);
+    EXPECT_FALSE(routes.resolve_peer(loopback_endpoint(12346)));
+    // A reused client socket is still routable to the same local address;
+    // only attribution to one retained connection becomes ambiguous.
+    routes.remember({3}, {peer, loopback_endpoint(443), 8});
+    ASSERT_TRUE(routes.resolve_peer(peer));
+    EXPECT_EQ(routes.resolve_peer(peer)->association, 0U);
+    routes.remember({4}, {peer, loopback_endpoint(8443), 9});
+    EXPECT_FALSE(routes.resolve_peer(peer));
+}
+
 TEST(OpenSslQuicDispatcher, IgnoresZeroLengthConnectionIds) {
     quic::detail::datagram_route_table routes;
     routes.remember({}, {loopback_endpoint(10001), loopback_endpoint(443)});
@@ -246,6 +282,40 @@ TEST(OpenSslQuicDispatcher, IgnoresZeroLengthConnectionIds) {
     routes.learn(initial.data(), initial.size(),
                  {loopback_endpoint(10001), loopback_endpoint(443)});
     EXPECT_EQ(routes.size(), 1U);
+}
+
+TEST(OpenSslQuicDispatcher, LearnsRotatedCidWithoutConfusingASharedClientPort) {
+    quic::detail::datagram_route_table routes;
+    auto const peer = loopback_endpoint(41001);
+    auto const first = quic::detail::datagram_route {peer, loopback_endpoint(443), 1};
+    auto second = first;
+    reinterpret_cast<sockaddr_in*>(&second.local.address)->sin_addr.s_addr = htonl(0x7f000002);
+    second.association = 2;
+    routes.remember({0x01}, first);
+    routes.remember({0x02}, second);
+    EXPECT_FALSE(routes.resolve_peer(peer));
+
+    // type=NEW_CONNECTION_ID, sequence=1, retire_prior_to=0, length=2.
+    std::vector<unsigned char> frame(6 + 16, 0); // Header plus stateless reset token.
+    const unsigned char header[] {0x18, 1, 0, 2, 0xab, 0xcd};
+    std::copy(std::begin(header), std::end(header), frame.begin());
+    ASSERT_TRUE(routes.learn_new_connection_id(frame.data(), frame.size(), second));
+    std::vector<unsigned char> packet {0x40, 0xab, 0xcd, 0x10};
+    auto route = routes.resolve(packet.data(), packet.size());
+    ASSERT_TRUE(route);
+    EXPECT_EQ(route->association, 2U);
+    EXPECT_EQ(reinterpret_cast<sockaddr_in const*>(&route->local.address)->sin_addr.s_addr,
+              htonl(0x7f000002));
+    EXPECT_FALSE(routes.learn_new_connection_id(frame.data(), frame.size() - 1, first));
+    frame[3] = 21;
+    EXPECT_FALSE(routes.learn_new_connection_id(frame.data(), frame.size(), first));
+
+    // A colliding CID may not redirect packets to the newly learned owner.
+    routes.remember({0xab, 0xcd}, first);
+    route = routes.resolve(packet.data(), packet.size());
+    ASSERT_TRUE(route);
+    EXPECT_FALSE(route->peer.valid());
+    EXPECT_FALSE(route->local.valid());
 }
 
 TEST(OpenSslQuicDispatcher, ResolvesOnlyUnambiguousKnownRoutes) {
@@ -375,6 +445,37 @@ TEST_F(OpenSslQuic, EmptyUdpDatagramDoesNotFailTheSharedListener) {
     close(server_fd);
 }
 
+TEST_F(OpenSslQuic, EmptyAcceptDoesNotDriveTheListenerEngine) {
+    auto context = quic::make_openssl_quic_context(true);
+    ASSERT_NE(context, nullptr);
+    auto const fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, IPPROTO_UDP);
+    ASSERT_GE(fd, 0);
+    auto listener = quic::openssl_listener::create(context.get(), fd, false);
+    ASSERT_NE(listener, nullptr) << quic::openssl_error_stack();
+
+    // Count transport operations, not elapsed time: a speculative accept must
+    // not repeat the owner's receive/timer pass when no connection is queued.
+    std::size_t network_calls = 0;
+    auto* bio = SSL_get_rbio(listener->handle_native());
+    BIO_set_callback_arg(bio, reinterpret_cast<char*>(&network_calls));
+    BIO_set_callback_ex(bio, [](BIO* observed, int operation, const char*, std::size_t,
+                                int, long, int result, std::size_t*) -> long {
+        if (operation == BIO_CB_READ || operation == BIO_CB_WRITE
+            || operation == BIO_CB_RECVMMSG || operation == BIO_CB_SENDMMSG)
+            ++*reinterpret_cast<std::size_t*>(BIO_get_callback_arg(observed));
+        return result;
+    });
+    for (int attempt = 0; attempt < 8; ++attempt) EXPECT_EQ(listener->accept(), nullptr);
+    EXPECT_EQ(network_calls, 0U);
+
+    // The explicit driver must still poll the socket even with an empty queue.
+    EXPECT_TRUE(listener->handle_events()) << listener->last_error();
+    EXPECT_GT(network_calls, 0U);
+    BIO_set_callback_ex(bio, nullptr);
+    listener.reset();
+    close(fd);
+}
+
 TEST_F(OpenSslQuic, CreatesTransparentIpv6Listener) {
     auto server_context = quic::make_openssl_quic_context(true);
     ASSERT_NE(server_context, nullptr) << quic::openssl_error_stack();
@@ -403,6 +504,8 @@ TEST_F(OpenSslQuic, CreatesTransparentIpv6Listener) {
                      reinterpret_cast<sockaddr*>(&server_address),
                      sizeof(server_address)), 1);
     EXPECT_TRUE(listener->handle_events()) << listener->last_error();
+    listener.reset();
+    EXPECT_GE(fcntl(server_fd, F_GETFD), 0);
     close(client_fd);
     close(server_fd);
 }
@@ -428,13 +531,19 @@ TEST_F(OpenSslQuic, NumericPeerIdentityUsesIpVerificationWithoutSni) {
         client_context.get(), reinterpret_cast<sockaddr*>(&peer), sizeof(peer),
         "127.0.0.1", &error);
     ASSERT_NE(connection, nullptr) << error;
-    const int connection_fd = SSL_get_fd(connection->native_handle());
+    const int connection_fd = SSL_get_fd(connection->handle_native());
     ASSERT_GE(connection_fd, 0);
     EXPECT_NE(fcntl(connection_fd, F_GETFD, 0) & FD_CLOEXEC, 0);
-    EXPECT_EQ(SSL_get_servername(connection->native_handle(),
+    EXPECT_EQ(SSL_get_servername(connection->handle_native(),
                                  TLSEXT_NAMETYPE_host_name), nullptr);
     EXPECT_EQ(X509_VERIFY_PARAM_get0_host(
-                  SSL_get0_param(connection->native_handle()), 0), nullptr);
+                  SSL_get0_param(connection->handle_native()), 0), nullptr);
+
+    connection.reset();
+    errno = 0;
+    EXPECT_EQ(fcntl(connection_fd, F_GETFD), -1);
+    EXPECT_EQ(errno, EBADF);
+    EXPECT_GE(fcntl(*peer_fd, F_GETFD), 0); // Borrowed peer socket stays live.
 }
 
 TEST_F(OpenSslQuic, OutgoingAdapterCompletesHandshake) {
@@ -546,6 +655,134 @@ TEST_F(OpenSslQuic, OutgoingAdapterCompletesHandshake) {
     close(server_fd);
 }
 
+TEST_F(OpenSslQuic, WorkerDomainOwnsIndependentOutgoingConnections) {
+    auto server_context = quic::make_openssl_quic_context(true);
+    auto client_context = quic::make_openssl_quic_context(false);
+    ASSERT_NE(server_context, nullptr);
+    ASSERT_NE(client_context, nullptr);
+    ASSERT_EQ(SSL_CTX_use_certificate_chain_file(server_context.get(),
+                                                "etc/certs/default/srv-cert.pem"), 1);
+    ASSERT_EQ(SSL_CTX_use_PrivateKey_file(server_context.get(),
+                                        "etc/certs/default/srv-key.pem", SSL_FILETYPE_PEM), 1);
+    SSL_CTX_set_alpn_select_cb(server_context.get(), select_h3, nullptr);
+    SSL_CTX_set_verify(client_context.get(), SSL_VERIFY_NONE, nullptr);
+    auto const fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    ASSERT_GE(fd, 0);
+    auto close_fd = std::shared_ptr<int>(new int(fd), [](int* value) { close(*value); delete value; });
+    ASSERT_TRUE(make_nonblocking(fd));
+    sockaddr_in address {};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ASSERT_EQ(bind(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
+    socklen_t size = sizeof(address);
+    ASSERT_EQ(getsockname(fd, reinterpret_cast<sockaddr*>(&address), &size), 0);
+    auto listener = quic::openssl_listener::create(server_context.get(), fd);
+    ASSERT_NE(listener, nullptr);
+
+    std::size_t network_calls = 0;
+    auto engine = quic::make_openssl_quic_client_engine(client_context.get(), AF_INET);
+    ASSERT_NE(engine, nullptr);
+    auto* domain = SSL_get0_domain(engine.get());
+    ASSERT_NE(domain, nullptr);
+    std::array<std::unique_ptr<quic::openssl_connection>, 2> clients;
+    for (auto& client : clients) {
+        std::string error;
+        client = quic::connect_openssl_quic(client_context.get(),
+            reinterpret_cast<sockaddr*>(&address), size, "localhost", "h3", &error,
+            nullptr, {}, engine.get());
+        ASSERT_NE(client, nullptr) << error;
+        // OpenSSL 3.5 exposes the domain through the port; the outgoing child
+        // does not populate the direct SSL_get0_domain() backlink.
+        EXPECT_EQ(SSL_get0_domain(SSL_get0_listener(client->handle_native())), domain);
+    }
+    auto* first_port = SSL_get0_listener(clients[0]->handle_native());
+    auto* second_port = SSL_get0_listener(clients[1]->handle_native());
+    ASSERT_NE(first_port, nullptr);
+    ASSERT_NE(second_port, nullptr);
+    EXPECT_EQ(first_port, engine.get());
+    EXPECT_EQ(second_port, engine.get());
+    EXPECT_EQ(SSL_get_fd(first_port), SSL_get_fd(second_port));
+
+    // Starting a channel bootstraps its Initial. Afterwards session polling
+    // must not secretly run the shared engine or touch its network BIO.
+    auto* bio = SSL_get_rbio(engine.get());
+    BIO_set_callback_arg(bio, reinterpret_cast<char*>(&network_calls));
+    BIO_set_callback_ex(bio, [](BIO* observed, int operation, const char*, std::size_t,
+                                int, long, int result, std::size_t*) -> long {
+        if (operation == BIO_CB_READ || operation == BIO_CB_WRITE
+            || operation == BIO_CB_RECVMMSG || operation == BIO_CB_SENDMMSG)
+            ++*reinterpret_cast<std::size_t*>(BIO_get_callback_arg(observed));
+        return result;
+    });
+    for (int i = 0; i < 8; ++i) for (auto& client : clients) client->drain_events();
+    EXPECT_EQ(network_calls, 0U);
+
+    std::vector<std::unique_ptr<quic::openssl_connection>> servers;
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (std::chrono::steady_clock::now() < deadline) {
+        ASSERT_EQ(SSL_handle_events(engine.get()), 1);
+        ASSERT_TRUE(listener->handle_events());
+        while (auto accepted = listener->accept()) servers.push_back(std::move(accepted));
+        for (auto& client : clients) client->drain_events();
+        for (auto& server : servers) server->drain_events();
+        if (servers.size() == 2 && clients[0]->handshake_complete()
+            && clients[1]->handshake_complete()
+            && servers[0]->handshake_complete() && servers[1]->handshake_complete()) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    ASSERT_EQ(servers.size(), 2U);
+    for (auto const& client : clients) ASSERT_TRUE(client->handshake_complete());
+
+    // An owner may sleep after consuming progress, even though the connection
+    // and its streams remain writable. Merely sampling events is passive.
+    clients[1]->take_application_progress();
+    clients[1]->drain_events();
+    EXPECT_FALSE(clients[1]->take_application_progress());
+
+    // Destroy one B, then exercise application I/O on its sibling. Its socket,
+    // domain and stream state must survive the other connection's destruction.
+    clients[0]->close();
+    clients[0].reset();
+    EXPECT_EQ(SSL_get0_domain(SSL_get0_listener(clients[1]->handle_native())), domain);
+    auto flow = clients[1]->open_flow(mf::direction::bidirectional);
+    EXPECT_TRUE(clients[1]->take_application_progress());
+    EXPECT_FALSE(clients[1]->take_application_progress());
+    std::string const payload = "the sibling still owns its connection";
+    auto const calls_before_write = network_calls;
+    EXPECT_EQ(clients[1]->write(flow, payload.data(), 0).size, 0U);
+    EXPECT_FALSE(clients[1]->take_application_progress());
+    ASSERT_EQ(clients[1]->write(flow, payload.data(), payload.size()).size, payload.size());
+    EXPECT_TRUE(clients[1]->take_application_progress());
+    clients[1]->drain_events();
+    EXPECT_FALSE(clients[1]->take_application_progress());
+    EXPECT_EQ(network_calls, calls_before_write);
+    // Control-only output needs the same immediate owner pass as payload.
+    ASSERT_EQ(clients[1]->finish(flow), mf::io_status::ok);
+    EXPECT_TRUE(clients[1]->take_application_progress());
+    ASSERT_EQ(clients[1]->finish(flow), mf::io_status::ok);
+    EXPECT_FALSE(clients[1]->take_application_progress());
+    std::string received;
+    auto const data_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (received.empty() && std::chrono::steady_clock::now() < data_deadline) {
+        ASSERT_EQ(SSL_handle_events(engine.get()), 1);
+        ASSERT_TRUE(listener->handle_events());
+        for (auto& server : servers) {
+            for (auto const& event : server->drain_events()) {
+                if (!event.flow) continue;
+                char buffer[128];
+                server->take_application_progress();
+                auto read = server->read(*event.flow, buffer, sizeof(buffer));
+                if (read.size != 0) {
+                    EXPECT_TRUE(server->take_application_progress());
+                }
+                received.append(buffer, read.size);
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    EXPECT_EQ(received, payload);
+}
+
 TEST_F(OpenSslQuic, TransparentDispatcherKeepsConcurrentHandshakesIsolated) {
     auto server_context = quic::make_openssl_quic_context(true);
     auto client_context = quic::make_openssl_quic_context(false);
@@ -614,6 +851,67 @@ TEST_F(OpenSslQuic, TransparentDispatcherKeepsConcurrentHandshakesIsolated) {
         EXPECT_EQ(server->negotiated_alpn(), "h3");
     }
 
+    // Exercise mixed-client datagram batches and one shared output phase.
+    // Each SNI identifies the expected payload, so cross-client routing cannot
+    // pass merely because every transfer happens to have the same length.
+    std::vector<mf::flow_handle> client_flows;
+    std::vector<mf::flow_handle> server_flows(client_count);
+    std::vector<std::string> requests(client_count), replies(client_count);
+    std::vector<bool> echoed(client_count, false);
+    for (std::size_t i = 0; i < client_count; ++i) {
+        auto flow = clients[i]->open_flow(mf::direction::bidirectional);
+        ASSERT_NE(flow.generation, 0U);
+        client_flows.push_back(flow);
+        std::string payload(8192, static_cast<char>('A' + i));
+        ASSERT_EQ(clients[i]->write(flow, payload.data(), payload.size()).size, payload.size());
+    }
+    auto const transfer_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < transfer_deadline) {
+        for (auto& client : clients) client->drain_events();
+        ASSERT_TRUE(listener->handle_events());
+        for (std::size_t i = 0; i < client_count; ++i) {
+            for (auto const& event : servers[i]->drain_events()) {
+                if (event.type == mf::event_type::flow_open && event.flow) server_flows[i] = *event.flow;
+            }
+            if (!server_flows[i].generation) continue;
+            char data[8192] {};
+            auto read = servers[i]->read(server_flows[i], data, sizeof(data));
+            requests[i].append(data, read.size);
+            if (requests[i].size() == 8192 && !echoed[i]) {
+                auto const client_index = std::stoul(servers[i]->server_name().substr(7));
+                EXPECT_EQ(requests[i], std::string(8192, static_cast<char>('A' + client_index)));
+                ASSERT_EQ(servers[i]->write(server_flows[i], requests[i].data(), requests[i].size()).size,
+                          requests[i].size());
+                echoed[i] = true;
+            }
+        }
+        ASSERT_TRUE(listener->finish_events());
+        for (std::size_t i = 0; i < client_count; ++i) {
+            clients[i]->drain_events();
+            char data[8192] {};
+            auto read = clients[i]->read(client_flows[i], data, sizeof(data));
+            replies[i].append(data, read.size);
+        }
+        if (std::all_of(replies.begin(), replies.end(), [](auto const& reply) { return reply.size() == 8192; })) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    for (std::size_t i = 0; i < client_count; ++i)
+        EXPECT_EQ(replies[i], std::string(8192, static_cast<char>('A' + i)));
+
+    // Saturate a send buffer without draining the receiver. A socket adapter
+    // must expose partial consumption and allow a different next write, rather
+    // than retaining an invisible all-or-nothing OpenSSL retry operation.
+    std::string oversized(4 * 1024 * 1024, 'x');
+    auto const partial = clients.front()->write(client_flows.front(),
+                                                oversized.data(), oversized.size());
+    ASSERT_EQ(partial.status, mf::io_status::ok);
+    EXPECT_GT(partial.size, 0U);
+    EXPECT_LT(partial.size, oversized.size());
+    std::string changed_queue(1024, 'y');
+    auto const retry = clients.front()->write(client_flows.front(),
+                                              changed_queue.data(), changed_queue.size());
+    EXPECT_TRUE(retry.status == mf::io_status::ok || retry.status == mf::io_status::would_block);
+
     for (auto& client : clients) client->close();
     for (auto& server : servers) server->close();
     close(server_fd);
@@ -665,7 +963,7 @@ TEST_F(OpenSslQuic, OutgoingAdapterVerifiesChainAndServerName) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     EXPECT_TRUE(client->handshake_complete()) << quic::openssl_error_stack();
-    EXPECT_EQ(SSL_get_verify_result(client->native_handle()), X509_V_OK);
+    EXPECT_EQ(SSL_get_verify_result(client->handle_native()), X509_V_OK);
     EXPECT_EQ(client->negotiated_alpn(), "h3");
     client->close();
     if (server) server->close();
@@ -718,9 +1016,11 @@ TEST_F(OpenSslQuic, LoopbackStreamProducesSelfDecryptingPcapng) {
     auto const capture_path = capture->FS.filename_full;
     ::unlink(capture_path.c_str());
 
+    std::size_t egress_datagrams = 0;
     auto listener = quic::openssl_listener::create(
         server_context.get(), server_fd, true,
-        [journal](quic::datagram_view const& datagram) {
+        [journal, &egress_datagrams](quic::datagram_view const& datagram) {
+            if (datagram.direction == quic::datagram_direction::egress) ++egress_datagrams;
             auto packet = complete_udp_packet(datagram);
             journal->write_packet(datagram.direction == quic::datagram_direction::ingress
                                       ? socle::side_t::LEFT : socle::side_t::RIGHT,
@@ -742,7 +1042,7 @@ TEST_F(OpenSslQuic, LoopbackStreamProducesSelfDecryptingPcapng) {
     auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
     while (std::chrono::steady_clock::now() < deadline
            && (!SSL_is_init_finished(client.get())
-               || !server || !SSL_is_init_finished(server->native_handle()))) {
+               || !server || !SSL_is_init_finished(server->handle_native()))) {
         SSL_connect(client.get());
         listener->handle_events();
         if (!server) {
@@ -751,13 +1051,13 @@ TEST_F(OpenSslQuic, LoopbackStreamProducesSelfDecryptingPcapng) {
             // completion. It must receive the same secrets as a later lookup.
             if (server) early_keylog = server->keylog();
         }
-        if (server) SSL_do_handshake(server->native_handle());
+        if (server) SSL_do_handshake(server->handle_native());
         SSL_handle_events(client.get());
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     ASSERT_TRUE(SSL_is_init_finished(client.get())) << quic::openssl_error_stack();
     ASSERT_NE(server, nullptr) << quic::openssl_error_stack();
-    ASSERT_TRUE(SSL_is_init_finished(server->native_handle())) << quic::openssl_error_stack();
+    ASSERT_TRUE(SSL_is_init_finished(server->handle_native())) << quic::openssl_error_stack();
     EXPECT_EQ(server->negotiated_alpn(), "h3");
 
     // Internal retention must not depend on the optional SSLKEYLOGFILE lab aid.
@@ -789,17 +1089,25 @@ TEST_F(OpenSslQuic, LoopbackStreamProducesSelfDecryptingPcapng) {
     mf::MFFlowCom client_com(client_connection, client_flow);
     static constexpr char message[] = "smithproxy-quic";
 
+    // The independent client/upstream engine follows the same explicit rule:
+    // writes and readiness queries must not send the new stream by themselves.
+    // The receive loop below then proves that the owner's transport tick does.
+    ASSERT_EQ(client_com.write(client_com.token(), message, sizeof(message) - 1, 0),
+              static_cast<ssize_t>(sizeof(message) - 1));
+    for (int pass = 0; pass < 8; ++pass) {
+        client_connection->readable(client_flow);
+        client_connection->writable(client_flow);
+    }
+    ASSERT_TRUE(listener->handle_events()) << listener->last_error();
+    for (auto const& event : server_connection->drain_events()) {
+        EXPECT_NE(event.type, mf::event_type::flow_open);
+    }
+
     mf::flow_handle server_flow;
     std::unique_ptr<mf::MFFlowCom> server_com;
     std::string received;
-    bool sent = false;
     auto const stream_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
     while (std::chrono::steady_clock::now() < stream_deadline && received.empty()) {
-        if (!sent) {
-            auto const written = client_com.write(client_com.token(), message, sizeof(message) - 1, 0);
-            ASSERT_GE(written, 0);
-            sent = written == static_cast<ssize_t>(sizeof(message) - 1);
-        }
         client_connection->drain_events();
         ASSERT_TRUE(listener->handle_events()) << listener->last_error();
         for (auto const& event : server_connection->drain_events()) {
@@ -816,6 +1124,33 @@ TEST_F(OpenSslQuic, LoopbackStreamProducesSelfDecryptingPcapng) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     EXPECT_EQ(received, message);
+
+    // Stream operations must not drive the listener's shared engine. Queue a
+    // reply, repeatedly collect events, and verify only the listener send phase
+    // releases it. This also catches a missing final tick before poll().
+    ASSERT_TRUE(listener->finish_events());
+    auto const before_reply = egress_datagrams;
+    static constexpr char reply[] = "listener-owned-output";
+    ASSERT_EQ(server_connection->write(server_flow, reply, sizeof(reply) - 1).size,
+              sizeof(reply) - 1);
+    for (int pass = 0; pass < 8; ++pass) server_connection->drain_events();
+    ASSERT_TRUE(listener->flush_output(listener->current_peer(),
+                                      listener->current_local()));
+    EXPECT_EQ(egress_datagrams, before_reply);
+    ASSERT_TRUE(listener->finish_events());
+    EXPECT_GT(egress_datagrams, before_reply);
+    std::string response;
+    auto const reply_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (response.size() < sizeof(reply) - 1
+           && std::chrono::steady_clock::now() < reply_deadline) {
+        client_connection->drain_events();
+        ASSERT_TRUE(listener->handle_events());
+        char data[64] {};
+        auto const read = client_connection->read(client_flow, data, sizeof(data));
+        response.append(data, read.size);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    EXPECT_EQ(response, reply);
 
     ASSERT_EQ(client_connection->finish(client_flow), mf::io_status::ok);
     static constexpr char after_fin[] = "must-not-be-written";

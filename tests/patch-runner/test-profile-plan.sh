@@ -25,6 +25,8 @@ mapfile -t corpus < <(patch_runner_profile_sections corpus)
 [[ ${corpus[*]} == "smoke corpus-regular.1 corpus-regular.2 corpus-regular.3 corpus-regular.4 corpus-edge.1 corpus-edge.2 corpus-edge.3 corpus-edge.4 corpus-insanity.1 corpus-insanity.2 corpus-insanity.3 corpus-insanity.4" ]]
 mapfile -t traffic < <(patch_runner_profile_sections traffic)
 [[ ${traffic[*]} == "smoke ${PATCH_RUNNER_TRAFFIC_SECTIONS[*]}" ]]
+[[ " ${full[*]} " == *" quic-throughput "* ]]
+[[ $(patch_runner_section_profile quic-throughput) == traffic ]]
 [[ $(patch_runner_section_profile rtt) == traffic ]]
 [[ $(patch_runner_section_profile lifecycle) == lifecycle ]]
 [[ $(patch_runner_section_profile corpus-edge.3) == corpus ]]
@@ -32,6 +34,10 @@ mapfile -t traffic < <(patch_runner_profile_sections traffic)
 [[ $(patch_runner_section_profile policy) == sanity ]]
 [[ ${PATCH_RUNNER_CAPTURE_SECTIONS[*]} == 'capture-traffic capture-pcapng quic quic-pcapng' ]]
 for section in "${PATCH_RUNNER_CAPTURE_SECTIONS[@]}"; do
+    [[ " ${full[*]} " == *" $section "* ]]
+    [[ $(patch_runner_section_profile "$section") == traffic ]]
+done
+for section in "${PATCH_RUNNER_QUIC_CERT_SECTIONS[@]}"; do
     [[ " ${full[*]} " == *" $section "* ]]
     [[ $(patch_runner_section_profile "$section") == traffic ]]
 done

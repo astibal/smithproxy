@@ -52,6 +52,7 @@ TLS_SUITE_TEST=${TLS_SUITE_TEST:-0}
 export TLS_PROFILE_TEST=${TLS_PROFILE_TEST:-$TLS_SUITE_TEST}
 TLS_TRANSFER_TEST=${TLS_TRANSFER_TEST:-0}
 TLS_THROUGHPUT_TEST=${TLS_THROUGHPUT_TEST:-0}
+QUIC_THROUGHPUT_TEST=${QUIC_THROUGHPUT_TEST:-0}
 KTLS_PROBE_TEST=${KTLS_PROBE_TEST:-0}
 STARTTLS_SUITE_TEST=${STARTTLS_SUITE_TEST:-0}
 POLICY_TEST=${POLICY_TEST:-0}
@@ -236,8 +237,10 @@ if [[ $CAPTURE_TEST == 1 && ${CAPTURE_GRE_FORMAT:-traffic} == traffic ]]; then
     done
     [[ -f $ROOT/results/gre-ready ]]
 fi
-ip netns exec "$SERVER" python3 -u "$ROOT/runner/tests/origin.py" "$ROOT/config/certs" > "$ROOT/results/origin.log" 2>&1 &
-ORIGIN_PID=$!
+if [[ $QUIC_THROUGHPUT_TEST != 1 ]]; then
+    ip netns exec "$SERVER" python3 -u "$ROOT/runner/tests/origin.py" "$ROOT/config/certs" > "$ROOT/results/origin.log" 2>&1 &
+    ORIGIN_PID=$!
+fi
 if [[ $QUIC_TEST == 1 ]]; then
     [[ -x ${QUIC_CURL_BIN:-} ]] || {
         echo "FAIL: QUIC_CURL_BIN is not executable: ${QUIC_CURL_BIN:-<unset>}" >&2
@@ -247,20 +250,59 @@ if [[ $QUIC_TEST == 1 ]]; then
         echo "FAIL: QUIC_CURL_BIN lacks HTTP/3 support" >&2
         exit 1
     }
-    python3 -c 'import aioquic' || {
-        echo 'FAIL: QUIC runner requires the aioquic Python package' >&2
-        exit 1
-    }
+    if [[ $QUIC_THROUGHPUT_TEST != 1 ]]; then
+        python3 -c 'import aioquic' || {
+            echo 'FAIL: QUIC runner requires the aioquic Python package' >&2
+            exit 1
+        }
+    fi
     command -v tshark >/dev/null
     command -v tcpdump >/dev/null
     [[ -r ${SPQ1_DISSECTOR:-} ]] || {
         echo "FAIL: SPQ1_DISSECTOR is not readable: ${SPQ1_DISSECTOR:-<unset>}" >&2
         exit 1
     }
-    ip netns exec "$SERVER" python3 -u "$ROOT/runner/tests/h3-origin.py" \
-        --certificate "$ROOT/config/certs/origin-cert.pem" \
-        --key "$ROOT/config/certs/origin-key.pem" \
-        > "$ROOT/results/h3-origin.log" 2>&1 &
+    QUIC_ORIGIN_IDENTITY=origin
+    case ${QUIC_TLS_PROFILE_TEST:-} in
+        self_signed_*) QUIC_ORIGIN_IDENTITY=self_signed ;;
+        expired_*) QUIC_ORIGIN_IDENTITY=expired ;;
+        future_*) QUIC_ORIGIN_IDENTITY=future ;;
+        untrusted_*) QUIC_ORIGIN_IDENTITY=untrusted ;;
+    esac
+    if [[ $QUIC_THROUGHPUT_TEST == 1 ]]; then
+        [[ -x ${NATIVE_H3_SERVER_BIN:-} && -x ${NATIVE_H3_CLIENT_BIN:-} ]] || {
+            echo 'FAIL: prepare the native HTTP/3 benchmark runtime first' >&2
+            exit 1
+        }
+        # Spread flows by destination IP so the real QUIC dispatcher selects
+        # different proxy workers. Aliases live only in this disposable lab.
+        case ${QUIC_THROUGHPUT_DESTINATIONS:-1} in
+            1) ;;
+            4)
+                for last in 3 4 5; do
+                    ip -n "$SERVER" addr add "198.18.20.$last/24" dev eth0
+                    ip -n "$SERVER" -6 addr add "fd00:20::$last/64" dev eth0 nodad
+                done ;;
+            *) echo 'QUIC_THROUGHPUT_DESTINATIONS must be 1 or 4' >&2; exit 2 ;;
+        esac
+        # Preserve the endpoint versions and hashes with the measured results.
+        native_prefix=$(dirname -- "$(dirname -- "$NATIVE_H3_SERVER_BIN")")
+        cp -a "$native_prefix/share/native-h3" "$ROOT/results/native-h3-runtime"
+        ip netns exec "$SERVER" python3 -u "$ROOT/runner/tests/native-h3-origin.py" \
+            --server "$NATIVE_H3_SERVER_BIN" \
+            --workers "${QUIC_THROUGHPUT_ORIGIN_WORKERS:-4}" \
+            --bytes "${QUIC_THROUGHPUT_BYTES:-67108864}" \
+            --directory "$ROOT/data/native-h3-www" --pid-file "$ROOT/data/native-h3-pids.json" \
+            --certificate "$ROOT/config/certs/origin-cert.pem" \
+            --key "$ROOT/config/certs/origin-key.pem" \
+            > "$ROOT/results/h3-origin.log" 2>&1 &
+    else
+        ip netns exec "$SERVER" python3 -u "$ROOT/runner/tests/h3-origin.py" \
+            --host6 fd00:20::2 \
+            --certificate "$ROOT/config/certs/$QUIC_ORIGIN_IDENTITY-cert.pem" \
+            --key "$ROOT/config/certs/$QUIC_ORIGIN_IDENTITY-key.pem" \
+            > "$ROOT/results/h3-origin.log" 2>&1 &
+    fi
     H3_ORIGIN_PID=$!
     for attempt in $(seq 1 100); do
         grep -q '^READY h3-origin ' "$ROOT/results/h3-origin.log" && break
@@ -442,6 +484,61 @@ if [[ $PRIVSEP_TEST == 1 ]]; then
     grep -q 'runner-origin-ok peer=fd00:20::1' "$ROOT/results/privsep-http6.txt"
     echo 'PASS6 privsep TCP/HTTP: unprivileged core uses transparent listener'
 fi
+if [[ $QUIC_THROUGHPUT_TEST == 1 ]]; then
+    # Both endpoints process QUIC/H3 natively. Curl remains a selectable C
+    # cross-check; neither option moves application data through this driver.
+    QUIC_TRANSFER_ARGS=(--origin-pid-file "$ROOT/data/native-h3-pids.json")
+    case ${QUIC_THROUGHPUT_CLIENT:-native} in
+        native) QUIC_TRANSFER_ARGS+=(--h3-client "$NATIVE_H3_CLIENT_BIN") ;;
+        curl) ;;
+        *) echo 'QUIC_THROUGHPUT_CLIENT must be native or curl' >&2; exit 2 ;;
+    esac
+    for family in 4 6; do
+        host=198.18.20.2
+        [[ $family != 6 ]] || host=fd00:20::2
+        hosts=$host
+        if [[ ${QUIC_THROUGHPUT_DESTINATIONS:-1} == 4 ]]; then
+            hosts=198.18.20.2,198.18.20.3,198.18.20.4,198.18.20.5
+            [[ $family != 6 ]] || hosts=fd00:20::2,fd00:20::3,fd00:20::4,fd00:20::5
+        fi
+        ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/tls-transfer.py" \
+            --hosts "$hosts" --protocol h3 --curl "$QUIC_CURL_BIN" --host "$host" "${QUIC_TRANSFER_ARGS[@]}" \
+            --ca-file "$ROOT/config/certs/ca-cert.pem" --pid "$(cat "$ROOT/data/proxy.pid")" \
+            --bytes "${QUIC_THROUGHPUT_BYTES:-67108864}" \
+            --repeats "${QUIC_THROUGHPUT_REPEATS:-3}" \
+            --cooldown-seconds "${QUIC_THROUGHPUT_COOLDOWN_SECONDS:-0}" \
+            --concurrency "${QUIC_THROUGHPUT_CONCURRENCY:-1,4,16}" \
+            --output "$ROOT/results/quic-throughput-v$family.json" > /dev/null
+        python3 "$ROOT/runner/tests/tls-transfer-report.py" --label 'QUIC throughput' \
+            "$ROOT/results/quic-throughput-v$family.json"
+        ip netns exec "$NS" python3 "$ROOT/runner/tests/quic-transparency.py" cli \
+            > "$ROOT/results/quic-throughput-workers-v$family.txt"
+        # The same native client/origin pair bounds what this fixture can deliver.
+        # Starting in the proxy namespace reaches the origin directly, without
+        # changing transparent interception rules or trusting the MITM CA.
+        if [[ ${QUIC_THROUGHPUT_DIRECT_BASELINE:-1} == 1 ]]; then
+            ip netns exec "$NS" python3 "$ROOT/runner/tests/tls-transfer.py" \
+                --protocol h3 --curl "$QUIC_CURL_BIN" --host "$host" "${QUIC_TRANSFER_ARGS[@]}" \
+                --ca-file "$ROOT/config/certs/origin-ca.pem" \
+                --bytes "${QUIC_THROUGHPUT_BYTES:-67108864}" \
+                --repeats "${QUIC_THROUGHPUT_REPEATS:-3}" \
+                --cooldown-seconds "${QUIC_THROUGHPUT_COOLDOWN_SECONDS:-0}" \
+                --concurrency "${QUIC_THROUGHPUT_CONCURRENCY:-1,4,16}" \
+                --output "$ROOT/results/quic-direct-throughput-v$family.json" > /dev/null
+            python3 "$ROOT/runner/tests/tls-transfer-report.py" --label 'QUIC direct reference' \
+                "$ROOT/results/quic-direct-throughput-v$family.json"
+        fi
+        echo "PASS$family QUIC throughput: checked H3 download/upload measured without a performance gate"
+    done
+    # Keep the receiver running as a regression detector: disabling only the
+    # content profile used to leave synchronous connection-start hooks active.
+    if [[ -s "$ROOT/results/quic-webhooks.jsonl" ]]; then
+        echo 'FAIL QUIC throughput: webhook requests contaminated the measurement' >&2
+        exit 1
+    fi
+    echo 'PASS QUIC throughput: no webhook requests during measurement'
+    exit 0
+fi
 if [[ -n ${QUIC_TLS_PROFILE_TEST:-} ]]; then
     # This is a separate admission probe: a rejecting profile must not first
     # pass the normal H3 traffic/observability positive-control suite.
@@ -449,6 +546,7 @@ if [[ -n ${QUIC_TLS_PROFILE_TEST:-} ]]; then
     ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/suites/tls/quic_profile.py" \
         --profile "$QUIC_TLS_PROFILE_TEST" --ca-file "$ROOT/config/certs/ca-cert.pem" \
         --proxy-log "$ROOT/data/messages.default.log" \
+        --origin-log "$ROOT/results/h3-origin.log" \
         --output "$ROOT/results/quic-tls-profile.json"
     exit 0
 fi
@@ -575,8 +673,8 @@ if [[ $QUIC_TEST == 1 ]]; then
     grep -q 'smithproxy-h3-origin path=/beta?item=2' "$QUIC_RESULT/beta.txt"
     grep -q 'smithproxy-h3-origin path=/gamma/deep' "$QUIC_RESULT/gamma.txt"
     grep -q 'smithproxy-h3-origin path=/hold?stream=4' "$QUIC_RESULT/hold.txt"
-    grep -q 'SNI: origin.runner.lab' "$QUIC_CLI"
-    grep -q 'ALPN: downstream=h3 upstream=h3' "$QUIC_CLI"
+    grep -q 'sni: origin.runner.lab' "$QUIC_RESULT/cli-quic.txt"
+    grep -q 'ALPN: downstream=h3 upstream=h3' "$QUIC_RESULT/cli-quic.txt"
     echo 'PASS4 QUIC/H3 traffic: verified certificate, SNI, ALPN and four multiplexed requests'
     echo 'PASS4 QUIC diagnostics: active session and streams visible in dedicated CLI'
     # Let normal peer close and the bounded QUIC drain finish while webhook
@@ -759,7 +857,7 @@ if [[ $TLS_THROUGHPUT_TEST == 1 ]]; then
             --bytes "${TLS_THROUGHPUT_BYTES:-67108864}" \
             --repeats "${TLS_THROUGHPUT_REPEATS:-3}" \
             --concurrency "${TLS_THROUGHPUT_CONCURRENCY:-1,4,16}" \
-            > "$ROOT/results/tls-throughput-v$family.json"
+            --output "$ROOT/results/tls-throughput-v$family.json" > /dev/null
         python3 "$ROOT/runner/tests/tls-transfer-report.py" \
             --label 'TLS throughput' "$ROOT/results/tls-throughput-v$family.json"
         echo "PASS$family TLS throughput: E2E download/upload measured without a performance gate"
@@ -1173,6 +1271,14 @@ if [[ -n ${PPLAY_SUITE:-} && ${PPLAY_SUITE_SKIP_RUN:-0} != 1 ]]; then
     }
     echo 'PASS4 pplay suite through Smithproxy'
     echo 'PASS6 pplay suite through Smithproxy'
+fi
+if [[ $QUIC_TEST == 1 ]]; then
+    # Check real intercepted wire tuples, including one client port shared by
+    # two destinations and later reused by a fresh connection. Capture/export
+    # assertions above keep their original four-request reference scenario.
+    python3 "$ROOT/runner/tests/quic-transparency.py" run --root "$ROOT" \
+        --client-ns "$CLIENT" --server-ns "$SERVER" --data-ns "$NS" \
+        --in-if "$IN_IF" --out-if "$OUT_IF"
 fi
 ip netns exec "$NS" nft list ruleset > "$ROOT/results/nft-active.txt"
 ip -n "$NS" -j route show table all > "$ROOT/results/data-routes.json"

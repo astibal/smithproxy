@@ -41,4 +41,25 @@ if ldd /usr/bin/smithproxy 2>&1 | grep -q "not found"; then
     exit 1
 fi
 
+# A successful default build must actually link the chosen transport, not just
+# accept the option while silently compiling the old backend.
+if [ "${SMITHPROXY_ENABLE_NGTCP2:-ON}" = ON ]; then
+    ldd /usr/bin/smithproxy | grep 'libngtcp2\.'
+    ldd /usr/bin/smithproxy | grep 'libngtcp2_crypto_ossl\.'
+fi
+
+# Debian packages use generated shlibs dependencies. Verify them against the
+# installed binary as well as checking that the runtime loader resolves it.
+if command -v dpkg-shlibdeps >/dev/null 2>&1; then
+    SHLIBS_CHECK="${WORK_DIR}/shlibs-check"
+    mkdir -p "${SHLIBS_CHECK}/debian"
+    printf 'Source: smithproxy\n\nPackage: smithproxy\nArchitecture: any\n' > "${SHLIBS_CHECK}/debian/control"
+    (cd "${SHLIBS_CHECK}" && dpkg-shlibdeps -O -e/usr/bin/smithproxy) > "${SHLIBS_CHECK}/depends"
+    cat "${SHLIBS_CHECK}/depends"
+    if [ "${SMITHPROXY_ENABLE_NGTCP2:-ON}" = ON ]; then
+        grep 'libngtcp2-crypto-ossl' "${SHLIBS_CHECK}/depends"
+        grep 'libngtcp2-[0-9]' "${SHLIBS_CHECK}/depends"
+    fi
+fi
+
 echo "SANITY PASS: ${DISTRO_NAME:-unknown distro}"

@@ -30,6 +30,8 @@ fresh Docker containers. With no DISTRO arguments, all supported images run.
 DISTRO is a name printed by --list, for example ubuntu-26.04 or alpine-3.22.
 
 Environment:
+  SMITHPROXY_ENABLE_NGTCP2=OFF
+                 explicitly test the OpenSSL-only build (default: ON)
   BUILD_JOBS=N   parallel compiler jobs per container (default: 2)
   DOCKER_PLATFORM=linux/arm64
                  select another architecture when Docker has QEMU/binfmt support
@@ -81,6 +83,7 @@ for entry in "${DISTROS[@]}"; do
         --env SMITHPROXY_SANITY_CONTAINER=1 \
         --env "DISTRO_NAME=${name}" \
         --env "BUILD_JOBS=${BUILD_JOBS}" \
+        --env "SMITHPROXY_ENABLE_NGTCP2=${SMITHPROXY_ENABLE_NGTCP2:-ON}" \
         --volume "${SOURCE_DIR}:/src:ro" \
         "${image}" \
         sh -c 'while :; do sleep 3600; done')
