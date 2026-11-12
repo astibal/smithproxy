@@ -1,4 +1,5 @@
 #include <vars.hpp>
+#include <privileged_socket.hpp>
 #include "proxy/quic/error_stats.hpp"
 #include "proxy/quic/log.hpp"
 #ifdef SMITHPROXY_ENABLE_NGTCP2
@@ -24,6 +25,7 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <net/if.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #endif
@@ -336,7 +338,7 @@ TEST_F(QuicListenerService, DeniedSetupPreventsProbeAndForwardingDatagrams) {
         ASSERT_NE(client_context, nullptr);
         SSL_CTX_set_verify(client_context.get(), SSL_VERIFY_NONE, nullptr);
 
-        const int origin_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        const int origin_fd = socle::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         ASSERT_GE(origin_fd, 0);
         struct socket_guard {
             int fd;
@@ -346,7 +348,7 @@ TEST_F(QuicListenerService, DeniedSetupPreventsProbeAndForwardingDatagrams) {
         sockaddr_in origin {};
         origin.sin_family = AF_INET;
         origin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        ASSERT_EQ(bind(origin_fd, reinterpret_cast<sockaddr*>(&origin), sizeof(origin)), 0);
+        ASSERT_EQ(socle::bind(origin_fd, reinterpret_cast<sockaddr*>(&origin), sizeof(origin)), 0);
         socklen_t size = sizeof(origin);
         ASSERT_EQ(getsockname(origin_fd, reinterpret_cast<sockaddr*>(&origin), &size), 0);
 
@@ -396,12 +398,12 @@ TEST_F(QuicListenerService, CleansUpHandshakeTimeout) {
     ASSERT_NE(client_context, nullptr);
     SSL_CTX_set_verify(client_context.get(), SSL_VERIFY_NONE, nullptr);
 
-    auto const silent_origin_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    auto const silent_origin_fd = socle::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     ASSERT_GE(silent_origin_fd, 0);
     sockaddr_in silent_origin {};
     silent_origin.sin_family = AF_INET;
     silent_origin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    ASSERT_EQ(bind(silent_origin_fd, reinterpret_cast<sockaddr*>(&silent_origin),
+    ASSERT_EQ(socle::bind(silent_origin_fd, reinterpret_cast<sockaddr*>(&silent_origin),
                    sizeof(silent_origin)), 0);
     socklen_t silent_origin_size = sizeof(silent_origin);
     ASSERT_EQ(getsockname(silent_origin_fd, reinterpret_cast<sockaddr*>(&silent_origin),
@@ -577,13 +579,13 @@ static void exercise_proxy_stream(bool use_workers, bool check_sampling = false)
     SSL_CTX_set_alpn_select_cb(origin_context.get(), select_h3_for_origin, nullptr);
     SSL_CTX_set_verify(client_context.get(), SSL_VERIFY_NONE, nullptr);
 
-    auto const origin_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    auto const origin_fd = socle::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     ASSERT_GE(origin_fd, 0);
     ASSERT_TRUE(nonblocking(origin_fd));
     sockaddr_in origin_address {};
     origin_address.sin_family = AF_INET;
     origin_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    ASSERT_EQ(bind(origin_fd, reinterpret_cast<sockaddr*>(&origin_address),
+    ASSERT_EQ(socle::bind(origin_fd, reinterpret_cast<sockaddr*>(&origin_address),
                    sizeof(origin_address)), 0);
     socklen_t origin_size = sizeof(origin_address);
     ASSERT_EQ(getsockname(origin_fd, reinterpret_cast<sockaddr*>(&origin_address),
@@ -1256,6 +1258,43 @@ TEST(QuicErrorStats, FailedConstructionRemainsVisible) {
 }
 
 #ifdef SMITHPROXY_ENABLE_NGTCP2
+// Exercise actual ancillary delivery: enabling original-destination metadata
+// alone leaves the ingress interface unknown and rejects role-scoped policy.
+TEST(QuicNgtcp2Metadata, ReceivesIngressInterfaceForBothAddressFamilies) {
+    auto const loopback = if_nametoindex("lo");
+    ASSERT_NE(loopback, 0U);
+    quic::unique_ssl_ctx context(SSL_CTX_new(TLS_method()));
+    ASSERT_TRUE(context);
+
+    for (int family : {AF_INET, AF_INET6}) {
+        socle::raw::unique<int> socket {
+            socle::socket(family, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0),
+            quic::close_descriptor};
+        ASSERT_GE(socket.value, 0);
+        quic::datagram_endpoint endpoint;
+        endpoint.address.ss_family = family;
+        if (family == AF_INET) {
+            endpoint.size = sizeof(sockaddr_in);
+            reinterpret_cast<sockaddr_in*>(&endpoint.address)->sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        } else {
+            endpoint.size = sizeof(sockaddr_in6);
+            reinterpret_cast<sockaddr_in6*>(&endpoint.address)->sin6_addr = in6addr_loopback;
+        }
+        auto* address = reinterpret_cast<sockaddr*>(&endpoint.address);
+        ASSERT_EQ(socle::bind(socket.value, address, endpoint.size), 0);
+        ASSERT_EQ(getsockname(socket.value, address, &endpoint.size), 0);
+        auto worker = quic::make_worker_transport(quic::transport_backend::ngtcp2,
+            context.get(), context.get(), socket.value, family, false, {}, {}, 16);
+        ASSERT_TRUE(worker);
+
+        char const payload = 'x';
+        ASSERT_EQ(sendto(socket.value, &payload, sizeof(payload), 0, address, endpoint.size), 1);
+        quic::datagram_packet packet;
+        ASSERT_TRUE(quic::receive_datagram(socket.value, packet));
+        EXPECT_EQ(packet.ingress_ifindex, loopback) << "address family " << family;
+    }
+}
+
 // TLS can call a keylog hook before the connection back-reference is attached.
 TEST(QuicErrorStats, KeylogRejectsMissingCallbackOwner) {
     auto const missing = quic::stats.errors.ngtcp2_keylog_missing_argument.load();
