@@ -44,6 +44,21 @@ struct datagram_endpoint {
 
 #if SMITHPROXY_OPENSSL_QUIC
 
+/** Owned UDP payload and its original tuple, safe to hand to another worker. */
+struct datagram_packet {
+    std::vector<unsigned char> data;
+    datagram_endpoint peer;
+    datagram_endpoint local;
+    std::uint64_t association = 0;
+    unsigned ingress_ifindex = 0;
+};
+
+/** Nonblocking packet source; false means no queued input is available. */
+using datagram_source = std::function<bool(datagram_packet&)>;
+
+/** Read one UDP datagram with original destination/interface metadata. */
+bool receive_datagram(int fd, datagram_packet& packet);
+
 /**
  * Thread-safe collection of NSS key-log records belonging to one QUIC connection.
  *
@@ -55,8 +70,8 @@ class keylog_store final {
 public:
     /** Save one complete NSS key-log line, ignoring empty and duplicate records. */
     void append(std::string line);
-    /** Return a stable copy suitable for a later capture/export operation. */
-    std::vector<std::string> snapshot() const;
+    /** Return all records if new ones exist beyond known_lines; otherwise empty. */
+    std::vector<std::string> snapshot(std::size_t known_lines = 0) const;
 
 private:
     mutable std::mutex mutex_;
@@ -91,8 +106,13 @@ public:
     /** Learn long-header CIDs unless one is already owned by another tuple. */
     bool learn(unsigned char const* data, std::size_t size,
                datagram_route const& route);
+    /** Learn the CID from an authenticated NEW_CONNECTION_ID frame. */
+    bool learn_new_connection_id(unsigned char const* data, std::size_t size,
+                                 datagram_route const& route);
     std::optional<datagram_route> resolve(
         unsigned char const* data, std::size_t size) const;
+    /** Recover the local tuple for a known peer; ambiguous peers fail closed. */
+    std::optional<datagram_route> resolve_peer(datagram_endpoint const& peer) const;
     std::size_t size() const { return routes_.size(); }
 
 private:
@@ -145,6 +165,9 @@ unique_ssl_ctx make_openssl_quic_context(bool server);
 
 #if SMITHPROXY_OPENSSL_QUIC
 
+/** Create one outgoing engine/socket for a worker; caller alone drives events. */
+unique_ssl make_openssl_quic_client_engine(SSL_CTX* context, int family);
+
 /**
  * Multiflow adapter for one accepted or connected OpenSSL QUIC connection.
  * It assumes single-thread worker affinity, as required by the initial MF
@@ -153,7 +176,10 @@ unique_ssl_ctx make_openssl_quic_context(bool server);
 class openssl_connection final : public multiflow::connection {
 public:
     /** Take ownership of a QUIC connection SSL and, optionally, its UDP fd. */
-    explicit openssl_connection(unique_ssl connection, int owned_udp_fd = -1);
+    enum class event_driver { connection, owner };
+    explicit openssl_connection(unique_ssl connection, int owned_udp_fd = -1,
+                                event_driver driver = event_driver::connection,
+                                datagram_endpoint peer = {});
     ~openssl_connection() override;
 
     openssl_connection(openssl_connection const&) = delete;
@@ -183,6 +209,8 @@ public:
     bool writable(multiflow::flow_handle flow) const override;
     /** Advance handshake/shutdown/timers without consuming queued flow events. */
     void progress_transport();
+    /** Consume application/lifecycle progress; the owner must tick before sleeping. */
+    bool take_application_progress() { return std::exchange(application_progress_, false); }
     /** Progress TLS, QUIC timers, stream acceptance, and lifecycle events. */
     std::vector<multiflow::event> drain_events() override;
 
@@ -232,17 +260,21 @@ private:
 
     unique_ssl connection_;                     ///< Owned OpenSSL QUIC connection.
     int owned_udp_fd_ = -1;                     ///< Outgoing socket, or -1 for listener-owned.
+    datagram_endpoint peer_;                    ///< Explicit outgoing peer; shared BIO peer is not per connection.
     std::map<multiflow::flow_id, std::unique_ptr<stream_state>> streams_; ///< Live streams.
     std::map<event_key, multiflow::event> events_; ///< Pending coalesced notifications.
     multiflow::flow_id next_internal_id_ = 1;
     multiflow::generation_id next_generation_ = 1;
+    event_driver driver_ = event_driver::connection; ///< Owner of transport ticks.
+    bool application_progress_ = true;          ///< New channels need an initial owner pass.
     bool closing_ = false;                      ///< Nonblocking shutdown needs progress.
     bool closed_ = false;                       ///< Transport reached terminal state.
 };
 
 /**
  * Create a nonblocking outgoing QUIC connection over a newly owned UDP socket.
- * The returned adapter progresses its handshake from drain_events().
+ * Without a port, the returned adapter owns its socket and drives its engine.
+ * With a port, it shares the worker's socket/engine, which the caller ticks.
  */
 std::unique_ptr<openssl_connection> connect_openssl_quic(
     SSL_CTX* context, const sockaddr* peer, socklen_t peer_size,
@@ -252,7 +284,7 @@ std::unique_ptr<openssl_connection> connect_openssl_quic(
     SSL_CTX* context, const sockaddr* peer, socklen_t peer_size,
     std::string const& server_name, std::string const& alpn, std::string* error = nullptr,
     HookEvent const* offer = nullptr,
-    std::function<bool(SSL*)> const& configure = {});
+    std::function<bool(SSL*)> const& configure = {}, SSL* port = nullptr);
 
 /**
  * Nonblocking OpenSSL QUIC listener over a caller-owned UDP socket.
@@ -275,7 +307,8 @@ public:
      */
     static std::unique_ptr<openssl_listener> create(SSL_CTX* context, int udp_fd,
                                                      bool enable_local_address = true,
-                                                     datagram_observer observer = {});
+                                                     datagram_observer observer = {},
+                                                     datagram_source source = {});
 
     ~openssl_listener();
     openssl_listener(openssl_listener const&) = delete;
@@ -285,6 +318,8 @@ public:
     std::unique_ptr<openssl_connection> accept();
     /** Progress listener packet processing and QUIC timers without blocking. */
     bool handle_events();
+    /** Transmit work queued by all sessions before the service waits for I/O. */
+    bool finish_events();
     /** Flush output produced by one known connection and preserve its CID identity. */
     bool flush_output(datagram_endpoint const& peer, datagram_endpoint const& local);
     bool flush_output(datagram_endpoint const& peer, datagram_endpoint const& local,
@@ -299,12 +334,14 @@ public:
     unsigned current_ingress_ifindex() const;
     /** Identity of the CID family currently being dispatched to OpenSSL. */
     std::uint64_t current_association() const;
+    /** Bind ClientHello's tuple to later authenticated CID changes on this SSL. */
+    bool bind_connection_route(SSL* connection);
     bool local_address_enabled() const { return local_address_enabled_; }
     SSL* native_handle() const { return listener_.get(); }
 
 private:
     openssl_listener(std::unique_ptr<observer_state> observer,
-                     std::unique_ptr<dispatcher_state> dispatcher, unique_ssl listener,
+                     std::shared_ptr<dispatcher_state> dispatcher, unique_ssl listener,
                      bool local_address_enabled);
 
     /** Store an adapter error together with the current OpenSSL error queue. */
@@ -319,7 +356,7 @@ private:
     bool progress_listener_timers();
 
     std::unique_ptr<observer_state> observer_state_; ///< Storage referenced by BIO callback.
-    std::unique_ptr<dispatcher_state> dispatcher_state_; ///< Transparent socket pump state.
+    std::shared_ptr<dispatcher_state> dispatcher_state_; ///< Weakly observed by per-SSL CID callbacks.
     unique_ssl listener_;                            ///< Owned OpenSSL listener object.
     bool local_address_enabled_ = false;             ///< BIO supports local-address metadata.
     std::string last_error_;                         ///< Socket/BIO pump failure detail.

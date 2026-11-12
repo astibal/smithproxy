@@ -19,6 +19,8 @@
 
 namespace sx::quic {
 
+class worker_dispatcher;
+
 namespace detail {
 /** Internal guard against allocator reuse of a borrowed OpenSSL handle. */
 bool same_certificate_callback_identity(std::string const& staged_server_name,
@@ -144,6 +146,12 @@ public:
     listener_service(listener_service const&) = delete;
     listener_service& operator=(listener_service const&) = delete;
 
+    /** Join a receiver before prepare(); each index has one session owner. */
+    void assign_worker(std::shared_ptr<worker_dispatcher> dispatcher, std::size_t index);
+    std::size_t worker_index() const { return worker_index_; }
+    std::size_t worker_count() const;
+    std::uint64_t dropped_datagrams() const;
+
     /** Allocate contexts/socket/listener. Safe to call again after success. */
     bool prepare();
     /** Run the single-thread event loop until stop() or a fatal listener error. */
@@ -160,7 +168,7 @@ public:
     std::size_t connection_count() const { return connection_count_; }
     /** Atomically sample operational counters without touching session state. */
     diagnostics_snapshot diagnostics() const;
-    /** Return a copy without exposing worker-affine OpenSSL/MF objects. */
+    /** Copy periodically sampled diagnostics; lifecycle changes bypass sampling. */
     std::vector<session_snapshot> session_diagnostics() const;
     using session_details = std::map<std::uint64_t, std::vector<std::string>>;
     // Render live stream details on their owner, only when explicitly requested.
@@ -194,8 +202,8 @@ private:
     /** Start or collect one origin-verification job for a downstream handshake. */
     int prepare_verified_certificate(SSL* downstream);
     struct verified_certificate;
-    /** Progress pending upstreams on the I/O worker, outside OpenSSL callbacks. */
-    void progress_certificate_jobs();
+    /** Progress pending upstreams; true asks the engine to resume a changed job. */
+    bool progress_certificate_jobs();
     /** Verify the final upstream identity and derive its downstream certificate. */
     verified_certificate verify_and_spoof(
         std::shared_ptr<openssl_connection> const& upstream,
@@ -207,6 +215,8 @@ private:
     /** Record a fatal listener error and make ready() false. */
     void fail(std::string message);
 
+    std::shared_ptr<worker_dispatcher> dispatcher_; ///< Shared ingress, never shared SSL state.
+    std::size_t worker_index_ = 0;                ///< Stable index throughout this generation.
     int address_family_;                         ///< Separate IPv4/IPv6 sockets avoid mapped-address ambiguity.
     std::uint16_t port_;                         ///< Requested local service port.
     std::uint16_t bound_port_ = 0;               ///< Actual port, relevant when port_ is zero.
@@ -229,6 +239,8 @@ private:
     std::atomic_size_t connection_count_ = 0;     ///< Sessions currently retained by the loop.
     mutable std::mutex snapshots_mutex_;          ///< Protects only copied diagnostics.
     std::vector<session_snapshot> snapshots_;     ///< Last worker-published view.
+    std::chrono::steady_clock::time_point next_snapshot_ {}; ///< Worker-owned sampling deadline.
+    bool snapshots_dirty_ = true;                ///< Lifecycle changes must be visible immediately.
     static inline std::atomic_uint64_t next_session_id_ {1}; ///< Unique across IPv4/IPv6 listeners.
 
     // Monotonic atomics back diagnostics(); writers live in the worker except
@@ -250,6 +262,7 @@ private:
 #if SMITHPROXY_OPENSSL_QUIC
     unique_ssl_ctx context_;                     ///< Downstream QUIC server context.
     unique_ssl_ctx client_context_;              ///< Verified upstream QUIC client context.
+    unique_ssl upstream_engine_;                 ///< One outgoing listener/engine/socket per worker.
     std::unique_ptr<openssl_listener> listener_; ///< Adapter over udp_fd_.
     /** Session phases are explicit so shutdown resources remain bounded. */
     enum class session_state { handshake, active, draining };
@@ -339,8 +352,8 @@ private:
     void observe_datagram(datagram_view const& datagram);
     /** Publish keylog records added since the previous session-loop pass. */
     void publish_capture_secrets(session& value);
-    /** Accept every connection currently available without blocking the worker. */
-    void accept_connections();
+    /** Dequeue available connections; true includes rejections needing a close frame. */
+    bool accept_connections();
     /** Progress one session according to its explicit lifecycle state. */
     void progress_session(session& value, std::chrono::steady_clock::time_point now);
     /** Complete both handshakes and construct the per-stream proxy bridge. */
@@ -349,8 +362,12 @@ private:
     void progress_active(session& value, std::chrono::steady_clock::time_point now);
     /** Flush OpenSSL output with this session's unambiguous UDP tuple. */
     bool flush_session_output(session& value);
-    /** Release expired draining sessions and abandoned staged upstream legs. */
-    void reap_expired(std::chrono::steady_clock::time_point now);
+    /** Tick the shared outgoing engine once; false stops the worker on failure. */
+    bool progress_upstream_engine();
+    /** Wait for network/deadline/control readiness; false ends the worker loop. */
+    bool wait_for_work();
+    /** Release expired sessions/jobs; true requests a final transport cleanup pass. */
+    bool reap_expired(std::chrono::steady_clock::time_point now);
     /** Stop proxying and begin bounded nonblocking shutdown of both legs. */
     void start_draining(session& value, std::chrono::steady_clock::time_point now,
                         std::uint64_t protocol_error = 0,

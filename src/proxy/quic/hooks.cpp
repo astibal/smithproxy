@@ -42,10 +42,11 @@ bool dispatch(proxymaker::SessionSetup* setup, HookEvent& event) {
 std::unique_ptr<openssl_connection> connect_with_hooks(
     SSL_CTX* context, const sockaddr* peer, socklen_t size,
     const std::string& server_name, std::string* error, proxymaker::SessionSetup* setup,
-    std::function<bool(SSL*)> const& configure) {
+    std::function<bool(SSL*)> const& configure, SSL* port) {
 
     if(!setup || !setup->quic_observer()) {
-        return connect_openssl_quic(context, peer, size, server_name, "h3", error, nullptr, configure);
+        return connect_openssl_quic(context, peer, size, server_name, "h3", error,
+                                    nullptr, configure, port);
     }
 
     HookEvent offer;
@@ -57,7 +58,7 @@ std::unique_ptr<openssl_connection> connect_with_hooks(
     }
 
     auto connection = connect_openssl_quic(
-        context, peer, size, server_name, offer.alpn, error, &offer, configure);
+        context, peer, size, server_name, offer.alpn, error, &offer, configure, port);
     if(!connection) {
         HookEvent failed;
         failed.kind = HookEvent::Kind::failed;

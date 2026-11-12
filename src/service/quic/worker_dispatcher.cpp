@@ -1,0 +1,178 @@
+#include "service/quic/worker_dispatcher.hpp"
+
+#if SMITHPROXY_OPENSSL_QUIC
+#include "proxy/quic/socket_io_detail.hpp"
+#include <cerrno>
+#include <fcntl.h>
+#include <poll.h>
+#include <pthread.h>
+#include <stdexcept>
+#include <system_error>
+#include <sys/eventfd.h>
+#include <unistd.h>
+
+namespace sx::quic {
+
+struct worker_dispatcher::inbox {
+    // The receiver cannot let a slow owner consume unbounded memory. Dropping
+    // on overload leaves QUIC recovery with the original owner, never a sibling.
+    static constexpr std::size_t max_packets = 1024;
+    static constexpr std::size_t max_bytes = 4 * 1024 * 1024;
+    std::mutex lock;
+    std::deque<datagram_packet> packets;
+    std::size_t bytes = 0;
+    int wake = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    bool retired = false;
+    std::atomic_uint64_t dropped {0};
+    ~inbox() { if (wake >= 0) ::close(wake); }
+};
+
+worker_dispatcher::worker_dispatcher(std::size_t workers) {
+    if (workers == 0) throw std::invalid_argument("QUIC receiver needs a worker");
+    for (std::size_t i = 0; i < workers; ++i) {
+        auto queue = std::make_unique<inbox>();
+        if (queue->wake < 0) throw std::system_error(errno, std::generic_category(), "QUIC inbox eventfd");
+        inboxes_.push_back(std::move(queue));
+    }
+    stop_fd_ = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    if (stop_fd_ < 0) throw std::system_error(errno, std::generic_category(), "QUIC receiver eventfd");
+}
+
+worker_dispatcher::~worker_dispatcher() {
+    stop();
+    if (socket_fd_ >= 0) ::close(socket_fd_);
+    if (stop_fd_ >= 0) ::close(stop_fd_);
+}
+
+bool worker_dispatcher::attach_socket(int fd) {
+    // Setup is serial, before workers launch. Keep the ingress alive even when
+    // the first service is destroyed before its siblings during shutdown.
+    if (socket_fd_ >= 0) return true;
+    socket_fd_ = ::fcntl(fd, F_DUPFD_CLOEXEC, 0);
+    return socket_fd_ >= 0;
+}
+
+std::size_t worker_dispatcher::owner(datagram_endpoint const& destination) const {
+    unsigned char const* bytes = nullptr;
+    std::size_t length = 0;
+    if (destination.valid() && destination.address.ss_family == AF_INET) {
+        bytes = reinterpret_cast<unsigned char const*>(
+            &reinterpret_cast<sockaddr_in const*>(&destination.address)->sin_addr);
+        length = sizeof(in_addr);
+    } else if (destination.valid() && destination.address.ss_family == AF_INET6) {
+        bytes = reinterpret_cast<unsigned char const*>(
+            &reinterpret_cast<sockaddr_in6 const*>(&destination.address)->sin6_addr);
+        length = sizeof(in6_addr);
+    }
+    std::uint64_t hash = 14695981039346656037ULL;
+    for (std::size_t i = 0; i < length; ++i) hash = (hash ^ bytes[i]) * 1099511628211ULL;
+    return hash % inboxes_.size();
+}
+
+bool worker_dispatcher::start() {
+    std::lock_guard lock(lifecycle_lock_);
+    if (thread_.joinable()) return error() == 0;
+    if (socket_fd_ < 0 || stopping_) return false;
+    try {
+        thread_ = std::thread([this] { run(); });
+    } catch (std::system_error const& error) {
+        fail(error.code().value());
+        return false;
+    }
+    return true;
+}
+
+void worker_dispatcher::stop() {
+    std::lock_guard lock(lifecycle_lock_);
+    stopping_ = true;
+    (void)::eventfd_write(stop_fd_, 1);
+    if (thread_.joinable()) thread_.join();
+}
+
+void worker_dispatcher::retire(std::size_t worker) {
+    auto& queue = *inboxes_.at(worker);
+    {
+        std::lock_guard lock(queue.lock);
+        if (queue.retired) return;
+        queue.retired = true;
+        queue.packets.clear();
+        queue.bytes = 0;
+        eventfd_t ignored;
+        (void)::eventfd_read(queue.wake, &ignored);
+    }
+    if (++retired_ == inboxes_.size()) stop();
+}
+
+int worker_dispatcher::wake_fd(std::size_t worker) const {
+    return inboxes_.at(worker)->wake;
+}
+
+bool worker_dispatcher::pop(std::size_t worker, datagram_packet& packet) {
+    auto& queue = *inboxes_.at(worker);
+    std::lock_guard lock(queue.lock);
+    if (queue.packets.empty()) return false;
+    queue.bytes -= queue.packets.front().data.size();
+    packet = std::move(queue.packets.front());
+    queue.packets.pop_front();
+    if (queue.packets.empty()) {
+        eventfd_t ignored;
+        (void)::eventfd_read(queue.wake, &ignored);
+    }
+    return true;
+}
+
+bool worker_dispatcher::enqueue(datagram_packet packet) {
+    auto& queue = *inboxes_[owner(packet.local)];
+    std::lock_guard lock(queue.lock);
+    if (queue.retired || queue.packets.size() >= inbox::max_packets
+        || packet.data.size() > inbox::max_bytes - queue.bytes) {
+        ++queue.dropped;
+        return false;
+    }
+    bool const wake = queue.packets.empty();
+    queue.bytes += packet.data.size();
+    queue.packets.push_back(std::move(packet));
+    if (wake) (void)::eventfd_write(queue.wake, 1);
+    return true;
+}
+
+std::uint64_t worker_dispatcher::dropped(std::size_t worker) const {
+    return inboxes_.at(worker)->dropped.load();
+}
+
+void worker_dispatcher::fail(int error) {
+    error_ = error;
+    for (auto const& queue : inboxes_) (void)::eventfd_write(queue->wake, 1);
+}
+
+void worker_dispatcher::run() {
+    pthread_setname_np(pthread_self(), "sxy_quic_rx");
+    while (!stopping_) {
+        pollfd descriptors[] {{socket_fd_, POLLIN, 0}, {stop_fd_, POLLIN, 0}};
+        auto const ready = ::poll(descriptors, 2, -1);
+        if (ready < 0) {
+            if (errno == EINTR) continue;
+            fail(errno);
+            break;
+        }
+        if (stopping_ || descriptors[1].revents) break;
+        if (descriptors[0].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+            fail(EIO);
+            break;
+        }
+        for (std::size_t i = 0; i < 64 && !stopping_; ++i) {
+            datagram_packet packet;
+            if (!receive_datagram(socket_fd_, packet)) {
+                if (detail::datagram_receive_would_block(errno)) break;
+                if (errno == EMSGSIZE || errno == EPROTO) continue;
+                fail(errno);
+                return;
+            }
+            if (!packet.peer.valid() || !packet.local.valid()) continue;
+            enqueue(std::move(packet));
+        }
+    }
+}
+
+} // namespace sx::quic
+#endif
