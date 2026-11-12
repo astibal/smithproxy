@@ -70,8 +70,8 @@ a comparison of transport integrations, not a full Smithproxy policy benchmark.
 Use a completed Smithproxy build for the socle and qpack support libraries.
 ngtcp2 and its OpenSSL crypto helper must already be installed or supplied through
 CMake's normal include/library search options. This prototype was exercised with
-ngtcp2 1.16.0 and OpenSSL 3.5.5. The standalone target does not change the default daemon build. The opt-in
-production integration is described below.
+ngtcp2 1.16.0 and OpenSSL 3.5.5. The standalone laboratory is separate from
+the default ngtcp2 production integration described below.
 
 ```sh
 cmake -S tests/quic/ngtcp2 -B /path/to/experiment-build \
@@ -130,15 +130,18 @@ production feature parity or attribute the entire difference to library CPU cost
 
 ## Production-service integration
 
-The root build now optionally places the same transport beneath the ordinary
-`listener_service`. Enable it with `-DSMITHPROXY_ENABLE_NGTCP2=ON`, supplying the
-ngtcp2 and crypto-helper install prefix through normal CMake search paths. This
+The root build places this transport beneath the ordinary `listener_service`
+by default (`SMITHPROXY_ENABLE_NGTCP2=ON`). Supply the ngtcp2 and crypto-helper
+install prefix through normal CMake search paths. This
 requires ngtcp2's OpenSSL crypto helper and OpenSSL 3.5 TLS-only QUIC API. The
 libraries remain external; no vendored or private OpenSSL build is required.
 
-Select `SMITHPROXY_QUIC_BACKEND=ngtcp2` in the daemon environment. Unset or
-`openssl` retains the original backend; unavailable/unknown selections fail
-listener preparation. The startup log records the selected backend.
+With no environment override, the daemon selects ngtcp2. Set
+`SMITHPROXY_QUIC_BACKEND=openssl` to explicitly select the OpenSSL backend.
+An explicit `-DSMITHPROXY_ENABLE_NGTCP2=OFF` build needs no ngtcp2 libraries
+and defaults to OpenSSL. Missing dependencies in a default build are an error,
+not an automatic fallback. Unavailable, unknown or empty runtime selections
+fail listener preparation. The startup log records the selected backend.
 
 ```
 shared UDP receiver -> destination owner -> single worker
