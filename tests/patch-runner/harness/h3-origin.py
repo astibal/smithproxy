@@ -65,22 +65,24 @@ async def run(arguments: argparse.Namespace) -> None:
         alpn_protocols=H3_ALPN,
     )
     configuration.load_cert_chain(arguments.certificate, arguments.key)
-    server = await serve(
-        arguments.host,
-        arguments.port,
-        configuration=configuration,
-        create_protocol=Http3OriginProtocol,
-    )
-    print(f"READY h3-origin {arguments.host}:{arguments.port}", flush=True)
+    servers = []
     try:
+        for host in (arguments.host, arguments.host6):
+            if not host:
+                continue
+            servers.append(await serve(host, arguments.port, configuration=configuration,
+                                       create_protocol=Http3OriginProtocol))
+        print(f"READY h3-origin {arguments.host}:{arguments.port} ipv6={arguments.host6}", flush=True)
         await asyncio.Future()
     finally:
-        server.close()
+        for server in servers:
+            server.close()
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="198.18.20.2")
+    parser.add_argument("--host6")
     parser.add_argument("--port", type=int, default=443)
     parser.add_argument("--certificate", required=True)
     parser.add_argument("--key", required=True)

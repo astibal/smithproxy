@@ -251,7 +251,8 @@ std::unique_ptr<openssl_connection> connect_openssl_quic(
 std::unique_ptr<openssl_connection> connect_openssl_quic(
     SSL_CTX* context, const sockaddr* peer, socklen_t peer_size,
     std::string const& server_name, std::string const& alpn, std::string* error = nullptr,
-    HookEvent const* offer = nullptr);
+    HookEvent const* offer = nullptr,
+    std::function<bool(SSL*)> const& configure = {});
 
 /**
  * Nonblocking OpenSSL QUIC listener over a caller-owned UDP socket.

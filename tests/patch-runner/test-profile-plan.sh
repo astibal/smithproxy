@@ -35,4 +35,8 @@ for section in "${PATCH_RUNNER_CAPTURE_SECTIONS[@]}"; do
     [[ " ${full[*]} " == *" $section "* ]]
     [[ $(patch_runner_section_profile "$section") == traffic ]]
 done
+for section in "${PATCH_RUNNER_QUIC_CERT_SECTIONS[@]}"; do
+    [[ " ${full[*]} " == *" $section "* ]]
+    [[ $(patch_runner_section_profile "$section") == traffic ]]
+done
 echo "PASS: full is the ordered union of native, sanity, traffic, lifecycle, corpus and fuzz"
