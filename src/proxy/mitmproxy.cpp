@@ -636,8 +636,10 @@ std::string MitmProxy::to_string(int verbosity) const {
         
         if(verbosity > INF) r << "\n    ";
 
-        std::string const sp_str = number_suffixed(stats_.mtr_up.get()*8) + "/" + number_suffixed(stats_.mtr_down.get()*8);
-        auto speed_str = (sp_str == "0.0/0.0") ? "up/dw: --" : string_format("up/dw: %s", sp_str.c_str());
+        auto const up = stats_.mtr_up.get() * 8;
+        auto const down = stats_.mtr_down.get() * 8;
+        std::string const sp_str = number_suffixed(up) + "/" + number_suffixed(down) + "bps";
+        auto speed_str = (up == 0 && down == 0) ? "speed up/dw: --" : string_format("speed up/dw: %s", sp_str.c_str());
 
 
         r << speed_str;

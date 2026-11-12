@@ -1872,16 +1872,16 @@ static void print_quic_sessions(DiagCli* cli, int flags, bool listener_summary, 
 
             const auto& traffic = session.stream_summary;
             const auto rates = number_suffixed(traffic.upload_bps) + "/" +
-                               number_suffixed(traffic.download_bps);
+                               number_suffixed(traffic.download_bps) + "bps";
             const auto speed = !traffic.traffic_available ? "n/a"
-                             : rates == "0.0/0.0" ? "--" : rates;
+                             : (traffic.upload_bps == 0 && traffic.download_bps == 0) ? "--" : rates;
             auto title_text = string_format("MitM|l:<quic_%s> <+> r:<%s> policy: %s ",
                 session.client.c_str(), target.c_str(), policies.c_str());
             if (verbosity > iINF) title_text += "\n    ";
-            title_text += "up/dw: " + speed;
+            title_text += "speed up/dw: " + speed;
             if (traffic.traffic_available) {
-                title_text += "  transferred up/dw: " + number_suffixed(traffic.upload_bytes) +
-                              "/" + number_suffixed(traffic.download_bytes) + " B";
+                title_text += ", transferred up/dw: " + number_suffixed(traffic.upload_bytes) +
+                              "/" + number_suffixed(traffic.download_bytes) + "B";
             }
             if (verbosity > iINF) {
                 for (const auto policy : traffic.policies) {
@@ -2747,9 +2747,9 @@ int cli_diag_worker_proxy_list(DiagCli *cli, [[maybe_unused]] const char *comman
             }
         }
 
-        std::string sp_str = number_suffixed(up) + "/" + number_suffixed(down);
+        std::string sp_str = number_suffixed(up) + "/" + number_suffixed(down) + "bps";
 
-        auto speed_str = (sp_str == "0.0/0.0") ? "up/dw: --" : string_format("up/dw: %s", sp_str.c_str());
+        auto speed_str = (up == 0 && down == 0) ? "speed up/dw: --" : string_format("speed up/dw: %s", sp_str.c_str());
 
         if(verbosity > iINF) {
             {
