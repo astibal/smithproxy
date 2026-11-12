@@ -21,12 +21,11 @@ namespace {
 // Worker-created descriptors use socle's RAII value wrapper. The downstream
 // descriptor is borrowed; only output and temporary route-lookup FDs are owned.
 using owned_socket = socle::raw::unique<int>;
-void close_socket(int& fd) { if (fd >= 0) ::close(fd); }
 
 // The outbound socket is shared by all B legs on this worker, never connected
 // to a single peer. Original-destination metadata supplies each received path.
 int open_output_socket(int family) {
-    owned_socket socket {socle::socket(family, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0), close_socket};
+    owned_socket socket {socle::socket(family, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0), close_descriptor};
     if (socket.value < 0) {
         ++stats.errors.worker_open_output_socket_ngtcp2_output_socket_failed;
         throw std::runtime_error("ngtcp2 output socket failed");
@@ -52,7 +51,7 @@ int open_output_socket(int family) {
 // only an unsent UDP route lookup, not another TLS/QUIC connection. Its temporary
 // port is replaced by the shared worker socket's port before creating B.
 datagram_endpoint outgoing_path(int fd, sockaddr const* peer, socklen_t size) {
-    owned_socket lookup {socle::socket(peer->sa_family, SOCK_DGRAM | SOCK_CLOEXEC, 0), close_socket};
+    owned_socket lookup {socle::socket(peer->sa_family, SOCK_DGRAM | SOCK_CLOEXEC, 0), close_descriptor};
     datagram_endpoint local, bound;
     local.size = bound.size = sizeof(sockaddr_storage);
     bool const route_selected = lookup.value >= 0 && ::connect(lookup.value, peer, size) == 0;
@@ -401,7 +400,7 @@ private:
 
     SSL_CTX* server_;
     int fd_;
-    owned_socket output_ {-1, close_socket};
+    owned_socket output_ {-1, close_descriptor};
     datagram_receiver receiver_;
     datagram_source source_;
     datagram_observer observer_;

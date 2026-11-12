@@ -195,7 +195,7 @@ std::future<listener_service::session_details> listener_service::request_session
         detail_requests_.push_back(std::move(request));
     }
 #if SMITHPROXY_OPENSSL_QUIC
-    if (wake_fd_ >= 0) (void)::eventfd_write(wake_fd_, 1);
+    if (wake_fd_.value >= 0) (void)::eventfd_write(wake_fd_.value, 1);
 #else
     process_detail_requests();
 #endif
@@ -234,8 +234,6 @@ listener_service::~listener_service() {
     connection_count_ = 0;
     listener_.reset();
     context_.reset();
-    if (udp_fd_ >= 0) ::close(udp_fd_);
-    if (wake_fd_ >= 0) ::close(wake_fd_);
 #endif
 }
 
@@ -248,14 +246,8 @@ void listener_service::fail(std::string message) {
 bool listener_service::open_socket() {
 #if SMITHPROXY_OPENSSL_QUIC
     auto close_open_descriptors = [this]() {
-        if (udp_fd_ >= 0) {
-            ::close(udp_fd_);
-            udp_fd_ = -1;
-        }
-        if (wake_fd_ >= 0) {
-            ::close(wake_fd_);
-            wake_fd_ = -1;
-        }
+        close_descriptor(udp_fd_.value);
+        close_descriptor(wake_fd_.value);
     };
     close_open_descriptors();
     receive_buffer_actual_ = 0;
@@ -265,26 +257,26 @@ bool listener_service::open_socket() {
         fail(std::move(message));
         return false;
     };
-    wake_fd_ = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
-    if (wake_fd_ < 0) {
+    wake_fd_.value = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    if (wake_fd_.value < 0) {
         ++stats.errors.listener_open_socket_eventfd;
         return fail_open(std::string("eventfd: ") + std::strerror(errno));
     }
     if (dispatcher_ && dispatcher_->socket_fd() >= 0) {
-        udp_fd_ = ::fcntl(dispatcher_->socket_fd(), F_DUPFD_CLOEXEC, 0);
-        if (udp_fd_ < 0) {
+        udp_fd_.value = ::fcntl(dispatcher_->socket_fd(), F_DUPFD_CLOEXEC, 0);
+        if (udp_fd_.value < 0) {
             ++stats.errors.listener_open_socket_cannot_duplicate_quic_receiver_socket;
             return fail_open("cannot duplicate QUIC receiver socket");
         }
         socklen_t buffer_size = sizeof(receive_buffer_actual_);
-        if (::getsockopt(udp_fd_, SOL_SOCKET, SO_RCVBUF,
+        if (::getsockopt(udp_fd_.value, SOL_SOCKET, SO_RCVBUF,
                          &receive_buffer_actual_, &buffer_size) != 0) {
             ++stats.errors.listener_shared_socket_receive_buffer_readback;
             return fail_open(std::string("SO_RCVBUF readback: ") + std::strerror(errno));
         }
         sockaddr_storage bound {};
         socklen_t size = sizeof(bound);
-        if (::getsockname(udp_fd_, reinterpret_cast<sockaddr*>(&bound), &size) != 0) {
+        if (::getsockname(udp_fd_.value, reinterpret_cast<sockaddr*>(&bound), &size) != 0) {
             ++stats.errors.listener_open_socket_cannot_inspect_quic_receiver_socket;
             return fail_open("cannot inspect QUIC receiver socket");
         }
@@ -297,8 +289,8 @@ bool listener_service::open_socket() {
         ++stats.errors.listener_open_socket_unsupported_quic_listener_address_family;
         return fail_open("unsupported QUIC listener address family");
     }
-    udp_fd_ = socle::socket(address_family_, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
-    if (udp_fd_ < 0) {
+    udp_fd_.value = socle::socket(address_family_, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
+    if (udp_fd_.value < 0) {
         ++stats.errors.listener_open_socket_socket;
         return fail_open(std::string("socket: ") + std::strerror(errno));
     }
@@ -310,7 +302,7 @@ bool listener_service::open_socket() {
         return fail_open("negative QUIC listener receive buffer");
     }
     if (receive_buffer_requested_ > 0
-        && socle::setsockopt(udp_fd_, SOL_SOCKET, SO_RCVBUF,
+        && socle::setsockopt(udp_fd_.value, SOL_SOCKET, SO_RCVBUF,
                         &receive_buffer_requested_, sizeof(receive_buffer_requested_)) != 0) {
         ++stats.errors.listener_open_socket_so_rcvbuf;
         return fail_open(std::string("SO_RCVBUF: ") + std::strerror(errno));
@@ -318,19 +310,19 @@ bool listener_service::open_socket() {
     // Read back rather than assume: kernels may clamp the request, and Linux
     // reports twice the requested size to include its bookkeeping allowance.
     socklen_t buffer_size = sizeof(receive_buffer_actual_);
-    if (::getsockopt(udp_fd_, SOL_SOCKET, SO_RCVBUF,
+    if (::getsockopt(udp_fd_.value, SOL_SOCKET, SO_RCVBUF,
                      &receive_buffer_actual_, &buffer_size) != 0) {
         ++stats.errors.listener_open_socket_receive_buffer_readback;
         return fail_open(std::string("SO_RCVBUF readback: ") + std::strerror(errno));
     }
 
     int enabled = 1;
-    if (socle::setsockopt(udp_fd_, SOL_SOCKET, SO_REUSEADDR, &enabled, sizeof(enabled)) != 0) {
+    if (socle::setsockopt(udp_fd_.value, SOL_SOCKET, SO_REUSEADDR, &enabled, sizeof(enabled)) != 0) {
         ++stats.errors.listener_open_socket_so_reuseaddr;
         return fail_open(std::string("SO_REUSEADDR: ") + std::strerror(errno));
     }
     if (address_family_ == AF_INET6
-        && socle::setsockopt(udp_fd_, SOL_IPV6, IPV6_V6ONLY, &enabled, sizeof(enabled)) != 0) {
+        && socle::setsockopt(udp_fd_.value, SOL_IPV6, IPV6_V6ONLY, &enabled, sizeof(enabled)) != 0) {
         ++stats.errors.listener_open_socket_ipv6_v6only;
         return fail_open(std::string("IPV6_V6ONLY: ") + std::strerror(errno));
     }
@@ -338,19 +330,19 @@ bool listener_service::open_socket() {
     int const transparent_option = address_family_ == AF_INET ? IP_TRANSPARENT : IPV6_TRANSPARENT;
     int const destination_option = address_family_ == AF_INET ? IP_RECVORIGDSTADDR : IPV6_RECVORIGDSTADDR;
     if (transparent_
-        && socle::setsockopt(udp_fd_, level, transparent_option, &enabled, sizeof(enabled)) != 0) {
+        && socle::setsockopt(udp_fd_.value, level, transparent_option, &enabled, sizeof(enabled)) != 0) {
         ++stats.errors.listener_open_socket_ip_transparent;
         return fail_open(std::string("IP_TRANSPARENT: ") + std::strerror(errno));
     }
     if (transparent_
-        && socle::setsockopt(udp_fd_, level, destination_option,
+        && socle::setsockopt(udp_fd_.value, level, destination_option,
                         &enabled, sizeof(enabled)) != 0) {
         ++stats.errors.listener_open_socket_ip_recvorigdstaddr;
         return fail_open(std::string("IP_RECVORIGDSTADDR: ") + std::strerror(errno));
     }
 
-    auto const flags = ::fcntl(udp_fd_, F_GETFL, 0);
-    if (flags < 0 || ::fcntl(udp_fd_, F_SETFL, flags | O_NONBLOCK) != 0) {
+    auto const flags = ::fcntl(udp_fd_.value, F_GETFL, 0);
+    if (flags < 0 || ::fcntl(udp_fd_.value, F_SETFL, flags | O_NONBLOCK) != 0) {
         ++stats.errors.listener_open_socket_o_nonblock;
         return fail_open(std::string("O_NONBLOCK: ") + std::strerror(errno));
     }
@@ -370,11 +362,11 @@ bool listener_service::open_socket() {
         ipv6->sin6_port = htons(port_);
         address_size = sizeof(*ipv6);
     }
-    if (socle::bind(udp_fd_, reinterpret_cast<sockaddr*>(&address), address_size) != 0) {
+    if (socle::bind(udp_fd_.value, reinterpret_cast<sockaddr*>(&address), address_size) != 0) {
         ++stats.errors.listener_open_socket_bind;
         return fail_open(std::string("bind: ") + std::strerror(errno));
     }
-    if (::getsockname(udp_fd_, reinterpret_cast<sockaddr*>(&address), &address_size) != 0) {
+    if (::getsockname(udp_fd_.value, reinterpret_cast<sockaddr*>(&address), &address_size) != 0) {
         ++stats.errors.listener_open_socket_getsockname;
         return fail_open(std::string("getsockname: ") + std::strerror(errno));
     }
@@ -399,14 +391,8 @@ bool listener_service::prepare() {
     // A previous prepare may have opened the transport successfully and then
     // failed while constructing the worker transport. Do not retain or
     // overwrite those descriptors on a retry.
-    if (udp_fd_ >= 0) {
-        ::close(udp_fd_);
-        udp_fd_ = -1;
-    }
-    if (wake_fd_ >= 0) {
-        ::close(wake_fd_);
-        wake_fd_ = -1;
-    }
+    close_descriptor(udp_fd_.value);
+    close_descriptor(wake_fd_.value);
     stopping_ = false;
     context_ = make_transport_context(backend_, true);
     client_context_ = make_transport_context(backend_, false);
@@ -440,7 +426,7 @@ bool listener_service::prepare() {
     // one incoming and one outgoing transport scheduler, with shared sockets.
     datagram_source source;
     if (dispatcher_) {
-        if (!dispatcher_->attach_socket(udp_fd_)) {
+        if (!dispatcher_->attach_socket(udp_fd_.value)) {
             ++stats.errors.listener_prepare_cannot_retain_quic_receiver_socket;
             fail("cannot retain QUIC receiver socket");
             return false;
@@ -450,7 +436,7 @@ bool listener_service::prepare() {
         };
     }
     listener_ = make_worker_transport(
-        backend_, context_.get(), client_context_.get(), udp_fd_, address_family_,
+        backend_, context_.get(), client_context_.get(), udp_fd_.value, address_family_,
         transparent_ || bool(dispatcher_),
         [this](datagram_view const& datagram) { observe_datagram(datagram); },
         std::move(source), limits_.max_sessions);
@@ -577,9 +563,9 @@ bool listener_service::wait_for_work() {
     // Both engines expose one socket each. Pending certificate jobs and
     // accepted sessions share the same upstream readiness and deadline.
     std::vector<pollfd> descriptors {
-        { udp_fd_, static_cast<short>(listener_->desired_socket_events()
+        { udp_fd_.value, static_cast<short>(listener_->desired_socket_events()
             & (dispatcher_ ? ~POLLIN : ~0)), 0 },
-        { wake_fd_, POLLIN, 0 },
+        { wake_fd_.value, POLLIN, 0 },
         { listener_->upstream_fd(), listener_->upstream_events(), 0 },
     };
     if (dispatcher_) descriptors.push_back(
@@ -596,7 +582,7 @@ bool listener_service::wait_for_work() {
     }
     if (descriptors[1].revents & POLLIN) {
         eventfd_t wakeups = 0;
-        while (::eventfd_read(wake_fd_, &wakeups) == 0) {
+        while (::eventfd_read(wake_fd_.value, &wakeups) == 0) {
         }
     }
     if (descriptors[0].revents != 0) {
@@ -1862,10 +1848,10 @@ std::shared_ptr<transport_connection> listener_service::connect_upstream(
 void listener_service::stop() {
     stopping_ = true;
 #if SMITHPROXY_OPENSSL_QUIC
-    if (wake_fd_ >= 0) {
+    if (wake_fd_.value >= 0) {
         // Nonblocking eventfd may only fail here if it is already saturated;
         // in that case it is already readable and poll() will still wake.
-        ::eventfd_write(wake_fd_, 1);
+        ::eventfd_write(wake_fd_.value, 1);
     }
 #endif
 }
@@ -1873,7 +1859,7 @@ void listener_service::stop() {
 void listener_service::drain() {
     draining_ = true;
 #if SMITHPROXY_OPENSSL_QUIC
-    if (wake_fd_ >= 0) (void)::eventfd_write(wake_fd_, 1);
+    if (wake_fd_.value >= 0) (void)::eventfd_write(wake_fd_.value, 1);
 #endif
 }
 

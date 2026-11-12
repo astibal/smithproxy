@@ -1,6 +1,8 @@
 #ifndef SMITHPROXY_QUIC_WORKER_DISPATCHER_HPP
 #define SMITHPROXY_QUIC_WORKER_DISPATCHER_HPP
 
+#include "proxy/quic/resource.hpp"
+
 #include "proxy/quic/openssl.hpp"
 
 #if SMITHPROXY_OPENSSL_QUIC
@@ -32,7 +34,7 @@ public:
 
     /** Borrow the prepared ingress socket; duplicate it when first attached. */
     bool attach_socket(int fd);
-    int socket_fd() const { return socket_fd_; }
+    int socket_fd() const { return socket_fd_.value; }
     std::size_t size() const { return inboxes_.size(); }
     /** Select by original destination IP, independent of ports and client IP. */
     std::size_t owner(datagram_endpoint const& destination) const;
@@ -67,8 +69,8 @@ private:
     const std::size_t max_packets_;
     const std::size_t max_bytes_;
     std::vector<std::unique_ptr<inbox>> inboxes_;
-    int socket_fd_ = -1;
-    int stop_fd_ = -1;
+    socle::raw::var<int> socket_fd_ {-1, close_descriptor};
+    socle::raw::var<int> stop_fd_ {-1, close_descriptor};
     std::mutex lifecycle_lock_;
     std::thread thread_;
     std::atomic_bool stopping_ {false};

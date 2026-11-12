@@ -1,6 +1,8 @@
 #ifndef SMITHPROXY_QUICSERVICE_HPP
 #define SMITHPROXY_QUICSERVICE_HPP
 
+#include "proxy/quic/resource.hpp"
+
 #include "proxy/quic/transport.hpp"
 #include "proxy/proxymaker_connect.hpp"
 #include "proxy/multiflow/mfmitmproxy.hpp"
@@ -239,8 +241,8 @@ private:
     proxymaker::SessionSetupFactory setup_factory_;
     flow_proxy_factory proxy_factory_;           ///< Production per-stream proxy strategy.
     bool capture_native_;                        ///< Buffer downstream wire records for policy.
-    int udp_fd_ = -1;                            ///< Socket owned by this service.
-    int wake_fd_ = -1;                           ///< eventfd used to interrupt an idle poll.
+    socle::raw::var<int> udp_fd_ {-1, close_descriptor};                            ///< Socket owned by this service.
+    socle::raw::var<int> wake_fd_ {-1, close_descriptor};                           ///< eventfd used to interrupt an idle poll.
     std::atomic_bool stopping_ = false;           ///< Cross-thread stop request.
     std::atomic_size_t connection_count_ = 0;     ///< Sessions currently retained by the loop.
     mutable std::mutex snapshots_mutex_;          ///< Protects only copied diagnostics.

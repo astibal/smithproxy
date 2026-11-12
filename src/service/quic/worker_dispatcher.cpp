@@ -22,10 +22,9 @@ struct worker_dispatcher::inbox {
     std::mutex lock;
     std::deque<datagram_packet> packets;
     std::size_t bytes = 0;
-    int wake = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    socle::raw::var<int> wake {::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC), close_descriptor};
     bool retired = false;
     std::atomic_uint64_t dropped {0};
-    ~inbox() { if (wake >= 0) ::close(wake); }
 };
 
 worker_dispatcher::worker_dispatcher(std::size_t workers, std::size_t max_packets,
@@ -41,14 +40,14 @@ worker_dispatcher::worker_dispatcher(std::size_t workers, std::size_t max_packet
     }
     for (std::size_t i = 0; i < workers; ++i) {
         auto queue = std::make_unique<inbox>();
-        if (queue->wake < 0) {
+        if (queue->wake.value < 0) {
             ++stats.errors.dispatcher_create_quic_inbox_eventfd;
             throw std::system_error(errno, std::generic_category(), "QUIC inbox eventfd");
         }
         inboxes_.push_back(std::move(queue));
     }
-    stop_fd_ = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
-    if (stop_fd_ < 0) {
+    stop_fd_.value = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    if (stop_fd_.value < 0) {
         ++stats.errors.dispatcher_create_quic_receiver_eventfd;
         throw std::system_error(errno, std::generic_category(), "QUIC receiver eventfd");
     }
@@ -56,16 +55,14 @@ worker_dispatcher::worker_dispatcher(std::size_t workers, std::size_t max_packet
 
 worker_dispatcher::~worker_dispatcher() {
     stop();
-    if (socket_fd_ >= 0) ::close(socket_fd_);
-    if (stop_fd_ >= 0) ::close(stop_fd_);
 }
 
 bool worker_dispatcher::attach_socket(int fd) {
     // Setup is serial, before workers launch. Keep the ingress alive even when
     // the first service is destroyed before its siblings during shutdown.
-    if (socket_fd_ >= 0) return true;
-    socket_fd_ = ::fcntl(fd, F_DUPFD_CLOEXEC, 0);
-    return socket_fd_ >= 0;
+    if (socket_fd_.value >= 0) return true;
+    socket_fd_.value = ::fcntl(fd, F_DUPFD_CLOEXEC, 0);
+    return socket_fd_.value >= 0;
 }
 
 std::size_t worker_dispatcher::owner(datagram_endpoint const& destination) const {
@@ -88,7 +85,7 @@ std::size_t worker_dispatcher::owner(datagram_endpoint const& destination) const
 bool worker_dispatcher::start() {
     std::lock_guard lock(lifecycle_lock_);
     if (thread_.joinable()) return error() == 0;
-    if (socket_fd_ < 0 || stopping_) return false;
+    if (socket_fd_.value < 0 || stopping_) return false;
     try {
         thread_ = std::thread([this] { run(); });
     } catch (std::system_error const& error) {
@@ -103,7 +100,7 @@ bool worker_dispatcher::start() {
 void worker_dispatcher::stop() {
     std::lock_guard lock(lifecycle_lock_);
     stopping_ = true;
-    (void)::eventfd_write(stop_fd_, 1);
+    (void)::eventfd_write(stop_fd_.value, 1);
     if (thread_.joinable()) thread_.join();
 }
 
@@ -116,13 +113,13 @@ void worker_dispatcher::retire(std::size_t worker) {
         queue.packets.clear();
         queue.bytes = 0;
         eventfd_t ignored;
-        (void)::eventfd_read(queue.wake, &ignored);
+        (void)::eventfd_read(queue.wake.value, &ignored);
     }
     if (++retired_ == inboxes_.size()) stop();
 }
 
 int worker_dispatcher::wake_fd(std::size_t worker) const {
-    return inboxes_.at(worker)->wake;
+    return inboxes_.at(worker)->wake.value;
 }
 
 bool worker_dispatcher::pop(std::size_t worker, datagram_packet& packet) {
@@ -144,7 +141,7 @@ std::size_t worker_dispatcher::pop_batch(
     // a producer arriving afterwards must publish a fresh wakeup.
     if (count && queue.packets.empty()) {
         eventfd_t ignored;
-        (void)::eventfd_read(queue.wake, &ignored);
+        (void)::eventfd_read(queue.wake.value, &ignored);
     }
     return count;
 }
@@ -183,7 +180,7 @@ std::size_t worker_dispatcher::enqueue_batch(datagram_packet* packets, std::size
             queue.packets.push_back(std::move(packet));
             ++accepted;
         }
-        if (was_empty && !queue.packets.empty()) (void)::eventfd_write(queue.wake, 1);
+        if (was_empty && !queue.packets.empty()) (void)::eventfd_write(queue.wake.value, 1);
     }
     return accepted;
 }
@@ -194,14 +191,14 @@ std::uint64_t worker_dispatcher::dropped(std::size_t worker) const {
 
 void worker_dispatcher::fail(int error) {
     error_ = error;
-    for (auto const& queue : inboxes_) (void)::eventfd_write(queue->wake, 1);
+    for (auto const& queue : inboxes_) (void)::eventfd_write(queue->wake.value, 1);
 }
 
 void worker_dispatcher::run() {
     pthread_setname_np(pthread_self(), "sxy_quic_rx");
     datagram_receiver receiver;
     while (!stopping_) {
-        pollfd descriptors[] {{socket_fd_, POLLIN, 0}, {stop_fd_, POLLIN, 0}};
+        pollfd descriptors[] {{socket_fd_.value, POLLIN, 0}, {stop_fd_.value, POLLIN, 0}};
         auto const ready = ::poll(descriptors, 2, -1);
         if (ready < 0) {
             if (errno == EINTR) continue;
@@ -218,7 +215,7 @@ void worker_dispatcher::run() {
         for (std::size_t i = 0; i < 64 && !stopping_;) {
             std::array<datagram_packet, datagram_receiver::capacity> packets;
             std::size_t valid = 0;
-            auto count = receiver.receive(socket_fd_, [&](datagram_packet&& packet) {
+            auto count = receiver.receive(socket_fd_.value, [&](datagram_packet&& packet) {
                 if (packet.peer.valid() && packet.local.valid()) packets[valid++] = std::move(packet);
             });
             enqueue_batch(packets.data(), valid);

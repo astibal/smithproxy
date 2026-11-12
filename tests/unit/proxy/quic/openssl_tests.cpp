@@ -504,6 +504,8 @@ TEST_F(OpenSslQuic, CreatesTransparentIpv6Listener) {
                      reinterpret_cast<sockaddr*>(&server_address),
                      sizeof(server_address)), 1);
     EXPECT_TRUE(listener->handle_events()) << listener->last_error();
+    listener.reset();
+    EXPECT_GE(fcntl(server_fd, F_GETFD), 0);
     close(client_fd);
     close(server_fd);
 }
@@ -536,6 +538,12 @@ TEST_F(OpenSslQuic, NumericPeerIdentityUsesIpVerificationWithoutSni) {
                                  TLSEXT_NAMETYPE_host_name), nullptr);
     EXPECT_EQ(X509_VERIFY_PARAM_get0_host(
                   SSL_get0_param(connection->handle_native()), 0), nullptr);
+
+    connection.reset();
+    errno = 0;
+    EXPECT_EQ(fcntl(connection_fd, F_GETFD), -1);
+    EXPECT_EQ(errno, EBADF);
+    EXPECT_GE(fcntl(*peer_fd, F_GETFD), 0); // Borrowed peer socket stays live.
 }
 
 TEST_F(OpenSslQuic, OutgoingAdapterCompletesHandshake) {

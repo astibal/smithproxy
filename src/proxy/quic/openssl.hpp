@@ -1,6 +1,8 @@
 #ifndef SMITHPROXY_QUIC_OPENSSL_HPP
 #define SMITHPROXY_QUIC_OPENSSL_HPP
 
+#include "proxy/quic/resource.hpp"
+
 #include <buffer.hpp>
 
 #include <openssl/opensslv.h>
@@ -280,8 +282,9 @@ private:
               std::optional<multiflow::flow_handle> flow,
               std::uint64_t protocol_error = 0);
 
+    // Reverse destruction releases streams, then SSL, then the owned socket.
+    socle::raw::var<int> owned_udp_fd_ {-1, close_descriptor}; ///< -1 for listener-owned sockets.
     unique_ssl connection_;                     ///< Owned OpenSSL QUIC connection.
-    int owned_udp_fd_ = -1;                     ///< Outgoing socket, or -1 for listener-owned.
     datagram_endpoint peer_;                    ///< Explicit outgoing peer; shared BIO peer is not per connection.
     std::map<multiflow::flow_id, std::unique_ptr<stream_state>> streams_; ///< Live streams.
     std::map<event_key, multiflow::event> events_; ///< Pending coalesced notifications.
