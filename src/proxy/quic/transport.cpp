@@ -33,7 +33,7 @@ public:
     }
     std::chrono::nanoseconds timeout() const override {
         std::chrono::nanoseconds result {-1};
-        for (auto* ssl : {listener_->native_handle(), upstream_.get()}) {
+        for (auto* ssl : {listener_->handle_native(), upstream_.get()}) {
             timeval tv {}; int infinite = 1;
             if (SSL_get_event_timeout(ssl, &tv, &infinite) != 1 || infinite) continue;
             // Keep OpenSSL's established millisecond polling granularity. The
