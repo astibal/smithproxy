@@ -1,5 +1,6 @@
 #include <vars.hpp>
 #include "proxy/quic/error_stats.hpp"
+#include "proxy/quic/log.hpp"
 #ifdef SMITHPROXY_ENABLE_NGTCP2
 #include "proxy/quic/ngtcp2.hpp"
 #endif
@@ -75,6 +76,16 @@ TEST_F(QuicBackendSelection, RejectsUnknownAndEmptyOverrides) {
     }
 }
 #endif
+
+TEST(QuicLogging, RegistersEveryTopicBeforeTraffic) {
+    quic::logging::initialize();
+    auto logger = logan::get();
+    for (auto* topic : {"com.quic", "com.quic.cb.info", "com.quic.cb.alpn",
+                        "com.quic.cb.msg", "com.quic.cb.session", "com.quic.cb.verify",
+                        "com.quic.mitm", "com.quic.ocsp", "com.quic.stream", "com.quic.transport"}) {
+        EXPECT_NE(logger->topic_db_.find(topic), logger->topic_db_.end()) << topic;
+    }
+}
 
 TEST(QuicCertificateCallbackIdentity, RejectsReusedBorrowedHandles) {
     EXPECT_TRUE(quic::detail::same_certificate_callback_identity(
