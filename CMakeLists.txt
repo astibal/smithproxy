@@ -869,6 +869,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 src/service/gre_broker.cpp
                 tests/unit/service/gre_broker_tests.cpp
         )
+        # Inject shutdown exactly between readiness and accept in GRE tests.
+        target_link_options(sx_gtests_gre_broker PRIVATE "-Wl,--wrap=accept4")
         add_executable(sx_gtests_cli_broker
                 src/service/cli/cli_broker.cpp
                 tests/unit/service/cli_broker_tests.cpp

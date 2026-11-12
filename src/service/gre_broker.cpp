@@ -81,7 +81,7 @@ int listen_seqpacket(const std::string& path) {
     sockaddr_un address{};
     socklen_t length = 0;
     if(unix_address(path, address, length) != 0) return -1;
-    const int fd = ::socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
+    const int fd = ::socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
     if(fd < 0) return -1;
     if(::bind(fd, reinterpret_cast<sockaddr*>(&address), length) != 0) {
         const int saved = errno;
@@ -366,6 +366,52 @@ int serve_connection(int fd, const sx::comm::gre::Profile& profile,
     ::_exit(serve_connection(fd, profile, counters) == 0 ? EXIT_SUCCESS : EXIT_FAILURE);
 }
 
+// Wait without a check-then-sleep gap: SIGINT/SIGTERM stay blocked between
+// checking the flag and entering ppoll, which atomically restores their mask.
+// The standalone broker owns signal handling on this single-threaded path.
+// Returns a blocking client socket, or -1/EINTR when shutdown was requested.
+int accept_until_stopped(int listener) {
+    sigset_t stop_signals{}, previous_mask{};
+    ::sigemptyset(&stop_signals);
+    ::sigaddset(&stop_signals, SIGINT);
+    ::sigaddset(&stop_signals, SIGTERM);
+    if(::sigprocmask(SIG_BLOCK, &stop_signals, &previous_mask) != 0) return -1;
+
+    int client = -1;
+    int error = EINTR;
+    while(!stop_requested) {
+        pollfd descriptor{listener, POLLIN, 0};
+        const int ready = ::ppoll(&descriptor, 1, nullptr, &previous_mask);
+        if(ready < 0) {
+            if(errno == EINTR) continue;
+            error = errno;
+            break;
+        }
+        if(stop_requested) break;
+        if((descriptor.revents & POLLIN) == 0) {
+            error = EIO;
+            break;
+        }
+
+        // Readiness can disappear before accept. Only the listener is
+        // nonblocking; accepted connections retain the server's blocking I/O.
+        client = ::accept4(listener, nullptr, nullptr, SOCK_CLOEXEC);
+        if(client >= 0) break;
+        if(errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) continue;
+        error = errno;
+        break;
+    }
+
+    const int restored = ::sigprocmask(SIG_SETMASK, &previous_mask, nullptr);
+    if(restored != 0) {
+        error = errno;
+        if(client >= 0) ::close(client);
+        client = -1;
+    }
+    if(client < 0) errno = error;
+    return client;
+}
+
 void request_stop(int) { stop_requested = 1; }
 
 } // namespace
@@ -454,19 +500,20 @@ int stop_local_broker() {
 
 int run_standalone_broker(const std::string& path, Profile profile) {
     if(profile.destination.empty()) { errno = EINVAL; return -1; }
-    const int listener = listen_seqpacket(path);
-    if(listener < 0) return -1;
-
     struct sigaction action{};
     action.sa_handler = request_stop;
     ::sigemptyset(&action.sa_mask);
-    ::sigaction(SIGINT, &action, nullptr);
-    ::sigaction(SIGTERM, &action, nullptr);
+    if(::sigaction(SIGINT, &action, nullptr) != 0 ||
+       ::sigaction(SIGTERM, &action, nullptr) != 0) return -1;
+
+    // Install handlers before publishing the socket path to clients.
+    const int listener = listen_seqpacket(path);
+    if(listener < 0) return -1;
 
     auto counters = std::make_shared<SharedStats>();
     int result = 0;
     while(!stop_requested) {
-        const int client = ::accept4(listener, nullptr, nullptr, SOCK_CLOEXEC);
+        const int client = accept_until_stopped(listener);
         if(client < 0) {
             if(errno == EINTR) continue;
             result = -1;

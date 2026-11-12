@@ -2,15 +2,35 @@
 
 #include <atomic>
 #include <chrono>
+#include <cerrno>
+#include <cstring>
 #include <filesystem>
 #include <string>
 #include <thread>
 
 #include <signal.h>
 #include <sys/wait.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 #include <gtest/gtest.h>
+
+// Test-only linker interception: consume the connection that made the listener
+// readable, then deliver shutdown before the real accept. The original blocking
+// implementation hangs here; the fixed listener retries through atomic ppoll.
+static int stop_before_accept = 0;
+extern "C" int __real_accept4(int, sockaddr*, socklen_t*, int);
+extern "C" int __wrap_accept4(int fd, sockaddr* address, socklen_t* length, int flags) {
+    if(stop_before_accept != 0) {
+        const int signal = stop_before_accept;
+        stop_before_accept = 0;
+        const int pending = __real_accept4(fd, nullptr, nullptr, SOCK_CLOEXEC);
+        if(pending < 0) ::_exit(90);
+        ::close(pending);
+        ::raise(signal);
+    }
+    return __real_accept4(fd, address, length, flags);
+}
 
 namespace {
 
@@ -30,6 +50,69 @@ bool wait_for_path(const std::string& path, bool expected) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     return false;
+}
+
+// Bound shutdown assertions so a regression fails instead of hanging CTest.
+// Always reap the child, including on the failure path.
+bool exited_cleanly(pid_t child) {
+    int status = 0;
+    for(unsigned attempt = 0; attempt < 200; ++attempt) {
+        const pid_t result = ::waitpid(child, &status, WNOHANG);
+        if(result == child) return WIFEXITED(status) && WEXITSTATUS(status) == EXIT_SUCCESS;
+        if(result < 0 && errno != EINTR) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    ::kill(child, SIGKILL);
+    while(::waitpid(child, &status, 0) < 0 && errno == EINTR) {}
+    return false;
+}
+
+void check_standalone_shutdown(int signal, bool race_accept) {
+    char directory_template[] = "./smithproxy-gre-stop-test-XXXXXX";
+    char* directory = ::mkdtemp(directory_template);
+    ASSERT_NE(directory, nullptr);
+    const std::string path = std::string(directory) + "/gre.sock";
+
+    stop_before_accept = race_accept ? signal : 0;
+    const pid_t child = start_broker(path);
+    stop_before_accept = 0;
+    ASSERT_GT(child, 0);
+    const bool ready = wait_for_path(path, true);
+    EXPECT_TRUE(ready);
+
+    if(ready && race_accept) {
+        const int client = ::socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
+        sockaddr_un address{};
+        address.sun_family = AF_UNIX;
+        std::memcpy(address.sun_path, path.c_str(), path.size() + 1);
+        const bool connected = client >= 0 &&
+            ::connect(client, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0;
+        EXPECT_TRUE(connected);
+        if(client >= 0) ::close(client);
+        if(!connected) ::kill(child, signal);
+    } else {
+        EXPECT_EQ(::kill(child, signal), 0);
+    }
+
+    EXPECT_TRUE(exited_cleanly(child));
+    EXPECT_FALSE(std::filesystem::exists(path));
+    // Also remove the stale socket after a failed assertion, keeping repeats clean.
+    ::unlink(path.c_str());
+    EXPECT_EQ(::rmdir(directory), 0);
+}
+
+TEST(GreBrokerTest, ShutdownCannotBeLostBetweenReadinessAndAccept) {
+    for(const int signal : {SIGTERM, SIGINT}) {
+        SCOPED_TRACE(signal);
+        check_standalone_shutdown(signal, true);
+    }
+}
+
+TEST(GreBrokerTest, ShutdownWakesIdleListenerWithoutClientTraffic) {
+    for(const int signal : {SIGTERM, SIGINT}) {
+        SCOPED_TRACE(signal);
+        check_standalone_shutdown(signal, false);
+    }
 }
 
 TEST(GreBrokerTest, ExternalClientConnectsAndBrokerRemovesOwnedSocket) {
