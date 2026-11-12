@@ -42,8 +42,9 @@ public:
     bool send_blocked() const { return !pending_output_.empty(); }
     bool established() const;
     bool ended() const { return closed_; }
-    ngtcp2_conn* native() const { return conn_.value; }
-    SSL* native_handle() const override { return ssl_.value; }
+    // Borrowed transport and TLS handles; ownership stays with this connection.
+    ngtcp2_conn* handle() const { return conn_.value; }
+    SSL* handle_native() const override { return ssl_.value; }
     datagram_endpoint peer_endpoint() const override { return remote_; }
     bool handshake_complete() const override { return established(); }
     bool closed() const override { return closed_; }

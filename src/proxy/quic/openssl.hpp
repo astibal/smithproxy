@@ -240,7 +240,7 @@ public:
     bool inject_datagram(const unsigned char* data, std::size_t size,
                          const BIO_ADDR* peer, const BIO_ADDR* local);
 
-    SSL* native_handle() const { return connection_.get(); } ///< Borrowed OpenSSL handle.
+    SSL* handle_native() const { return connection_.get(); } ///< Borrowed OpenSSL handle.
     /** Return the current datagram peer copied from the connection BIO. */
     datagram_endpoint peer_endpoint() const;
     /** True once TLS 1.3 authentication and QUIC parameter exchange complete. */
@@ -359,7 +359,7 @@ public:
     /** Bind ClientHello's tuple to later authenticated CID changes on this SSL. */
     bool bind_connection_route(SSL* connection);
     bool local_address_enabled() const { return local_address_enabled_; }
-    SSL* native_handle() const { return listener_.get(); }
+    SSL* handle_native() const { return listener_.get(); }
 
 private:
     openssl_listener(std::unique_ptr<observer_state> observer,

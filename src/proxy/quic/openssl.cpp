@@ -1,4 +1,5 @@
 #include "proxy/quic/error_stats.hpp"
+#include "proxy/quic/tls_log.hpp"
 #include <privileged_socket.hpp>
 #include <ancillary_ifindex.hpp>
 #include "proxy/quic/openssl.hpp"
@@ -151,6 +152,7 @@ unique_ssl_ctx make_openssl_quic_context(bool server) {
     if (context && server) {
         SSL_CTX_set_keylog_callback(context.get(), append_quic_keylog_line);
     }
+    if (context) SSL_CTX_set_info_callback(context.get(), logging::tls_info);
     return context;
 #else
     (void)server;
@@ -412,8 +414,17 @@ int connection_route_index() {
 }
 
 /** Keep CID routing exact after either side rotates its connection ID. */
-void observe_connection_id(int, int, int content_type, void const* data,
-                           std::size_t size, SSL*, void* argument) noexcept {
+void observe_connection_id(int write, int version, int content_type, void const* data,
+                           std::size_t size, SSL* ssl, void* argument) noexcept {
+    try {
+        if (*logging::message().level() >= DUM) {
+            logging::message().dum("openssl ssl=%p %s version=0x%x type=%d bytes=%zu",
+                                   static_cast<void*>(ssl), write ? "TX" : "RX", version, content_type, size);
+        }
+    } catch (...) {
+        ++stats.errors.logging_message_exception;
+    }
+    if (!argument) return;
     if (content_type != SSL3_RT_QUIC_FRAME_FULL || !data || size == 0) return;
     auto const type = parse_varint(static_cast<unsigned char const*>(data), size);
     if (!type || type.value != 0x18) return;
@@ -1016,6 +1027,8 @@ void openssl_connection::progress_transport() {
             auto const error = SSL_get_error(connection_.get(), result);
             if (error != SSL_ERROR_WANT_READ && error != SSL_ERROR_WANT_WRITE
                 && error != SSL_ERROR_WANT_X509_LOOKUP) {
+                logging::info().war("openssl ssl=%p handshake failed error=%d",
+                                    static_cast<void*>(connection_.get()), error);
                 closed_ = true;
                 emit(multiflow::event_type::connection_close, std::nullopt,
                      static_cast<std::uint64_t>(error));
@@ -1215,9 +1228,9 @@ std::unique_ptr<openssl_connection> connect_openssl_quic(
         // Bootstrap once after policy/hooks are installed. OpenSSL starts the
         // channel here; subsequent transport ticks belong to the worker.
         ERR_clear_error();
-        auto const result = SSL_do_handshake(connection->native_handle());
+        auto const result = SSL_do_handshake(connection->handle_native());
         if (result != 1) {
-            auto const reason = SSL_get_error(connection->native_handle(), result);
+            auto const reason = SSL_get_error(connection->handle_native(), result);
             if (reason != SSL_ERROR_WANT_READ && reason != SSL_ERROR_WANT_WRITE
                 && reason != SSL_ERROR_WANT_X509_LOOKUP) {
                 ++stats.errors.openssl_connect_start_shared_quic_handshake;
@@ -1257,6 +1270,9 @@ multiflow::flow_handle openssl_connection::attach_stream(unique_ssl stream, bool
         : (stream_type == SSL_STREAM_TYPE_READ
             ? multiflow::direction::receive_only
             : multiflow::direction::send_only);
+    logging::stream().deb("openssl ssl=%p stream=%llu opened incoming=%d type=%d",
+                          static_cast<void*>(connection_.get()),
+                          static_cast<unsigned long long>(SSL_get_stream_id(stream.get())), incoming, stream_type);
     multiflow::flow_handle handle { next_internal_id_++, next_generation_++ };
     streams_.emplace(handle.id,
                      std::make_unique<stream_state>(handle, std::move(stream), stream_direction));

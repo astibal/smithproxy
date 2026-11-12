@@ -1,3 +1,4 @@
+#include "proxy/quic/log.hpp"
 #include <gtest/gtest.h>
 #include "../../tls/ocsp_fixture.hpp"
 
@@ -825,7 +826,7 @@ TEST(QuicTestbed, ConcurrentVerifiedMitmSessionsAndStreams) {
         std::this_thread::sleep_for(1ms);
     }
     ASSERT_TRUE(direct->handshake_complete())
-        << "verify=" << SSL_get_verify_result(direct->native_handle())
+        << "verify=" << SSL_get_verify_result(direct->handle_native())
         << " errors=" << quic::openssl_error_stack();
     direct->close();
 
@@ -885,7 +886,7 @@ TEST(QuicTestbed, ConcurrentVerifiedMitmSessionsAndStreams) {
         << " handshake_failures=" << handshake_diagnostics.handshake_failures
         << " upstream_failures=" << handshake_diagnostics.upstream_failures
         << " first_verify="
-        << SSL_get_verify_result(clients.front().connection->native_handle())
+        << SSL_get_verify_result(clients.front().connection->handle_native())
         << " openssl=" << quic::openssl_error_stack();
     ASSERT_EQ(proxy.connection_count(), client_count)
         << "accepted=" << handshake_diagnostics.accepted_sessions
@@ -904,7 +905,7 @@ TEST(QuicTestbed, ConcurrentVerifiedMitmSessionsAndStreams) {
         ASSERT_TRUE(client.connection->handshake_complete());
         EXPECT_EQ(client.connection->negotiated_alpn(), "h3");
         std::unique_ptr<X509, decltype(&X509_free)> peer(
-            SSL_get1_peer_certificate(client.connection->native_handle()), X509_free);
+            SSL_get1_peer_certificate(client.connection->handle_native()), X509_free);
         ASSERT_NE(peer, nullptr);
         EXPECT_EQ(X509_check_host(peer.get(), test_sni, std::strlen(test_sni), 0, nullptr), 1);
         EXPECT_EQ(X509_NAME_cmp(X509_get_issuer_name(peer.get()),
@@ -1044,7 +1045,7 @@ TEST_P(QuicCertificatePolicy, EnforcesPolicyBeforeActivationAndData) {
     if (accepted) {
         EXPECT_EQ(proxy.diagnostics().upstream_failures, 0U);
         if (allow) {
-            unique_x509 peer(SSL_get1_peer_certificate(client->native_handle()), X509_free);
+            unique_x509 peer(SSL_get1_peer_certificate(client->handle_native()), X509_free);
             ASSERT_NE(peer, nullptr);
             EXPECT_EQ(X509_NAME_cmp(X509_get_subject_name(peer.get()),
                                     X509_get_issuer_name(peer.get())), 0);
@@ -1118,10 +1119,10 @@ TEST(QuicTestbed, ConfiguredIdentityIncludesIntermediateChain) {
             reinterpret_cast<sockaddr const*>(&address.address), address.size, test_sni);
         ASSERT_NE(client, nullptr);
         ASSERT_TRUE(await_handshake(*client));
-        EXPECT_EQ(SSL_get_verify_result(client->native_handle()), X509_V_OK);
-        unique_x509 certificate(SSL_get1_peer_certificate(client->native_handle()), X509_free);
+        EXPECT_EQ(SSL_get_verify_result(client->handle_native()), X509_V_OK);
+        unique_x509 certificate(SSL_get1_peer_certificate(client->handle_native()), X509_free);
         EXPECT_EQ(fingerprint(certificate.get()), expected);
-        EXPECT_GE(sk_X509_num(SSL_get_peer_cert_chain(client->native_handle())), 2);
+        EXPECT_GE(sk_X509_num(SSL_get_peer_cert_chain(client->handle_native())), 2);
         client->close();
     }
 }
@@ -1306,7 +1307,7 @@ TEST(QuicTestbed, ClientRejectsMitmCertificateWithoutTestCaTrust) {
     ASSERT_NE(client, nullptr) << error;
 
     EXPECT_FALSE(await_handshake(*client));
-    EXPECT_NE(SSL_get_verify_result(client->native_handle()), X509_V_OK);
+    EXPECT_NE(SSL_get_verify_result(client->handle_native()), X509_V_OK);
     client->close();
 }
 
@@ -1848,6 +1849,18 @@ int main(int argc, char** argv) {
 #if SMITHPROXY_OPENSSL_QUIC
     Log::init();
     Log::get()->level(WAR);
+    // Opt-in diagnostics for testing the same callbacks with tracing enabled.
+    if (std::getenv("SMITHPROXY_QUIC_TEST_TRACE")) {
+        Log::get()->level(DUM);
+        sx::quic::logging::initialize();
+        for (auto* topic : {&sx::quic::log(), &sx::quic::logging::info(),
+                            &sx::quic::logging::alpn(), &sx::quic::logging::message(),
+                            &sx::quic::logging::session(), &sx::quic::logging::verify(),
+                            &sx::quic::logging::mitm(), &sx::quic::logging::ocsp(),
+                            &sx::quic::logging::stream(), &sx::quic::logging::transport()}) {
+            topic->level(DUM);
+        }
+    }
     if (!create_test_pki()) return 2;
     auto& factory = SSLFactory::factory();
     factory.certs_path() = test_pki_directory + "/";

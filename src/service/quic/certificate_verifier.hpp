@@ -1,4 +1,5 @@
 #include "proxy/quic/error_stats.hpp"
+#include "proxy/quic/log.hpp"
 #pragma once
 
 #include "proxy/proxymaker_connect.hpp"
@@ -73,7 +74,7 @@ public:
             ++stats.errors.verifier_install_callback_state_failed;
             return false;
         }
-        SSL_set_verify(ssl, SSL_VERIFY_PEER, SSLCom::ssl_client_vrfy_callback);
+        SSL_set_verify(ssl, SSL_VERIFY_PEER, verify_chain);
 
         // OpenSSL 3.5's SSL_new_from_listener() exposes its inner TLS object
         // to verification callbacks, unlike SSL_new(). Bind the borrowed
@@ -116,6 +117,8 @@ public:
         }
 
         started_ = true;
+        logging::verify().deb("verifier=%p B handshake complete verify-result=%ld",
+                              static_cast<void*>(this), SSL_get_verify_result(ssl));
         if (SSL_get0_listener(ssl)) {
             // The handshake has bound its TLS callback state. Do not retain
             // a per-frame observer in the application's steady-state path.
@@ -144,6 +147,21 @@ public:
     }
 
 private:
+    // Preserve TLS policy semantics and expose its per-chain-step decision.
+    static int verify_chain(int trusted, X509_STORE_CTX* context) {
+        int const accepted = SSLCom::ssl_client_vrfy_callback(trusted, context);
+        try {
+            if (context) {
+                logging::verify().deb("chain=%p depth=%d error=%d trusted=%d accepted=%d",
+                                      static_cast<void*>(context), X509_STORE_CTX_get_error_depth(context),
+                                      X509_STORE_CTX_get_error(context), trusted, accepted);
+            }
+        } catch (...) {
+            ++stats.errors.logging_verify_exception;
+        }
+        return accepted;
+    }
+
     // Attach only the non-owning SSLCom slot on the inner TLS object. Its
     // lifetime is nested inside owner_; duplicating our owning slot would
     // double-delete the verifier. Failure keeps admission closed.
@@ -257,6 +275,7 @@ private:
                 return;
             }
 
+            logging::ocsp().deb("snapshot=%p revocation checks started", static_cast<void*>(snapshot.get()));
             int verdict = -1;
             try {
                 bool const accepted = SSLCom::status_resp_callback(snapshot->sslcom_ssl, nullptr) == 1
@@ -264,9 +283,13 @@ private:
                 verdict = accepted ? 1 : -1;
             } catch (...) {
                 ++stats.errors.certificate_verifier_execute_exception;
+                logging::ocsp().err("snapshot=%p revocation checks raised an exception",
+                                    static_cast<void*>(snapshot.get()));
                 // A worker failure must never turn into certificate acceptance.
                 verdict = -1;
             }
+            if (verdict > 0) logging::ocsp().dia("snapshot=%p revocation accepted", static_cast<void*>(snapshot.get()));
+            else logging::ocsp().war("snapshot=%p revocation rejected", static_cast<void*>(snapshot.get()));
             if (auto output = result.lock()) {
                 output->store(verdict, std::memory_order_release);
             }
@@ -286,6 +309,7 @@ private:
         if (pending_.fetch_add(1) >= max_pending_revocations) {
             --pending_;
             ++stats.errors.verifier_revocation_capacity_exhausted;
+            logging::ocsp().war("revocation capacity exhausted: limit=%u", max_pending_revocations);
             return false;
         }
         // Until a task exists, this guard owns the reserved pending slot.
@@ -314,6 +338,9 @@ private:
 
     // Store an immediate event-loop decision in the same result used by workers.
     int finish(int verdict) {
+        if (verdict < 0) logging::verify().war("verifier=%p certificate policy rejected", static_cast<void*>(this));
+        else logging::verify().dia("verifier=%p certificate accepted policy-exception=%d",
+                                   static_cast<void*>(this), exception_);
         result_->store(verdict);
         return verdict;
     }

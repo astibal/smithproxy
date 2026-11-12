@@ -38,11 +38,19 @@ namespace {
 int select_h3(SSL*, const unsigned char** output, unsigned char* output_size,
               const unsigned char* input, unsigned input_size, void*) {
     static constexpr unsigned char supported[] = { 2, 'h', '3' };
-    return SSL_select_next_proto(const_cast<unsigned char**>(output), output_size,
-                                 supported, sizeof(supported), input, input_size)
-            == OPENSSL_NPN_NEGOTIATED
-        ? SSL_TLSEXT_ERR_OK
-        : SSL_TLSEXT_ERR_ALERT_FATAL;
+    bool const accepted = SSL_select_next_proto(const_cast<unsigned char**>(output), output_size,
+                                                supported, sizeof(supported), input, input_size)
+        == OPENSSL_NPN_NEGOTIATED;
+    try {
+        if (accepted) {
+            logging::alpn().deb("A selected h3 from %u bytes of ALPN offers", input_size);
+        } else {
+            logging::alpn().war("A rejected ClientHello: h3 not offered");
+        }
+    } catch (...) {
+        ++stats.errors.logging_alpn_exception;
+    }
+    return accepted ? SSL_TLSEXT_ERR_OK : SSL_TLSEXT_ERR_ALERT_FATAL;
 }
 
 bool use_pem_credentials(SSL_CTX* context, const std::string& certificate,
@@ -130,7 +138,7 @@ listener_service::listener_service(std::uint16_t port, std::string certificate,
       verify_upstream_(verify_upstream), lifecycle_(lifecycle), limits_(limits),
       setup_factory_(std::move(setup_factory)),
       proxy_factory_(std::move(proxy_factory)), capture_native_(capture_native) {
-    (void)log();
+    logging::initialize();
 }
 
 void listener_service::assign_worker(std::shared_ptr<worker_dispatcher> dispatcher,
@@ -663,7 +671,7 @@ void listener_service::attach_staged_upstream(session& value) {
 
     // The certificate callback knows the transparent tuple before OpenSSL
     // publishes the accepted connection object. Preserve it across that gap.
-    auto* key = value.downstream->native_handle();
+    auto* key = value.downstream->handle_native();
     if (auto pending = certificate_jobs_.find(key); pending != certificate_jobs_.end()) {
         value.created = std::min(value.created, pending->second.created);
         value.client_endpoint = pending->second.client;
@@ -714,7 +722,7 @@ bool listener_service::prepare_resumed_upstream(session& value) {
     value.upstream = transparent_
         ? connect_upstream(value.target_endpoint, server_name, value.setup.get())
         : connect_upstream(server_name, value.setup.get());
-    dispatcher_bindings_.erase(value.downstream->native_handle());
+    dispatcher_bindings_.erase(value.downstream->handle_native());
 
     if(!value.upstream) {
         ++upstream_failures_;
@@ -737,7 +745,7 @@ bool listener_service::accept_connections() {
         if (sessions_.size() >= limits_.max_sessions) {
             ++session_limit_rejections_;
             log().war("session rejected: listener limit %zu reached", limits_.max_sessions);
-            if (auto binding = dispatcher_bindings_.find(connection->native_handle());
+            if (auto binding = dispatcher_bindings_.find(connection->handle_native());
                 binding != dispatcher_bindings_.end()) {
                 pending_captures_.erase(binding->second.association);
                 capture_routes_.erase(binding->second.association);
@@ -752,7 +760,7 @@ bool listener_service::accept_connections() {
         incoming.downstream = std::move(connection);
         incoming.keylog = incoming.downstream->keylog();
         incoming.client_endpoint = incoming.downstream->peer_endpoint();
-        auto* ssl = incoming.downstream->native_handle();
+        auto* ssl = incoming.downstream->handle_native();
         if (auto binding = dispatcher_bindings_.find(ssl);
             binding != dispatcher_bindings_.end()) {
             if(binding->second.client.valid()) incoming.client_endpoint = binding->second.client;
@@ -781,9 +789,9 @@ bool listener_service::accept_connections() {
         ++accepted_sessions_;
 
         auto const& value = sessions_.back();
-        log().inf("session %llu accepted from %s",
-                  static_cast<unsigned long long>(value.id),
-                  endpoint_text(value.client_endpoint).c_str());
+        logging::session().inf("session %llu accepted from %s",
+                               static_cast<unsigned long long>(value.id),
+                               endpoint_text(value.client_endpoint).c_str());
     }
     return accepted_any;
 }
@@ -813,8 +821,8 @@ void listener_service::progress_handshake(
 
     if (now - value.created >= lifecycle_.handshake_timeout) {
         ++handshake_timeouts_;
-        log().war("session %llu handshake timed out",
-                  static_cast<unsigned long long>(value.id));
+        logging::session().war("session %llu handshake timed out",
+                               static_cast<unsigned long long>(value.id));
         start_draining(value, now, 0, "handshake timeout");
         return;
     }
@@ -827,22 +835,22 @@ void listener_service::progress_handshake(
     // A resumed handshake does not enter OpenSSL's certificate callback.
     // Prepare its normal verified forwarding leg before publishing outcomes.
     if(verify_upstream_ && !value.upstream && value.downstream->handshake_complete()
-       && SSL_session_reused(value.downstream->native_handle())) {
+       && SSL_session_reused(value.downstream->handle_native())) {
         if(!prepare_resumed_upstream(value)) {
             start_draining(value, now, 0, "upstream connect failed");
             return;
         }
     }
 
-    if(!hook_outcome(value.setup.get(), value.downstream->native_handle(), true)) {
+    if(!hook_outcome(value.setup.get(), value.downstream->handle_native(), true)) {
         start_draining(value, now, 0, "downstream hook rejected");
         return;
     }
 
     if (value.downstream->closed()) {
         ++handshake_failures_;
-        log().war("session %llu downstream handshake failed",
-                  static_cast<unsigned long long>(value.id));
+        logging::info().war("session %llu downstream handshake failed",
+                            static_cast<unsigned long long>(value.id));
         start_draining(value, now, 0, "downstream handshake failed");
         return;
     }
@@ -866,14 +874,14 @@ void listener_service::progress_handshake(
     if (!value.upstream) return;
 
     value.upstream->progress_transport();
-    if(!hook_outcome(value.setup.get(), value.upstream->native_handle(), false)) {
+    if(!hook_outcome(value.setup.get(), value.upstream->handle_native(), false)) {
         start_draining(value, now, 0, "upstream hook rejected");
         return;
     }
     if (value.upstream->closed()) {
         ++upstream_failures_;
-        log().war("session %llu upstream handshake failed",
-                  static_cast<unsigned long long>(value.id));
+        logging::info().war("session %llu upstream handshake failed",
+                            static_cast<unsigned long long>(value.id));
         start_draining(value, now, 0, "upstream handshake failed");
         return;
     }
@@ -884,9 +892,9 @@ void listener_service::progress_handshake(
 
     // The same upstream supplies the certificate and carries application data.
     // Keep this guard for resumed downstreams, which skip certificate callbacks.
-    auto* verifier = certificate_verifier::get(value.upstream->native_handle());
-    int const verdict = verifier ? verifier->progress(value.upstream->native_handle())
-        : (SSL_get_verify_result(value.upstream->native_handle()) == X509_V_OK ? 1 : -1);
+    auto* verifier = certificate_verifier::get(value.upstream->handle_native());
+    int const verdict = verifier ? verifier->progress(value.upstream->handle_native())
+        : (SSL_get_verify_result(value.upstream->handle_native()) == X509_V_OK ? 1 : -1);
     if (verify_upstream_ && verdict == 0) return;
     if (verify_upstream_ && verdict < 0) {
         ++upstream_failures_;
@@ -902,12 +910,15 @@ void listener_service::progress_handshake(
     auto const upstream_alpn = value.upstream->negotiated_alpn();
     if (downstream_alpn.empty() || downstream_alpn != upstream_alpn) {
         ++alpn_failures_;
-        log().war("session %llu ALPN mismatch downstream='%s' upstream='%s'",
-                  static_cast<unsigned long long>(value.id),
-                  downstream_alpn.c_str(), upstream_alpn.c_str());
+        logging::alpn().war("session %llu ALPN mismatch downstream='%s' upstream='%s'",
+                            static_cast<unsigned long long>(value.id),
+                            downstream_alpn.c_str(), upstream_alpn.c_str());
         start_draining(value, now, 1, "ALPN mismatch");
         return;
     }
+
+    logging::alpn().dia("session %llu A/B negotiated '%s'",
+                        static_cast<unsigned long long>(value.id), downstream_alpn.c_str());
 
     auto const proxy_limits = multiflow::proxy_limits {
         limits_.max_streams_per_session,
@@ -946,10 +957,10 @@ void listener_service::progress_handshake(
 
     value.state = session_state::active;
     value.last_activity = now;
-    log().inf("session %llu active sni='%s' alpn='%s' target=%s",
-              static_cast<unsigned long long>(value.id),
-              value.downstream->server_name().c_str(),
-              downstream_alpn.c_str(), endpoint_text(value.target_endpoint).c_str());
+    logging::session().inf("session %llu active sni='%s' alpn='%s' target=%s",
+                           static_cast<unsigned long long>(value.id),
+                           value.downstream->server_name().c_str(),
+                           downstream_alpn.c_str(), endpoint_text(value.target_endpoint).c_str());
 }
 
 void listener_service::progress_active(
@@ -1132,7 +1143,7 @@ std::string listener_service::handshake_phase(session const& value) const {
     if (value.state == session_state::draining) return value.last_handshake_phase;
     if (value.state == session_state::active) return "complete";
     if (value.downstream) {
-        auto const job = certificate_jobs_.find(value.downstream->native_handle());
+        auto const job = certificate_jobs_.find(value.downstream->handle_native());
         if (job != certificate_jobs_.end()) {
             switch (job->second.state) {
             case certificate_state::queued: return "upstream-connect";
@@ -1149,7 +1160,7 @@ std::string listener_service::handshake_phase(session const& value) const {
     }
     if (value.upstream && !value.upstream->handshake_complete()) return "upstream-handshake";
     if (value.upstream) {
-        auto* verifier = certificate_verifier::get(value.upstream->native_handle());
+        auto* verifier = certificate_verifier::get(value.upstream->handle_native());
         if (verifier && verifier->verdict() == 0) return "upstream-certificate-check";
     }
     if (value.downstream && !value.downstream->handshake_complete()) return "downstream-handshake";
@@ -1184,7 +1195,7 @@ void listener_service::publish_session_snapshots(
             item.server_name = linked.downstream->server_name();
             item.downstream_alpn = linked.downstream->negotiated_alpn();
             item.downstream_tls = linked.state == session_state::draining
-                ? linked.draining_downstream_tls : snapshot_tls(linked.downstream->native_handle());
+                ? linked.draining_downstream_tls : snapshot_tls(linked.downstream->handle_native());
         }
         if (item.target == "-") {
             auto const& host = upstream_host_.empty() ? item.server_name : upstream_host_;
@@ -1192,13 +1203,13 @@ void listener_service::publish_session_snapshots(
         }
         auto upstream = linked.upstream;
         if (!upstream && linked.downstream) {
-            auto const job = certificate_jobs_.find(linked.downstream->native_handle());
+            auto const job = certificate_jobs_.find(linked.downstream->handle_native());
             if (job != certificate_jobs_.end()) upstream = job->second.upstream;
         }
         if (upstream) {
             item.upstream_alpn = upstream->negotiated_alpn();
             item.upstream_tls = linked.state == session_state::draining
-                ? linked.draining_upstream_tls : snapshot_tls(upstream->native_handle());
+                ? linked.draining_upstream_tls : snapshot_tls(upstream->handle_native());
         }
         item.age_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - linked.created).count();
@@ -1227,7 +1238,7 @@ void listener_service::start_draining(session& value,
     value.last_handshake_phase = handshake_phase(value);
     value.end_reason = reason;
     if (value.downstream) {
-        auto const key = value.downstream->native_handle();
+        auto const key = value.downstream->handle_native();
         if (auto pending = certificate_jobs_.find(key); pending != certificate_jobs_.end()) {
             if (pending->second.state == certificate_state::failed) value.end_reason = "upstream certificate preparation failed";
             if (!value.upstream) value.upstream = std::move(pending->second.upstream);
@@ -1241,22 +1252,22 @@ void listener_service::start_draining(session& value,
     }
 
     if(value.downstream)
-        value.draining_downstream_tls = snapshot_tls(value.downstream->native_handle());
+        value.draining_downstream_tls = snapshot_tls(value.downstream->handle_native());
     if(value.upstream)
-        value.draining_upstream_tls = snapshot_tls(value.upstream->native_handle());
+        value.draining_upstream_tls = snapshot_tls(value.upstream->handle_native());
 
     value.draining_downstream_tls.ended = true;
     value.draining_upstream_tls.ended = true;
 
     // Sample outcomes before close retires the handshake evidence.
-    if(value.downstream) hook_outcome(value.setup.get(), value.downstream->native_handle(),
+    if(value.downstream) hook_outcome(value.setup.get(), value.downstream->handle_native(),
                                       true, "QUIC handshake ended before completion");
-    if(value.upstream) hook_outcome(value.setup.get(), value.upstream->native_handle(),
+    if(value.upstream) hook_outcome(value.setup.get(), value.upstream->handle_native(),
                                     false, "QUIC handshake ended before completion");
-    log().dia("session %llu draining protocol-error=%llu forwarded=%llu",
-              static_cast<unsigned long long>(value.id),
-              static_cast<unsigned long long>(protocol_error),
-              static_cast<unsigned long long>(value.forwarded_bytes));
+    logging::session().dia("session %llu draining protocol-error=%llu forwarded=%llu",
+                           static_cast<unsigned long long>(value.id),
+                           static_cast<unsigned long long>(protocol_error),
+                           static_cast<unsigned long long>(value.forwarded_bytes));
     value.state = session_state::draining;
     snapshots_dirty_ = true;
     value.draining_since = now;
@@ -1548,9 +1559,9 @@ int listener_service::prepare_verified_certificate(SSL* downstream) {
                   limits_.max_certificate_jobs);
         return 0;
     }
-    log().deb("starting certificate job sni='%s' peer=%s target=%s",
-              server_name.c_str(), endpoint_text(peer_endpoint).c_str(),
-              endpoint_text(destination).c_str());
+    logging::mitm().deb("starting certificate job sni='%s' peer=%s target=%s",
+                        server_name.c_str(), endpoint_text(peer_endpoint).c_str(),
+                        endpoint_text(destination).c_str());
     auto setup = binding == dispatcher_bindings_.end() ? nullptr : binding->second.setup;
     if(!setup && setup_factory_) {
         auto const [host, port] = endpoint_parts(peer_endpoint);
@@ -1596,9 +1607,9 @@ bool listener_service::progress_certificate_jobs() {
         job.state = certificate_state::upstream_handshake;
         job.upstream->progress_transport();
         if (job.upstream->closed()) {
-            log().war("QUIC upstream handshake rejected sni='%s' verify=%ld",
-                      job.server_name.c_str(), SSL_get_verify_result(job.upstream->native_handle()));
-            hook_outcome(job.setup.get(), job.upstream->native_handle(), false,
+            logging::info().war("QUIC upstream handshake rejected sni='%s' verify=%ld",
+                                job.server_name.c_str(), SSL_get_verify_result(job.upstream->handle_native()));
+            hook_outcome(job.setup.get(), job.upstream->handle_native(), false,
                          "QUIC upstream handshake failed");
             ++upstream_failures_;
             job.state = certificate_state::failed;
@@ -1611,21 +1622,21 @@ bool listener_service::progress_certificate_jobs() {
 
         // TLS completion alone is not admission: OCSP/CRL policy may still be
         // pending in the pool. Keep the downstream certificate callback waiting.
-        auto* verifier = certificate_verifier::get(job.upstream->native_handle());
-        int const verdict = verifier ? verifier->progress(job.upstream->native_handle()) : 1;
+        auto* verifier = certificate_verifier::get(job.upstream->handle_native());
+        int const verdict = verifier ? verifier->progress(job.upstream->handle_native()) : 1;
         if (verdict == 0) {
             job.state = certificate_state::certificate_check;
             continue;
         }
         if (verdict < 0) {
-            log().war("QUIC certificate policy rejected sni='%s'", job.server_name.c_str());
+            logging::verify().war("QUIC certificate policy rejected sni='%s'", job.server_name.c_str());
             job.upstream->close(1);
             ++upstream_failures_;
             job.state = certificate_state::failed;
             progress = true; // Resume the downstream callback to report failure.
             continue;
         }
-        if (hook_outcome(job.setup.get(), job.upstream->native_handle(), false)) {
+        if (hook_outcome(job.setup.get(), job.upstream->handle_native(), false)) {
             job.result = verify_and_spoof(job.upstream, job.destination, job.server_name);
         }
         if (!job.result.certificate) {
@@ -1645,24 +1656,24 @@ listener_service::verified_certificate listener_service::verify_and_spoof(
     std::shared_ptr<transport_connection> const& upstream,
     datagram_endpoint destination, std::string const& server_name) {
     verified_certificate verified;
-    auto* verifier = certificate_verifier::get(upstream->native_handle());
+    auto* verifier = certificate_verifier::get(upstream->handle_native());
     if (!upstream->handshake_complete()
-        || (verifier ? verifier->progress(upstream->native_handle()) != 1
-            : SSL_get_verify_result(upstream->native_handle()) != X509_V_OK)) {
-        log().war("upstream verification failed sni='%s' target=%s verify=%ld",
-                  server_name.c_str(), endpoint_text(destination).c_str(),
-                  SSL_get_verify_result(upstream->native_handle()));
+        || (verifier ? verifier->progress(upstream->handle_native()) != 1
+            : SSL_get_verify_result(upstream->handle_native()) != X509_V_OK)) {
+        logging::verify().war("upstream verification failed sni='%s' target=%s verify=%ld",
+                              server_name.c_str(), endpoint_text(destination).c_str(),
+                              SSL_get_verify_result(upstream->handle_native()));
         upstream->close(1);
         return verified;
     }
     if (upstream->negotiated_alpn() != "h3") {
-        log().war("upstream ALPN rejected sni='%s' negotiated='%s'",
-                  server_name.c_str(), upstream->negotiated_alpn().c_str());
+        logging::alpn().war("upstream ALPN rejected sni='%s' negotiated='%s'",
+                            server_name.c_str(), upstream->negotiated_alpn().c_str());
         upstream->close(1);
         return verified;
     }
 
-    socle::raw::var<X509*> peer_certificate {SSL_get1_peer_certificate(upstream->native_handle()),
+    socle::raw::var<X509*> peer_certificate {SSL_get1_peer_certificate(upstream->handle_native()),
         [](auto*& value) { X509_free(value); }};
     auto* certificate = peer_certificate.value; // Borrowed for identity checks and cache lookup.
     if (!certificate) {
@@ -1677,7 +1688,7 @@ listener_service::verified_certificate listener_service::verify_and_spoof(
         ? X509_check_ip_asc(certificate, server_name.c_str(), 0)
         : X509_check_host(certificate, server_name.c_str(), server_name.size(), 0, nullptr);
     if (identity_matches != 1) {
-        log().war("upstream identity mismatch sni='%s'", server_name.c_str());
+        logging::verify().war("upstream identity mismatch sni='%s'", server_name.c_str());
 
         upstream->close(1);
         return verified;
@@ -1735,7 +1746,7 @@ listener_service::verified_certificate listener_service::verify_and_spoof(
         return verified;
     }
     if (policy.only_custom_certs) {
-        log().war("QUIC certificate policy rejected sni='%s': custom identity required", server_name.c_str());
+        logging::verify().war("QUIC certificate policy rejected sni='%s': custom identity required", server_name.c_str());
 
         upstream->close(1);
         return {};
@@ -1755,12 +1766,12 @@ listener_service::verified_certificate listener_service::verify_and_spoof(
     }
 
     if (!ready) {
-        log().err("certificate spoof failed sni='%s'", server_name.c_str());
+        logging::mitm().err("certificate spoof failed sni='%s'", server_name.c_str());
         upstream->close(1);
         return {};
     }
-    log().deb("certificate ready sni='%s' target=%s", server_name.c_str(),
-              endpoint_text(destination).c_str());
+    logging::mitm().deb("certificate ready sni='%s' target=%s", server_name.c_str(),
+                        endpoint_text(destination).c_str());
     // The worker retains this authenticated connection for application data.
     return verified;
 }

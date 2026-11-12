@@ -1,4 +1,5 @@
 #include "proxy/quic/error_stats.hpp"
+#include "proxy/quic/tls_log.hpp"
 #include <vars.hpp>
 #include <privileged_socket.hpp>
 #include "proxy/quic/ngtcp2.hpp"
@@ -208,7 +209,7 @@ public:
     unsigned current_ingress_ifindex() const override { return current_ ? current_->ifindex : 0; }
     uint64_t current_association() const override { return current_ ? current_->association : 0; }
     bool bind_connection_route(SSL* ssl) override {
-        return current_ && current_->connection && current_->connection->native_handle() == ssl;
+        return current_ && current_->connection && current_->connection->handle_native() == ssl;
     }
 
 private:
@@ -430,6 +431,7 @@ unique_ssl_ctx make_ngtcp2_context(bool server) {
         || !SSLFactory::factory().set_verify_locations(context.get())) return {};
     if (!server && SSLFactory::factory().is_ct_available()
         && SSL_CTX_set_ctlog_list_file(context.get(), SSLFactory::factory().ctlogfile().c_str()) != 1) return {};
+    SSL_CTX_set_info_callback(context.get(), logging::tls_info);
     if (server) SSL_CTX_set_keylog_callback(context.get(), ng::connection::record_keylog);
     return context;
 }

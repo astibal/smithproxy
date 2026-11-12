@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
-#include <log/logan.hpp>
+#include "proxy/quic/log.hpp"
 #include <stdexcept>
 #include <limits>
 
@@ -169,7 +169,16 @@ int connection::recv_crypto(ngtcp2_conn* conn, ngtcp2_encryption_level level,
     auto& owner = *static_cast<connection*>(self);
     try {
         auto rc = ngtcp2_crypto_read_write_crypto_data(conn, level, data, size);
-        owner.tls_paused_ = rc == NGTCP2_CRYPTO_OSSL_ERR_TLS_WANT_X509_LOOKUP;
+        bool const paused = rc == NGTCP2_CRYPTO_OSSL_ERR_TLS_WANT_X509_LOOKUP;
+        if (paused != owner.tls_paused_) {
+            logging::info().deb("ngtcp2 conn=%p %s certificate callback %s",
+                                self, owner.server_ ? "A" : "B", paused ? "paused" : "resumed");
+        }
+        owner.tls_paused_ = paused;
+        if (*logging::message().level() >= DUM) {
+            logging::message().dum("ngtcp2 conn=%p CRYPTO level=%d bytes=%zu result=%d",
+                                   self, static_cast<int>(level), size, rc);
+        }
         if (owner.tls_paused_ || rc == 0) return 0;
         ++stats.errors.connection_recv_crypto_tls_failure;
         ngtcp2_conn_set_tls_error(conn, rc);
@@ -240,6 +249,9 @@ void connection::notify_fin(int64_t id, stream& value) {
 connection::stream& connection::ensure_stream(int64_t id, bool incoming) {
     auto [it, inserted] = streams_.try_emplace(id);
     if (inserted) {
+        logging::stream().deb("ngtcp2 conn=%p %s stream=%lld opened incoming=%d",
+                              static_cast<void*>(this), server_ ? "A" : "B",
+                              static_cast<long long>(id), incoming);
         it->second.direction = (id & 2)
             ? (incoming ? mf::direction::receive_only : mf::direction::send_only)
             : mf::direction::bidirectional;
@@ -264,6 +276,11 @@ int connection::recv_stream(ngtcp2_conn*, uint32_t flags, int64_t id, uint64_t o
         }
         if (size) state.rx.push_back({buffer(data, size), offset, 0});
         state.received += size;
+        if (*logging::stream().level() >= DUM) {
+            logging::stream().dum("ngtcp2 conn=%p stream=%lld RX offset=%llu bytes=%zu flags=%u",
+                                  self, static_cast<long long>(id),
+                                  static_cast<unsigned long long>(offset), size, flags);
+        }
         if (flags & NGTCP2_STREAM_DATA_FLAG_FIN) state.peer_fin = true;
         owner.notify_fin(id, state);
         return 0;
@@ -283,6 +300,11 @@ int connection::ack_stream(ngtcp2_conn*, int64_t id, uint64_t offset, uint64_t s
     try {
         auto& state = static_cast<connection*>(self)->streams_.at(id);
         state.acknowledged = offset + size;
+        if (*logging::stream().level() >= DUM) {
+            logging::stream().dum("ngtcp2 conn=%p stream=%lld ACK offset=%llu bytes=%llu",
+                                  self, static_cast<long long>(id),
+                                  static_cast<unsigned long long>(offset), static_cast<unsigned long long>(size));
+        }
         while (!state.tx.empty() && state.tx.front().offset + state.tx.front().bytes.size() <= state.acknowledged) {
             state.tx.pop_front();
             --state.tx_submitted;
@@ -393,6 +415,10 @@ int connection::remove_cid(ngtcp2_conn*, ngtcp2_cid const* cid, void* self) {
 // Feed the actual packet path to QUIC under the correct service callback owner.
 void connection::receive(datagram_packet const& packet, timestamp ts) {
     if (closed_) return;
+    if (*logging::transport().level() >= EXT) {
+        logging::transport().ext("ngtcp2 conn=%p %s RX bytes=%zu",
+                                 static_cast<void*>(this), server_ ? "A" : "B", packet.data.size());
+    }
     activate_();
     ngtcp2_path path {{const_cast<sockaddr*>(reinterpret_cast<sockaddr const*>(&packet.local.address)), packet.local.size},
                       {const_cast<sockaddr*>(reinterpret_cast<sockaddr const*>(&packet.peer.address)), packet.peer.size}, nullptr};
@@ -406,6 +432,9 @@ void connection::receive(datagram_packet const& packet, timestamp ts) {
 // Service due protocol timers without imposing a second handshake timeout.
 void connection::expire(timestamp ts) {
     if (!closed_ && ngtcp2_conn_get_expiry(conn_.value) <= ts) {
+        if (*logging::transport().level() >= DUM) {
+            logging::transport().dum("ngtcp2 conn=%p timer expired", static_cast<void*>(this));
+        }
         if (auto rc = ngtcp2_conn_handle_expiry(conn_.value, ts)) {
             ++stats.errors.connection_expire_timer;
             fail(rc, "timer");
@@ -436,8 +465,12 @@ void connection::fail(int error, char const* operation) {
         ngtcp2_ccerr_set_liberr(&close_error_, error, nullptr, 0);
     events_.push_back({mf::event_type::connection_close, std::nullopt, 0});
     if (error != NGTCP2_ERR_DRAINING && error != NGTCP2_ERR_IDLE_CLOSE) {
-        static logan_lite log {"proxy.quic.ngtcp2"};
-        log.dia("%s %s: %s", server_ ? "A" : "B", operation, ngtcp2_strerror(error));
+        logging::transport().war("ngtcp2 conn=%p %s %s: %s",
+                                 static_cast<void*>(this), server_ ? "A" : "B",
+                                 operation, ngtcp2_strerror(error));
+    } else {
+        logging::transport().dia("ngtcp2 conn=%p %s closed: %s",
+                                 static_cast<void*>(this), server_ ? "A" : "B", ngtcp2_strerror(error));
     }
 }
 
@@ -590,6 +623,10 @@ size_t connection::send_packets(int fd, output_packet* const* packets, size_t co
             return 0;
         ++stats.errors.connection_send_packets_ngtcp2_sendmmsg;
         throw std::runtime_error(std::string("ngtcp2 sendmmsg: ") + std::strerror(errno));
+    }
+    if (*logging::transport().level() >= EXT) {
+        logging::transport().ext("ngtcp2 conn=%p TX batch sent=%ld requested=%zu",
+                                 static_cast<void*>(this), static_cast<long>(sent), count);
     }
     for (ssize_t i = 0; i < sent; ++i) {
         auto const& packet = *packets[i];

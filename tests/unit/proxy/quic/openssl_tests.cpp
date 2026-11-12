@@ -456,7 +456,7 @@ TEST_F(OpenSslQuic, EmptyAcceptDoesNotDriveTheListenerEngine) {
     // Count transport operations, not elapsed time: a speculative accept must
     // not repeat the owner's receive/timer pass when no connection is queued.
     std::size_t network_calls = 0;
-    auto* bio = SSL_get_rbio(listener->native_handle());
+    auto* bio = SSL_get_rbio(listener->handle_native());
     BIO_set_callback_arg(bio, reinterpret_cast<char*>(&network_calls));
     BIO_set_callback_ex(bio, [](BIO* observed, int operation, const char*, std::size_t,
                                 int, long, int result, std::size_t*) -> long {
@@ -529,13 +529,13 @@ TEST_F(OpenSslQuic, NumericPeerIdentityUsesIpVerificationWithoutSni) {
         client_context.get(), reinterpret_cast<sockaddr*>(&peer), sizeof(peer),
         "127.0.0.1", &error);
     ASSERT_NE(connection, nullptr) << error;
-    const int connection_fd = SSL_get_fd(connection->native_handle());
+    const int connection_fd = SSL_get_fd(connection->handle_native());
     ASSERT_GE(connection_fd, 0);
     EXPECT_NE(fcntl(connection_fd, F_GETFD, 0) & FD_CLOEXEC, 0);
-    EXPECT_EQ(SSL_get_servername(connection->native_handle(),
+    EXPECT_EQ(SSL_get_servername(connection->handle_native(),
                                  TLSEXT_NAMETYPE_host_name), nullptr);
     EXPECT_EQ(X509_VERIFY_PARAM_get0_host(
-                  SSL_get0_param(connection->native_handle()), 0), nullptr);
+                  SSL_get0_param(connection->handle_native()), 0), nullptr);
 }
 
 TEST_F(OpenSslQuic, OutgoingAdapterCompletesHandshake) {
@@ -685,10 +685,10 @@ TEST_F(OpenSslQuic, WorkerDomainOwnsIndependentOutgoingConnections) {
         ASSERT_NE(client, nullptr) << error;
         // OpenSSL 3.5 exposes the domain through the port; the outgoing child
         // does not populate the direct SSL_get0_domain() backlink.
-        EXPECT_EQ(SSL_get0_domain(SSL_get0_listener(client->native_handle())), domain);
+        EXPECT_EQ(SSL_get0_domain(SSL_get0_listener(client->handle_native())), domain);
     }
-    auto* first_port = SSL_get0_listener(clients[0]->native_handle());
-    auto* second_port = SSL_get0_listener(clients[1]->native_handle());
+    auto* first_port = SSL_get0_listener(clients[0]->handle_native());
+    auto* second_port = SSL_get0_listener(clients[1]->handle_native());
     ASSERT_NE(first_port, nullptr);
     ASSERT_NE(second_port, nullptr);
     EXPECT_EQ(first_port, engine.get());
@@ -735,7 +735,7 @@ TEST_F(OpenSslQuic, WorkerDomainOwnsIndependentOutgoingConnections) {
     // domain and stream state must survive the other connection's destruction.
     clients[0]->close();
     clients[0].reset();
-    EXPECT_EQ(SSL_get0_domain(SSL_get0_listener(clients[1]->native_handle())), domain);
+    EXPECT_EQ(SSL_get0_domain(SSL_get0_listener(clients[1]->handle_native())), domain);
     auto flow = clients[1]->open_flow(mf::direction::bidirectional);
     EXPECT_TRUE(clients[1]->take_application_progress());
     EXPECT_FALSE(clients[1]->take_application_progress());
@@ -955,7 +955,7 @@ TEST_F(OpenSslQuic, OutgoingAdapterVerifiesChainAndServerName) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     EXPECT_TRUE(client->handshake_complete()) << quic::openssl_error_stack();
-    EXPECT_EQ(SSL_get_verify_result(client->native_handle()), X509_V_OK);
+    EXPECT_EQ(SSL_get_verify_result(client->handle_native()), X509_V_OK);
     EXPECT_EQ(client->negotiated_alpn(), "h3");
     client->close();
     if (server) server->close();
@@ -1034,7 +1034,7 @@ TEST_F(OpenSslQuic, LoopbackStreamProducesSelfDecryptingPcapng) {
     auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
     while (std::chrono::steady_clock::now() < deadline
            && (!SSL_is_init_finished(client.get())
-               || !server || !SSL_is_init_finished(server->native_handle()))) {
+               || !server || !SSL_is_init_finished(server->handle_native()))) {
         SSL_connect(client.get());
         listener->handle_events();
         if (!server) {
@@ -1043,13 +1043,13 @@ TEST_F(OpenSslQuic, LoopbackStreamProducesSelfDecryptingPcapng) {
             // completion. It must receive the same secrets as a later lookup.
             if (server) early_keylog = server->keylog();
         }
-        if (server) SSL_do_handshake(server->native_handle());
+        if (server) SSL_do_handshake(server->handle_native());
         SSL_handle_events(client.get());
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     ASSERT_TRUE(SSL_is_init_finished(client.get())) << quic::openssl_error_stack();
     ASSERT_NE(server, nullptr) << quic::openssl_error_stack();
-    ASSERT_TRUE(SSL_is_init_finished(server->native_handle())) << quic::openssl_error_stack();
+    ASSERT_TRUE(SSL_is_init_finished(server->handle_native())) << quic::openssl_error_stack();
     EXPECT_EQ(server->negotiated_alpn(), "h3");
 
     // Internal retention must not depend on the optional SSLKEYLOGFILE lab aid.
