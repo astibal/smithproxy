@@ -19,6 +19,8 @@ SET(SOCLE_DIR "socle")
 SET(SOCLE_COMMON_DIR "socle/common")
 
 project(smithproxy C CXX)
+
+include(${PROJECT_SOURCE_DIR}/cmake/QuicBackend.cmake)
 include(CTest)
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}")
 
@@ -1133,6 +1135,11 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
 
             find_package(Python3 COMPONENTS Interpreter)
             if(Python3_Interpreter_FOUND)
+                add_test(NAME unit.quic_build_defaults
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/packaging/test_quic_build.py)
+                set_tests_properties(unit.quic_build_defaults PROPERTIES
+                        LABELS "native;unit;packaging" TIMEOUT 30)
                 add_test(NAME unit.capture_output_gate
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/tests/patch-runner/harness/test-capture-output.py)
@@ -1548,15 +1555,7 @@ if("${USE_EXPERIMENT}" STREQUAL "Y")
     message(" >> - software you built and install contain code which is probably not for general use" )
 endif()
 
-# ngtcp2 is the default QUIC transport. Explicitly disabling it retains an
-# OpenSSL-only build; missing ngtcp2 dependencies must not silently select that
-# fallback. Private TLS builds and distribution-specific paths stay outside git.
-option(SMITHPROXY_ENABLE_NGTCP2 "Build the default ngtcp2 QUIC backend" ON)
 if(SMITHPROXY_ENABLE_NGTCP2)
-    find_path(NGTCP2_INCLUDE_DIR ngtcp2/ngtcp2.h REQUIRED)
-    find_path(NGTCP2_CRYPTO_INCLUDE_DIR ngtcp2/ngtcp2_crypto_ossl.h REQUIRED)
-    find_library(NGTCP2_LIBRARY ngtcp2 REQUIRED)
-    find_library(NGTCP2_CRYPTO_LIBRARY ngtcp2_crypto_ossl REQUIRED)
     get_property(quic_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
     foreach(quic_target IN LISTS quic_targets)
         get_target_property(quic_sources ${quic_target} SOURCES)
@@ -1568,7 +1567,7 @@ if(SMITHPROXY_ENABLE_NGTCP2)
         endif()
     endforeach()
     if(TARGET quic_testbed)
-        # Run the same service/certificate/lifecycle corpus through the alternate
+        # Run the same service/certificate/lifecycle corpus through the default
         # transport; clients and origins remain OpenSSL interoperability peers.
         add_test(NAME integration.quic_ngtcp2_testbed COMMAND quic_testbed)
         set_tests_properties(integration.quic_ngtcp2_testbed PROPERTIES

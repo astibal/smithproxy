@@ -1,4 +1,4 @@
-name: Build and Package
+name: Build default ngtcp2 (Ubuntu 26.04)
 
 on:
   push:

@@ -33,9 +33,9 @@ CHANNEL = "snapshots"
 
 parser = argparse.ArgumentParser(description='Smithproxy builder')
 
-top_group = parser.add_argument_group()
-
-build_group = top_group.add_argument_group()
+build_group = parser.add_argument_group("Build")
+build_group.add_argument('--ngtcp2', choices=('ON', 'OFF'), default='ON',
+                         help='QUIC backend build: ON (default ngtcp2), OFF (explicit OpenSSL-only)')
 build_group.add_argument('--targets', type=str, help='builds to ... build', nargs='*')
 
 build_group.add_argument('--exclude', type=str, nargs='*', help='builds to exclude')
@@ -48,7 +48,7 @@ build_group.add_argument('--branch', type=str, help="smithproxy git branch to us
 
 build_group.add_argument('--channel', type=str, help="release channel (snapshots/release/...)", nargs='?')
 
-misc_group = top_group.add_argument_group()
+misc_group = parser.add_argument_group("Options")
 misc_group.add_argument('--list', action='store_true')
 misc_group.add_argument('--cleanup', action='store_true')
 misc_group.add_argument('--config', type=str, nargs=1, help="custom config file (default %s)" % (CFG_DEFAULT))
@@ -95,7 +95,7 @@ def list_dockers(arg_filter=None, out_filter=None):
     return to_ret
 
 
-def run_build(host, files, arg_http_proxy=None, arg_cleanup=False, arg_user=None, arg_key=None):
+def run_build(host, files, arg_http_proxy=None, arg_cleanup=False, arg_user=None, arg_key=None, arg_ngtcp2="ON"):
 
     cmd_pre = ""
     if arg_cleanup:
@@ -111,6 +111,8 @@ def run_build(host, files, arg_http_proxy=None, arg_cleanup=False, arg_user=None
                             --build-arg CURL_UPLOAD_OPTS=%s " % (FTP_PASS, FTP_UPLOAD_USER, FTP_UPLOAD_PATH, SRC_BRANCH,
                                                                  CHANNEL, CURL_UPLOAD_OPTS)
 
+        cmd_base += " --build-arg SMITHPROXY_ENABLE_NGTCP2=" + arg_ngtcp2
+
         # reset - cmd_pre is run only once
         cmd_pre = ""
 
@@ -121,7 +123,7 @@ def run_build(host, files, arg_http_proxy=None, arg_cleanup=False, arg_user=None
                 
         if host == "localhost":
             cmd_local = cmd_base + " -f %s `mktemp -d`" % (dockerfile,)
-            subprocess.run("(" + tag + cmd_local + ") >> /tmp/builder-%s.log 2>&1" % (host,), shell=True)
+            subprocess.run("(" + tag + "; " + cmd_local + ") >> /tmp/builder-%s.log 2>&1" % (host,), shell=True, check=True)
                 
         else:
 
@@ -142,13 +144,13 @@ def run_build(host, files, arg_http_proxy=None, arg_cleanup=False, arg_user=None
 
             ssh_cmd += " -C " + cmd_base + " -f /tmp/Dockerfile.current \`mktemp -d\`"
             
-            ssh_cmd = "(" + tag + ";" + cp_cmd + ";" + ssh_cmd + ") >> /tmp/builder-%s.log 2>&1" % (host,)
+            ssh_cmd = "(" + tag + ";" + cp_cmd + " && " + ssh_cmd + ") >> /tmp/builder-%s.log 2>&1" % (host,)
             
             # print(">>> " + ssh_cmd)
             # sys.exit(0)
             
             try:
-                subprocess.run(ssh_cmd, shell=True)
+                subprocess.run(ssh_cmd, shell=True, check=True)
             except KeyboardInterrupt as k_e:
                 err_msg = "echo \"Ctrl-C hit: terminated %s\" >> /tmp/builder-%s.log" % (k_e, host)
                 subprocess.run(err_msg, shell=True)
@@ -248,7 +250,7 @@ if __name__ == '__main__':
                 pid = os.fork()
                 if pid == 0:
                     print("%s host child process: %s" % (h, str(dockerfiles)))
-                    run_build(h, dockerfiles, arg_http_proxy=http_proxy, arg_cleanup=cleanup, arg_user=sshuser, arg_key=sshkey)
+                    run_build(h, dockerfiles, arg_http_proxy=http_proxy, arg_cleanup=cleanup, arg_user=sshuser, arg_key=sshkey, arg_ngtcp2=args.ngtcp2)
                     print("%s host child finished: %s" % (h, str(dockerfiles)))
                     sys.exit(0)
                 else:
@@ -258,8 +260,14 @@ if __name__ == '__main__':
 
         if len(children) > 0 and os.getpid() == main_pid:
             print("waiting children to finish")
+            # A failed host build must also fail the parent invocation.
+            failed = False
             for ch in children:
-                os.waitpid(ch, 0)
+                _, status = os.waitpid(ch, 0)
+                if not os.WIFEXITED(status) or os.WEXITSTATUS(status) != 0:
+                    failed = True
+            if failed:
+                sys.exit(1)
         
     except KeyboardInterrupt as e:
         if os.getpid() == main_pid:

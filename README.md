@@ -3,6 +3,41 @@
  written in C++17.  
 It uses our C++17 socket proxying library called [*socle*](https://github.com/astibal/socle). 
 
+## QUIC build defaults
+
+QUIC uses **ngtcp2 by default**. The default build requires ngtcp2 1.16 or newer,
+its **OpenSSL crypto adapter** (`libngtcp2_crypto_ossl`), and OpenSSL 3.5 or newer.
+OpenSSL still supplies TLS/cryptography; ngtcp2 supplies the QUIC transport.
+Missing or incompatible dependencies fail configuration; there is no automatic
+fallback to the OpenSSL QUIC implementation.
+
+```sh
+sudo ./tools/linux-deps.sh
+sudo ./tools/linux-build.sh
+```
+
+Ubuntu 26.04 provides the required development packages. Older distributions
+may need suitable backports or a separately provisioned dependency prefix
+(`cmake -DCMAKE_PREFIX_PATH=...`). The scripts never replace system OpenSSL or
+add third-party repositories automatically. For an intentional OpenSSL-only
+compatibility build, use the same opt-out for both steps:
+
+```sh
+sudo env SMITHPROXY_ENABLE_NGTCP2=OFF ./tools/linux-deps.sh
+sudo env SMITHPROXY_ENABLE_NGTCP2=OFF ./tools/linux-build.sh
+```
+
+Direct CMake builds use `-DSMITHPROXY_ENABLE_NGTCP2=OFF`. An enabled build can
+also select the retained OpenSSL QUIC backend explicitly at startup with
+`SMITHPROXY_QUIC_BACKEND=openssl`; unset means ngtcp2. OpenSSL-only builds on
+older TLS libraries do not gain QUIC features that those libraries lack.
+
+Docker packaging defaults to `--build-arg SMITHPROXY_ENABLE_NGTCP2=ON`;
+`sx-builder.py --ngtcp2 OFF` is the explicit packaging opt-out. Direct Debian
+builds use `DEB_BUILD_PROFILES=pkg.smithproxy.openssl-quic` for the same opt-out.
+Debian runtime library dependencies are derived from the linked binaries using
+`${shlibs:Depends}`, including ngtcp2 and its crypto adapter in default builds.
+
 ## Testing policy
 
 Since October 2026, Smithproxy development follows a strict, documented testing policy. Successful clean-tree validation runs can be published as commit-specific reports recording the test profile, executed sections, results, selected metrics and reproduction command. The report format and publishing rules live in [`docs/test-reports/`](docs/test-reports/); failed or dirty runs do not produce a passing report.

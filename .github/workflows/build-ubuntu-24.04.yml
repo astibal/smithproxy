@@ -1,4 +1,4 @@
-name: Build and Package
+name: Build explicit OpenSSL-only compatibility (Ubuntu 24.04)
 
 on:
   push:
@@ -19,7 +19,7 @@ jobs:
         submodules: 'recursive'      
 
     - name: Install dependencies
-      run: sudo ./tools/linux-deps.sh
+      run: sudo env SMITHPROXY_ENABLE_NGTCP2=OFF ./tools/linux-deps.sh
 
     - name: Build project
-      run: sudo ./tools/linux-build.sh
+      run: sudo env SMITHPROXY_ENABLE_NGTCP2=OFF ./tools/linux-build.sh

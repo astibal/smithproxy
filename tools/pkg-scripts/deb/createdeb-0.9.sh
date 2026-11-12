@@ -1,4 +1,14 @@
 #!/usr/bin/env bash
+
+# Propagate the same explicit opt-out to Debian dependency checks and rules.
+case "${SMITHPROXY_ENABLE_NGTCP2:-ON}" in
+    ON) ;;
+    OFF) export DEB_BUILD_PROFILES="${DEB_BUILD_PROFILES:-} pkg.smithproxy.openssl-quic" ;;
+    *) echo "error: SMITHPROXY_ENABLE_NGTCP2 must be ON or OFF" >&2; exit 2 ;;
+esac
+# debuild sanitizes its environment; pass the intentional build profile through.
+export DEB_BUILD_PROFILES=${DEB_BUILD_PROFILES:-}
+
 ORIG_DIR="$(pwd)"
 
 # === LOAD DEFAULTS ====
@@ -226,7 +236,7 @@ cd "${DEB_DIR}" || exit 255
 
 
 echo "createdeb: creating debian packages..."
-debuild -us -uc -j"$(nproc)"
+debuild --preserve-envvar=DEB_BUILD_PROFILES -us -uc -j"$(nproc)" || exit $?
 
 echo "createdeb: cd to ${CUR_DIR}"
 cd "${CUR_DIR}" || exit 255

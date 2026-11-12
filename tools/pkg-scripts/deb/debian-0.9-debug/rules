@@ -1,5 +1,9 @@
 #!/usr/bin/make -f
 
+# Debian's opt-out profile changes both build dependencies and CMake together.
+SMITHPROXY_ENABLE_NGTCP2 = $(if $(filter pkg.smithproxy.openssl-quic,$(DEB_BUILD_PROFILES)),OFF,ON)
+
+
 CFLAGS += -O0
 INSTALL_PROGRAM += -s
 
@@ -7,7 +11,7 @@ INSTALL_PROGRAM += -s
 	dh $@ --parallel
 
 override_dh_auto_configure:
-	dh_auto_configure --  -DCMAKE_BUILD_TYPE=Debug
+	dh_auto_configure --  -DCMAKE_BUILD_TYPE=Debug -DSMITHPROXY_ENABLE_NGTCP2=$(SMITHPROXY_ENABLE_NGTCP2)
 
 
 override_dh_strip:
