@@ -186,7 +186,13 @@ std::vector<unsigned char> encode_stream_packet(
     // Build the STREAM frame separately because the QUIC-shaped long header
     // carries its complete encoded length before the packet number.
     std::vector<unsigned char> frame;
-    frame.reserve(size + 32);
+    // Validate before adding framing headroom: a wrapped reservation would
+    // hide an invalid payload length and undermine the capacity estimate.
+    constexpr std::size_t framing_headroom = 32;
+    if (size > frame.max_size() - framing_headroom) {
+        throw std::length_error("SPQ1 STREAM payload exceeds buffer capacity");
+    }
+    frame.reserve(size + framing_headroom);
     frame.push_back(static_cast<unsigned char>(0x0E | (fin ? 0x01 : 0x00)));
     append_varint(frame, context.stream_id);
     append_varint(frame, offset);

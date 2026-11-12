@@ -5,7 +5,9 @@
 #include <traflog/pcapapi.hpp>
 #include <traflog/pcaplog.hpp>
 #include <algorithm>
+#include <limits>
 #include <memory>
+#include <stdexcept>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -84,6 +86,22 @@ TEST(Spq1, EncodesSelfContainedStreamPacket) {
     EXPECT_EQ(5, packet[26]);
     EXPECT_EQ(">>>", std::string(packet.begin() + 27, packet.begin() + 30));
     EXPECT_EQ("hello", std::string(packet.begin() + 30, packet.end()));
+}
+
+TEST(Spq1, RejectsPayloadLengthsBeforeAddingFramingHeadroom) {
+    auto connection = std::make_shared<sx::quic::spq1::connection_context>(2, "h3");
+    sx::quic::spq1::stream_context stream {connection, 0};
+    unsigned char const byte = 0;
+    auto const size_limit = std::numeric_limits<std::size_t>::max();
+    auto const capacity_limit = std::vector<unsigned char>{}.max_size();
+
+    // No payload is read or huge allocation attempted: invalid lengths must
+    // fail before reserve, including values whose extra 32 bytes wrap to zero.
+    for (auto const size : {capacity_limit - 31, size_limit - 31, size_limit}) {
+        SCOPED_TRACE(size);
+        EXPECT_THROW(sx::quic::spq1::encode_stream_packet(
+            stream, 0, &byte, size, false), std::length_error);
+    }
 }
 
 TEST(Spq1, EncodesDecodedH3HeadersAsPrivateExtension) {
