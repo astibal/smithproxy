@@ -16,7 +16,7 @@ class keylog_store;
 class transport_connection : public multiflow::connection {
 public:
     /** Borrow the TLS object; all access remains on this connection's worker. */
-    virtual SSL* native_handle() const = 0;
+    virtual SSL* handle_native() const = 0;
     virtual datagram_endpoint peer_endpoint() const = 0;
     virtual bool handshake_complete() const = 0;
     virtual bool closed() const = 0;

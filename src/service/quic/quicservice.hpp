@@ -1,6 +1,8 @@
 #ifndef SMITHPROXY_QUICSERVICE_HPP
 #define SMITHPROXY_QUICSERVICE_HPP
 
+#include "proxy/quic/resource.hpp"
+
 #include "proxy/quic/transport.hpp"
 #include "proxy/proxymaker_connect.hpp"
 #include "proxy/multiflow/mfmitmproxy.hpp"
@@ -178,7 +180,23 @@ public:
     // Render live stream details on their owner, only when explicitly requested.
     std::future<session_details> request_session_details(multiflow::flow_proxy::detail_renderer renderer);
 
+#ifdef SMITHPROXY_QUIC_LIFECYCLE_PROBE
+    // Install before run(); the observer is called only on the owning worker.
+    // Tests retain evidence independently of the replaceable CLI snapshot.
+    using lifecycle_probe = std::function<void(char const*, std::uint64_t,
+        std::chrono::steady_clock::time_point, std::string_view, std::string_view, std::string_view)>;
+    void set_lifecycle_probe(lifecycle_probe observer) { lifecycle_probe_ = std::move(observer); }
+#endif
+
 private:
+#ifdef SMITHPROXY_QUIC_LIFECYCLE_PROBE
+    lifecycle_probe lifecycle_probe_;
+    void probe_lifecycle(char const* event, std::uint64_t id,
+                         std::chrono::steady_clock::time_point logical_time,
+                         std::string_view phase, std::string_view state, std::string_view reason) const {
+        if (lifecycle_probe_) lifecycle_probe_(event, id, logical_time, phase, state, reason);
+    }
+#endif
     struct detail_request {
         multiflow::flow_proxy::detail_renderer renderer;
         std::promise<session_details> result;
@@ -239,8 +257,8 @@ private:
     proxymaker::SessionSetupFactory setup_factory_;
     flow_proxy_factory proxy_factory_;           ///< Production per-stream proxy strategy.
     bool capture_native_;                        ///< Buffer downstream wire records for policy.
-    int udp_fd_ = -1;                            ///< Socket owned by this service.
-    int wake_fd_ = -1;                           ///< eventfd used to interrupt an idle poll.
+    socle::raw::var<int> udp_fd_ {-1, close_descriptor};                            ///< Socket owned by this service.
+    socle::raw::var<int> wake_fd_ {-1, close_descriptor};                           ///< eventfd used to interrupt an idle poll.
     std::atomic_bool stopping_ = false;           ///< Cross-thread stop request.
     std::atomic_size_t connection_count_ = 0;     ///< Sessions currently retained by the loop.
     mutable std::mutex snapshots_mutex_;          ///< Protects only copied diagnostics.

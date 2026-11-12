@@ -1,3 +1,6 @@
+#include "proxy/quic/error_stats.hpp"
+#include "proxy/quic/tls_log.hpp"
+#include <privileged_socket.hpp>
 #include <ancillary_ifindex.hpp>
 #include "proxy/quic/openssl.hpp"
 #include "proxy/quic/socket_io_detail.hpp"
@@ -82,20 +85,20 @@ void append_quic_keylog_line(const SSL* ssl, const char* line) {
     if (!path || *path == '\0') return;
 
     std::lock_guard lock(keylog_lock);
-    auto const fd = ::open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600);
-    if (fd < 0) return;
-    ::fchmod(fd, 0600);
+    socle::raw::var<int> fd {::open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600),
+                              close_descriptor};
+    if (fd.value < 0) return;
+    ::fchmod(fd.value, 0600);
 
     std::string record(line);
     record.push_back('\n');
     std::size_t written = 0;
     while (written < record.size()) {
-        auto const result = ::write(fd, record.data() + written,
+        auto const result = ::write(fd.value, record.data() + written,
                                     record.size() - written);
         if (result <= 0) break;
         written += static_cast<std::size_t>(result);
     }
-    ::close(fd);
 }
 #endif
 
@@ -149,6 +152,7 @@ unique_ssl_ctx make_openssl_quic_context(bool server) {
     if (context && server) {
         SSL_CTX_set_keylog_callback(context.get(), append_quic_keylog_line);
     }
+    if (context) SSL_CTX_set_info_callback(context.get(), logging::tls_info);
     return context;
 #else
     (void)server;
@@ -167,10 +171,12 @@ unique_ssl make_openssl_quic_client_engine(SSL_CTX* context, int family) {
 
     // OpenSSL 3.5 supports one port per engine. Use an unconnected datagram
     // socket: the port demultiplexes replies by CID, each child sets its peer.
-    auto const fd = ::socket(family, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, IPPROTO_UDP);
-    if (fd < 0) return {};
-    BIO* bio = BIO_new_dgram(fd, BIO_CLOSE);
-    if (!bio) { ::close(fd); return {}; }
+    socle::raw::unique<int> fd {
+        socle::socket(family, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, IPPROTO_UDP), close_descriptor};
+    if (fd.value < 0) return {};
+    BIO* bio = BIO_new_dgram(fd.value, BIO_CLOSE);
+    if (!bio) return {};
+    (void)fd.release(); // BIO_CLOSE transfers the socket to the BIO, then to SSL.
     SSL_set_bio(port.get(), bio, bio);
     if (SSL_set_blocking_mode(port.get(), 0) != 1) return {};
     // No SSL_listen/accept: this port creates outgoing children only. Each
@@ -201,9 +207,9 @@ struct openssl_listener::observer_state {
 struct openssl_listener::dispatcher_state {
     using packet = datagram_packet;
     datagram_source source;              // Optional receiver-to-worker inbox.
-    ~dispatcher_state() { BIO_free(application_bio); }
-
-    BIO* application_bio = nullptr;       // Owned application half of the datagram pair.
+    // Own only the application half; SSL owns the opposite half of the pair.
+    socle::raw::var<BIO*> application_bio {nullptr,
+        [](auto*& value) { BIO_free(value); }};
     int socket_fd = -1;                   // Borrowed transparent UDP socket.
     std::deque<packet> pending_input;     // Waiting for capacity in the OpenSSL BIO.
     std::deque<packet> pending_output;    // Waiting for socket writability.
@@ -410,8 +416,17 @@ int connection_route_index() {
 }
 
 /** Keep CID routing exact after either side rotates its connection ID. */
-void observe_connection_id(int, int, int content_type, void const* data,
-                           std::size_t size, SSL*, void* argument) noexcept {
+void observe_connection_id(int write, int version, int content_type, void const* data,
+                           std::size_t size, SSL* ssl, void* argument) noexcept {
+    try {
+        if (*logging::message().level() >= DUM) {
+            logging::message().dum("openssl ssl=%p %s version=0x%x type=%d bytes=%zu",
+                                   static_cast<void*>(ssl), write ? "TX" : "RX", version, content_type, size);
+        }
+    } catch (...) {
+        ++stats.errors.logging_message_exception;
+    }
+    if (!argument) return;
     if (content_type != SSL3_RT_QUIC_FRAME_FULL || !data || size == 0) return;
     auto const type = parse_varint(static_cast<unsigned char const*>(data), size);
     if (!type || type.value != 0x18) return;
@@ -421,6 +436,7 @@ void observe_connection_id(int, int, int content_type, void const* data,
             state->routes.learn_new_connection_id(
                 static_cast<unsigned char const*>(data), size, observer->route);
         } catch (...) {
+            ++stats.errors.openssl_observe_connection_id_exception;
             state->route_failed = true;
         }
     }
@@ -458,7 +474,9 @@ bool decode_socket_datagram(int fd, msghdr& message, unsigned char const* payloa
         errno = EMSGSIZE;
         return false;
     }
-    packet.data.assign(payload, payload + received);
+    // A moved-from socle buffer retains a non-owning view. Replace its storage
+    // rather than assigning through that view when the packet object is reused.
+    packet.data = buffer(payload, received);
     if (!socle_detail::copy_socket_address(
             packet.peer.address, message.msg_name, message.msg_namelen)) {
         errno = EPROTO;
@@ -616,7 +634,7 @@ bool drain_bio_output(openssl_listener::dispatcher_state& state) {
         BIO_MSG message { payload.data(), payload.size(), peer.get(), local.get(), 0 };
         std::size_t processed = 0;
         ERR_clear_error();
-        if (BIO_recvmmsg(state.application_bio, &message, sizeof(message), 1, 0,
+        if (BIO_recvmmsg(state.application_bio.value, &message, sizeof(message), 1, 0,
                          &processed) != 1 || processed == 0) {
             auto const error = ERR_peek_last_error();
             if (error == 0) break;
@@ -625,7 +643,7 @@ bool drain_bio_output(openssl_listener::dispatcher_state& state) {
             break;
         }
         openssl_listener::dispatcher_state::packet packet;
-        packet.data.assign(payload.data(), payload.data() + message.data_len);
+        packet.data = buffer(payload.data(), message.data_len);
         // Reading the application half reverses the sender's BIO addresses.
         packet.peer = endpoint_from_bio(local.get());
         packet.local = endpoint_from_bio(peer.get());
@@ -730,7 +748,8 @@ datagram_endpoint endpoint_from_bio_address(const BIO_ADDR* address) {
 
 openssl_connection::openssl_connection(unique_ssl connection, int owned_udp_fd,
                                        event_driver driver, datagram_endpoint peer)
-    : connection_(std::move(connection)), owned_udp_fd_(owned_udp_fd), peer_(peer), driver_(driver) {
+    : owned_udp_fd_(std::move(owned_udp_fd), close_descriptor),
+      connection_(std::move(connection)), peer_(peer), driver_(driver) {
     if (connection_) {
         ERR_clear_error();
         // Stream I/O only consumes or queues application bytes. Transport ticks
@@ -750,11 +769,7 @@ openssl_connection::openssl_connection(unique_ssl connection, int owned_udp_fd,
     }
 }
 
-openssl_connection::~openssl_connection() {
-    streams_.clear();
-    connection_.reset();
-    if (owned_udp_fd_ >= 0) ::close(owned_udp_fd_);
-}
+openssl_connection::~openssl_connection() = default;
 
 bool openssl_connection::handshake_complete() const {
     return connection_ && SSL_is_init_finished(connection_.get());
@@ -1011,6 +1026,8 @@ void openssl_connection::progress_transport() {
             auto const error = SSL_get_error(connection_.get(), result);
             if (error != SSL_ERROR_WANT_READ && error != SSL_ERROR_WANT_WRITE
                 && error != SSL_ERROR_WANT_X509_LOOKUP) {
+                logging::info().war("openssl ssl=%p handshake failed error=%d",
+                                    static_cast<void*>(connection_.get()), error);
                 closed_ = true;
                 emit(multiflow::event_type::connection_close, std::nullopt,
                      static_cast<std::uint64_t>(error));
@@ -1127,29 +1144,43 @@ std::unique_ptr<openssl_connection> connect_openssl_quic(
         return std::unique_ptr<openssl_connection> {};
     };
     if (!context || !peer || peer_size == 0 || alpn.empty() || alpn.size() > 255) {
+        ++stats.errors.openssl_connect_invalid_quic_peer_or_alpn;
         return fail("invalid QUIC peer or ALPN");
     }
 
     // Production children share the worker's outgoing port/socket. Standalone
     // adapters keep their own connected socket for tests and independent use.
-    int fd = -1;
-    auto close_and_fail = [&fd, &fail](std::string message) {
-        if (fd >= 0) ::close(fd);
+    socle::raw::unique<int> fd {-1, close_descriptor};
+    auto fail_setup = [&fail](std::string message) {
+        ++stats.errors.openssl_connect_failure;
         return fail(std::move(message));
     };
     if (port) {
-        if (!SSL_is_listener(port) || SSL_get_SSL_CTX(port) != context)
+        if (!SSL_is_listener(port) || SSL_get_SSL_CTX(port) != context) {
+            ++stats.errors.openssl_connect_quic_port_context_mismatch;
             return fail("QUIC port/context mismatch");
+        }
     } else {
-        fd = ::socket(peer->sa_family, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, IPPROTO_UDP);
-        if (fd < 0) return fail(std::string("socket: ") + std::strerror(errno));
-        if (detail::retry_on_eintr([&] { return ::connect(fd, peer, peer_size); }) != 0)
-            return close_and_fail(std::string("connect: ") + std::strerror(errno));
+        fd.value = socle::socket(peer->sa_family, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, IPPROTO_UDP);
+        if (fd.value < 0) {
+            ++stats.errors.openssl_connect_socket;
+            return fail(std::string("socket: ") + std::strerror(errno));
+        }
+        if (detail::retry_on_eintr([&] { return ::connect(fd.value, peer, peer_size); }) != 0) {
+            ++stats.errors.openssl_connect;
+            return fail_setup(std::string("connect: ") + std::strerror(errno));
+        }
     }
     unique_ssl ssl(port ? SSL_new_from_listener(port, 0) : SSL_new(context));
-    if (!ssl) return close_and_fail("SSL_new: " + openssl_error_stack());
+    if (!ssl) {
+        ++stats.errors.openssl_ssl_new;
+        return fail_setup("SSL_new: " + openssl_error_stack());
+    }
     datagram_endpoint endpoint;
-    if (peer_size > sizeof(endpoint.address)) return close_and_fail("invalid QUIC peer size");
+    if (peer_size > sizeof(endpoint.address)) {
+        ++stats.errors.openssl_invalid_quic_peer_size;
+        return fail_setup("invalid QUIC peer size");
+    }
     std::memcpy(&endpoint.address, peer, peer_size);
     endpoint.size = peer_size;
     auto initial_peer = endpoint_to_bio(endpoint);
@@ -1157,7 +1188,7 @@ std::unique_ptr<openssl_connection> connect_openssl_quic(
     auto const numeric_identity = !server_name.empty()
         && (::inet_pton(AF_INET, server_name.c_str(), binary_address.data()) == 1
             || ::inet_pton(AF_INET6, server_name.c_str(), binary_address.data()) == 1);
-    if ((!port && SSL_set_fd(ssl.get(), fd) != 1)
+    if ((!port && SSL_set_fd(ssl.get(), fd.value) != 1)
         || !initial_peer || SSL_set1_initial_peer_addr(ssl.get(), initial_peer.get()) != 1
         || SSL_set_blocking_mode(ssl.get(), 0) != 1
         || (!server_name.empty() && numeric_identity
@@ -1166,39 +1197,52 @@ std::unique_ptr<openssl_connection> connect_openssl_quic(
         || (!server_name.empty() && !numeric_identity
             && (SSL_set_tlsext_host_name(ssl.get(), server_name.c_str()) != 1
                 || SSL_set1_host(ssl.get(), server_name.c_str()) != 1))) {
-        return close_and_fail("configure outgoing QUIC: " + openssl_error_stack());
+        ++stats.errors.openssl_configure_outgoing_quic;
+        return fail_setup("configure outgoing QUIC: " + openssl_error_stack());
     }
     std::vector<unsigned char> encoded_alpn;
     encoded_alpn.reserve(alpn.size() + 1);
     encoded_alpn.push_back(static_cast<unsigned char>(alpn.size()));
     encoded_alpn.insert(encoded_alpn.end(), alpn.begin(), alpn.end());
     if (SSL_set_alpn_protos(ssl.get(), encoded_alpn.data(), encoded_alpn.size()) != 0) {
-        return close_and_fail("configure QUIC ALPN: " + openssl_error_stack());
+        ++stats.errors.openssl_configure_quic_alpn;
+        return fail_setup("configure QUIC ALPN: " + openssl_error_stack());
     }
 
     if(offer && !apply_hook_offer(ssl.get(), *offer, server_name)) {
-        return close_and_fail("configure QUIC hook settings: " + openssl_error_stack());
+        ++stats.errors.openssl_configure_quic_hook_settings;
+        return fail_setup("configure QUIC hook settings: " + openssl_error_stack());
     }
 
-    if (configure && !configure(ssl.get())) return close_and_fail("QUIC certificate policy setup failed");
+    if (configure && !configure(ssl.get())) {
+        ++stats.errors.openssl_quic_certificate_policy_setup_failed;
+        return fail_setup("QUIC certificate policy setup failed");
+    }
 
-    auto connection = std::make_unique<openssl_connection>(std::move(ssl), fd,
-        port ? openssl_connection::event_driver::owner
-               : openssl_connection::event_driver::connection, endpoint);
+    // A new-expression allocates before evaluating arguments: failed allocation
+    // leaves fd guarded; once construction starts, the connection owns it.
+    auto connection = std::unique_ptr<openssl_connection>(new openssl_connection(
+        std::move(ssl), fd.release(), port ? openssl_connection::event_driver::owner
+                                         : openssl_connection::event_driver::connection, endpoint));
     if (port && !connection->closed()) {
         // Bootstrap once after policy/hooks are installed. OpenSSL starts the
         // channel here; subsequent transport ticks belong to the worker.
         ERR_clear_error();
-        auto const result = SSL_do_handshake(connection->native_handle());
+        auto const result = SSL_do_handshake(connection->handle_native());
         if (result != 1) {
-            auto const reason = SSL_get_error(connection->native_handle(), result);
+            auto const reason = SSL_get_error(connection->handle_native(), result);
             if (reason != SSL_ERROR_WANT_READ && reason != SSL_ERROR_WANT_WRITE
-                && reason != SSL_ERROR_WANT_X509_LOOKUP)
+                && reason != SSL_ERROR_WANT_X509_LOOKUP) {
+                ++stats.errors.openssl_connect_start_shared_quic_handshake;
                 return fail("start shared QUIC handshake: " + openssl_error_stack());
+            }
         }
     }
     connection->drain_events();
-    if (connection->closed()) return fail("start QUIC handshake: " + openssl_error_stack());
+    if (connection->closed()) {
+        ++stats.errors.openssl_connect_start_quic_handshake;
+        return fail("start QUIC handshake: " + openssl_error_stack());
+    }
     if (error) error->clear();
     return connection;
 }
@@ -1226,6 +1270,9 @@ multiflow::flow_handle openssl_connection::attach_stream(unique_ssl stream, bool
         : (stream_type == SSL_STREAM_TYPE_READ
             ? multiflow::direction::receive_only
             : multiflow::direction::send_only);
+    logging::stream().deb("openssl ssl=%p stream=%llu opened incoming=%d type=%d",
+                          static_cast<void*>(connection_.get()),
+                          static_cast<unsigned long long>(SSL_get_stream_id(stream.get())), incoming, stream_type);
     multiflow::flow_handle handle { next_internal_id_++, next_generation_++ };
     streams_.emplace(handle.id,
                      std::make_unique<stream_state>(handle, std::move(stream), stream_direction));
@@ -1278,7 +1325,7 @@ std::unique_ptr<openssl_listener> openssl_listener::create(SSL_CTX* context, int
             ? IP_RECVORIGDSTADDR : IPV6_RECVORIGDSTADDR;
         if ((bound.ss_family != AF_INET && bound.ss_family != AF_INET6)
             || sx::quic::detail::retry_on_eintr([&] {
-                return ::setsockopt(udp_fd, level, option, &enabled,
+                return socle::setsockopt(udp_fd, level, option, &enabled,
                                     sizeof(enabled));
             }) != 0) return nullptr;
     }
@@ -1292,23 +1339,18 @@ std::unique_ptr<openssl_listener> openssl_listener::create(SSL_CTX* context, int
         const int enabled = 1;
         const int level = bound.ss_family == AF_INET ? SOL_IP : SOL_IPV6;
         const int option = bound.ss_family == AF_INET ? IP_PKTINFO : IPV6_RECVPKTINFO;
-        if(::setsockopt(udp_fd, level, option, &enabled, sizeof(enabled)) != 0) return nullptr;
+        if(socle::setsockopt(udp_fd, level, option, &enabled, sizeof(enabled)) != 0) return nullptr;
     }
 
-    BIO* network_bio = nullptr;
+    socle::raw::unique<BIO*> network_bio {nullptr, [](auto*& value) { BIO_free(value); }};
     auto dispatcher = std::shared_ptr<openssl_listener::dispatcher_state> {};
     bool local_address_enabled = false;
     if (enable_local_address) {
-        BIO* application_bio = nullptr;
-        BIO* ssl_bio = nullptr;
-        if (BIO_new_bio_dgram_pair(&application_bio, 1U << 20, &ssl_bio, 1U << 20) != 1) {
+        socle::raw::unique<BIO*> application_bio {nullptr, [](auto*& value) { BIO_free(value); }};
+        socle::raw::unique<BIO*> ssl_bio {nullptr, [](auto*& value) { BIO_free(value); }};
+        if (BIO_new_bio_dgram_pair(&application_bio.value, 1U << 20, &ssl_bio.value, 1U << 20) != 1) {
             return nullptr;
         }
-        auto fail_pair = [&]() {
-            BIO_free(application_bio);
-            BIO_free(ssl_bio);
-            return std::unique_ptr<openssl_listener> {};
-        };
         // Both users preserve both addresses on every datagram: the dispatcher
         // supplies the received peer/local tuple and honours the tuple emitted
         // by OpenSSL. Capabilities are advertised to the opposite BIO half, so
@@ -1317,34 +1359,32 @@ std::unique_ptr<openssl_listener> openssl_listener::create(SSL_CTX* context, int
         constexpr std::uint32_t address_capabilities =
             BIO_DGRAM_CAP_HANDLES_SRC_ADDR | BIO_DGRAM_CAP_HANDLES_DST_ADDR
             | BIO_DGRAM_CAP_PROVIDES_SRC_ADDR | BIO_DGRAM_CAP_PROVIDES_DST_ADDR;
-        if (BIO_dgram_set_caps(ssl_bio, address_capabilities) != 1
-            || BIO_dgram_set_caps(application_bio, address_capabilities) != 1
-            || BIO_dgram_set_local_addr_enable(ssl_bio, 1) != 1
-            || BIO_dgram_set_local_addr_enable(application_bio, 1) != 1
-            || BIO_dgram_set_mtu(application_bio, 1500) != 1) {
-            return fail_pair();
+        if (BIO_dgram_set_caps(ssl_bio.value, address_capabilities) != 1
+            || BIO_dgram_set_caps(application_bio.value, address_capabilities) != 1
+            || BIO_dgram_set_local_addr_enable(ssl_bio.value, 1) != 1
+            || BIO_dgram_set_local_addr_enable(application_bio.value, 1) != 1
+            || BIO_dgram_set_mtu(application_bio.value, 1500) != 1) {
+            return nullptr;
         }
         dispatcher = std::make_shared<openssl_listener::dispatcher_state>();
-        dispatcher->application_bio = application_bio;
+        dispatcher->application_bio.value = application_bio.release();
         dispatcher->socket_fd = udp_fd;
         dispatcher->source = std::move(source);
-        network_bio = ssl_bio;
+        network_bio.value = ssl_bio.release();
         local_address_enabled = true;
     } else {
-        network_bio = BIO_new_dgram(udp_fd, BIO_NOCLOSE);
-        if (!network_bio) return nullptr;
+        network_bio.value = BIO_new_dgram(udp_fd, BIO_NOCLOSE);
+        if (!network_bio.value) return nullptr;
     }
     auto observer_state = std::make_unique<openssl_listener::observer_state>();
     observer_state->observer = std::move(observer);
     unique_ssl listener(SSL_new_listener(context, 0));
-    if (!listener) {
-        BIO_free(network_bio);
-        return nullptr;
-    }
+    if (!listener) return nullptr;
     // Capability negotiation occurs when the BIO is attached. Transparent mode
     // therefore uses a datagram pair configured above, while this adapter owns
     // all socket I/O and preserves the original source/destination tuple.
-    SSL_set_bio(listener.get(), network_bio, network_bio);
+    SSL_set_bio(listener.get(), network_bio.value, network_bio.value);
+    (void)network_bio.release(); // SSL owns the shared read/write BIO after attachment.
     if (SSL_set_blocking_mode(listener.get(), 0) != 1) return nullptr;
     if (SSL_listen(listener.get()) != 1) return nullptr;
     return std::unique_ptr<openssl_listener>(
@@ -1368,13 +1408,17 @@ std::unique_ptr<openssl_connection> openssl_listener::accept() {
 
 bool openssl_listener::handle_events() {
     last_error_.clear();
-    if (!listener_) return fail_operation("listener is not initialized");
+    if (!listener_) {
+        ++stats.errors.openssl_listener_is_not_initialized;
+        return fail_operation("listener is not initialized");
+    }
 
     // A normal socket BIO already owns the entire transport pump.
     if (!dispatcher_state_) {
         ERR_clear_error();
-        return SSL_handle_events(listener_.get()) == 1
-            || fail_operation("SSL_handle_events on socket BIO");
+        if (SSL_handle_events(listener_.get()) == 1) return true;
+        ++stats.errors.openssl_ssl_handle_events_on_socket_bio;
+        return fail_operation("SSL_handle_events on socket BIO");
     }
 
     // Transparent mode owns recvmsg/sendmsg so the original destination and
@@ -1393,10 +1437,14 @@ bool openssl_listener::handle_events() {
 bool openssl_listener::finish_events() {
     // Stream writes only enqueue bytes. Tick once after all sessions have run,
     // otherwise queued data can wait for a peer packet which will never arrive.
-    if (!listener_) return fail_operation("listener is not initialized");
+    if (!listener_) {
+        ++stats.errors.openssl_listener_is_not_initialized_2;
+        return fail_operation("listener is not initialized");
+    }
     if (dispatcher_state_) return progress_listener_timers();
-    return SSL_handle_events(listener_.get()) == 1
-        || fail_operation("SSL_handle_events after stream output");
+    if (SSL_handle_events(listener_.get()) == 1) return true;
+    ++stats.errors.openssl_ssl_handle_events_after_stream_output;
+    return fail_operation("SSL_handle_events after stream output");
 }
 
 bool openssl_listener::fail_operation(std::string operation) {
@@ -1433,15 +1481,16 @@ bool openssl_listener::progress_input_packet() {
     // certificate/Retry callbacks. Keep each batch below the BIO capacity.
     auto const can_batch = [](dispatcher_state::packet const& input) {
         return input.association != 0 && !input.data.empty()
-            && (input.data.front() & 0x80) == 0;
+            && (input.data[0] & 0x80) == 0;
     };
     bool const batch = can_batch(packet);
     if (batch) dispatcher.input_active = false;
     std::size_t bytes = 0;
     do {
         auto const& input = dispatcher.pending_input.front();
-        if (!inject_bio_datagram(dispatcher.application_bio, input)) {
+        if (!inject_bio_datagram(dispatcher.application_bio.value, input)) {
             clear_active();
+            ++stats.errors.openssl_bio_sendmmsg_into_listener;
             return fail_operation("BIO_sendmmsg into listener");
         }
         bytes += input.data.size();
@@ -1455,10 +1504,12 @@ bool openssl_listener::progress_input_packet() {
     ERR_clear_error();
     if (SSL_handle_events(listener_.get()) != 1) {
         clear_active();
+        ++stats.errors.openssl_ssl_handle_events_after_input;
         return fail_operation("SSL_handle_events after input");
     }
     if (!drain_bio_output(dispatcher)) {
         clear_active();
+        ++stats.errors.openssl_bio_recvmmsg_from_listener;
         return fail_operation("BIO_recvmmsg from listener");
     }
 
@@ -1506,9 +1557,11 @@ bool openssl_listener::progress_listener_timers() {
     // Tick timer-driven QUIC work even if the socket had no readable datagram.
     ERR_clear_error();
     if (SSL_handle_events(listener_.get()) != 1) {
+        ++stats.errors.openssl_ssl_handle_events_timer_tick;
         return fail_operation("SSL_handle_events timer tick");
     }
     if (!drain_bio_output(dispatcher)) {
+        ++stats.errors.openssl_bio_recvmmsg_after_timer_tick;
         return fail_operation("BIO_recvmmsg after timer tick");
     }
     return flush_dispatcher_socket();

@@ -1,3 +1,4 @@
+#include "proxy/quic/log.hpp"
 #include <gtest/gtest.h>
 #include "../../tls/ocsp_fixture.hpp"
 
@@ -825,7 +826,7 @@ TEST(QuicTestbed, ConcurrentVerifiedMitmSessionsAndStreams) {
         std::this_thread::sleep_for(1ms);
     }
     ASSERT_TRUE(direct->handshake_complete())
-        << "verify=" << SSL_get_verify_result(direct->native_handle())
+        << "verify=" << SSL_get_verify_result(direct->handle_native())
         << " errors=" << quic::openssl_error_stack();
     direct->close();
 
@@ -885,7 +886,7 @@ TEST(QuicTestbed, ConcurrentVerifiedMitmSessionsAndStreams) {
         << " handshake_failures=" << handshake_diagnostics.handshake_failures
         << " upstream_failures=" << handshake_diagnostics.upstream_failures
         << " first_verify="
-        << SSL_get_verify_result(clients.front().connection->native_handle())
+        << SSL_get_verify_result(clients.front().connection->handle_native())
         << " openssl=" << quic::openssl_error_stack();
     ASSERT_EQ(proxy.connection_count(), client_count)
         << "accepted=" << handshake_diagnostics.accepted_sessions
@@ -904,7 +905,7 @@ TEST(QuicTestbed, ConcurrentVerifiedMitmSessionsAndStreams) {
         ASSERT_TRUE(client.connection->handshake_complete());
         EXPECT_EQ(client.connection->negotiated_alpn(), "h3");
         std::unique_ptr<X509, decltype(&X509_free)> peer(
-            SSL_get1_peer_certificate(client.connection->native_handle()), X509_free);
+            SSL_get1_peer_certificate(client.connection->handle_native()), X509_free);
         ASSERT_NE(peer, nullptr);
         EXPECT_EQ(X509_check_host(peer.get(), test_sni, std::strlen(test_sni), 0, nullptr), 1);
         EXPECT_EQ(X509_NAME_cmp(X509_get_issuer_name(peer.get()),
@@ -1044,7 +1045,7 @@ TEST_P(QuicCertificatePolicy, EnforcesPolicyBeforeActivationAndData) {
     if (accepted) {
         EXPECT_EQ(proxy.diagnostics().upstream_failures, 0U);
         if (allow) {
-            unique_x509 peer(SSL_get1_peer_certificate(client->native_handle()), X509_free);
+            unique_x509 peer(SSL_get1_peer_certificate(client->handle_native()), X509_free);
             ASSERT_NE(peer, nullptr);
             EXPECT_EQ(X509_NAME_cmp(X509_get_subject_name(peer.get()),
                                     X509_get_issuer_name(peer.get())), 0);
@@ -1118,10 +1119,10 @@ TEST(QuicTestbed, ConfiguredIdentityIncludesIntermediateChain) {
             reinterpret_cast<sockaddr const*>(&address.address), address.size, test_sni);
         ASSERT_NE(client, nullptr);
         ASSERT_TRUE(await_handshake(*client));
-        EXPECT_EQ(SSL_get_verify_result(client->native_handle()), X509_V_OK);
-        unique_x509 certificate(SSL_get1_peer_certificate(client->native_handle()), X509_free);
+        EXPECT_EQ(SSL_get_verify_result(client->handle_native()), X509_V_OK);
+        unique_x509 certificate(SSL_get1_peer_certificate(client->handle_native()), X509_free);
         EXPECT_EQ(fingerprint(certificate.get()), expected);
-        EXPECT_GE(sk_X509_num(SSL_get_peer_cert_chain(client->native_handle())), 2);
+        EXPECT_GE(sk_X509_num(SSL_get_peer_cert_chain(client->handle_native())), 2);
         client->close();
     }
 }
@@ -1306,7 +1307,7 @@ TEST(QuicTestbed, ClientRejectsMitmCertificateWithoutTestCaTrust) {
     ASSERT_NE(client, nullptr) << error;
 
     EXPECT_FALSE(await_handshake(*client));
-    EXPECT_NE(SSL_get_verify_result(client->native_handle()), X509_V_OK);
+    EXPECT_NE(SSL_get_verify_result(client->handle_native()), X509_V_OK);
     client->close();
 }
 
@@ -1385,6 +1386,63 @@ TEST(QuicTestbed, ActivatesAfterDelayedDownstreamFinished) {
     exercise_pending_downstream(true);
 }
 
+// Each thread owns one bounded journal. No logging, allocation or cross-thread
+// locking occurs while recording; merge and format only after the worker joins.
+struct lifecycle_journal {
+    using clock = std::chrono::steady_clock;
+    struct record {
+        clock::time_point observed, logical;
+        char const* event;
+        std::uint64_t id;
+        std::array<char, 48> phase {};
+        std::array<char, 24> state {};
+        std::array<char, 120> reason {};
+    };
+    std::vector<record> records;
+    std::size_t dropped = 0;
+
+    lifecycle_journal() { records.reserve(8192); }
+
+    // Truncate text rather than allocate in the timed path. The event names
+    // are string literals, and every other string is copied before returning.
+    void append(char const* event, std::uint64_t id, clock::time_point logical,
+                std::string_view phase = {}, std::string_view state = {},
+                std::string_view reason = {}) {
+        if (records.size() == records.capacity()) { ++dropped; return; }
+        record item {clock::now(), logical, event, id};
+        auto copy = [](auto& destination, std::string_view source) {
+            auto const size = std::min(destination.size() - 1, source.size());
+            if (size) std::memcpy(destination.data(), source.data(), size);
+        };
+        copy(item.phase, phase);
+        copy(item.state, state);
+        copy(item.reason, reason);
+        records.push_back(item);
+    }
+
+    // Includes logical worker time and actual observation time to expose work
+    // or scheduling delays between setting the deadline and publishing it.
+    std::string timeline(lifecycle_journal const& reader, clock::time_point started) const {
+        auto merged = records;
+        merged.insert(merged.end(), reader.records.begin(), reader.records.end());
+        std::stable_sort(merged.begin(), merged.end(), [](auto const& a, auto const& b) {
+            return a.observed < b.observed;
+        });
+        std::ostringstream out;
+        out << "Lifecycle journal: dropped worker=" << dropped << " reader=" << reader.dropped << '\n';
+        out << "actual_us logical_us event session phase state reason\n";
+        auto us = [started](auto time) {
+            return std::chrono::duration_cast<std::chrono::microseconds>(time - started).count();
+        };
+        for (auto const& item : merged) {
+            out << us(item.observed) << ' ' << us(item.logical) << ' ' << item.event << ' '
+                << item.id << ' ' << item.phase.data() << ' ' << item.state.data()
+                << ' ' << item.reason.data() << '\n';
+        }
+        return out.str();
+    }
+};
+
 TEST(QuicTestbed, PendingUpstreamTimeoutPreservesLifecycleDiagnostics) {
     origin_server origin(600ms);
     ASSERT_TRUE(origin.ready());
@@ -1394,6 +1452,11 @@ TEST(QuicTestbed, PendingUpstreamTimeoutPreservesLifecycleDiagnostics) {
     quic::listener_service proxy(0, pki_file("srv-cert.pem"), pki_file("srv-key.pem"), false,
                                  origin.port(), true, lifecycle, {}, "127.0.0.1");
     ASSERT_TRUE(proxy.prepare());
+    lifecycle_journal worker_journal, reader_journal;
+    auto const started = std::chrono::steady_clock::now();
+    proxy.set_lifecycle_probe([&](auto event, auto id, auto logical, auto phase, auto state, auto reason) {
+        worker_journal.append(event, id, logical, phase, state, reason);
+    });
     running_service runner(proxy);
     auto context = make_verified_client_context();
     ASSERT_NE(context, nullptr);
@@ -1403,9 +1466,26 @@ TEST(QuicTestbed, PendingUpstreamTimeoutPreservesLifecycleDiagnostics) {
     ASSERT_NE(client, nullptr);
     bool pending = false, draining = false;
     auto const deadline = std::chrono::steady_clock::now() + 2s;
+    auto previous_read = std::chrono::steady_clock::now();
+    std::chrono::steady_clock::duration max_read_gap {}, max_client_progress {};
+    bool saw_any_draining = false;
     while (std::chrono::steady_clock::now() < deadline) {
+        auto const client_started = std::chrono::steady_clock::now();
+        reader_journal.append("client-progress-begin", 0, client_started);
         client->drain_events();
-        for (auto const& snapshot : proxy.session_diagnostics()) {
+        auto const read_started = std::chrono::steady_clock::now();
+        max_client_progress = std::max(max_client_progress, read_started - client_started);
+        reader_journal.append("read-begin", 0, read_started);
+        auto snapshots = proxy.session_diagnostics();
+        auto const read_finished = std::chrono::steady_clock::now();
+        max_read_gap = std::max(max_read_gap, read_finished - previous_read);
+        previous_read = read_finished;
+        reader_journal.append("read-end", 0, read_started);
+        for (auto const& snapshot : snapshots) {
+            // Record before the phase filter: a rejected snapshot is evidence too.
+            reader_journal.append("read-snapshot", snapshot.id, read_finished,
+                                  snapshot.handshake_phase, snapshot.state, snapshot.end_reason);
+            saw_any_draining = saw_any_draining || snapshot.state == "draining";
             EXPECT_NE(snapshot.state, "active");
             if (snapshot.handshake_phase != "upstream-handshake") continue;
             EXPECT_TRUE(snapshot.upstream_tls.available);
@@ -1417,15 +1497,37 @@ TEST(QuicTestbed, PendingUpstreamTimeoutPreservesLifecycleDiagnostics) {
                 EXPECT_TRUE(snapshot.upstream_tls.ended);
             }
         }
-        if (proxy.diagnostics().completed_sessions) break;
+        if (proxy.diagnostics().completed_sessions) {
+            reader_journal.append("read-completed", 0, std::chrono::steady_clock::now());
+            break;
+        }
         std::this_thread::sleep_for(1ms);
     }
+    // Sample final counters before stop(), which itself performs cleanup.
+    auto const counters = proxy.diagnostics();
+    auto const connections = proxy.connection_count();
+    auto const origin_handshakes = origin.handshake_count();
+    runner.stop(); // Join before inspecting the worker-owned journal or last_error.
+    auto us = [](auto elapsed) {
+        return std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+    };
+    std::ostringstream evidence;
+    evidence << "max_read_gap_us=" << us(max_read_gap)
+             << " max_client_progress_us=" << us(max_client_progress)
+             << " saw_any_draining=" << saw_any_draining
+             << " worker_error='" << proxy.last_error() << "'\n"
+             << worker_journal.timeline(reader_journal, started);
+    SCOPED_TRACE(evidence.str());
+    if (!draining || ::testing::Test::HasFailure() || std::getenv("SMITHPROXY_LIFECYCLE_TIMELINE"))
+        std::cerr << evidence.str();
+    EXPECT_EQ(worker_journal.dropped, 0U);
+    EXPECT_EQ(reader_journal.dropped, 0U);
     EXPECT_TRUE(pending);
     EXPECT_TRUE(draining);
-    EXPECT_EQ(proxy.diagnostics().handshake_timeouts, 1U);
-    EXPECT_EQ(proxy.diagnostics().handshake_failures, 0U);
-    EXPECT_EQ(proxy.connection_count(), 0U);
-    EXPECT_EQ(origin.handshake_count(), 0U);
+    EXPECT_EQ(counters.handshake_timeouts, 1U);
+    EXPECT_EQ(counters.handshake_failures, 0U);
+    EXPECT_EQ(connections, 0U);
+    EXPECT_EQ(origin_handshakes, 0U);
 }
 
 TEST(QuicTestbed, StopCancelsPendingUpstreamWithoutWaitingForOrigin) {
@@ -1848,6 +1950,18 @@ int main(int argc, char** argv) {
 #if SMITHPROXY_OPENSSL_QUIC
     Log::init();
     Log::get()->level(WAR);
+    // Opt-in diagnostics for testing the same callbacks with tracing enabled.
+    if (std::getenv("SMITHPROXY_QUIC_TEST_TRACE")) {
+        Log::get()->level(DUM);
+        sx::quic::logging::initialize();
+        for (auto* topic : {&sx::quic::log(), &sx::quic::logging::info(),
+                            &sx::quic::logging::alpn(), &sx::quic::logging::message(),
+                            &sx::quic::logging::session(), &sx::quic::logging::verify(),
+                            &sx::quic::logging::mitm(), &sx::quic::logging::ocsp(),
+                            &sx::quic::logging::stream(), &sx::quic::logging::transport()}) {
+            topic->level(DUM);
+        }
+    }
     if (!create_test_pki()) return 2;
     auto& factory = SSLFactory::factory();
     factory.certs_path() = test_pki_directory + "/";

@@ -1,6 +1,10 @@
 #ifndef SMITHPROXY_QUIC_OPENSSL_HPP
 #define SMITHPROXY_QUIC_OPENSSL_HPP
 
+#include "proxy/quic/resource.hpp"
+
+#include <buffer.hpp>
+
 #include <openssl/opensslv.h>
 #include <openssl/ssl.h>
 
@@ -46,7 +50,7 @@ struct datagram_endpoint {
 
 /** Owned UDP payload and its original tuple, safe to hand to another worker. */
 struct datagram_packet {
-    std::vector<unsigned char> data;
+    buffer data;
     datagram_endpoint peer;
     datagram_endpoint local;
     std::uint64_t association = 0;
@@ -238,7 +242,7 @@ public:
     bool inject_datagram(const unsigned char* data, std::size_t size,
                          const BIO_ADDR* peer, const BIO_ADDR* local);
 
-    SSL* native_handle() const { return connection_.get(); } ///< Borrowed OpenSSL handle.
+    SSL* handle_native() const { return connection_.get(); } ///< Borrowed OpenSSL handle.
     /** Return the current datagram peer copied from the connection BIO. */
     datagram_endpoint peer_endpoint() const;
     /** True once TLS 1.3 authentication and QUIC parameter exchange complete. */
@@ -278,8 +282,9 @@ private:
               std::optional<multiflow::flow_handle> flow,
               std::uint64_t protocol_error = 0);
 
+    // Reverse destruction releases streams, then SSL, then the owned socket.
+    socle::raw::var<int> owned_udp_fd_ {-1, close_descriptor}; ///< -1 for listener-owned sockets.
     unique_ssl connection_;                     ///< Owned OpenSSL QUIC connection.
-    int owned_udp_fd_ = -1;                     ///< Outgoing socket, or -1 for listener-owned.
     datagram_endpoint peer_;                    ///< Explicit outgoing peer; shared BIO peer is not per connection.
     std::map<multiflow::flow_id, std::unique_ptr<stream_state>> streams_; ///< Live streams.
     std::map<event_key, multiflow::event> events_; ///< Pending coalesced notifications.
@@ -357,7 +362,7 @@ public:
     /** Bind ClientHello's tuple to later authenticated CID changes on this SSL. */
     bool bind_connection_route(SSL* connection);
     bool local_address_enabled() const { return local_address_enabled_; }
-    SSL* native_handle() const { return listener_.get(); }
+    SSL* handle_native() const { return listener_.get(); }
 
 private:
     openssl_listener(std::unique_ptr<observer_state> observer,
