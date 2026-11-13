@@ -20,8 +20,8 @@ SET(SOCLE_COMMON_DIR "socle/common")
 
 project(smithproxy C CXX)
 
-include(${PROJECT_SOURCE_DIR}/cmake/QuicBackend.cmake)
 include(CTest)
+include(${PROJECT_SOURCE_DIR}/cmake/QuicBackend.cmake)
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}")
 
 option(SMITHPROXY_COVERAGE "Instrument Smithproxy tests for GCC line coverage" OFF)
@@ -259,6 +259,8 @@ endif(EXISTS "${PROJECT_SOURCE_DIR}/.git")
 message(STATUS "Git current smithproxy branch: ${SX_GIT_BRANCH}")
 message(STATUS "Git commit smithproxy hash: ${SX_GIT_COMMIT_HASH}")
 message(STATUS "Git commit smithproxy version: ${SX_GIT_VERSION}")
+
+include(${PROJECT_SOURCE_DIR}/cmake/DependencyInfo.cmake)
 
 message(STATUS "Generating smithproxy_version.h")
 
@@ -1048,7 +1050,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 src/service/quic/worker_dispatcher.cpp
                 tests/quic/testbed/quic_test_node.cpp
         )
-        target_link_libraries(quic_test_node smithproxy_qpack socle_lib pthread crypto ssl)
+        target_link_libraries(quic_test_node smithproxy_qpack nlohmann_json socle_lib pthread crypto ssl)
 
         if(BUILD_TESTING)
             add_test(NAME unit.core COMMAND sx_gtests
@@ -1579,8 +1581,7 @@ if(SMITHPROXY_ENABLE_NGTCP2)
         if("src/proxy/quic/transport.cpp" IN_LIST quic_sources)
             target_sources(${quic_target} PRIVATE src/proxy/quic/ngtcp2.cpp src/proxy/quic/ngtcp2_worker.cpp)
             target_compile_definitions(${quic_target} PRIVATE SMITHPROXY_ENABLE_NGTCP2=1)
-            target_include_directories(${quic_target} PRIVATE ${NGTCP2_INCLUDE_DIR} ${NGTCP2_CRYPTO_INCLUDE_DIR})
-            target_link_libraries(${quic_target} ${NGTCP2_CRYPTO_LIBRARY} ${NGTCP2_LIBRARY})
+            target_link_libraries(${quic_target} smithproxy_ngtcp2)
         endif()
     endforeach()
     if(TARGET quic_testbed)

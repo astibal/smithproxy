@@ -6,3 +6,6 @@
 [submodule "src/ext/lmhpp"]
 	path = src/ext/lmhpp
 	url = ../lmhpp
+[submodule "src/ext/ngtcp2"]
+	path = src/ext/ngtcp2
+	url = https://github.com/ngtcp2/ngtcp2.git

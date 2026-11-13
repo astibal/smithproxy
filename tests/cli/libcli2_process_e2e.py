@@ -421,7 +421,9 @@ script_profiles = {
             require(cli.command("en"), "Password:")
             require(cli.command("libcli2-test-password"), "#")
             require(cli.command_ok("show"), "Version:")
-            require(cli.command_ok("show status"), "Total sessions:")
+            status_text = cli.command_ok("show status")
+            for field in ("Total sessions:", "OpenSSL:", "Built against:", "ngtcp2:"):
+                require(status_text, field)
             require(cli.command_ok("execute events clear"), "Events cleared")
             require(cli.command_ok("show event list"), "events cleared by admin")
             require(cli.command_ok("execute kb print"), "Knowledgebase dump:")
@@ -729,7 +731,9 @@ script_profiles = {
                     "script=libcli2_e2e_script")
             for section, name, _ in named_objects:
                 require(cli.command_ok(f"show config {section}"), name)
-            require(cli.command_ok("show status"), "Total sessions:")
+            status_text = cli.command_ok("show status")
+            for field in ("Total sessions:", "OpenSSL:", "Built against:", "ngtcp2:"):
+                require(status_text, field)
             cli.command_ok(f"test webhook http://127.0.0.1:{webhook_port}/stall")
             if not WebhookHandler.stall_started.wait(timeout=3):
                 raise AssertionError("stalled webhook request did not start")
