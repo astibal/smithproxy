@@ -221,6 +221,9 @@ public:
     nlohmann::json protocol_diagnostics() const {
         return flow_ctx_->protocol_diagnostics();
     }
+    nlohmann::json http_diagnostics() const {
+        return flow_ctx_->http_diagnostics();
+    }
     void protocol_event(FlowCtx::Dir dir, sx::engine::ProtocolEvent event,
                         std::optional<std::uint64_t> error = std::nullopt) {
         flow_ctx_->transport_event(dir, event, error);

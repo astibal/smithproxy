@@ -2,6 +2,11 @@
 
 #include <proxy/mitmhost.hpp>
 #include <inspect/engine/http3_adapter.hpp>
+#include <inspect/http_diagnostics.hpp>
+
+nlohmann::json FlowCtx::http_diagnostics() const {
+    return sx::engine::http::diagnostics(protocol_views(), stream_);
+}
 
 nlohmann::json FlowCtx::protocol_diagnostics() const {
     if (!session_views_ || !stream_) return {};

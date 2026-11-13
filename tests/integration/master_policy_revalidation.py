@@ -176,12 +176,22 @@ try:
     key = (root / 'config/api.key').read_text().strip()
     context = ssl._create_unverified_context()
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPSHandler(context=context))
-    def api(path):
-        request = urllib.request.Request('https://127.0.0.1:55555/api/' + path, headers={'X-API-Key': key})
+    def api(path, params=None):
+        data = None
+        if params:
+            authorize = urllib.request.Request('https://127.0.0.1:55555/api/authorize',
+                data=json.dumps({'access_key': key}).encode(),
+                headers={'Content-Type': 'application/json'})
+            with opener.open(authorize, timeout=2) as response:
+                tokens = json.load(response)
+            data = json.dumps({**tokens, 'params': params}).encode()
+        request = urllib.request.Request('https://127.0.0.1:55555/api/' + path, data=data,
+                                         method='POST' if params else 'GET',
+                                         headers={'X-API-Key': key, 'Content-Type': 'application/json'})
         with opener.open(request, timeout=2) as response:
             return json.load(response)
-    def sessions():
-        return api('diag/proxy/session/list')
+    def sessions(**params):
+        return api('diag/proxy/session/list', params)
     def cli(command):
         with socket.create_connection(('127.0.0.1', 50000), timeout=5) as connection:
             def prompt():

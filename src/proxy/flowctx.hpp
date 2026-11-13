@@ -65,6 +65,7 @@ public:
         return views_.context(active_endpoint_);
     }
     nlohmann::json protocol_diagnostics() const;
+    nlohmann::json http_diagnostics() const;
     std::string const& protocol_fork_error() const { return protocol_views().fork_error(); }
 
 private:

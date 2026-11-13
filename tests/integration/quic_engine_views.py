@@ -104,6 +104,32 @@ def run_case(root, proxy, hooks, config, eventually, run, sessions, cli):
             assert api_snapshot['client']['request']['flow.http3.method'] == 'GET'
             assert api_snapshot['server']['request']['flow.http3.method'] == 'POST'
             assert api_snapshot['server']['response']['flow.http3.decode']['state'] == 'decoded'
+            def http_records(value):
+                if isinstance(value, dict):
+                    if 'http' in value and value.get('stream_id') == 4:
+                        yield value
+                    for child in value.values():
+                        yield from http_records(child)
+                elif isinstance(value, list):
+                    for child in value:
+                        yield from http_records(child)
+            record = eventually(lambda: next(http_records(sessions(verbose=True, tlsinfo=True)), None))
+            views = record['http']['views']
+            assert views['client']['current']['method'] == 'GET', record
+            assert views['server']['current']['method'] == 'POST', record
+            assert views['server']['current']['url'].endswith('/views/4'), record
+            assert views['server']['streams'][0]['response']['header_sections'], record
+            assert record['left'][0]['buffers']['read']['size'] >= 0, record
+            assert record['tlsinfo']['source'] == 'quic parent', record
+            assert record['tlsinfo']['right']['alpn'] == 'h3', record
+            assert record['tlsinfo']['right']['established'], record
+            text7 = cli('diag proxy session list 7')
+            assert 'HTTP protocol: "http3"' in text7, text7
+            assert 'current: "GET" "https://origin.runner.lab/views/4"' in text7, text7
+            assert 'current: "POST" "https://origin.runner.lab/views/4"' in text7, text7
+            assert 'L7_engine: none' not in text7, text7
+            (root / 'http-diagnostics-api.json').write_text(json.dumps(record, indent=2))
+            (root / 'http-diagnostics-cli-7.txt').write_text(text7)
             text = cli('diag proxy session list 99')
             cli_snapshots = [json.loads(line.split('H3: ', 1)[1]) for line in text.splitlines()
                              if 'H3: ' in line]
