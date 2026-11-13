@@ -25,6 +25,27 @@ TEST(CfgValue, BooleanFilterNormalizesAcceptedSpellings) {
     EXPECT_FALSE(CfgValue::VALUE_BOOL("truthy").accepted());
 }
 
+TEST(CfgValue, SiftLoredModeOffersAndValidatesSupportedModes) {
+    auto value = CfgValueHelp::get().find("settings.webhook.sift_lored_mode");
+    ASSERT_TRUE(value);
+    EXPECT_FALSE(value->get().may_be_empty());
+    EXPECT_EQ(value->get().suggestion_generate("settings.webhook", "sift_lored_mode"),
+              (std::vector<std::string>{"disabled", "optional", "required"}));
+
+    for(auto const* mode : {"disabled", "optional", "required"}) {
+        auto const [accepted, error] = CfgValueHelp::get().value_check(
+            "settings.webhook.sift_lored_mode", mode);
+        ASSERT_TRUE(accepted) << mode << ": " << error;
+        EXPECT_EQ(*accepted, mode);
+    }
+    for(auto const* invalid : {"", "optionu", "require", "REQUIRED", "optional "}) {
+        auto const [accepted, error] = CfgValueHelp::get().value_check(
+            "settings.webhook.sift_lored_mode", invalid);
+        EXPECT_FALSE(accepted) << invalid;
+        EXPECT_FALSE(error.empty()) << invalid;
+    }
+}
+
 TEST(CfgValue, CopyAssignmentPreservesValidationAndSuggestionPolicy) {
     CfgValue source("source");
     source.help("long").help_quick("short").may_be_empty(false)

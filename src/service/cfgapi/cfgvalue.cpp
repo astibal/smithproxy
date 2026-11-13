@@ -549,7 +549,13 @@ void CfgValueHelp::init() {
     add("settings.webhook.sift_lored_mode", "request LoreD enrichment through Sift")
             .help_quick("<disabled|optional|required>: per-request LoreD policy (default: disabled)")
             .may_be_empty(false)
-            .value_filter(CfgValue::VALUE_ANY);
+            .value_filter(is_in_vector(
+                []() { return std::vector<std::string>{"disabled", "optional", "required"}; },
+                "disabled, optional, or required"))
+            .suggestion_generator(
+                [](std::string const&, std::string const&) {
+                    return std::vector<std::string>{"disabled", "optional", "required"};
+                });
 
     add("settings.webhook.sift_lored_include_url", "allow Sift to send observed URLs to LoreD")
             .help_quick("<bool>: opt in to URL/path disclosure to LoreD (default: false)")
