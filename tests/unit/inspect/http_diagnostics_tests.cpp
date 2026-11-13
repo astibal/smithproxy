@@ -89,6 +89,21 @@ TEST(HttpDiagnostics, NonUtf8BytesRemainSerializableAndLossless) {
     EXPECT_NO_THROW(result.dump());
 }
 
+TEST(HttpDiagnostics, UnidirectionalTypeComesFromRetainedMetadata) {
+    ProtocolViews views;
+    http::v3::Http3Connection connection;
+    connection.streams[ProtocolStream{2, 0}].directions[0].stream_type = 0;
+    connection.streams[ProtocolStream{7, 0}].directions[1].stream_type = 2;
+    views.context(E::Client).state_data = connection;
+    auto control = http::diagnostics(views, ProtocolStream{2, 0});
+    EXPECT_EQ(control["views"]["shared"]["streams"][0]["request"]["stream_type"], 0);
+    auto encoder = http::diagnostics(views, ProtocolStream{7, 0});
+    auto const& stream = encoder["views"]["shared"]["streams"][0];
+    EXPECT_EQ(stream["kind"], "unidirectional");
+    EXPECT_EQ(stream["response"]["stream_type"], 2);
+    EXPECT_FALSE(stream["request"].contains("stream_type"));
+}
+
 TEST(HttpDiagnostics, UnrecognizedProtocolHasNoHttpSnapshot) {
     ProtocolViews views;
     EXPECT_TRUE(http::diagnostics(views).empty());
