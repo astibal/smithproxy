@@ -128,6 +128,10 @@ def run_case(root, proxy, hooks, config, eventually, run, sessions, cli):
             assert 'current: "GET" "https://origin.runner.lab/views/4"' in text7, text7
             assert 'current: "POST" "https://origin.runner.lab/views/4"' in text7, text7
             assert 'L7_engine: none' not in text7, text7
+            assert 'client -> server: control, open' in text7, text7
+            assert 'server -> client: control, open' in text7, text7
+            assert 'decode={' not in text7, text7
+            assert 'QUIC errors: process-lifetime' not in text7, text7
             (root / 'http-diagnostics-api.json').write_text(json.dumps(record, indent=2))
             (root / 'http-diagnostics-cli-7.txt').write_text(text7)
             text = cli('diag proxy session list 99')

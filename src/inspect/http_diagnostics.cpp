@@ -65,6 +65,7 @@ json h3_direction(v3::Http3Stream::Direction const& direction) {
     }
     json result = {{"header_sections", std::move(sections)},
                    {"ended", direction.finished}, {"final_headers", direction.final_headers}};
+    if (direction.stream_type) result["stream_type"] = *direction.stream_type;
     if (direction.reset_error) result["reset_error"] = *direction.reset_error;
     if (!direction.metadata_limit.empty()) result["metadata_limit"] = direction.metadata_limit;
     return result;

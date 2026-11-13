@@ -1804,13 +1804,6 @@ static void print_quic_sessions(DiagCli* cli, int flags, bool listener_summary, 
     const bool tls_details = listener_summary || verbosity >= iDEB ||
                              flag_check<int>(flags, SL_TLS_DETAILS);
 
-    if (listener_summary || verbosity >= iDIA) {
-        cli_print(cli, "QUIC errors: process-lifetime site counters (nonzero only)");
-        sx::quic::stats.errors.visit([&](char const* name, std::uint64_t count) {
-            if (count) cli_print(cli, "  %s: %llu", name, static_cast<unsigned long long>(count));
-        });
-    }
-
     const auto decor = cli->context.decor();
     auto const& services = SmithProxy::instance().quic_services;
     std::size_t total = 0;
@@ -1927,6 +1920,19 @@ static void print_quic_sessions(DiagCli* cli, int flags, bool listener_summary, 
             }
         }
         total += sessions.size();
+    }
+    // Process-wide counters belong after the session listing, not beside a
+    // particular connection. Do not print an empty errors heading.
+    if (listener_summary || verbosity >= iDIA) {
+        bool heading = false;
+        sx::quic::stats.errors.visit([&](char const* name, std::uint64_t count) {
+            if (!count) return;
+            if (!heading) {
+                cli_print(cli, "\nQUIC global counters since process start (not session-specific):");
+                heading = true;
+            }
+            cli_print(cli, "  %s: %llu", name, static_cast<unsigned long long>(count));
+        });
     }
     if (listener_summary) {
         if (services.empty()) cli_print(cli, "No QUIC listeners configured.");
@@ -2313,6 +2319,43 @@ auto get_proxy_title(MitmProxy* proxy, int sl_flags, int verbosity) {
 }
 
 
+// Unidirectional streams carry control/QPACK data (or extension data), not
+// an HTTP request/response pair. The type is already retained by the observer.
+void print_http_unidirectional(std::ostream& out, nlohmann::json const& stream) {
+    const bool from_server = (stream.at("id").get<std::uint64_t>() & 1U) != 0;
+    auto const& detail = stream.at(from_server ? "response" : "request");
+    out << "          " << (from_server ? "server -> client" : "client -> server") << ": ";
+    if (!detail.contains("stream_type")) {
+        out << "type pending";
+    } else {
+        const auto type = detail.at("stream_type").get<std::uint64_t>();
+        switch (type) {
+            case 0: out << "control"; break;
+            case 1: out << "push"; break;
+            case 2: out << "QPACK encoder"; break;
+            case 3: out << "QPACK decoder"; break;
+            default: out << "extension/unknown type " << type; break;
+        }
+    }
+    out << ", " << (detail.value("ended", false) ? "ended" : "open");
+    if (detail.contains("reset_error")) out << ", reset=" << detail.at("reset_error");
+    if (detail.contains("metadata_limit")) out << ", limit=" << detail.at("metadata_limit").dump();
+    // Real decoder failures remain visible; pending/opaque are normal here.
+    auto const& decode = detail.at("decode");
+    const auto state = decode.value("state", std::string{});
+    if (state == "invalid" || state == "limited" || state == "blocked") {
+        out << ", decode=" << state;
+        if (!decode.value("reason", std::string{}).empty()) out << " (" << decode.at("reason").dump() << ")";
+    }
+    out << "\n";
+}
+
+void print_http_decode(std::ostream& out, nlohmann::json const& decode) {
+    out << " decode=" << decode.at("state").get<std::string>()
+        << " encoding=" << (decode.value("encoding_known", false) ? "known" : "unknown");
+    if (!decode.value("reason", std::string{}).empty()) out << " reason=" << decode.at("reason").dump();
+}
+
 // All values are escaped by JSON serialization, including control bytes in
 // peer-supplied headers. This is a presentation of retained state only.
 void print_http_diagnostics(std::ostream& out, nlohmann::json const& http, int verbosity) {
@@ -2328,7 +2371,11 @@ void print_http_diagnostics(std::ostream& out, nlohmann::json const& http, int v
                 if (current.contains(field)) out << " " << current.at(field).dump();
             }
             out << "\n";
-            if (verbosity >= iDEB) out << "        metadata: " << current.dump() << "\n";
+            if (verbosity >= iDEB) {
+                for (auto const& [field, value] : current.items()) {
+                    if (field != "method" && field != "url") out << "        " << field << ": " << value.dump() << "\n";
+                }
+            }
         }
         if (view.contains("connection_invalid")) {
             out << "        connection invalid: " << view.at("connection_invalid") << "\n";
@@ -2338,12 +2385,17 @@ void print_http_diagnostics(std::ostream& out, nlohmann::json const& http, int v
             out << "        stream " << stream.at("id");
             if (stream.contains("kind")) out << " (" << stream.at("kind").get<std::string>() << ")";
             out << "\n";
+            if (stream.value("kind", std::string{}) == "unidirectional") {
+                print_http_unidirectional(out, stream);
+                continue;
+            }
             for (auto const* direction : {"request", "response"}) {
                 auto const& detail = stream.at(direction);
                 out << "          " << direction << ":";
-                for (auto const* field : {"ended", "invalid", "body_bytes", "flow_window", "reset_error", "decode"}) {
+                for (auto const* field : {"ended", "invalid", "body_bytes", "flow_window", "reset_error"}) {
                     if (detail.contains(field)) out << " " << field << "=" << detail.at(field).dump();
                 }
+                if (detail.contains("decode")) print_http_decode(out, detail.at("decode"));
                 out << "\n";
                 auto print_fields = [&](nlohmann::json const& fields) {
                     for (auto const& field : fields) {
