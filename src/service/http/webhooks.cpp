@@ -7,6 +7,7 @@
 
 #include <service/http/webhooks.hpp>
 #include <service/http/async_request.hpp>
+#include <service/http/sift_diagnostics.hpp>
 #include <service/http/jsonize.hpp>
 
 #include <unordered_map>
@@ -492,6 +493,11 @@ namespace sx::http::webhooks {
         }
         settings.dns_servers = dns.str();
         return settings;
+    }
+
+    std::string sift_service_diagnostics(bool lored_only) {
+        // A user-triggered read must not inflate content/lifecycle counters.
+        return fetch_sift_service_diagnostics(sift_settings(), lored_only);
     }
 
     static nlohmann::json sift_identity() {

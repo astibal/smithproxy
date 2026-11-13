@@ -220,6 +220,7 @@ namespace sx::http::webhooks {
     };
 
     [[nodiscard]] sift_diagnostics_snapshot sift_diagnostics();
+    [[nodiscard]] std::string sift_service_diagnostics(bool lored_only = false);
     bool send_sift_content_wait(
         std::string const& action_id, nlohmann::json details,
         std::string_view payload, sx::http::AsyncRequest::reply_hook hook);

@@ -1,6 +1,9 @@
 #include <gtest/gtest.h>
 #include <service/helper_log.hpp>
 #include <service/http/async_request.hpp>
+#include <service/http/sift_diagnostics.hpp>
+#include <sys/un.h>
+#include <cstring>
 #include <proxy/proxy_hooks.hpp>
 #include <proxy/retirement.hpp>
 #include <future>
@@ -340,3 +343,90 @@ TEST(HelperHttpDebug, ConnectionFailureReportsRetriesAndCurlReason) {
     EXPECT_EQ(retries, 1U);
     EXPECT_EQ(helper_http_records.back().event, "transport-error");
 }
+
+
+TEST(SiftDiagnostics, ReportsAllRemoteFieldsAndUnavailableSections) {
+    using namespace sx::http::webhooks;
+    sx::http::expected_reply_t reply;
+    reply.response = {200, R"({"lored":{"unknown":7,"matched":2,"future_counter":9,
+        "latency_us":{"last":42},"last_error":"bad\u001b[31m"},
+        "http":{"requests":12},"engine":{"flows":3},"dns_evidence":{"hits":4}})"};
+    const auto lored_output = format_sift_service_diagnostics(reply, true);
+    const auto service_output = format_sift_service_diagnostics(reply);
+    EXPECT_EQ(lored_output.find("--- http ---"), std::string::npos);
+    EXPECT_EQ(service_output.find("--- LoreD ---"), std::string::npos);
+    const auto output = lored_output + service_output;
+    for(auto const* field : {"whole Sift instance", "--- LoreD ---", "\"unknown\": 7",
+            "\"future_counter\": 9", "\"last\": 42", "--- http ---", "--- engine ---",
+            "--- dns_evidence ---"}) EXPECT_NE(output.find(field), std::string::npos) << field;
+    EXPECT_EQ(output.find('\x1b'), std::string::npos);
+    reply.response = {200, "{}"};
+    EXPECT_NE(format_sift_service_diagnostics(reply).find("section missing"), std::string::npos);
+    reply.response = {200, "not json"};
+    EXPECT_NE(format_sift_service_diagnostics(reply).find("invalid diagnostics JSON"), std::string::npos);
+    reply.response = {404, "not found"};
+    EXPECT_NE(format_sift_service_diagnostics(reply).find("status 404"), std::string::npos);
+    EXPECT_NE(format_sift_service_diagnostics({}).find("no response"), std::string::npos);
+    sx::http::AsyncRequest::request_settings disabled;
+    EXPECT_NE(fetch_sift_service_diagnostics(disabled).find("disabled"), std::string::npos);
+}
+
+class SiftDiagnosticsTransport : public testing::TestWithParam<bool> {};
+
+TEST_P(SiftDiagnosticsTransport, FetchesDiagnosticsUsingConfiguredTransport) {
+    const bool unix_transport = GetParam();
+    const int listener = socket(unix_transport ? AF_UNIX : AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    ASSERT_GE(listener, 0);
+    const std::string socket_path = "/tmp/sift-diag-test-" + std::to_string(getpid()) + ".sock";
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    sockaddr_un unix_address{};
+    unix_address.sun_family = AF_UNIX;
+    std::strcpy(unix_address.sun_path, socket_path.c_str());
+    const int bound = unix_transport
+        ? bind(listener, reinterpret_cast<sockaddr*>(&unix_address), sizeof(unix_address))
+        : bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address));
+    ASSERT_EQ(bound, 0);
+    ASSERT_EQ(listen(listener, 1), 0);
+    socklen_t size = sizeof(address);
+    if(!unix_transport) {
+        ASSERT_EQ(getsockname(listener, reinterpret_cast<sockaddr*>(&address), &size), 0);
+    }
+    std::string wire;
+    std::thread receiver([&] {
+        pollfd ready{listener, POLLIN, 0};
+        if(poll(&ready, 1, 5000) > 0) {
+            const int client = accept(listener, nullptr, nullptr);
+            if(client >= 0) {
+                timeval timeout{3, 0};
+                setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+                char buffer[2048];
+                while(wire.find("\r\n\r\n") == std::string::npos) {
+                    const auto count = recv(client, buffer, sizeof(buffer), 0);
+                    if(count <= 0) break;
+                    wire.append(buffer, count);
+                }
+                const std::string body = R"({"lored":{"unknown":7}})";
+                const std::string response = "HTTP/1.1 200 OK\r\nContent-Length: " +
+                    std::to_string(body.size()) + "\r\nConnection: close\r\n\r\n" + body;
+                send(client, response.data(), response.size(), MSG_NOSIGNAL);
+                close(client);
+            }
+        }
+    });
+    sx::http::AsyncRequest::request_settings settings;
+    settings.enabled = true;
+    settings.url = "http://127.0.0.1:" + std::to_string(unix_transport ? 1 : ntohs(address.sin_port)) +
+        "/custom/webhook?old=query#fragment";
+    if(unix_transport) settings.unix_socket_path = socket_path;
+    const auto output = sx::http::webhooks::fetch_sift_service_diagnostics(settings, true);
+    receiver.join();
+    close(listener);
+    if(unix_transport) unlink(socket_path.c_str());
+    EXPECT_EQ(wire.find("GET /api/diagnostics HTTP/1.1\r\n"), 0U) << wire;
+    EXPECT_EQ(wire.find("old=query"), std::string::npos);
+    EXPECT_NE(output.find("\"unknown\": 7"), std::string::npos) << output;
+}
+
+INSTANTIATE_TEST_SUITE_P(DirectAndUnix, SiftDiagnosticsTransport, testing::Bool());

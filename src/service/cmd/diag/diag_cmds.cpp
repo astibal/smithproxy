@@ -1419,6 +1419,24 @@ int cli_diag_sys_sift_stats(DiagCli* cli, const char* command,
            << ", min " << stats.rtt_min_ms
            << ", max " << stats.rtt_max_ms;
     if(!stats.last_error.empty()) output << "\n  last error: " << stats.last_error;
+    output << '\n' << sx::http::webhooks::sift_service_diagnostics();
+    cli_print(cli, "%s", output.str().c_str());
+    return CLI_OK;
+}
+
+int cli_diag_sys_sift_lored_stats(DiagCli* cli, const char* command,
+                                char* argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+    std::ostringstream output;
+    {
+        auto lock = std::scoped_lock(CfgFactory::lock());
+        auto const& settings = CfgFactory::get()->settings_webhook;
+        output << "LoreD request policy in Smithproxy:\n"
+               << "  Sift enabled: " << (settings.sift ? "yes" : "no") << '\n'
+               << "  mode: " << settings.sift_lored_mode << '\n'
+               << "  include_url: " << (settings.sift_lored_include_url ? "yes" : "no") << '\n';
+    }
+    output << sx::http::webhooks::sift_service_diagnostics(true);
     cli_print(cli, "%s", output.str().c_str());
     return CLI_OK;
 }
@@ -3290,7 +3308,9 @@ void register_diags(libcli2::Cli& native) {
         auto diag_sys_webhook = diag_register_command(cli, diag_sys, "webhook", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "webhook communication broker diagnostics");
             diag_register_command(cli, diag_sys_webhook, "stats", cli_diag_sys_webhook_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display webhook transport statistics");
         auto diag_sys_sift = diag_register_command(cli, diag_sys, "sift", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "Sift communication broker diagnostics");
-            diag_register_command(cli, diag_sys_sift, "stats", cli_diag_sys_sift_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display Sift transport statistics");
+            diag_register_command(cli, diag_sys_sift, "stats", cli_diag_sys_sift_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display Sift transport and service statistics");
+        auto diag_sys_sift_lored = diag_register_command(cli, diag_sys, "sift-lored", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "LoreD enrichment through Sift");
+            diag_register_command(cli, diag_sys_sift_lored, "stats", cli_diag_sys_sift_lored_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display LoreD policy and service statistics through Sift");
     auto diag_ssl = diag_register_command(cli, diag, "tls", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "ssl related troubleshooting commands");
     auto diag_ssl_cache = diag_register_command(cli, diag_ssl, "cache", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl certificate cache");
     diag_register_command(cli, diag_ssl_cache, "stats", cli_diag_ssl_cache_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "display ssl cert cache statistics");

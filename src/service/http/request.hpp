@@ -313,18 +313,25 @@ namespace sx::http {
         Request& operator=(Request&&) = delete;
 
         using Reply = sx::http::expected_reply;
+        enum class Method { post, get };
 
-        Reply emit(std::string const &url, std::string const &payload) {
+        Reply emit(std::string const &url, std::string const &payload,
+                   Method method = Method::post) {
             CURLcode res = CURLE_FAILED_INIT;
 
             auto setup = curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-            if (setup == CURLE_OK)
-                setup = curl_easy_setopt(curl, CURLOPT_POST, 1L);
-            if (setup == CURLE_OK)
-                setup = curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload.data());
-            if (setup == CURLE_OK)
-                setup = curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE,
-                                         static_cast<curl_off_t>(payload.size()));
+            if (method == Method::get) {
+                if (setup == CURLE_OK)
+                    setup = curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
+            } else {
+                if (setup == CURLE_OK)
+                    setup = curl_easy_setopt(curl, CURLOPT_POST, 1L);
+                if (setup == CURLE_OK)
+                    setup = curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload.data());
+                if (setup == CURLE_OK)
+                    setup = curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE,
+                                             static_cast<curl_off_t>(payload.size()));
+            }
             if (setup != CURLE_OK) {
                 trace_attempt("setup-error", setup);
                 return make_reply(url, 600, curl_easy_strerror(setup));

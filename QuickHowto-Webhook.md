@@ -32,6 +32,30 @@ webhook is considered as enable and will be used.
 - `hostid` - if set, you can override using hostname as a json `source` value. 
 
 
+## Sift and LoreD diagnostics
+
+Use these privileged CLI commands:
+
+```text
+diag sys sift stats
+diag sys sift-lored stats
+```
+
+The first command shows Smithproxy's local Sift transport counters followed by
+Sift's HTTP, engine and DNS evidence statistics. The second shows Smithproxy's
+LoreD request policy and all LoreD fields returned by Sift, including `requests`,
+`matched`, `unknown`, `failures`, `skipped`, cache counters, limits, latency in
+microseconds and `last_error`. `unknown` counts valid non-`matched` replies; it
+does not mean that communication failed.
+
+Each command reads `/api/diagnostics` from the configured Sift endpoint, using
+the configured Sift Unix transport when present. The read has a three-second
+timeout and does not increment Smithproxy's content/lifecycle request counters.
+Remote counters describe the whole Sift instance, potentially shared by multiple
+Smithproxy instances or tenants. Disabled Sift, HTTP/transport errors, invalid
+JSON and missing diagnostic sections are reported as unavailable, not as zero.
+Older Sift versions must expose `/api/diagnostics` to provide these statistics.
+
 ##  Message format
 Message format, as received into python `dict`.
 
