@@ -12,3 +12,6 @@ tools/build-scripts/deb/debian/changelog
 /smithproxy.srctrl*
 /build/
 /test-runs/*paranoid*/
+
+# CMake-generated dependency status metadata (also for in-source builds).
+/generated/

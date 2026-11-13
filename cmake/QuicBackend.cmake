@@ -1,46 +1,65 @@
-# This is a required backend unless the builder deliberately opts out. Never
-# turn a missing ngtcp2 package into a successful OpenSSL-only configuration.
-option(SMITHPROXY_ENABLE_NGTCP2 "Build the default ngtcp2 QUIC backend" ON)
+# The default transport is built from the pinned source submodule. Configuration
+# never downloads dependencies or silently falls back to another QUIC backend.
+option(SMITHPROXY_ENABLE_NGTCP2 "Build the bundled ngtcp2 QUIC backend" ON)
 if(NOT SMITHPROXY_ENABLE_NGTCP2)
     message(STATUS "QUIC backend: OpenSSL (explicit ngtcp2 opt-out)")
     return()
 endif()
 
 find_package(OpenSSL 3.5 REQUIRED)
-find_path(NGTCP2_INCLUDE_DIR ngtcp2/ngtcp2.h)
-find_path(NGTCP2_CRYPTO_INCLUDE_DIR ngtcp2/ngtcp2_crypto_ossl.h)
-find_library(NGTCP2_LIBRARY ngtcp2)
-find_library(NGTCP2_CRYPTO_LIBRARY ngtcp2_crypto_ossl)
-if(NOT NGTCP2_INCLUDE_DIR OR NOT NGTCP2_CRYPTO_INCLUDE_DIR OR
-   NOT NGTCP2_LIBRARY OR NOT NGTCP2_CRYPTO_LIBRARY)
+set(SMITHPROXY_NGTCP2_SOURCE_DIR "${PROJECT_SOURCE_DIR}/src/ext/ngtcp2")
+if(NOT EXISTS "${SMITHPROXY_NGTCP2_SOURCE_DIR}/CMakeLists.txt")
     message(FATAL_ERROR
-        "Default QUIC requires ngtcp2 >= 1.16 and its OpenSSL crypto adapter. "
-        "Install the development packages for libngtcp2 and libngtcp2_crypto_ossl "
-        "(a GnuTLS adapter is not interchangeable), or supply CMAKE_PREFIX_PATH. "
-        "Only an explicit -DSMITHPROXY_ENABLE_NGTCP2=OFF selects OpenSSL QUIC.")
+        "The pinned ngtcp2 source submodule is missing. Run "
+        "'git submodule update --init --recursive' before configuring Smithproxy. "
+        "Source archives must include populated submodules.")
+endif()
+if(CMAKE_VERSION VERSION_LESS 3.20)
+    message(FATAL_ERROR "Bundled ngtcp2 requires CMake 3.20 or newer.")
 endif()
 
-# Check headers and linkage together: older distro packages may provide the core
-# library without the TLS-only OpenSSL adapter used by our A:B transport.
-include(CheckCXXSourceCompiles)
-include(CMakePushCheckState)
-cmake_push_check_state(RESET)
-set(CMAKE_REQUIRED_INCLUDES ${NGTCP2_INCLUDE_DIR} ${NGTCP2_CRYPTO_INCLUDE_DIR})
-set(CMAKE_REQUIRED_LIBRARIES ${NGTCP2_CRYPTO_LIBRARY} ${NGTCP2_LIBRARY}
-    OpenSSL::SSL OpenSSL::Crypto)
-unset(SMITHPROXY_NGTCP2_USABLE CACHE)
-check_cxx_source_compiles("
-#include <ngtcp2/version.h>
-#include <ngtcp2/ngtcp2_crypto_ossl.h>
-#if NGTCP2_VERSION_NUM < 0x011000
-#error Smithproxy requires ngtcp2 1.16 or newer
-#endif
-int main() {
-    ngtcp2_crypto_ossl_ctx* ctx = nullptr;
-    return ngtcp2_crypto_ossl_ctx_new(&ctx, nullptr);
-}" SMITHPROXY_NGTCP2_USABLE)
-cmake_pop_check_state()
-if(NOT SMITHPROXY_NGTCP2_USABLE)
-    message(FATAL_ERROR "ngtcp2/OpenSSL adapter headers or linkage are incompatible; see CMakeError.log. No backend fallback was selected.")
+# Keep upstream's generic options local: in particular, its tests and TLS
+# backends must not change Smithproxy's BUILD_TESTING or other dependencies.
+function(smithproxy_add_ngtcp2)
+    set(smithproxy_build_testing "${BUILD_TESTING}")
+    set(ENABLE_LIB_ONLY ON)
+    set(ENABLE_STATIC_LIB ON)
+    set(ENABLE_SHARED_LIB OFF)
+    set(ENABLE_OPENSSL ON)
+    set(ENABLE_GNUTLS OFF)
+    set(ENABLE_BORINGSSL OFF)
+    set(ENABLE_PICOTLS OFF)
+    set(ENABLE_WOLFSSL OFF)
+    set(ENABLE_JEMALLOC OFF)
+    set(ENABLE_ASAN OFF)
+    set(ENABLE_DEBUG OFF)
+    set(ENABLE_WERROR OFF)
+    set(BUILD_TESTING OFF)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+    # EXCLUDE_FROM_ALL also keeps upstream install rules out of our install:
+    # no system ngtcp2 headers, libraries or pkg-config files are replaced.
+    add_subdirectory("${SMITHPROXY_NGTCP2_SOURCE_DIR}"
+        "${PROJECT_BINARY_DIR}/ext/ngtcp2" EXCLUDE_FROM_ALL)
+
+    # Upstream uses cmake_dependent_option, which writes this shared cache
+    # entry even with a local override. Preserve our caller's test selection.
+    set(BUILD_TESTING "${smithproxy_build_testing}" CACHE BOOL "Build Smithproxy tests" FORCE)
+endfunction()
+smithproxy_add_ngtcp2()
+
+if(NOT TARGET ngtcp2_crypto_ossl_static)
+    message(FATAL_ERROR
+        "The bundled ngtcp2 OpenSSL adapter could not be built. "
+        "OpenSSL must provide the TLS-only QUIC API (OpenSSL 3.5 or newer).")
 endif()
-message(STATUS "QUIC backend: ngtcp2 (default); OpenSSL QUIC requires explicit selection")
+
+add_library(smithproxy_ngtcp2 INTERFACE)
+target_link_libraries(smithproxy_ngtcp2 INTERFACE ngtcp2_crypto_ossl_static)
+target_include_directories(smithproxy_ngtcp2 INTERFACE
+    "${SMITHPROXY_NGTCP2_SOURCE_DIR}/crypto/includes")
+
+# The static dependency's license travels with installed Smithproxy binaries.
+install(FILES "${SMITHPROXY_NGTCP2_SOURCE_DIR}/COPYING"
+    DESTINATION "share/smithproxy/docs/licenses" RENAME "LICENSE.ngtcp2")
+message(STATUS "QUIC backend: pinned ngtcp2 submodule (static), external OpenSSL")

@@ -9,7 +9,7 @@ case "$SMITHPROXY_ENABLE_NGTCP2" in
     *) echo "error: SMITHPROXY_ENABLE_NGTCP2 must be ON or OFF" >&2; exit 2 ;;
 esac
 if [ "$SMITHPROXY_ENABLE_NGTCP2" = ON ]; then
-    echo "QUIC dependencies: ngtcp2 + OpenSSL crypto adapter (OpenSSL 3.5+). No automatic fallback."
+    echo "QUIC dependencies: pinned ngtcp2 source submodule + system OpenSSL 3.5+."
 else
     echo "QUIC dependencies: explicit OpenSSL-only build requested."
 fi
@@ -47,10 +47,6 @@ is_like() {
 }
 
 install_apt_dependencies() {
-    set --
-    if [ "$SMITHPROXY_ENABLE_NGTCP2" = ON ]; then
-        set -- libngtcp2-dev libngtcp2-crypto-ossl-dev
-    fi
     export DEBIAN_FRONTEND=noninteractive
 
     apt-get update
@@ -62,14 +58,10 @@ install_apt_dependencies() {
         libssl-dev libssh-4 libssh-dev libarchive-dev libunwind-dev libmicrohttpd-dev libcurl4-openssl-dev \
         libpam0g-dev \
         iptables iproute2 telnet \
-        swig libffi-dev libxml2-dev libxslt1-dev xmlsec1 "$@"
+        swig libffi-dev libxml2-dev libxslt1-dev xmlsec1
 }
 
 install_apk_dependencies() {
-    set --
-    if [ "$SMITHPROXY_ENABLE_NGTCP2" = ON ]; then
-        set -- ngtcp2-dev pc:libngtcp2_crypto_ossl
-    fi
     apk add --no-cache \
         ca-certificates wget curl bash \
         git g++ cmake make pkgconf musl-dev linux-headers bsd-compat-headers \
@@ -77,14 +69,10 @@ install_apk_dependencies() {
         libconfig-dev openssl-dev libssh libssh-dev libarchive-dev libunwind-dev libmicrohttpd-dev curl-dev \
         linux-pam-dev \
         iptables iproute2 busybox-extras \
-        swig libffi-dev libxml2-dev libxslt-dev xmlsec-dev "$@"
+        swig libffi-dev libxml2-dev libxslt-dev xmlsec-dev
 }
 
 install_dnf_dependencies() {
-    set --
-    if [ "$SMITHPROXY_ENABLE_NGTCP2" = ON ]; then
-        set -- 'pkgconfig(libngtcp2)' 'pkgconfig(libngtcp2_crypto_ossl)'
-    fi
     # DNF may replace glibc/bash in minimal images. Replacing this process
     # avoids continuing in an interpreter whose runtime was just upgraded.
     exec dnf install -y \
@@ -94,7 +82,7 @@ install_dnf_dependencies() {
         libconfig-devel openssl-devel libssh libssh-devel libarchive-devel libunwind-devel libmicrohttpd-devel \
         libcurl-devel pam-devel \
         iptables iproute telnet \
-        swig libffi-devel libxml2-devel libxslt-devel xmlsec1-devel "$@"
+        swig libffi-devel libxml2-devel libxslt-devel xmlsec1-devel
 }
 
 install_rhel_dependencies() {
@@ -105,10 +93,6 @@ install_rhel_dependencies() {
 }
 
 install_zypper_dependencies() {
-    set --
-    if [ "$SMITHPROXY_ENABLE_NGTCP2" = ON ]; then
-        set -- 'pkgconfig(libngtcp2)' 'pkgconfig(libngtcp2_crypto_ossl)'
-    fi
     zypper --non-interactive refresh
     zypper --non-interactive install --no-recommends \
         ca-certificates wget curl \
@@ -117,7 +101,7 @@ install_zypper_dependencies() {
         libconfig-devel libopenssl-devel libssh-devel libarchive-devel libunwind-devel libmicrohttpd-devel \
         libcurl-devel pam-devel \
         iptables iproute2 telnet \
-        swig libffi-devel libxml2-devel libxslt-devel xmlsec1-devel "$@"
+        swig libffi-devel libxml2-devel libxslt-devel xmlsec1-devel
 }
 
 case "${DIST_ID}" in

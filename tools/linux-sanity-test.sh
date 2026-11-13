@@ -41,11 +41,17 @@ if ldd /usr/bin/smithproxy 2>&1 | grep -q "not found"; then
     exit 1
 fi
 
-# A successful default build must actually link the chosen transport, not just
-# accept the option while silently compiling the old backend.
+# The transport and its TLS adapter are embedded in our binary. Check defined
+# symbols before packaging strips them, and reject direct shared ngtcp2 links.
+# An unrelated system dependency (for example curl) may itself use ngtcp2.
 if [ "${SMITHPROXY_ENABLE_NGTCP2:-ON}" = ON ]; then
-    ldd /usr/bin/smithproxy | grep 'libngtcp2\.'
-    ldd /usr/bin/smithproxy | grep 'libngtcp2_crypto_ossl\.'
+    nm /usr/bin/smithproxy | grep -E ' [Tt] ngtcp2_conn_client_new_versioned$'
+    nm /usr/bin/smithproxy | grep -E ' [Tt] ngtcp2_crypto_ossl_ctx_new$'
+    if readelf -d /usr/bin/smithproxy | grep -E 'NEEDED.*libngtcp2'; then
+        echo "error: Smithproxy directly depends on a system ngtcp2 library" >&2
+        exit 1
+    fi
+    test -s /usr/share/smithproxy/docs/licenses/LICENSE.ngtcp2
 fi
 
 # Debian packages use generated shlibs dependencies. Verify them against the
@@ -56,9 +62,9 @@ if command -v dpkg-shlibdeps >/dev/null 2>&1; then
     printf 'Source: smithproxy\n\nPackage: smithproxy\nArchitecture: any\n' > "${SHLIBS_CHECK}/debian/control"
     (cd "${SHLIBS_CHECK}" && dpkg-shlibdeps -O -e/usr/bin/smithproxy) > "${SHLIBS_CHECK}/depends"
     cat "${SHLIBS_CHECK}/depends"
-    if [ "${SMITHPROXY_ENABLE_NGTCP2:-ON}" = ON ]; then
-        grep 'libngtcp2-crypto-ossl' "${SHLIBS_CHECK}/depends"
-        grep 'libngtcp2-[0-9]' "${SHLIBS_CHECK}/depends"
+    if grep -q 'libngtcp2' "${SHLIBS_CHECK}/depends"; then
+        echo "error: package unexpectedly requires system ngtcp2" >&2
+        exit 1
     fi
 fi
 

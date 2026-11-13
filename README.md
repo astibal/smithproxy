@@ -5,38 +5,53 @@ It uses our C++17 socket proxying library called [*socle*](https://github.com/as
 
 ## QUIC build defaults
 
-QUIC uses **ngtcp2 by default**. The default build requires ngtcp2 1.16 or newer,
-its **OpenSSL crypto adapter** (`libngtcp2_crypto_ossl`), and OpenSSL 3.5 or newer.
-OpenSSL still supplies TLS/cryptography; ngtcp2 supplies the QUIC transport.
-Missing or incompatible dependencies fail configuration; there is no automatic
-fallback to the OpenSSL QUIC implementation.
+QUIC uses **ngtcp2 by default**, built statically from the pinned
+`src/ext/ngtcp2` Git submodule (currently upstream v1.26.0). Its OpenSSL crypto
+adapter is built from the same source. **OpenSSL 3.5 or newer remains a system
+shared-library dependency**; no separate Smithproxy runtime is installed.
+
+Source checkout is the distribution path. Populate all submodules before
+building (including after updating a checkout):
 
 ```sh
+git clone --recurse-submodules https://github.com/astibal/smithproxy.git
+cd smithproxy
+git submodule update --init --recursive
 sudo ./tools/linux-deps.sh
 sudo ./tools/linux-build.sh
 ```
 
-Ubuntu 26.04 provides the required development packages. Older distributions
-may need suitable backports or a separately provisioned dependency prefix
-(`cmake -DCMAKE_PREFIX_PATH=...`). The scripts never replace system OpenSSL or
-add third-party repositories automatically. For an intentional OpenSSL-only
-compatibility build, use the same opt-out for both steps:
+The default build needs CMake 3.20 or newer. Configuration and compilation do
+not download ngtcp2, use FetchContent, or require distribution ngtcp2 packages.
+Git pins the exact dependency commit; updating it is a reviewed source change.
+Source archives must include populated submodules: GitHub's automatic source
+ZIP/tar archives do not include their contents. The dependency's license is
+installed alongside Smithproxy documentation.
+
+For distributions with older OpenSSL, an explicit compatibility build remains
+available. It does not gain QUIC features missing from the installed OpenSSL:
 
 ```sh
 sudo env SMITHPROXY_ENABLE_NGTCP2=OFF ./tools/linux-deps.sh
 sudo env SMITHPROXY_ENABLE_NGTCP2=OFF ./tools/linux-build.sh
 ```
 
-Direct CMake builds use `-DSMITHPROXY_ENABLE_NGTCP2=OFF`. An enabled build can
-also select the retained OpenSSL QUIC backend explicitly at startup with
-`SMITHPROXY_QUIC_BACKEND=openssl`; unset means ngtcp2. OpenSSL-only builds on
-older TLS libraries do not gain QUIC features that those libraries lack.
+Direct CMake builds use `-DSMITHPROXY_ENABLE_NGTCP2=OFF` for that opt-out.
+An enabled build can also explicitly select the OpenSSL QUIC transport at
+runtime with `SMITHPROXY_QUIC_BACKEND=openssl`; unset means ngtcp2.
 
-Docker packaging defaults to `--build-arg SMITHPROXY_ENABLE_NGTCP2=ON`;
-`sx-builder.py --ngtcp2 OFF` is the explicit packaging opt-out. Direct Debian
-builds use `DEB_BUILD_PROFILES=pkg.smithproxy.openssl-quic` for the same opt-out.
-Debian runtime library dependencies are derived from the linked binaries using
-`${shlibs:Depends}`, including ngtcp2 and its crypto adapter in default builds.
+`show status` and `/api/status/ping` expose dependency information from the
+same snapshot (`libraries` in JSON): OpenSSL build/runtime versions, linkage
+and loaded library paths, plus embedded ngtcp2's version and source commit.
+OpenSSL is labelled `external`, since a custom prefix is also supported and
+library paths alone do not prove distribution package ownership. A source
+archive without Git metadata reports an unknown commit rather than guessing.
+The build metadata header is generated in the ignored build directory.
+
+The optional Docker/Debian packaging scripts use this same source build.
+`sx-builder.py --ngtcp2 OFF` or `DEB_BUILD_PROFILES=pkg.smithproxy.openssl-quic`
+selects the compatibility build. `${shlibs:Depends}` captures shared runtime
+dependencies such as OpenSSL; embedded ngtcp2 needs no separate runtime package.
 
 ## Testing policy
 
