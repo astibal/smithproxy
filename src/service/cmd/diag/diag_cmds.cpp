@@ -2020,7 +2020,7 @@ void print_queue_stats(std::stringstream &ss, int verbosity, MitmHostCX *cx, con
 
     // fun stuff
     if(verbosity >= EXT and in_buf) {
-        ss << "     " << bg << " last-seen read data: \n" << hex_dump(cx->readbuf(), 6) << "\n";
+        ss << "     " << bg << " current read buffer: \n" << hex_dump(cx->readbuf(), 6) << "\n";
     }
 }
 
@@ -2313,6 +2313,61 @@ auto get_proxy_title(MitmProxy* proxy, int sl_flags, int verbosity) {
 }
 
 
+// All values are escaped by JSON serialization, including control bytes in
+// peer-supplied headers. This is a presentation of retained state only.
+void print_http_diagnostics(std::ostream& out, nlohmann::json const& http, int verbosity) {
+    out << "\n    HTTP protocol: " << http.at("protocol").dump()
+        << ", views: " << (http.at("split").get<bool>() ? "client/server" : "shared") << "\n";
+    if (http.contains("fork_error")) out << "      fork error: " << http.at("fork_error").dump() << "\n";
+    for (auto const& [name, view] : http.at("views").items()) {
+        out << "      " << name << ":\n";
+        if (view.contains("current") && !view.at("current").empty()) {
+            auto const& current = view.at("current");
+            out << "        current:";
+            for (auto const* field : {"method", "url"}) {
+                if (current.contains(field)) out << " " << current.at(field).dump();
+            }
+            out << "\n";
+            if (verbosity >= iDEB) out << "        metadata: " << current.dump() << "\n";
+        }
+        if (view.contains("connection_invalid")) {
+            out << "        connection invalid: " << view.at("connection_invalid") << "\n";
+        }
+        if (!view.contains("streams")) continue;
+        for (auto const& stream : view.at("streams")) {
+            out << "        stream " << stream.at("id");
+            if (stream.contains("kind")) out << " (" << stream.at("kind").get<std::string>() << ")";
+            out << "\n";
+            for (auto const* direction : {"request", "response"}) {
+                auto const& detail = stream.at(direction);
+                out << "          " << direction << ":";
+                for (auto const* field : {"ended", "invalid", "body_bytes", "flow_window", "reset_error", "decode"}) {
+                    if (detail.contains(field)) out << " " << field << "=" << detail.at(field).dump();
+                }
+                out << "\n";
+                auto print_fields = [&](nlohmann::json const& fields) {
+                    for (auto const& field : fields) {
+                        auto const header = field.at(0).is_string() ? field.at(0).get<std::string>() : std::string{};
+                        if (verbosity >= iDEB || header == ":method" || header == ":authority" ||
+                            header == "host" || header == ":path" || header == ":status") {
+                            out << "            " << field.at(0).dump() << ": " << field.at(1).dump() << "\n";
+                        }
+                    }
+                };
+                if (detail.contains("headers")) print_fields(detail.at("headers"));
+                if (detail.contains("header_sections")) {
+                    std::size_t index = 0;
+                    for (auto const& section : detail.at("header_sections")) {
+                        out << "            header section " << index++ << ":\n";
+                        print_fields(section);
+                    }
+                }
+            }
+        }
+    }
+}
+
+
 auto get_more_info(MitmProxy const* curr_proxy, MitmHostCX* lf, MitmHostCX* rg, int verbosity) {
 
     std::stringstream info_ss;
@@ -2355,12 +2410,19 @@ auto get_more_info(MitmProxy const* curr_proxy, MitmHostCX* lf, MitmHostCX* rg, 
                     info_ss << "\n    L7_engine: unknown signature type";
                 }
             } else {
-                info_ss << "\n    L7_engine: none";
+                info_ss << "\n    L7_signature: none";
             }
 
             if (curr_proxy) {
-                if (auto h3 = curr_proxy->protocol_diagnostics(); !h3.empty()) {
-                    info_ss << "\n    H3: " << h3.dump() << "\n";
+                if (auto http = curr_proxy->http_diagnostics(); !http.empty()) {
+                    print_http_diagnostics(info_ss, http, verbosity);
+                }
+                // Preserve the detailed H3 decoder/replay counters at the
+                // highest verbosity; normal diagnostics use the common view.
+                if (verbosity >= iEXT) {
+                    if (auto h3 = curr_proxy->protocol_diagnostics(); !h3.empty()) {
+                        info_ss << "\n    H3: " << h3.dump() << "\n";
+                    }
                 }
             }
             if (lf->engine().application_data) {

@@ -133,6 +133,9 @@ namespace jsonize {
         }
 
         ret["oid"] = what->to_connection_ID();
+        if (auto http = what->http_diagnostics(); !http.empty()) {
+            ret["http"] = std::move(http);
+        }
         if (auto h3 = what->protocol_diagnostics(); !h3.empty()) {
             ret["http3"] = std::move(h3);
         }
@@ -198,6 +201,12 @@ namespace jsonize {
             ret["host"] = h;
             ret["port"] = p;
             ret["com"] = c;
+            if (verbosity >= DIA && what->readbuf() && what->writebuf()) {
+                ret["buffers"] = {
+                    {"read", {{"size", what->readbuf()->size()}, {"capacity", what->readbuf()->capacity()}}},
+                    {"write", {{"size", what->writebuf()->size()}, {"capacity", what->writebuf()->capacity()}}}
+                };
+            }
         } else {
             ret["host"] = "0.0.0.0";
             ret["port"] = "0";

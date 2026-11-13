@@ -134,7 +134,35 @@ nlohmann::json ObjAPI::proxy_session_list_json(bool active_only, bool tls_info, 
     // The queue transports strings for CLI as well, so encode each JSON record
     // there and decode only the completed, immutable snapshot here.
     std::vector<std::future<sx::quic::listener_service::session_details>> quic_requests;
+    std::vector<std::map<std::uint64_t, nlohmann::json>> quic_tls;
     for (auto const& service : SmithProxy::instance().quic_services) {
+        auto& parent_tls = quic_tls.emplace_back();
+        if (tls_info) {
+            // Reuse the value-only parent snapshot already consumed by CLI.
+            // IDs are listener-local, so keep each listener's lookup separate.
+            auto tls_json = [](sx::quic::tls_snapshot const& tls, std::string const& alpn) {
+                nlohmann::json value = {
+                    {"available", tls.available}, {"established", tls.established},
+                    {"ended", tls.ended}, {"handshake", tls.handshake_status()}, {"alpn", alpn}
+                };
+                if (tls.available) {
+                    value.update({{"version", tls.version}, {"cipher", tls.cipher},
+                        {"sni", tls.server_name}, {"state", tls.state},
+                        {"resumed", tls.resumed}, {"has_ticket", tls.has_ticket},
+                        {"verify_peer", tls.verify_peer}, {"verify_result", tls.verify_result},
+                        {"verify_error", tls.verify_error}});
+                    if (tls.has_ticket) value["ticket"]["lifetime_hint"] = tls.ticket_lifetime_hint;
+                }
+                return value;
+            };
+            for (auto const& session : service->session_diagnostics()) {
+                parent_tls[session.id] = {
+                    {"source", "quic parent"},
+                    {"left", tls_json(session.downstream_tls, session.downstream_alpn)},
+                    {"right", tls_json(session.upstream_tls, session.upstream_alpn)}
+                };
+            }
+        }
         quic_requests.push_back(service->request_session_details(
             [json_single_proxy](MitmProxy* proxy) -> std::optional<std::string> {
                 auto detail = json_single_proxy(proxy);
@@ -152,11 +180,22 @@ nlohmann::json ObjAPI::proxy_session_list_json(bool active_only, bool tls_info, 
     if (!request->wait_for(std::chrono::seconds(5))) return nlohmann::json::array();
     auto result = request->json_result();
     try {
-        for (auto& pending : quic_requests) {
+        for (std::size_t listener = 0; listener < quic_requests.size(); ++listener) {
+            auto& pending = quic_requests[listener];
             if (pending.wait_until(deadline) != std::future_status::ready)
                 return nlohmann::json::array();
             for (auto const& [id, streams] : pending.get()) {
-                for (auto const& stream : streams) result.push_back(nlohmann::json::parse(stream));
+                for (auto const& stream : streams) {
+                    auto detail = nlohmann::json::parse(stream);
+                    if (tls_info) {
+                        auto const parent = quic_tls[listener].find(id);
+                        // Parent and child snapshots are asynchronous. Do not
+                        // present empty SSLCom data as the child's QUIC TLS.
+                        detail["tlsinfo"] = parent != quic_tls[listener].end()
+                            ? parent->second : nlohmann::json{{"source", "quic parent"}, {"available", false}};
+                    }
+                    result.push_back(std::move(detail));
+                }
             }
         }
     } catch (std::exception const& error) {
