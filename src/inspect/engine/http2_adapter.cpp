@@ -70,6 +70,8 @@ std::unique_ptr<EngineCtx> fork_context(EngineCtx const& source) {
 
 class Http2Adapter final : public ProtocolAdapter {
 public:
+    bool owns_content_metadata() const override { return true; }
+
     bool owns(EngineCtx const& ctx) const override {
         return ctx.state_data.type() == typeid(http::v2::Http2Connection);
     }

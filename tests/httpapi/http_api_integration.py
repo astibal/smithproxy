@@ -161,6 +161,19 @@ def run(args):
             status_document = json.loads(payload)
             assert status_document["status"] == "ok"
             assert "version" in status_document and "uptime" in status_document
+            libraries = status_document["libraries"]
+            openssl = libraries["openssl"]
+            assert openssl["version"].startswith("OpenSSL ")
+            assert openssl["build_version"] and openssl["source"] == "external"
+            assert openssl["linkage"] in ("static", "dynamic")
+            if openssl["linkage"] == "dynamic":
+                assert openssl["loaded_library"]
+            ngtcp2 = libraries["ngtcp2"]
+            if ngtcp2["enabled"]:
+                assert ngtcp2["version"] and ngtcp2["source"] == "submodule"
+                assert ngtcp2["linkage"] == "static" and ngtcp2["crypto_adapter"] == "ossl"
+            else:
+                assert ngtcp2["linkage"] == "disabled"
 
             status, headers, payload = api_request(
                 api_port, "GET", f"/api/authorize?key={api_key}")

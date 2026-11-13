@@ -2,6 +2,7 @@
 #define SX_PROTOCOL_ADAPTER_HPP
 
 #include <inspect/engine.hpp>
+#include <inspect/protocol_input.hpp>
 
 namespace sx::engine {
 
@@ -13,10 +14,22 @@ public:
 
     virtual ~ProtocolAdapter() = default;
     virtual bool owns(EngineCtx const& ctx) const = 0;
+    // True when this adapter publishes content ranges/encoding itself. Capture
+    // adapters must not overwrite those observations with independent state.
+    virtual bool owns_content_metadata() const { return false; }
     virtual Preparation prepare(EngineCtx& ctx, bool from_client,
                                 buffer const& current) const = 0;
     virtual void observe(EngineCtx& ctx, bool from_client, buffer const& bytes,
                          std::uint64_t read_bytes) const = 0;
+    // Byte-stream protocols keep their existing parser entry point. Multiplexed
+    // adapters override this overload to consume stream and lifecycle metadata.
+    virtual void observe(EngineCtx& ctx, ProtocolInput const& input,
+                         std::uint64_t read_bytes) const {
+        if (input.event == ProtocolEvent::Data && !input.bytes.empty()) {
+            observe(ctx, input.sender == ProtocolEndpoint::Client, input.bytes, read_bytes);
+        }
+    }
+    virtual void select_stream(EngineCtx&, ProtocolStream) const {}
     virtual std::unique_ptr<EngineCtx> fork(EngineCtx const& ctx) const = 0;
 };
 

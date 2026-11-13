@@ -11,6 +11,7 @@
 #include <service/core/smithproxy_objapi.hpp>
 #include <service/core/smithproxy_objapi_utils.hpp>
 #include <service/core/sessionlist.hpp>
+#include <service/quic/quicservice.hpp>
 #include <service/http/jsonize.hpp>
 #include <proxy/mitmproxy.hpp>
 #include <proxy/nbrhood.hpp>
@@ -127,8 +128,42 @@ nlohmann::json ObjAPI::proxy_session_list_json(bool active_only, bool tls_info, 
         });
 
     dispatch_session_list(request);
+
+    // QUIC children live on separate workers. Reuse their owner-thread snapshot
+    // queue: the renderer runs under child locks, never on this API thread.
+    // The queue transports strings for CLI as well, so encode each JSON record
+    // there and decode only the completed, immutable snapshot here.
+    std::vector<std::future<sx::quic::listener_service::session_details>> quic_requests;
+    for (auto const& service : SmithProxy::instance().quic_services) {
+        quic_requests.push_back(service->request_session_details(
+            [json_single_proxy](MitmProxy* proxy) -> std::optional<std::string> {
+                auto detail = json_single_proxy(proxy);
+                if (!detail) return std::nullopt;
+                (*detail)["origin"] = "quic worker";
+                if (proxy->webhook_stream) {
+                    (*detail)["parent_id"] = proxy->webhook_stream->parent_id;
+                    (*detail)["stream_id"] = proxy->webhook_stream->stream_id;
+                }
+                return detail->dump();
+            }));
+    }
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     if (!request->wait_for(std::chrono::seconds(5))) return nlohmann::json::array();
-    return request->json_result();
+    auto result = request->json_result();
+    try {
+        for (auto& pending : quic_requests) {
+            if (pending.wait_until(deadline) != std::future_status::ready)
+                return nlohmann::json::array();
+            for (auto const& [id, streams] : pending.get()) {
+                for (auto const& stream : streams) result.push_back(nlohmann::json::parse(stream));
+            }
+        }
+    } catch (std::exception const& error) {
+        Log::get()->events().insert(ERR, "QUIC API session snapshot failed: %s", error.what());
+        return nlohmann::json::array();
+    }
+    return result;
 }
 
 

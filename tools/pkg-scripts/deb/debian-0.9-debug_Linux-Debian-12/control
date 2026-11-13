@@ -3,12 +3,10 @@ Maintainer: Ales Stibal <astib@mag0.net>
 Section: misc
 Priority: optional
 Standards-Version: 3.9.6
-Build-Depends: cmake, debhelper (>= 10), pkg-config, libssh-dev, libarchive-dev,
+Build-Depends: cmake (>= 3.20), debhelper (>= 10), pkg-config, libssh-dev, libarchive-dev,
                libconfig++-dev, libmicrohttpd-dev, libcurl4-openssl-dev, libpam0g-dev, libunwind-dev,
                libssl-dev (>= 3.5) <!pkg.smithproxy.openssl-quic>,
-               libssl-dev <pkg.smithproxy.openssl-quic>,
-               libngtcp2-dev (>= 1.16) <!pkg.smithproxy.openssl-quic>,
-               libngtcp2-crypto-ossl-dev (>= 1.16) <!pkg.smithproxy.openssl-quic>
+               libssl-dev <pkg.smithproxy.openssl-quic>
 
 Package: smithproxy-dbg
 Architecture: any

@@ -22,6 +22,7 @@ struct flow_proxy_context {
         make_traffic_log_adapter;
     unsigned ingress_ifindex = 0; ///< Original admission interface, retained across streams.
     std::string parent_connection_id = {}; ///< Physical transport webhook identity.
+    bool rewrite_requested = false; ///< Reservation inherited from transport setup.
     std::string transport_name = "mf"; ///< CLI endpoint prefix for this transport.
 };
 

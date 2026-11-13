@@ -413,6 +413,7 @@ namespace sx::proxymaker {
 
             void ingress_ifindex(unsigned index) override { ingress_ifindex_ = index; }
             std::string connection_id() const override { return id_; }
+            bool rewrite_requested() const override { return rewrite_requested_; }
             sx::proxy::QuicObserver* quic_observer() override { return observer_.get(); }
 
             std::optional<QuicTlsPolicy> tls_policy(
@@ -514,6 +515,9 @@ namespace sx::proxymaker {
                             auto result = sx::proxy::parse_setup_reply(
                                 reply->response.first, reply->response.second);
                             control_->apply(result.body);
+                            if (result.action == sx::proxy::setup_action::accept) {
+                                rewrite_requested_ = result.rewrite;
+                            }
                             const auto& control = result.body.value("control", nlohmann::json::object());
                             if(result.action == sx::proxy::setup_action::accept &&
                                control.value("quic_lifecycle", 0) == 1) {
@@ -551,6 +555,7 @@ namespace sx::proxymaker {
             bool started_ = false;
             bool notified_ = false;
             bool allowed_ = false;
+            bool rewrite_requested_ = false;
         };
     }
 

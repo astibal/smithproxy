@@ -9,6 +9,7 @@ on:
       - 'cmake/**'
       - 'src/**'
       - 'socle'
+      - '.gitmodules'
       - 'tools/linux-*.sh'
   push:
     branches:
@@ -20,6 +21,7 @@ on:
       - 'cmake/**'
       - 'src/**'
       - 'socle'
+      - '.gitmodules'
       - 'tools/linux-*.sh'
 
 jobs:
@@ -30,21 +32,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Older images deliberately test compatibility with ngtcp2 OFF.
-        # The build/install scripts themselves always default to ON.
+        # The bundled ngtcp2 ossl adapter requires system OpenSSL >= 3.5.
+        # OFF covers older TLS stacks; build/install scripts default to ON.
         include:
-          - { name: Ubuntu 24.04, slug: ubuntu-24.04, ngtcp2: 'OFF' }
+          - { name: Ubuntu 24.04, slug: ubuntu-24.04, ngtcp2: 'OFF' } # OpenSSL 3.0
           - { name: Ubuntu 26.04, slug: ubuntu-26.04, ngtcp2: 'ON' }
-          - { name: Debian 12, slug: debian-12, ngtcp2: 'OFF' }
-          - { name: Debian 13, slug: debian-13, ngtcp2: 'OFF' }
-          - { name: Alpine 3.20, slug: alpine-3.20, ngtcp2: 'OFF' }
-          - { name: Alpine 3.22, slug: alpine-3.22, ngtcp2: 'OFF' }
-          - { name: Fedora 42, slug: fedora-42, ngtcp2: 'OFF' }
+          - { name: Debian 12, slug: debian-12, ngtcp2: 'OFF' } # OpenSSL 3.0
+          - { name: Debian 13, slug: debian-13, ngtcp2: 'ON' }
+          - { name: Alpine 3.20, slug: alpine-3.20, ngtcp2: 'OFF' } # OpenSSL 3.3
+          - { name: Alpine 3.22, slug: alpine-3.22, ngtcp2: 'ON' }
+          - { name: Fedora 42, slug: fedora-42, ngtcp2: 'OFF' } # OpenSSL 3.2
           - { name: Fedora 43, slug: fedora-43, ngtcp2: 'ON' }
           - { name: openSUSE Tumbleweed, slug: opensuse-tumbleweed, ngtcp2: 'ON' }
-          - { name: AlmaLinux 9, slug: almalinux-9, ngtcp2: 'OFF' }
-          - { name: AlmaLinux 10, slug: almalinux-10, ngtcp2: 'OFF' }
-          - { name: Rocky Linux 9, slug: rockylinux-9, ngtcp2: 'OFF' }
+          - { name: AlmaLinux 9, slug: almalinux-9, ngtcp2: 'ON' }
+          - { name: AlmaLinux 10, slug: almalinux-10, ngtcp2: 'ON' }
+          - { name: Rocky Linux 9, slug: rockylinux-9, ngtcp2: 'ON' }
 
     steps:
       - name: Checkout code
@@ -62,12 +64,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Older images deliberately test compatibility with ngtcp2 OFF.
-        # The build/install scripts themselves always default to ON.
+        # These images provide OpenSSL >= 3.5 for the bundled ngtcp2 adapter.
         include:
           - { name: Ubuntu 26.04, slug: ubuntu-26.04, ngtcp2: 'ON' }
-          - { name: Debian 13, slug: debian-13, ngtcp2: 'OFF' }
-          - { name: Alpine 3.22, slug: alpine-3.22, ngtcp2: 'OFF' }
+          - { name: Debian 13, slug: debian-13, ngtcp2: 'ON' }
+          - { name: Alpine 3.22, slug: alpine-3.22, ngtcp2: 'ON' }
 
     steps:
       - name: Checkout code

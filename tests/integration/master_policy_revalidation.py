@@ -3,6 +3,7 @@
 Run: unshare -Urn python3 tests/integration/master_policy_revalidation.py BINARY ARTIFACT_DIR
 QUIC gate (requires aioquic on PYTHONPATH and OpenSSL 3.5+):
   REVALIDATION_CASES=quic-policy-drop unshare -Urn python3 <this file> BINARY ARTIFACT_DIR
+H3 metadata/rewrite gate: use REVALIDATION_CASES=quic-engine-views alone.
 Never run the driver in the host network namespace. It refuses that topology.
 """
 import http.server
@@ -19,6 +20,12 @@ import sys
 import threading
 import time
 import urllib.request
+
+
+# The H3 metadata case uses a responding origin; revalidation uses held streams.
+selected = os.environ.get('REVALIDATION_CASES', '').split(',')
+if 'quic-engine-views' in selected:
+    assert selected == ['quic-engine-views'], 'run quic-engine-views separately'
 
 
 def run(*args):
@@ -59,8 +66,11 @@ if len(sys.argv) >= 2 and sys.argv[1] == 'origin':
     run('ip', '-6', 'addr', 'add', '2001:db8:ff::10/128', 'dev', 'lo', 'nodad')
     run('ip', '-6', 'addr', 'add', '2001:db8:1::2/64', 'dev', 'rv-ap', 'nodad')
     run('ip', '-6', 'addr', 'add', '2001:db8:2::2/64', 'dev', 'rv-bp', 'nodad')
-    if 'quic-policy-drop' in os.environ.get('REVALIDATION_CASES', ''):
-        quic = subprocess.Popen([sys.executable, str(pathlib.Path(__file__).with_name('quic_revalidation_peer.py')),
+    if any(case in os.environ.get('REVALIDATION_CASES', '')
+           for case in ('quic-policy-drop', 'quic-engine-views')):
+        peer_file = ('quic_engine_views.py' if 'quic-engine-views' in os.environ.get('REVALIDATION_CASES', '')
+                     else 'quic_revalidation_peer.py')
+        quic = subprocess.Popen([sys.executable, str(pathlib.Path(__file__).with_name(peer_file)),
                                  'origin', sys.argv[2]], stdout=subprocess.PIPE, text=True)
         assert quic.stdout.readline().strip() == 'ready'
         def stop_origin(*_):
@@ -106,7 +116,12 @@ class Hooks(http.server.BaseHTTPRequestHandler):
         pass
 
     def do_POST(self):
-        event = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+        raw = self.rfile.read(int(self.headers['Content-Length']))
+        if 'quic-engine-views' in os.environ.get('REVALIDATION_CASES', ''):
+            from quic_engine_views import decode_event
+            event = decode_event(raw, self.path)
+        else:
+            event = json.loads(raw)
         with self.lock:
             self.events.append(event)
         result = {'action': 'unchanged', 'control': {'server_lifecycle': 1, 'tls_lifecycle': 1}}
@@ -116,6 +131,9 @@ class Hooks(http.server.BaseHTTPRequestHandler):
         if event.get('action') == 'tls-lifecycle':
             result = {'action': 'tls-lifecycle', 'id': event['id'], 'proceed': True,
                       'envelope': event['details']['tls']['envelope']}
+        if 'quic-engine-views' in os.environ.get('REVALIDATION_CASES', ''):
+            from quic_engine_views import webhook_reply
+            result = webhook_reply(event, result)
         reply = json.dumps(result).encode()
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
@@ -219,7 +237,8 @@ try:
              ('settings-fail-open-drop', False, False, 4),
              ('tls-policy-reload-drop', False, False, 4),
              ('udp-drop', False, False, 4),
-             ('quic-policy-drop', False, False, 4)]
+             ('quic-policy-drop', False, False, 4),
+             ('quic-engine-views', False, False, 4)]
     selected_cases = os.environ.get('REVALIDATION_CASES', '').split(',')
     for label, allow_other, role_change, family in cases:
         if selected_cases != [''] and label not in selected_cases: continue
@@ -251,6 +270,13 @@ try:
         if label.startswith('quic'):
             text = text.replace('quic_workers = -1', 'quic_workers = 1')
             text = text.replace('interfaces = (', 'interfaces = ( { match = { if_name = "rv-c"; }; role = "Office"; },', 1)
+        if label == 'quic-engine-views':
+            text = text.replace('tls_profile = "default";',
+                                'tls_profile = "default"; detection_profile = "detect"; content_profile = "default";')
+            text = text.replace('sift = false;', 'sift = true; sift_url = "http://127.0.0.1:18081/sift";')
+            text, count = re.subn(r'(content_profiles\s*=\s*\{\s*default\s*=\s*\{)',
+                                  r'\1 webhook_enable = TRUE;', text, count=1)
+            assert count == 1, 'missing content webhook setting'
         with Hooks.lock:
             Hooks.events.clear()
         cfg = root / 'config/smithproxy.cfg'; cfg.write_text(text)
@@ -260,7 +286,10 @@ try:
             proxy = subprocess.Popen([str(binary), '--no-pidfile', '--diagnose', '-c', str(cfg)], stdout=log, stderr=subprocess.STDOUT)
             eventually(lambda: api('status/ping'))
             if label.startswith('quic'):
-                from quic_revalidation_peer import run_case
+                if label == 'quic-engine-views':
+                    from quic_engine_views import run_case
+                else:
+                    from quic_revalidation_peer import run_case
                 run_case(root, proxy, Hooks, cfg, eventually, run, sessions, cli)
                 proxy.terminate(); proxy.wait(timeout=15); proxy = None
                 results.append({'case': label, 'result': 'PASS'})

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace sx::multiflow {
@@ -94,6 +95,11 @@ public:
     /** Report the physical carrier without changing logical stream I/O. */
     virtual outer_transport policy_transport() const {
         return outer_transport::tcp;
+    }
+
+    /** Read the transport's handshake result; empty when ALPN is unavailable. */
+    virtual std::string negotiated_alpn() const {
+        return {};
     }
 
     /** Return the transport's externally visible stream ID when it has one. */

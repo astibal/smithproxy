@@ -677,9 +677,9 @@ tests/patch-runner/prepare-quic-runtime.sh
 Override the locations with `CURL_HTTP3_PREFIX` and `QUIC_PYTHON_PREFIX`.
 
 `quic-throughput` instead uses native C++ client/server endpoints based on
-ngtcp2 1.16.0 and nghttp3 1.12.0. Python only launches processes and collects
+ngtcp2 1.26.0 and nghttp3 1.18.0. Python only launches processes and collects
 measurements; it does not handle QUIC datagrams or HTTP bodies. Prepare this
-separate runtime with a C++20 toolchain, CMake, pkg-config, libev development
+separate runtime with a C++23 toolchain, CMake, pkg-config, libev development
 files and OpenSSL 3.5 or newer:
 
 ```bash
@@ -700,6 +700,19 @@ after receiving and checking its complete zero-filled body. The contract test
 also checks corrupt/short uploads and wrong CA/hostname rejection on both IP
 families. `QUIC_THROUGHPUT_CLIENT=curl` selects the independent C client for a
 cross-check against the same native server.
+
+To exercise retransmission and fragmentation limits, run the same suite with
+`--env QUIC_REORDER_TEST=1`. This adds `netem delay 2ms 1ms distribution normal`
+on the isolated origin interface, affecting both direct and proxied downloads.
+All normal completion/payload assertions remain enabled. The qdisc description
+is saved as `quic-reorder-qdisc.txt`. For a stress run, also use
+`--env QUIC_THROUGHPUT_CONCURRENCY=16 --env QUIC_THROUGHPUT_REPEATS=5`.
+This is a correctness regression run, not a comparable throughput measurement.
+
+ngtcp2 1.26 is the minimum for both the proxy and native fixtures: upstream
+fixes #1919 and #1988 raise overly restrictive fragmentation/retransmission
+limits; #2393 stops counting legitimate duplicate STREAM/MAX_STREAM_DATA
+frames as glitches. Older releases can close valid connections under reordering. These remain bounded protections, not unlimited queues.
 
 Four origin processes share the destination IP/port using `SO_REUSEPORT` by
 default; `QUIC_THROUGHPUT_ORIGIN_WORKERS` changes their count. This fixture uses

@@ -930,6 +930,7 @@ void listener_service::progress_handshake(
         };
         flow_context.ingress_ifindex = value.ingress_ifindex;
         flow_context.transport_name = "quic";
+        flow_context.rewrite_requested = value.setup && value.setup->rewrite_requested();
         if (value.setup) flow_context.parent_connection_id = value.setup->connection_id();
 
         value.proxy = proxy_factory_(
@@ -1079,6 +1080,19 @@ bool listener_service::reap_expired(std::chrono::steady_clock::time_point now) {
     for (auto iterator = dispatcher_bindings_.begin();
          iterator != dispatcher_bindings_.end();) {
         if (now - iterator->second.updated >= lifecycle_.handshake_timeout) {
+            // A binding predates its certificate job/session. Its independent
+            // expiry must not invalidate a still-owned callback generation just
+            // before the session timeout records and closes the upstream leg.
+            auto* downstream = iterator->first;
+            auto const owned = certificate_jobs_.find(downstream) != certificate_jobs_.end()
+                || staged_upstreams_.find(downstream) != staged_upstreams_.end()
+                || std::any_of(sessions_.begin(), sessions_.end(), [downstream](auto const& value) {
+                    return value.downstream && value.downstream->handle_native() == downstream;
+                });
+            if (owned) {
+                ++iterator;
+                continue;
+            }
             iterator = dispatcher_bindings_.erase(iterator);
         } else {
             ++iterator;

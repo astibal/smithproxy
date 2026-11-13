@@ -54,14 +54,14 @@ else:
             self.env["SMITHPROXY_ENABLE_NGTCP2"] = backend
         return subprocess.run(["sh", str(script)], env=self.env, capture_output=True, text=True)
 
-    def test_installers_require_adapter_by_default_and_omit_it_only_for_off(self):
+    def test_installers_use_system_tls_without_system_ngtcp2(self):
         packages = {
-            "ubuntu": "libngtcp2-crypto-ossl-dev", "alpine": "pc:libngtcp2_crypto_ossl",
-            "fedora": "pkgconfig(libngtcp2_crypto_ossl)",
-            "opensuse-tumbleweed": "pkgconfig(libngtcp2_crypto_ossl)",
-            "rocky": "pkgconfig(libngtcp2_crypto_ossl)",
+            "ubuntu": "libssl-dev", "alpine": "openssl-dev",
+            "fedora": "openssl-devel",
+            "opensuse-tumbleweed": "libopenssl-devel",
+            "rocky": "openssl-devel",
         }
-        for distro, adapter in packages.items():
+        for distro, tls_package in packages.items():
             for backend in (None, "OFF"):
                 with self.subTest(distro=distro, backend=backend):
                     self.env.pop("SMITHPROXY_ENABLE_NGTCP2", None)
@@ -69,9 +69,8 @@ else:
                     result = self.install(distro, backend)
                     self.assertEqual(result.returncode, 0, result.stderr)
                     args = [arg for call in self.calls() for arg in call]
-                    self.assertEqual(adapter in args, backend is None)
-                    if backend == "OFF":
-                        self.assertFalse(any("ngtcp2" in arg for arg in args))
+                    self.assertIn(tls_package, args)
+                    self.assertFalse(any("ngtcp2" in arg for arg in args))
 
     def test_missing_dependency_fails_without_retrying_another_backend(self):
         self.env["INSTALL_FAILURE"] = "42"
@@ -79,7 +78,8 @@ else:
         self.assertEqual(result.returncode, 42)
         installs = [call for call in self.calls() if "install" in call]
         self.assertEqual(len(installs), 1)
-        self.assertIn("libngtcp2-crypto-ossl-dev", installs[0])
+        self.assertIn("libssl-dev", installs[0])
+        self.assertFalse(any("ngtcp2" in arg for arg in installs[0]))
 
     def test_invalid_backend_fails_before_package_or_build_operations(self):
         result = self.install("ubuntu", "auto")

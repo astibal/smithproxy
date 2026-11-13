@@ -100,6 +100,7 @@ async def main(mode, root):
     from aioquic.h3.connection import H3Connection
     from aioquic.h3.events import HeadersReceived, DataReceived
     from aioquic.quic.configuration import QuicConfiguration
+    from aioquic.quic.logger import QuicFileLogger
     from aioquic.quic.events import ConnectionTerminated, StreamReset
 
     class Peer(QuicConnectionProtocol):
@@ -133,6 +134,10 @@ async def main(mode, root):
 
     certs = root / 'config/certs'
     config = QuicConfiguration(is_client=mode == 'client', alpn_protocols=['h3'])
+    # Preserve transport resets and their error codes when readiness fails.
+    qlog = root / f'quic-{mode}-qlog'
+    qlog.mkdir(exist_ok=True)
+    config.quic_logger = QuicFileLogger(str(qlog))
     if mode == 'origin':
         config.load_cert_chain(certs / 'origin-cert.pem', certs / 'origin-key.pem')
         server = await serve('203.0.113.10', 443, configuration=config, create_protocol=Peer)

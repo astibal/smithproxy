@@ -2358,6 +2358,11 @@ auto get_more_info(MitmProxy const* curr_proxy, MitmHostCX* lf, MitmHostCX* rg, 
                 info_ss << "\n    L7_engine: none";
             }
 
+            if (curr_proxy) {
+                if (auto h3 = curr_proxy->protocol_diagnostics(); !h3.empty()) {
+                    info_ss << "\n    H3: " << h3.dump() << "\n";
+                }
+            }
             if (lf->engine().application_data) {
                 auto const app = lf->engine().application_data;
                 std::string desc = app->to_string(verbosity);

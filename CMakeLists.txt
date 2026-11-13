@@ -20,8 +20,8 @@ SET(SOCLE_COMMON_DIR "socle/common")
 
 project(smithproxy C CXX)
 
-include(${PROJECT_SOURCE_DIR}/cmake/QuicBackend.cmake)
 include(CTest)
+include(${PROJECT_SOURCE_DIR}/cmake/QuicBackend.cmake)
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}")
 
 option(SMITHPROXY_COVERAGE "Instrument Smithproxy tests for GCC line coverage" OFF)
@@ -260,6 +260,8 @@ message(STATUS "Git current smithproxy branch: ${SX_GIT_BRANCH}")
 message(STATUS "Git commit smithproxy hash: ${SX_GIT_COMMIT_HASH}")
 message(STATUS "Git commit smithproxy version: ${SX_GIT_VERSION}")
 
+include(${PROJECT_SOURCE_DIR}/cmake/DependencyInfo.cmake)
+
 message(STATUS "Generating smithproxy_version.h")
 
 configure_file(
@@ -392,6 +394,7 @@ add_executable(smithproxy
         src/inspect/protocol_fork.cpp
         src/inspect/protocol_adapter.cpp
         src/inspect/engine/http2_adapter.cpp
+        src/inspect/engine/http3_adapter.cpp
         src/inspect/protocol_views.cpp
         src/proxy/mitmproxy.cpp
         src/proxy/proxy_hooks.cpp
@@ -633,6 +636,11 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
     if(GTEST_FOUND)
         add_executable(sx_gtests
                 src/inspect/dns.cpp
+                src/inspect/protocol_fork.cpp
+                src/inspect/protocol_adapter.cpp
+                src/inspect/protocol_views.cpp
+                src/inspect/engine/http2_adapter.cpp
+                src/inspect/engine/http3_adapter.cpp
                 src/utils/str.cpp
                 src/utils/fs.cpp
                 src/utils/mem.cpp
@@ -804,11 +812,14 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/inspect/http1_framing_tests.cpp
                 tests/unit/inspect/http2_content_framing_tests.cpp
                 tests/unit/inspect/protocol_views_tests.cpp
+                tests/unit/inspect/http3_engine_tests.cpp
+                src/proxy/quic/h3capture.cpp
                 tests/unit/inspect/protocol_fork_tests.cpp
                 tests/unit/inspect/protocol_fork_benchmark.cpp
                 src/inspect/protocol_fork.cpp
                 src/inspect/protocol_adapter.cpp
                 src/inspect/engine/http2_adapter.cpp
+                src/inspect/engine/http3_adapter.cpp
                 src/inspect/protocol_views.cpp
 
                 src/inspect/engine.hpp
@@ -968,7 +979,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
         if (LIBCONFIGPP_FOUND)
             target_link_libraries(sx_gtests ${LIBCONFIGPP_LIBRARIES})
         endif()
-        target_link_libraries(sx_gtests_http1 gtest gtest_main socle_lib
+        target_link_libraries(sx_gtests_http1 gtest gtest_main socle_lib smithproxy_qpack
                 nlohmann_json::nlohmann_json pthread crypto ssl)
         target_link_libraries(sx_gtests_startstoptls
                 gtest gtest_main
@@ -1023,7 +1034,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
         )
         # Lifecycle probes are absent from the production binary and class layout.
         target_compile_definitions(quic_testbed PRIVATE SMITHPROXY_QUIC_LIFECYCLE_PROBE)
-        target_link_libraries(quic_testbed gtest smithproxy_qpack socle_lib pthread crypto ssl)
+        target_link_libraries(quic_testbed gtest smithproxy_qpack socle_lib
+                nlohmann_json::nlohmann_json pthread crypto ssl)
 
         add_executable(quic_test_node
                 src/proxy/multiflow/mfflowcom.cpp
@@ -1038,7 +1050,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 src/service/quic/worker_dispatcher.cpp
                 tests/quic/testbed/quic_test_node.cpp
         )
-        target_link_libraries(quic_test_node smithproxy_qpack socle_lib pthread crypto ssl)
+        target_link_libraries(quic_test_node smithproxy_qpack nlohmann_json socle_lib pthread crypto ssl)
 
         if(BUILD_TESTING)
             add_test(NAME unit.core COMMAND sx_gtests
@@ -1051,6 +1063,9 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                     --gtest_filter=LogMux.RemoteTargetLifecycleIsSafeDuringConcurrentLogging)
             add_test(NAME unit.http1 COMMAND sx_gtests_http1
                     --gtest_filter=-HTTP1.benchmark:ProtocolForkBenchmark.*)
+            add_test(NAME unit.http3 COMMAND sx_gtests_http1 --gtest_filter=Http3Engine.*)
+            add_test(NAME unit.http3_capture COMMAND quic_testbed
+                    --gtest_filter=H3Capture.*:QpackVendor.*)
             add_test(NAME unit.protocol_views COMMAND sx_gtests_http1
                     --gtest_filter=*ProtocolViews*
                     --gtest_output=xml:protocol-views-results.xml)
@@ -1566,8 +1581,7 @@ if(SMITHPROXY_ENABLE_NGTCP2)
         if("src/proxy/quic/transport.cpp" IN_LIST quic_sources)
             target_sources(${quic_target} PRIVATE src/proxy/quic/ngtcp2.cpp src/proxy/quic/ngtcp2_worker.cpp)
             target_compile_definitions(${quic_target} PRIVATE SMITHPROXY_ENABLE_NGTCP2=1)
-            target_include_directories(${quic_target} PRIVATE ${NGTCP2_INCLUDE_DIR} ${NGTCP2_CRYPTO_INCLUDE_DIR})
-            target_link_libraries(${quic_target} ${NGTCP2_CRYPTO_LIBRARY} ${NGTCP2_LIBRARY})
+            target_link_libraries(${quic_target} smithproxy_ngtcp2)
         endif()
     endforeach()
     if(TARGET quic_testbed)

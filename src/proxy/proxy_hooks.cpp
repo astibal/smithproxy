@@ -2,6 +2,7 @@
 #include <proxy/retirement.hpp>
 #include <proxy/mitmproxy.hpp>
 #include <proxy/content_webhook_metadata.hpp>
+#include <inspect/engine/http3_adapter.hpp>
 #include <proxy/connection_start.hpp>
 #include <proxy/connection_transport.hpp>
 #include <proxy/httpconnect/httpconnectrequest.hpp>
@@ -1202,6 +1203,19 @@ nlohmann::json ProxyHooks::content_details(MitmProxy& proxy, const ContentExchan
     add_content_ranges(j["info"], args.input, proxy.first_left());
     add_content_tls(j["info"], proxy.first_right());
     add_content_http(j["info"], proxy.first_left());
+    if (proxy.webhook_stream && proxy.first_left()) {
+        const auto sender = args.input.side == side_t::LEFT
+            ? sx::engine::ProtocolEndpoint::Client : sx::engine::ProtocolEndpoint::Server;
+        auto metadata = sx::engine::http::v3::metadata(proxy.first_left()->engine(),
+            proxy.webhook_stream->stream_id, sender);
+        for (auto& [key, value] : metadata.items()) j["info"][key] = std::move(value);
+    }
+    if (auto const& error = proxy.flow_ctx_->protocol_fork_error(); !error.empty()) {
+        j["info"]["protocol_fork_error"] = error;
+    }
+    if (j["info"].contains("protocol_metadata_version")) {
+        sx::engine::http::v3::encode_metadata_bytes(j["info"]);
+    }
     return j;
 }
 

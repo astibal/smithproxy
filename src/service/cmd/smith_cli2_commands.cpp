@@ -5,6 +5,7 @@
 #include "diag/diag_cmds.hpp"
 
 #include <service/cfgapi/cfgapi.hpp>
+#include <service/dependency_info.hpp>
 
 #include <inspect/kb/kb.hpp>
 #include <log/logger.hpp>
@@ -130,6 +131,24 @@ std::string status_text(const libcli2::Decorator& decor) {
     output << " Socle lib source info: " << SOCLE_GIT_VERSION << '\n';
     output << "                branch: " << SOCLE_GIT_BRANCH << " commit: " << SOCLE_GIT_COMMIT_HASH << '\n';
 #endif
+    const auto libraries = sx::dependencies::status();
+    const auto& openssl = libraries.at("openssl");
+    output << decor.key("OpenSSL:") << ' ' << openssl.at("version").get<std::string>()
+           << " (" << openssl.at("linkage").get<std::string>() << ", external)\n"
+           << "  Built against: " << openssl.at("build_version").get<std::string>() << '\n';
+    for(const auto* field : {"loaded_library", "crypto_loaded_library"}) {
+        const auto path = openssl.at(field).get<std::string>();
+        if(!path.empty()) output << "  Loaded: " << path << '\n';
+    }
+    const auto& ngtcp2 = libraries.at("ngtcp2");
+    output << decor.key("ngtcp2:") << ' ';
+    if(ngtcp2.at("enabled").get<bool>()) {
+        output << ngtcp2.at("version").get<std::string>() << " (static, submodule, ossl adapter)\n"
+               << "  Commit: " << ngtcp2.at("commit").get<std::string>() << '\n';
+    } else {
+        output << "disabled at build time\n";
+    }
+
     output << decor.key("Built with:") << ' ';
 #ifndef BUILD_RELEASE
     output << "DEBUG ";

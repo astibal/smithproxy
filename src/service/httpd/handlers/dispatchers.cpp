@@ -16,6 +16,7 @@
 #include <service/httpd/cfg/archive.hpp>
 #include <service/httpd/cfg/transaction.hpp>
 #include <service/privileged_file.hpp>
+#include <service/dependency_info.hpp>
 
 #include <service/httpd/wh/whcontrol.hpp>
 
@@ -87,6 +88,7 @@ namespace sx::webserver::dispatchers {
                                 time_t uptime = time(nullptr) - SmithProxy::instance().ts_sys_started;
                                 return {{"version", SMITH_VERSION},
                                         {"status",     "ok"},
+                                        {"libraries", sx::dependencies::status()},
                                         {"uptime",     uptime},
                                         {"uptime_str", uptime_string(uptime)}};
                             }));

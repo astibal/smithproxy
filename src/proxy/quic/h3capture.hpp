@@ -46,6 +46,13 @@ public:
         socle::side_t side, std::uint64_t stream_id,
         unsigned char const* data, std::size_t size);
 
+    void finish(socle::side_t side, std::uint64_t stream_id, bool reset);
+
+    // Observability only: an unavailable decoder must not masquerade as an
+    // empty, successfully decoded field section.
+    std::string connection_status() const;
+    std::string status(socle::side_t side, std::uint64_t stream_id) const;
+
 private:
     class implementation;
     std::unique_ptr<implementation> implementation_;

@@ -42,6 +42,28 @@ void ProtocolViews::set_mode(Mode mode) {
     mode_ = mode;
 }
 
+bool ProtocolViews::enable_rewrite() {
+    if (mode_ == Mode::Rewrite) return true;
+    if (untracked_rewrite_) return false;
+    if (pending_) throw std::logic_error("Cannot split an active protocol callback");
+
+    // Before the first input the normal lazy fork suffices. Later admission of
+    // a stream can request a fork of the exact state reached by earlier streams.
+    if (sequence_) {
+        try {
+            auto copy = adapter(shared_).fork(shared_);
+            other_ = std::move(copy);
+        } catch (std::runtime_error const& error) {
+            fork_error_ = error.what();
+            return false;
+        }
+    }
+
+    fork_error_.clear();
+    mode_ = Mode::Rewrite;
+    return true;
+}
+
 void ProtocolViews::prepare_output() {
     if (mode_ != Mode::Rewrite || split()) return;
 
@@ -53,10 +75,15 @@ void ProtocolViews::prepare_output() {
 
 void ProtocolViews::observe(EngineCtx& ctx, Endpoint sender, buffer const& bytes,
                             std::uint64_t read_bytes, bool output, PayloadAnalysis* analysis) {
-    if (bytes.empty()) return;
+    observe(ctx, ProtocolInput{sender, bytes}, read_bytes, output, analysis);
+}
+
+void ProtocolViews::observe(EngineCtx& ctx, ProtocolInput const& input,
+                            std::uint64_t read_bytes, bool output, PayloadAnalysis* analysis) {
+    if (input.event == ProtocolEvent::Data && input.bytes.empty()) return;
 
     ObservationScope scope(ctx, output, analysis);
-    adapter(ctx).observe(ctx, sender == Endpoint::Client, bytes, read_bytes);
+    adapter(ctx).observe(ctx, input, read_bytes);
 }
 
 ProtocolAdapter const& ProtocolViews::adapter(EngineCtx const& ctx) {
@@ -108,12 +135,27 @@ bool ProtocolViews::prepare(Endpoint sender, buffer const& current,
 
 std::uint64_t ProtocolViews::begin(Endpoint sender, buffer const& bytes,
                                   std::uint64_t read_bytes) {
+    return begin(ProtocolInput{sender, bytes}, read_bytes);
+}
+
+std::uint64_t ProtocolViews::begin(ProtocolInput const& input, std::uint64_t read_bytes) {
     if (pending_) throw std::logic_error("Protocol callback is already active");
 
     prepare_output();
-    auto& source = context(sender);
-    pending_.emplace(Pending{++sequence_, sender, PayloadAnalysis()});
-    observe(source, sender, bytes, read_bytes, false, &pending_->analysis);
+    auto& source = context(input.sender);
+    pending_.emplace(Pending{++sequence_, input.sender, PayloadAnalysis(), input.stream, std::nullopt});
+    // Unexpected raw overrides remain legal. Remember the original multiplexed
+    // bytes only while shared so a divergence can be reported without claiming
+    // that a later fork represents both endpoints. TCP/H2 keeps its fast path.
+    if (input.stream && mode_ == Mode::Observe && input.event == ProtocolEvent::Data) {
+        pending_->original = std::string(input.bytes.string_view());
+    }
+    try {
+        observe(source, input, read_bytes, false, &pending_->analysis);
+    } catch (...) {
+        pending_.reset();
+        throw;
+    }
     return pending_->token;
 }
 
@@ -125,20 +167,44 @@ void ProtocolViews::check_token(std::uint64_t token) const {
 
 void ProtocolViews::finish(std::uint64_t token, buffer const& bytes) {
     check_token(token);
+    finish(token, ProtocolInput{pending_->sender, bytes, pending_->stream});
+}
+
+void ProtocolViews::finish(std::uint64_t token, ProtocolInput const& output) {
+    finish_outputs(token, &output, 1);
+}
+
+void ProtocolViews::finish(std::uint64_t token, std::vector<ProtocolInput> const& outputs) {
+    finish_outputs(token, outputs.data(), outputs.size());
+}
+
+void ProtocolViews::finish_outputs(std::uint64_t token, ProtocolInput const* outputs,
+                                   std::size_t count) {
+    check_token(token);
     const auto sender = pending_->sender;
+    for (std::size_t index = 0; index < count; ++index) {
+        auto const& output = outputs[index];
+        if (output.sender != sender) {
+            throw std::logic_error("Output sender changed within callback");
+        }
+    }
 
     if (mode_ == Mode::Observe) {
-        // Mutation permission is enforced at the webhook boundary. This path
-        // needs neither a copy nor a second parse nor a byte-by-byte comparison.
+        if (pending_->original &&
+            (count != 1 || outputs[0].bytes.string_view() != *pending_->original)) {
+            untracked_rewrite_ = true;
+            fork_error_ = "Protocol views unavailable: raw rewrite preceded session split";
+        }
         pending_.reset();
         return;
     }
 
-    // Rewrite prepared both views before input. Empty output (need-more)
-    // must not advance the receiver until bytes are actually queued for it.
-    // No webhook follows this pass. The observation scope supplies an explicit
-    // protocol-only analysis request, not a cache miss requiring another hash.
-    observe(context(sender, Phase::Output), sender, bytes, 0, true);
+    // One callback may emit both request and QPACK-stream bytes. Observe the
+    // exact ordered batch queued by the caller, without repeating inspectors.
+    for (std::size_t index = 0; index < count; ++index) {
+        auto const& output = outputs[index];
+        observe(context(sender, Phase::Output), output, 0, true);
+    }
     pending_.reset();
 }
 
@@ -150,7 +216,11 @@ void ProtocolViews::abandon(std::uint64_t token) {
 }
 
 void ProtocolViews::inject(Endpoint recipient, buffer const& bytes) {
-    if (bytes.empty()) return;
+    inject(ProtocolInput{peer(recipient), bytes});
+}
+
+void ProtocolViews::inject(ProtocolInput const& output) {
+    if (output.event == ProtocolEvent::Data && output.bytes.empty()) return;
 
     // A shared observation view cannot represent data seen by only one peer.
     // Never fork late from a state that already contains unmodified input.
@@ -159,8 +229,7 @@ void ProtocolViews::inject(Endpoint recipient, buffer const& bytes) {
     }
 
     prepare_output();
-    const auto sender = peer(recipient);
-    observe(context(sender, Phase::Output), sender, bytes, 0, true);
+    observe(context(output.sender, Phase::Output), output, 0, true);
 }
 
 void ProtocolViews::seed(Endpoint sender, buffer const& bytes, PayloadAnalysis* analysis) {

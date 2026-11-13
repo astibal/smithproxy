@@ -21,7 +21,7 @@ public:
     virtual bool handshake_complete() const = 0;
     virtual bool closed() const = 0;
     virtual std::string server_name() const = 0;
-    virtual std::string negotiated_alpn() const = 0;
+    std::string negotiated_alpn() const override = 0;
     virtual std::shared_ptr<keylog_store> keylog() const = 0;
     /** Service TLS/shutdown without consuming pending application events. */
     virtual void progress_transport() = 0;
