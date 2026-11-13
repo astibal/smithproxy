@@ -930,6 +930,7 @@ void listener_service::progress_handshake(
         };
         flow_context.ingress_ifindex = value.ingress_ifindex;
         flow_context.transport_name = "quic";
+        flow_context.rewrite_requested = value.setup && value.setup->rewrite_requested();
         if (value.setup) flow_context.parent_connection_id = value.setup->connection_id();
 
         value.proxy = proxy_factory_(

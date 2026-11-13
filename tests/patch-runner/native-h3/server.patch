@@ -1,43 +1,6 @@
 --- a/examples/server.cc
 +++ b/examples/server.cc
-@@ -53,6 +53,7 @@
- #include "shared.h"
- #include "http.h"
- #include "template.h"
-+#include "benchmark.h"
- 
- using namespace ngtcp2;
- using namespace std::literals;
-@@ -429,6 +430,18 @@
-     return send_status_response(httpconn, 400);
-   }
- 
-+  if (method == "POST") {
-+    auto [file, error] = open_file(config.htdocs + req.path);
-+    const bool valid = error == 0 && uploaded_bytes == file.len
-+                       && !upload_has_nonzero;
-+    const auto headers = std::to_array({
-+      util::make_nv_nn(":status"sv, valid ? "200"sv : "400"sv),
-+      util::make_nv_nn("content-length"sv, "0"sv),
-+    });
-+    return nghttp3_conn_submit_response(httpconn, stream_id, headers.data(),
-+                                       headers.size(), nullptr);
-+  }
-+
-   auto dyn_len = find_dyn_length(req.path);
- 
-   int64_t content_length = -1;
-@@ -1024,6 +1037,9 @@
-     debug::print_http_data(stream_id, {data, datalen});
-   }
-   auto h = static_cast<Handler *>(user_data);
-+  auto stream = static_cast<Stream *>(stream_user_data);
-+  stream->uploaded_bytes += datalen;
-+  stream->upload_has_nonzero |= !h3_bench::all_zero({data, datalen});
-   h->http_consume(stream_id, datalen);
-   return 0;
- }
-@@ -2267,7 +2283,7 @@
+@@ -1455,7 +1455,7 @@
        continue;
      }
  
@@ -46,24 +9,67 @@
                     static_cast<socklen_t>(sizeof(val))) == -1) {
        close(fd);
        continue;
-@@ -2353,7 +2369,7 @@
-     return -1;
+@@ -1549,7 +1549,7 @@
+     return std::unexpected{Error::SYSCALL};
    }
  
 -  if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &val,
 +  if (setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &val,
                   static_cast<socklen_t>(sizeof(val))) == -1) {
      close(fd);
-     return -1;
+     return std::unexpected{Error::SYSCALL};
 --- a/examples/server.h
 +++ b/examples/server.h
-@@ -82,6 +82,9 @@
+@@ -107,6 +107,9 @@
    std::string method;
    std::string authority;
    std::string status_resp_body;
-+  // Test fixture: acknowledge POST only after all expected zero bytes arrive.
++  // Acknowledge POST only after all expected zero bytes arrive.
 +  uint64_t uploaded_bytes = 0;
 +  bool upload_has_nonzero = false;
-   // data is a pointer to the memory which maps file denoted by fd.
-   uint8_t *data;
-   // datalen is the length of mapped file by data.
+   // resp_data is a pointer to the response data.  It might be the
+   // memory which maps file denoted by fd, or status_resp_body.
+   std::span<const uint8_t> resp_data;
+--- a/examples/http3_server_proto_codec.cc
++++ b/examples/http3_server_proto_codec.cc
+@@ -23,6 +23,7 @@
+  * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+  */
+ #include "http3_server_proto_codec.h"
++#include "benchmark.h"
+ 
+ #include "server.h"
+ #include "debug.h"
+@@ -287,6 +288,9 @@
+     debug::print_http_data(stream_id, {data, datalen});
+   }
+   auto pc = static_cast<ProtoCodec *>(user_data);
++  auto stream = static_cast<Stream *>(stream_user_data);
++  stream->uploaded_bytes += datalen;
++  stream->upload_has_nonzero |= !h3_bench::all_zero({data, datalen});
+   pc->http_consume(stream_id, datalen);
+   return 0;
+ }
+@@ -548,6 +552,22 @@
+   }
+ 
+   const auto &req = *maybe_req;
++
++  if (stream->method == "POST") {
++    auto path = config.htdocs / std::filesystem::path{req.path}.relative_path();
++    auto file = stream->open_file(path);
++    const bool valid = file && stream->uploaded_bytes == file->len
++                       && !stream->upload_has_nonzero;
++    const auto headers = std::to_array({
++      util::make_nv_nn(":status"sv, valid ? "200"sv : "400"sv),
++      util::make_nv_nn("content-length"sv, "0"sv),
++    });
++    if (nghttp3_conn_submit_response(httpconn_, stream->stream_id, headers.data(),
++                                     headers.size(), nullptr) != 0) {
++      return std::unexpected{Error::HTTP3};
++    }
++    return {};
++  }
+ 
+   uint64_t content_length;
+   nghttp3_data_reader dr{};

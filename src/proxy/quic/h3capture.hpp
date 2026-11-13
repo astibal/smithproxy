@@ -46,6 +46,8 @@ public:
         socle::side_t side, std::uint64_t stream_id,
         unsigned char const* data, std::size_t size);
 
+    void finish(socle::side_t side, std::uint64_t stream_id, bool reset);
+
 private:
     class implementation;
     std::unique_ptr<implementation> implementation_;

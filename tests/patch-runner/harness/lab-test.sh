@@ -204,6 +204,19 @@ if [[ $ROUTING_TEST == 1 ]]; then
     ip -n "$SERVER" addr add 198.18.20.3/24 dev eth0
 fi
 ip -n "$SERVER" -6 addr add fd00:20::2/64 dev eth0 nodad
+if [[ ${QUIC_REORDER_TEST:-0} == 1 ]]; then
+    [[ $QUIC_THROUGHPUT_TEST == 1 ]] || {
+        echo 'QUIC_REORDER_TEST requires the quic-throughput suite' >&2
+        exit 2
+    }
+    # Delay variation reorders packets on the disposable origin link. Exercise
+    # retransmission/fragmentation limits on both the direct and proxy paths;
+    # completion and payload checks remain identical to the normal benchmark.
+    ip netns exec "$SERVER" tc qdisc add dev eth0 root netem \
+        delay 2ms 1ms distribution normal
+    ip netns exec "$SERVER" tc -s qdisc show dev eth0 \
+        > "$ROOT/results/quic-reorder-qdisc.txt"
+fi
 if [[ $ROUTING_TEST == 1 ]]; then
     ip -n "$SERVER" -6 addr add fd00:20::3/64 dev eth0 nodad
 fi

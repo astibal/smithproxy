@@ -7,11 +7,12 @@ namespace sx::engine {
 
 // Two endpoint-local, bidirectional conversations; NOT one parser per direction.
 // Setup chooses one observation context or two rewrite-capable contexts. The
-// decision precedes input analysis; no speculative per-payload copy is needed.
+// decision precedes input analysis. Multiplexed sessions may request a later
+// exact fork when the adapter still retains sufficient history.
 // Output advances protocol state only, without inspectors or another webhook.
 class ProtocolViews {
 public:
-    enum class Endpoint { Client, Server };
+    using Endpoint = ProtocolEndpoint;
     enum class Phase { Input, Output };
     enum class Mode { Observe, Rewrite };
 
@@ -22,6 +23,21 @@ public:
         : adapter_(&adapter), mode_(mode) {}
 
     void set_mode(Mode mode);
+    // Session-scoped capabilities are monotonic: a later stream cannot disable
+    // a split requested by an earlier one. Failure leaves the shared view intact.
+    bool enable_rewrite();
+    std::string const& fork_error() const { return fork_error_; }
+
+    EngineCtx& stream_context(Endpoint endpoint, ProtocolStream stream) {
+        auto& ctx = context(endpoint);
+        adapter(ctx).select_stream(ctx, stream);
+        return ctx;
+    }
+
+    std::uint64_t begin(ProtocolInput const& input, std::uint64_t read_bytes);
+    void finish(std::uint64_t token, ProtocolInput const& output);
+    void finish(std::uint64_t token, std::vector<ProtocolInput> const& outputs);
+    void inject(ProtocolInput const& output);
 
     bool prepare(Endpoint sender, buffer const& current,
                  duplexFlow const& history, bool ingested);
@@ -36,6 +52,9 @@ public:
     }
     bool split() const { return other_ != nullptr; }
     bool active() const { return adapter_ != nullptr; }
+    bool owns_content_metadata() const {
+        return adapter_ && adapter_->owns_content_metadata();
+    }
     bool can_inject() const { return mode_ == Mode::Rewrite && active(); }
 
     // Exactly one input/finish pair may be outstanding. Tokens prevent an old
@@ -59,6 +78,8 @@ private:
         std::uint64_t token;
         Endpoint sender;
         PayloadAnalysis analysis;
+        std::optional<ProtocolStream> stream;
+        std::optional<std::string> original;
     };
 
     static Endpoint peer(Endpoint endpoint) {
@@ -69,6 +90,12 @@ private:
     ProtocolAdapter const& adapter(EngineCtx const& ctx);
     void check_token(std::uint64_t token) const;
     void prepare_output();
+    void observe(EngineCtx& ctx, ProtocolInput const& input,
+                 std::uint64_t read_bytes, bool output, PayloadAnalysis* analysis = nullptr);
+    void finish_outputs(std::uint64_t token, ProtocolInput const* outputs, std::size_t count);
+
+    std::string fork_error_;
+    bool untracked_rewrite_ = false;
 
     EngineCtx shared_;
     ProtocolAdapter const* adapter_ = nullptr;

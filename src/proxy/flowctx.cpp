@@ -31,6 +31,13 @@ FlowCtx::Tx FlowCtx::begin(Dir dir, buffer const& data,
     const char side = dir == Dir::I2R ? 'r' : 'w';
     const bool ingested = i_->ingest(side, data);
 
+    if (session_views_) {
+        engine(); // Select this child's metadata before the synchronous pass.
+        tx.protocol_token = session_views_->begin(
+            sx::engine::ProtocolInput{active_endpoint_, data, stream_}, read_bytes);
+        return tx;
+    }
+
     if ((views_.active() || i_->opt_engines_enabled) &&
         views_.prepare(active_endpoint_, data, i_->flow(), ingested)) {
         tx.protocol_token = views_.begin(active_endpoint_, data, read_bytes);
@@ -56,19 +63,35 @@ void FlowCtx::commit(Tx const& tx, buffer const& data) {
 
     // This is called after ALL modifiers and before queueing to the peer.
     // No ingest(), inspector, webhook or payload rewriting on this pass.
-    if (tx.protocol_token) views_.finish(tx.protocol_token, data);
+    if (tx.protocol_token) protocol_views().finish(tx.protocol_token, data);
 }
 
 void FlowCtx::discard(Tx const& tx) {
     if(not tx.active) return;
     ++stats(tx.dir).dropped;
-    if (tx.protocol_token) views_.abandon(tx.protocol_token);
+    if (tx.protocol_token) protocol_views().abandon(tx.protocol_token);
 }
 
 void FlowCtx::inject(Dir dir, buffer const& data) {
     const auto recipient = dir == Dir::I2R ? Endpoint::Server : Endpoint::Client;
-    views_.inject(recipient, data);
+    if (session_views_) {
+        const auto sender = dir == Dir::I2R ? Endpoint::Client : Endpoint::Server;
+        session_views_->inject(sx::engine::ProtocolInput{sender, data, stream_});
+    } else {
+        views_.inject(recipient, data);
+    }
     stats(dir).out_bytes += data.size();
+}
+
+void FlowCtx::transport_event(Dir dir, sx::engine::ProtocolEvent event,
+                              std::optional<std::uint64_t> error) {
+    if (!session_views_) return;
+    buffer empty;
+    active_endpoint_ = dir == Dir::I2R ? Endpoint::Client : Endpoint::Server;
+    engine();
+    const sx::engine::ProtocolInput input{active_endpoint_, empty, stream_, event, error};
+    const auto token = session_views_->begin(input, 0);
+    session_views_->finish(token, input);
 }
 
 FlowCtx::Stats& FlowCtx::stats(Dir dir) {

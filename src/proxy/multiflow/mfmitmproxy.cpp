@@ -5,6 +5,7 @@
 #include "proxy/mitmproxy.hpp"
 #include "proxy/proxymaker.hpp"
 #include "proxy/master_policy.hpp"
+#include <inspect/engine/http3_adapter.hpp>
 
 #include <masterproxy.hpp>
 
@@ -95,7 +96,18 @@ public:
                     std::shared_ptr<connection> upstream,
                     proxy_limits limits, flow_proxy_context context)
         : downstream_(std::move(downstream)), upstream_(std::move(upstream)),
-          limits_(limits), context_(std::move(context)) {}
+          limits_(limits), context_(std::move(context)) {
+        auto alpn = downstream_ ? downstream_->negotiated_alpn() : std::string{};
+        if (alpn == "h3") {
+            auto const& adapter = sx::engine::http::v3::protocol_adapter();
+            protocol_views_ = std::make_shared<sx::engine::ProtocolViews>(adapter);
+            auto& ctx = protocol_views_->context(sx::engine::ProtocolEndpoint::Client);
+            ctx.negotiated_alpn = std::move(alpn);
+            buffer empty;
+            adapter.prepare(ctx, true, empty);
+            if (context_.rewrite_requested) protocol_views_->enable_rewrite();
+        }
+    }
 
     void shutdown() override {
         for(auto& [id, current] : pairs_) {
@@ -243,6 +255,16 @@ private:
         for (auto const& current : events) {
             if (current.type == event_type::connection_close) {
                 (from_left ? upstream_ : downstream_)->close(current.protocol_error);
+                if (protocol_views_) {
+                    buffer empty;
+                    const sx::engine::ProtocolInput input{
+                        from_left ? sx::engine::ProtocolEndpoint::Client
+                                  : sx::engine::ProtocolEndpoint::Server,
+                        empty, std::nullopt, sx::engine::ProtocolEvent::ConnectionClose,
+                        current.protocol_error};
+                    const auto token = protocol_views_->begin(input, 0);
+                    protocol_views_->finish(token, input);
+                }
                 closed_ = true;
                 continue;
             }
@@ -261,6 +283,10 @@ private:
                                    current.protocol_error);
                 auto lock = std::scoped_lock(match->master->proxy_lock());
                 for (auto const& proxy : match->master->proxies()) {
+                    if (auto* mitm = dynamic_cast<MitmProxy*>(proxy.get())) {
+                        mitm->protocol_event(from_left ? FlowCtx::Dir::I2R : FlowCtx::Dir::R2I,
+                            sx::engine::ProtocolEvent::Reset, current.protocol_error);
+                    }
                     if (proxy) proxy->state().dead(true);
                 }
                 retired_.insert(match->left.id);
@@ -351,6 +377,11 @@ private:
             proxy->traffic_log_adapter(std::move(adapter));
         }
 
+        if (proxy && protocol_views_) {
+            const auto id = downstream_->wire_flow_id(left_handle).value_or(left_handle.id);
+            proxy->bind_protocol(protocol_views_, {id, left_handle.generation});
+        }
+
         if (!proxy || !proxymaker::policy(proxy, false)) {
             source_connection->reset(source, 0x10c);
             return;
@@ -399,14 +430,22 @@ private:
                 auto* left = mitm->first_left();
                 auto* right = mitm->first_right();
                 if (current.left_fin && !current.right_finish_sent
-                    && right && right->writebuf()->empty()) {
+                    && left && !left->com()->readable(left->socket())
+                    && left->to_read().empty() && right && right->writebuf()->empty()) {
                     auto const result = upstream_->finish(current.right);
                     current.right_finish_sent = result != io_status::would_block;
+                    if (result == io_status::ok) {
+                        mitm->protocol_event(FlowCtx::Dir::I2R, sx::engine::ProtocolEvent::Fin);
+                    }
                 }
                 if (current.right_fin && !current.left_finish_sent
-                    && left && left->writebuf()->empty()) {
+                    && right && !right->com()->readable(right->socket())
+                    && right->to_read().empty() && left && left->writebuf()->empty()) {
                     auto const result = downstream_->finish(current.left);
                     current.left_finish_sent = result != io_status::would_block;
+                    if (result == io_status::ok) {
+                        mitm->protocol_event(FlowCtx::Dir::R2I, sx::engine::ProtocolEvent::Fin);
+                    }
                 }
 
                 auto const left_complete = !current.left_expects_fin
@@ -435,6 +474,7 @@ private:
     std::shared_ptr<connection> upstream_;
     proxy_limits limits_;
     flow_proxy_context context_;
+    std::shared_ptr<sx::engine::ProtocolViews> protocol_views_;
     std::map<flow_id, pair> pairs_;
     std::set<flow_id> retired_;
     std::set<int> policies_;

@@ -1506,7 +1506,7 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
 
     // Transport adapters may enrich the ordinary application state before
     // the same content webhook path used by TCP-based inspection engines.
-    if(traffic_log_adapter_) {
+    if(traffic_log_adapter_ && !flow_ctx_->owns_content_metadata()) {
         if(auto metadata = traffic_log_adapter_->inspect_content(side, from->to_read())) {
             if(auto* current = MitmHostCX::from_baseHostCX(from); current != nullptr) {
                 auto app = std::dynamic_pointer_cast<HttpApplication>(

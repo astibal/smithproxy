@@ -24,10 +24,10 @@ fetch() {
     printf '%s  %s\n' "$checksum" "$archive" | sha256sum -c -
     [[ -d $work/$project-$version ]] || tar -xJf "$archive" -C "$work"
 }
-fetch ngtcp2 1.16.0 367cbcecaca539f76453c49454d8e7b38ecb162acf89cd571535ac4acf82a2b4
-fetch nghttp3 1.12.0 6ca1e523b7edd75c02502f2bcf961125c25577e29405479016589c5da48fc43d
+fetch ngtcp2 1.26.0 7804aa0fa1c39942ba322a90805824c37231f7675b08d0c3cc4332858a7b085e
+fetch nghttp3 1.18.0 aad782c23d3f01bd4bb52c8bac7a553b631ef8115fd1612703df6183449fef19
 
-source_dir="$work/ngtcp2-1.16.0"
+source_dir="$work/ngtcp2-1.26.0"
 adapter_hash=$(cat "$here/native-h3/"*.patch "$here/native-h3/benchmark.h" | sha256sum | cut -d ' ' -f1)
 if [[ -e $source_dir/.smithproxy-benchmark && $(cat "$source_dir/.smithproxy-benchmark") != "$adapter_hash" ]]; then
     echo 'Cached source uses different adapters; choose a new runtime directory.' >&2
@@ -40,7 +40,7 @@ if [[ ! -e $source_dir/.smithproxy-benchmark ]]; then
     cp "$here/native-h3/benchmark.h" "$source_dir/examples/"
     printf '%s\n' "$adapter_hash" > "$source_dir/.smithproxy-benchmark"
 fi
-cmake -S "$work/nghttp3-1.12.0" -B "$work/build-nghttp3" \
+cmake -S "$work/nghttp3-1.18.0" -B "$work/build-nghttp3" \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$destination" \
     -DENABLE_LIB_ONLY=ON -DENABLE_SHARED_LIB=ON -DENABLE_STATIC_LIB=OFF
 cmake --build "$work/build-nghttp3" -j "$jobs"
@@ -74,8 +74,8 @@ WRAPPER
     chmod 0755 "$destination/bin/h3-$endpoint"
 done
 cp "$source_dir/COPYING" "$destination/share/native-h3/ngtcp2-LICENSE"
-cp "$work/nghttp3-1.12.0/COPYING" "$destination/share/native-h3/nghttp3-LICENSE"
-printf 'ngtcp2=1.16.0\nnghttp3=1.12.0\ntransport=ngtcp2\ntls=OpenSSL\n' \
+cp "$work/nghttp3-1.18.0/COPYING" "$destination/share/native-h3/nghttp3-LICENSE"
+printf 'ngtcp2=1.26.0\nnghttp3=1.18.0\ntransport=ngtcp2\ntls=OpenSSL\n' \
     > "$destination/share/native-h3/versions.txt"
 printf 'adapters_sha256=%s\n' "$adapter_hash" >> "$destination/share/native-h3/versions.txt"
 (cd "$destination" && sha256sum bin/* lib/*.so* > share/native-h3/SHA256SUMS)

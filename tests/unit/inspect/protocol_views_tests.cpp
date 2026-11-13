@@ -63,7 +63,9 @@ void initialize(ProtocolViews& views) {
 
 TEST(ProtocolViews, RequestRewriteResponseAndNextRequest) {
     ProtocolViews views(ProtocolViews::Mode::Rewrite);
+    EXPECT_FALSE(views.owns_content_metadata());
     initialize(views);
+    EXPECT_TRUE(views.owns_content_metadata());
     const auto original = frame(1, 4, 3, request()); // POST
     auto changed_headers = request();
     changed_headers[0] = '\x82'; // GET
@@ -470,8 +472,11 @@ TEST(ProtocolViews, NonHttpAdapterRoutesBothDirectionsWithOneSetupFork) {
     LedgerAdapter adapter;
     ProtocolViews views(adapter, ProtocolViews::Mode::Rewrite);
     views.context(E::Client).state_data = LedgerState{};
+    EXPECT_TRUE(views.active());
+    EXPECT_FALSE(views.owns_content_metadata());
     pass(views, E::Client, "original");
     EXPECT_TRUE(views.split());
+    EXPECT_FALSE(views.owns_content_metadata());
     EXPECT_EQ(adapter.outputs, 1U);
 
     exchange(views, E::Client, "request", "rewritten");

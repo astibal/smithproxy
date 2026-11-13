@@ -188,6 +188,24 @@ public:
         lsqpack_dec_cleanup(&decoder_);
     }
 
+    void finish(std::uint64_t stream_id, bool reset) {
+        if (!reset) return;
+        for (auto current = pending_.begin(); current != pending_.end();) {
+            if ((*current)->stream_id == stream_id) {
+                lsqpack_dec_unref_stream(&decoder_, current->get());
+                current = pending_.erase(current);
+            } else {
+                ++current;
+            }
+        }
+        auto found = streams_.find(stream_id);
+        if (found != streams_.end()) {
+            found->second.semantic_invalid = true;
+            found->second.field_section.clear();
+            found->second.input.clear();
+        }
+    }
+
     direction_decoder(direction_decoder const&) = delete;
     direction_decoder& operator=(direction_decoder const&) = delete;
 
@@ -1166,6 +1184,17 @@ public:
         return records;
     }
 
+    void finish(socle::side_t side, std::uint64_t stream_id, bool reset) {
+        std::lock_guard lock(lock_);
+        (side == socle::side_t::LEFT ? client_ : server_).finish(stream_id, reset);
+        if (reset) {
+            pending_responses_.erase(std::remove_if(
+                pending_responses_.begin(), pending_responses_.end(),
+                [&](auto const& record) { return record.stream_id == stream_id; }),
+                pending_responses_.end());
+        }
+    }
+
 private:
     std::mutex lock_;
     bool server_extended_connect_enabled_ = false;
@@ -1185,6 +1214,10 @@ h3_capture_decoder::h3_capture_decoder()
     : implementation_(std::make_unique<implementation>()) {}
 
 h3_capture_decoder::~h3_capture_decoder() = default;
+
+void h3_capture_decoder::finish(socle::side_t side, std::uint64_t stream_id, bool reset) {
+    implementation_->finish(side, stream_id, reset);
+}
 
 std::vector<h3_headers_record> h3_capture_decoder::ingest(
     socle::side_t side, std::uint64_t stream_id,

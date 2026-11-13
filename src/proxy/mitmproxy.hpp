@@ -214,6 +214,14 @@ public:
     ~MitmProxy() override;
 
     void attach_flow(MitmHostCX& host, char leg);
+    void bind_protocol(std::shared_ptr<sx::engine::ProtocolViews> views,
+                       sx::engine::ProtocolStream stream) {
+        flow_ctx_->bind_protocol(std::move(views), stream);
+    }
+    void protocol_event(FlowCtx::Dir dir, sx::engine::ProtocolEvent event,
+                        std::optional<std::uint64_t> error = std::nullopt) {
+        flow_ctx_->transport_event(dir, event, error);
+    }
 
     // Change only on the owning thread, before the TLS start boundary.
     void tls_observer_enabled(bool enabled);

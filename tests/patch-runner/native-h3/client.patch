@@ -1,41 +1,73 @@
 --- a/examples/client.cc
 +++ b/examples/client.cc
-@@ -46,6 +46,7 @@
- #include <urlparse.h>
+@@ -1694,6 +1694,16 @@
+   if (it != std::ranges::end(streams_)) {
+     ++nstreams_closed_;
+ 
++    const auto &stream = *it->second;
++    auto error = rx_app_error_code.value_or(tx_app_error_code.value_or(0));
++    if (tx_app_error_code && *tx_app_error_code != 0 && *tx_app_error_code != 256) {
++      error = *tx_app_error_code;
++    }
++    std::println("{{\"h3_benchmark\":true,\"http_code\":{},"
++                 "\"http_version\":\"3\",\"size_download\":{},"
++                 "\"size_upload\":{},\"nonzero\":{},\"error_code\":{}}}",
++                 stream.response_status, stream.body_bytes, config.datalen,
++                 stream.body_has_nonzero, error);
+     streams_.erase(it);
+   }
+ 
+--- a/examples/client.h
++++ b/examples/client.h
+@@ -65,6 +65,10 @@
+ 
+   std::expected<void, Error> open_file(std::string_view path);
+ 
++  // Test-only evidence emitted after the QUIC stream has closed.
++  uint64_t body_bytes = 0;
++  bool body_has_nonzero = false;
++  unsigned int response_status = 0;
+   Request req;
+   int64_t stream_id;
+   int fd{-1};
+--- a/examples/http3_client_proto_codec.cc
++++ b/examples/http3_client_proto_codec.cc
+@@ -27,6 +27,7 @@
+ #include <unistd.h>
  
  #include "client.h"
 +#include "benchmark.h"
- #include "network.h"
  #include "debug.h"
- #include "util.h"
-@@ -1885,7 +1886,7 @@
+ 
+ extern Config config;
+@@ -188,7 +189,7 @@
  }
  } // namespace
  
--int Client::submit_http_request(const Stream *stream) {
-+int Client::submit_http_request(Stream *stream) {
+-std::expected<void, Error> ProtoCodec::submit_request(const Stream *stream) {
++std::expected<void, Error> ProtoCodec::submit_request(Stream *stream) {
    std::string content_length_str;
  
    const auto &req = stream->req;
-@@ -1913,7 +1914,7 @@
+@@ -216,7 +217,7 @@
  
    if (auto rv = nghttp3_conn_submit_request(
          httpconn_, stream->stream_id, nva.data(), nvlen,
 -        config.fd == -1 ? nullptr : &dr, nullptr);
 +        config.fd == -1 ? nullptr : &dr, stream);
        rv != 0) {
-     std::cerr << "nghttp3_conn_submit_request: " << nghttp3_strerror(rv)
-               << std::endl;
-@@ -2032,6 +2033,8 @@
- 
-   auto &stream = (*it).second;
+     std::println(stderr, "nghttp3_conn_submit_request: {}",
+                  nghttp3_strerror(rv));
+@@ -349,6 +350,8 @@
+     return;
+   }
  
 +  stream->body_bytes += data.size();
 +  stream->body_has_nonzero |= !h3_bench::all_zero(data);
    if (stream->fd == -1) {
      return;
    }
-@@ -2058,6 +2061,14 @@
+@@ -386,6 +389,14 @@
                       void *user_data, void *stream_user_data) {
    if (!config.quiet) {
      debug::print_http_header(stream_id, name, value, flags);
@@ -50,69 +82,44 @@
    }
    return 0;
  }
-@@ -2169,6 +2180,12 @@
-               << app_error_code << std::endl;
-   }
+--- a/examples/http3_client_proto_codec.h
++++ b/examples/http3_client_proto_codec.h
+@@ -68,7 +68,7 @@
  
-+  const auto &stream = *it->second;
-+  std::cout << "{\"h3_benchmark\":true,\"http_code\":" << stream.response_status
-+            << ",\"http_version\":\"3\",\"size_download\":" << stream.body_bytes
-+            << ",\"size_upload\":" << config.datalen
-+            << ",\"nonzero\":" << stream.body_has_nonzero
-+            << ",\"error_code\":" << app_error_code << "}" << std::endl;
-   streams_.erase(it);
- }
+   std::expected<void, Error> on_stream_stop_sending(int64_t stream_id);
  
---- a/examples/client.h
-+++ b/examples/client.h
-@@ -57,6 +57,10 @@
+-  std::expected<void, Error> submit_request(const Stream *stream);
++  std::expected<void, Error> submit_request(Stream *stream);
  
-   int open_file(const std::string_view &path);
- 
-+  // Test-only evidence emitted after HTTP/3 stream completion.
-+  uint64_t body_bytes = 0;
-+  bool body_has_nonzero = false;
-+  unsigned int response_status = 0;
-   Request req;
-   int64_t stream_id;
-   int fd;
-@@ -122,7 +126,7 @@
-   void set_remote_addr(const ngtcp2_addr &remote_addr);
- 
-   int setup_httpconn();
--  int submit_http_request(const Stream *stream);
-+  int submit_http_request(Stream *stream);
-   int recv_stream_data(uint32_t flags, int64_t stream_id,
-                        std::span<const uint8_t> data);
-   int acked_stream_data_offset(int64_t stream_id, uint64_t datalen);
+   ngtcp2_ssize write_pkt(ngtcp2_path *path, ngtcp2_pkt_info *pi, uint8_t *dest,
+                          size_t destlen, ngtcp2_tstamp ts);
 --- a/examples/tls_client_context_ossl.cc
 +++ b/examples/tls_client_context_ossl.cc
-@@ -97,7 +97,12 @@
-     return -1;
+@@ -87,7 +87,11 @@
+     return std::unexpected{Error::CRYPTO};
    }
  
 -  SSL_CTX_set_default_verify_paths(ssl_ctx_);
-+  // Honor SSL_CERT_FILE from the harness and fail the handshake on an
-+  // untrusted certificate; the upstream example otherwise disables verification.
++  // Honor SSL_CERT_FILE and enforce trust, unlike the upstream demo default.
 +  if (SSL_CTX_set_default_verify_paths(ssl_ctx_) != 1) {
-+    return -1;
++    return std::unexpected{Error::CRYPTO};
 +  }
 +  SSL_CTX_set_verify(ssl_ctx_, SSL_VERIFY_PEER, nullptr);
  
    if (SSL_CTX_set_ciphersuites(ssl_ctx_, config.ciphers) != 1) {
-     std::cerr << "SSL_CTX_set_ciphersuites: "
+     std::println(stderr, "SSL_CTX_set_ciphersuites: {}",
 --- a/examples/tls_client_session_ossl.cc
 +++ b/examples/tls_client_session_ossl.cc
-@@ -85,6 +85,12 @@
+@@ -80,6 +80,12 @@
      SSL_set_tlsext_host_name(ssl, remote_addr);
    }
  
-+  // SNI selects the origin identity; validate that same DNS name as curl does.
++  // Validate the same DNS identity that the harness selects with SNI.
 +  const auto hostname = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
 +  if (!hostname || SSL_set1_host(ssl, hostname) != 1) {
-+    return -1;
++    return std::unexpected{Error::CRYPTO};
 +  }
 +
-   if (config.session_file) {
-     auto f = BIO_new_file(config.session_file, "r");
+   if (!config.session_file.empty()) {
+     auto f = BIO_new_file(config.session_file.c_str(), "r");
      if (f == nullptr) {

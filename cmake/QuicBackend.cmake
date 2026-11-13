@@ -14,12 +14,15 @@ find_library(NGTCP2_CRYPTO_LIBRARY ngtcp2_crypto_ossl)
 if(NOT NGTCP2_INCLUDE_DIR OR NOT NGTCP2_CRYPTO_INCLUDE_DIR OR
    NOT NGTCP2_LIBRARY OR NOT NGTCP2_CRYPTO_LIBRARY)
     message(FATAL_ERROR
-        "Default QUIC requires ngtcp2 >= 1.16 and its OpenSSL crypto adapter. "
+        "Default QUIC requires ngtcp2 >= 1.26 and its OpenSSL crypto adapter. "
         "Install the development packages for libngtcp2 and libngtcp2_crypto_ossl "
         "(a GnuTLS adapter is not interchangeable), or supply CMAKE_PREFIX_PATH. "
         "Only an explicit -DSMITHPROXY_ENABLE_NGTCP2=OFF selects OpenSSL QUIC.")
 endif()
 
+# ngtcp2 1.26 includes upstream fixes for retransmission/fragmentation limits
+# and false-positive glitch detection under loss or reordering (#1919, #1988,
+# #2393). Older releases can abort legitimate high-throughput connections.
 # Check headers and linkage together: older distro packages may provide the core
 # library without the TLS-only OpenSSL adapter used by our A:B transport.
 include(CheckCXXSourceCompiles)
@@ -32,8 +35,8 @@ unset(SMITHPROXY_NGTCP2_USABLE CACHE)
 check_cxx_source_compiles("
 #include <ngtcp2/version.h>
 #include <ngtcp2/ngtcp2_crypto_ossl.h>
-#if NGTCP2_VERSION_NUM < 0x011000
-#error Smithproxy requires ngtcp2 1.16 or newer
+#if NGTCP2_VERSION_NUM < 0x011a00
+#error Smithproxy requires ngtcp2 1.26 or newer
 #endif
 int main() {
     ngtcp2_crypto_ossl_ctx* ctx = nullptr;

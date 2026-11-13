@@ -5,7 +5,7 @@ It uses our C++17 socket proxying library called [*socle*](https://github.com/as
 
 ## QUIC build defaults
 
-QUIC uses **ngtcp2 by default**. The default build requires ngtcp2 1.16 or newer,
+QUIC uses **ngtcp2 by default**. The default build requires ngtcp2 1.26 or newer,
 its **OpenSSL crypto adapter** (`libngtcp2_crypto_ossl`), and OpenSSL 3.5 or newer.
 OpenSSL still supplies TLS/cryptography; ngtcp2 supplies the QUIC transport.
 Missing or incompatible dependencies fail configuration; there is no automatic

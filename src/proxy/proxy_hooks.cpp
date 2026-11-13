@@ -1202,6 +1202,9 @@ nlohmann::json ProxyHooks::content_details(MitmProxy& proxy, const ContentExchan
     add_content_ranges(j["info"], args.input, proxy.first_left());
     add_content_tls(j["info"], proxy.first_right());
     add_content_http(j["info"], proxy.first_left());
+    if (auto const& error = proxy.flow_ctx_->protocol_fork_error(); !error.empty()) {
+        j["info"]["protocol_fork_error"] = error;
+    }
     return j;
 }
 
