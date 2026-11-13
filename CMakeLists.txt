@@ -535,6 +535,15 @@ add_executable(smithproxy
         src/proxy/filters/access_filter.cpp
 )
 
+add_custom_target(smithproxy-status-version
+        COMMAND ${CMAKE_COMMAND}
+            "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
+            "-DOUTPUT_FILE=${PROJECT_BINARY_DIR}/generated/status_build_info.hpp"
+            -P "${PROJECT_SOURCE_DIR}/cmake/StatusVersion.cmake"
+        BYPRODUCTS "${PROJECT_BINARY_DIR}/generated/status_build_info.hpp"
+        VERBATIM)
+add_dependencies(smithproxy smithproxy-status-version)
+
 add_executable(smithproxy-gre-broker
         src/service/gre_broker_main.cpp
         src/service/gre_broker.cpp

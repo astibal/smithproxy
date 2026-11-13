@@ -1,0 +1,6 @@
+#pragma once
+
+namespace sx::status_build {
+inline constexpr char smithproxy_version[] = "@SX_STATUS_VERSION@";
+inline constexpr char socle_version[] = "@SOCLE_STATUS_VERSION@";
+}

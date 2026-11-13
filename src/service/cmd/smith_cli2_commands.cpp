@@ -6,6 +6,7 @@
 
 #include <service/cfgapi/cfgapi.hpp>
 #include <service/dependency_info.hpp>
+#include <status_build_info.hpp>
 
 #include <inspect/kb/kb.hpp>
 #include <log/logger.hpp>
@@ -38,7 +39,6 @@
 #include <mutex>
 #include <sstream>
 #include <string_view>
-#include <thread>
 #include <vector>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -123,8 +123,12 @@ bool write_trusted_keys(std::vector<std::string> const& lines, std::string& erro
 
 std::string status_text(const libcli2::Decorator& decor) {
     std::ostringstream output;
-    output << decor.key("Version:") << ' ' << decor.value(SMITH_VERSION) << (SMITH_DEVEL ? decor.warning(" (dev)") : "") << '\n';
-    output << decor.key("Socle:") << ' ' << decor.value(SOCLE_VERSION) << (SOCLE_DEVEL ? decor.warning(" (dev)") : "") << '\n';
+    const auto smith_version = *sx::status_build::smithproxy_version
+        ? sx::status_build::smithproxy_version : SMITH_VERSION;
+    const auto socle_version = *sx::status_build::socle_version
+        ? sx::status_build::socle_version : SOCLE_VERSION;
+    output << decor.key("Version:") << ' ' << decor.value(smith_version) << (SMITH_DEVEL ? decor.warning(" (dev)") : "") << '\n';
+    output << decor.key("Socle:") << ' ' << decor.value(socle_version) << (SOCLE_DEVEL ? decor.warning(" (dev)") : "") << '\n';
 #if (SMITH_DEVEL > 0) || (SOCLE_DEVEL > 0)
     output << "Smithproxy source info: " << SX_GIT_VERSION << '\n';
     output << "                branch: " << SX_GIT_BRANCH << " commit: " << SX_GIT_COMMIT_HASH << '\n';
@@ -173,39 +177,48 @@ std::string status_text(const libcli2::Decorator& decor) {
 #endif
     output << "\n\n";
 
-    const auto proxy_type = [](const auto& proxies) { return proxies.empty() ? "none" : proxies[0]->sq_type_str(); };
-    const auto multiplier = [](const auto& proxies) { return proxies.empty() ? -1 : proxies[0]->core_multiplier(); };
-    const auto tasks = [](const auto& proxies) { return proxies.empty() ? 0 : proxies[0]->task_count(); };
+    const auto workers = [](const auto& proxies) {
+        std::size_t count = 0;
+        for(auto const& proxy : proxies) if(proxy) count += proxy->task_count();
+        return count;
+    };
     auto& smith = SmithProxy::instance();
-    output << "CPU cores detected: " << std::thread::hardware_concurrency()
-           << ", acc multi: " << multiplier(smith.plain_proxies)
-           << " recv multi: " << multiplier(smith.udp_proxies) << '\n';
-    output << "Acceptor hinting: tcp:" << proxy_type(smith.plain_proxies)
-           << ", tls:" << proxy_type(smith.ssl_proxies)
-           << ", udp:" << proxy_type(smith.udp_proxies)
-           << ", dtls:" << proxy_type(smith.dtls_proxies) << '\n';
 
     const auto acceptors = [&](std::string_view title, std::string_view protocol, const auto& proxies) {
         output << "\n" << decor.heading(std::string(title) + ":") << "\n  " << protocol << ": " << proxies.size()
-               << " workers: " << proxies.size() * static_cast<std::size_t>(tasks(proxies)) << '\n';
+               << " workers: " << workers(proxies) << '\n';
     };
     if (CfgFactory::get()->accept_tproxy) {
         output << "\n" << decor.heading("Tproxy acceptors:") << "\n";
-        output << "  TCP: " << smith.plain_proxies.size() << " workers: " << smith.plain_proxies.size() * tasks(smith.plain_proxies) << '\n';
-        output << "  UDP: " << smith.udp_proxies.size() << " workers: " << smith.udp_proxies.size() * tasks(smith.udp_proxies) << '\n';
-        output << "  TLS: " << smith.ssl_proxies.size() << " workers: " << smith.ssl_proxies.size() * tasks(smith.ssl_proxies) << '\n';
-        output << "  DTLS: " << smith.dtls_proxies.size() << " workers: " << smith.dtls_proxies.size() * tasks(smith.dtls_proxies) << '\n';
+        output << "  TCP: " << smith.plain_proxies.size() << " workers: " << workers(smith.plain_proxies) << '\n';
+        output << "  UDP: " << smith.udp_proxies.size() << " workers: " << workers(smith.udp_proxies) << '\n';
+        output << "  TLS: " << smith.ssl_proxies.size() << " workers: " << workers(smith.ssl_proxies) << '\n';
+        output << "  DTLS: " << smith.dtls_proxies.size() << " workers: " << workers(smith.dtls_proxies) << '\n';
     }
+    output << "\n" << decor.heading("QUIC listeners:") << "\n";
+    std::size_t quic_listeners = 0;
+    std::size_t quic_workers = 0;
+    for(auto const& service : smith.quic_services) {
+        if(!service) continue;
+        // One worker group per listening socket; every service owns one worker.
+        if(service->worker_index() == 0) ++quic_listeners;
+        ++quic_workers;
+    }
+    output << "  UDP: " << quic_listeners << " workers: " << quic_workers << '\n';
     if (CfgFactory::get()->accept_redirect) {
         output << "\n" << decor.heading("Redirect acceptors:") << "\n";
-        output << "  TCP: " << smith.redir_plain_proxies.size() << " workers: " << smith.redir_plain_proxies.size() * tasks(smith.redir_plain_proxies) << '\n';
-        output << "  UDP: " << smith.redir_udp_proxies.size() << " workers: " << smith.redir_udp_proxies.size() * tasks(smith.redir_udp_proxies) << '\n';
-        output << "  TLS: " << smith.redir_ssl_proxies.size() << " workers: " << smith.redir_ssl_proxies.size() * tasks(smith.redir_ssl_proxies) << '\n';
+        output << "  TCP: " << smith.redir_plain_proxies.size() << " workers: " << workers(smith.redir_plain_proxies) << '\n';
+        output << "  UDP: " << smith.redir_udp_proxies.size() << " workers: " << workers(smith.redir_udp_proxies) << '\n';
+        output << "  TLS: " << smith.redir_ssl_proxies.size() << " workers: " << workers(smith.redir_ssl_proxies) << '\n';
     } else {
         output << "\n" << decor.heading("Redirect acceptors:") << ' ' << decor.muted("disabled") << "\n";
     }
-    if (CfgFactory::get()->accept_socks) acceptors("Socks acceptors", "TCP", smith.socks_proxies);
+    if (CfgFactory::get()->accept_socks) acceptors("SOCKS acceptors", "TCP", smith.socks_proxies);
     else output << "\n" << decor.heading("SOCKS acceptors:") << ' ' << decor.muted("disabled") << "\n";
+
+    if (CfgFactory::get()->accept_http_connect)
+        acceptors("HTTP CONNECT acceptors", "TCP", smith.http_connect_proxies);
+    else output << "\n" << decor.heading("HTTP CONNECT acceptors:") << ' ' << decor.muted("disabled") << "\n";
 
     output << "\n" << decor.key("Uptime:") << ' ' << decor.value(uptime_string(time(nullptr) - smith.ts_sys_started)) << '\n';
     const unsigned long upload = MitmProxy::total_mtr_up().get();
