@@ -58,7 +58,7 @@ else:
         packages = {
             "ubuntu": "libssl-dev", "alpine": "openssl-dev",
             "fedora": "openssl-devel",
-            "opensuse-tumbleweed": "openssl-devel",
+            "opensuse-tumbleweed": "libopenssl-devel",
             "rocky": "openssl-devel",
         }
         for distro, tls_package in packages.items():
