@@ -88,8 +88,70 @@ def run_case(root, proxy, hooks, config, eventually, run, sessions, cli):
         run('iptables', '-t', 'mangle', '-A', 'PREROUTING', '-i', 'rv-c', '-p', 'udp',
             '--dport', '443', '-j', 'TPROXY', '--on-port', '443', '--tproxy-mark', '1')
         peer.stdin.write('go\n'); peer.stdin.flush()
+        if not dynamic:
+            eventually(lambda: (root / 'diagnostics-ready').exists())
+            def h3_snapshots(value):
+                if isinstance(value, dict):
+                    if 'http3' in value:
+                        yield value['http3']
+                    for child in value.values():
+                        yield from h3_snapshots(child)
+                elif isinstance(value, list):
+                    for child in value:
+                        yield from h3_snapshots(child)
+            api_snapshot = eventually(lambda: next((item for item in h3_snapshots(sessions())
+                if item['stream_id'] == 4 and item['split']), None))
+            assert api_snapshot['client']['request']['flow.http3.method'] == 'GET'
+            assert api_snapshot['server']['request']['flow.http3.method'] == 'POST'
+            assert api_snapshot['server']['response']['flow.http3.decode']['state'] == 'decoded'
+            text = cli('diag proxy session list 99')
+            cli_snapshots = [json.loads(line.split('H3: ', 1)[1]) for line in text.splitlines()
+                             if 'H3: ' in line]
+            assert api_snapshot in cli_snapshots, (api_snapshot, text)
+            (root / 'diagnostics-api.json').write_text(json.dumps(api_snapshot, indent=2))
+            (root / 'diagnostics-cli.txt').write_text(text)
+            (root / 'diagnostics-release').touch()
         assert peer.wait(timeout=30) == 0
-        events = hooks.snapshot()
+        # Metadata uses asynchronous connection-info delivery. Wait for the
+        # final stream's header observation at both sinks before comparing.
+        final_stream = 12 if dynamic else 8
+        def delivered():
+            observed = hooks.snapshot()
+            if not all(any(e.get('action') == 'connection-info'
+                           and e.get('_test_receiver') == sink
+                           and e.get('details', {}).get('info', {}).get('stream_id') == final_stream
+                           and e['details']['info'].get('protocol_event') == 'headers'
+                           and e['details']['info'].get('side') == 'R'
+                           for e in observed) for sink in ('spider', 'sift')):
+                return False
+            envelopes = [[json.dumps(e['details']['info'], sort_keys=True)
+                          for e in observed if e.get('action') == 'connection-info'
+                          and e.get('_test_receiver') == sink
+                          and e.get('details', {}).get('info', {}).get('payload_layer') == 'http3.metadata']
+                         for sink in ('spider', 'sift')]
+            return observed if sorted(envelopes[0]) == sorted(envelopes[1]) else False
+        events = eventually(delivered)
+        metadata = [e['details']['info'] for e in events if e.get('action') == 'connection-info'
+                    and e['details'].get('info', {}).get('payload_layer') == 'http3.metadata'
+                    and e['_test_receiver'] == 'spider']
+        sift_metadata = [e['details']['info'] for e in events if e.get('action') == 'connection-info'
+                         and e['details'].get('info', {}).get('payload_layer') == 'http3.metadata'
+                         and e['_test_receiver'] == 'sift']
+        # Dispatch is asynchronous, so compare complete envelopes without
+        # relying on cross-sink delivery order.
+        assert sorted(map(lambda x: json.dumps(x, sort_keys=True), metadata)) == sorted(
+            map(lambda x: json.dumps(x, sort_keys=True), sift_metadata))
+        metadata.sort(key=lambda i: i['protocol_sequence'])
+        assert len({i['protocol_sequence'] for i in metadata}) == len(metadata)
+        assert metadata and any(i['protocol_event'] == 'fin' for i in metadata)
+        for info in metadata:
+            assert info['scope'] == 'stream' and info['parent_id']
+            assert info['protocol_metadata_version'] == 1
+            assert info['protocol_endpoint'] in ('client', 'server')
+            assert 'content' not in info
+            if info['protocol_event'] == 'headers':
+                assert info['flow.http3.headers']
+                assert info['flow.http3.header_section'] in ('request', 'interim', 'response', 'trailers')
         spider = [e['details']['info'] for e in events if e.get('action') == 'connection-content'
                   and e['_test_receiver'] == 'spider']
         sift = [e['details']['info'] for e in events if e.get('action') == 'connection-content'
@@ -97,7 +159,7 @@ def run_case(root, proxy, hooks, config, eventually, run, sessions, cli):
         assert spider and sift, 'missing Spider or SIFT content'
         keys = ('stream_id', 'side', 'content', 'content_annotations', 'L7_payload_start',
                 'L7_payload_end', 'L7_encoding', 'flow.http3.method', 'flow.http3.authority',
-                'flow.http3.path', 'flow.http3.url')
+                'flow.http3.path', 'flow.http3.url', 'flow.http3.decode')
         assert [[i.get(k) for k in keys] for i in spider] == [[i.get(k) for k in keys] for i in sift]
         content = spider
         assert content, 'no H3 content callbacks'
@@ -112,8 +174,20 @@ def run_case(root, proxy, hooks, config, eventually, run, sessions, cli):
             assert cursor == len(payload), info
         if dynamic:
             from quic_engine_dynamic import verify
-            verify(content)
+            verify(content, metadata)
         else:
+            for stream in (0, 4, 8):
+                sections = [i for i in metadata if i['stream_id'] == stream and i['side'] == 'R'
+                            and i['protocol_event'] == 'headers']
+                assert [i['flow.http3.header_section'] for i in sections] == ['response', 'trailers']
+                assert sections[0]['flow.http3.headers'][1] == ['x-raw', {'encoding': 'base64', 'data': '/w=='}]
+                assert sections[0]['flow.http3.headers'][-2:] == [['set-cookie', 'a=1'], ['set-cookie', 'b=2']]
+                assert sections[1]['flow.http3.headers'] == [['x-trailer', 'done']]
+                body_chunks = [i for i in content if i['stream_id'] == stream and i['side'] == 'R'
+                               and any(end > start for start, end in zip(i['L7_payload_start'], i['L7_payload_end']))]
+                assert body_chunks
+                assert all(i['flow.http3.decode']['encoding_known'] and
+                           all(encoding == '' for encoding in i['L7_encoding']) for i in body_chunks)
             for stream in (0, 4, 8):
                 for side in ('L', 'R'):
                     observations = [i for i in content if i['stream_id'] == stream and i['side'] == side
@@ -145,7 +219,6 @@ async def main(mode, root):
             self.http = H3Connection(self._quic)
             self.responses = {}
             self.bodies = {}
-            self.request_bodies = set()
 
         def quic_event_received(self, event):
             for item in self.http.handle_event(event):
@@ -155,14 +228,14 @@ async def main(mode, root):
                         with (root / 'dynamic-origin.jsonl').open('a') as log:
                             log.write(json.dumps({'stream': item.stream_id, 'method': fields[b':method'].decode()}) + '\n')
                     body = fields[b':method'] + b' ' + fields[b':path']
-                    self.http.send_headers(item.stream_id, [(b':status', b'200')])
-                    self.http.send_data(item.stream_id, body, end_stream=True)
+                    self.http.send_headers(item.stream_id, [(b':status', b'200'), (b'x-raw', b'\xff'),
+                        (b'set-cookie', b'a=1'), (b'set-cookie', b'b=2')])
+                    self.http.send_data(item.stream_id, body, end_stream=dynamic)
+                    if not dynamic:
+                        self.http.send_headers(item.stream_id, [(b'x-trailer', b'done')], end_stream=True)
                     self.transmit()
-                elif mode == 'origin' and isinstance(item, DataReceived) and dynamic:
-                    if item.data == b'x':
-                        self.request_bodies.add(item.stream_id)
-                    if {4, 8} <= self.request_bodies:
-                        (root / 'dynamic-bodies-received').touch()
+                elif mode == 'client' and isinstance(item, HeadersReceived) and item.stream_ended:
+                    self.responses[item.stream_id].set_result(bytes(self.bodies[item.stream_id]))
                 elif mode == 'client' and isinstance(item, DataReceived):
                     self.bodies[item.stream_id].extend(item.data)
                     if item.stream_ended:
@@ -196,11 +269,20 @@ async def main(mode, root):
                 assert client._quic.get_next_available_stream_id() == stream
                 client.responses[stream] = asyncio.get_running_loop().create_future()
                 client.bodies[stream] = bytearray()
-                client._quic.send_stream_data(stream, request_frame(stream), end_stream=True)
+                client._quic.send_stream_data(stream, request_frame(stream), end_stream=stream != 4)
                 client.transmit()
                 body = await asyncio.wait_for(client.responses[stream], 10)
                 expected = (b'POST' if stream == 4 else b'GET') + f' /views/{stream}'.encode()
                 assert body == expected, (body, expected)
+                if stream == 4:
+                    # Keep this child alive while CLI/API inspect both rewrite views.
+                    (root / 'diagnostics-ready').touch()
+                    deadline = asyncio.get_running_loop().time() + 20
+                    while not (root / 'diagnostics-release').exists():
+                        assert asyncio.get_running_loop().time() < deadline
+                        await asyncio.sleep(0.02)
+                    client._quic.send_stream_data(stream, b'', end_stream=True)
+                    client.transmit()
 
 
 if __name__ == '__main__':

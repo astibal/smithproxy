@@ -6,6 +6,8 @@
 #include "proxy/proxymaker.hpp"
 #include "proxy/master_policy.hpp"
 #include <inspect/engine/http3_adapter.hpp>
+#include <inspect/engine/http3.hpp>
+#include <service/http/webhooks.hpp>
 
 #include <masterproxy.hpp>
 
@@ -105,6 +107,23 @@ public:
             ctx.negotiated_alpn = std::move(alpn);
             buffer empty;
             adapter.prepare(ctx, true, empty);
+            auto& h3 = std::any_cast<sx::engine::http::v3::Http3Connection&>(ctx.state_data);
+            h3.on_metadata = [this](std::uint64_t id, nlohmann::json info) {
+                // Route using immutable stream identities, never a child pointer:
+                // a QPACK callback can describe a sibling while its lock is held.
+                auto target = metadata_targets_.find(id);
+                if (target == metadata_targets_.end()) return;
+                info["session"] = target->second.second;
+                info["scope"] = "stream";
+                info["parent_id"] = context_.parent_connection_id;
+                info["stream_id"] = id;
+                info["payload_layer"] = "http3.metadata";
+                info["protocol_sequence"] = ++metadata_sequence_;
+                nlohmann::json details = {{"info", std::move(info)}};
+                if (sx::http::webhooks::is_enabled())
+                    sx::http::webhooks::send_action("connection-info", target->second.first, details);
+                sx::http::webhooks::send_sift_action("connection-info", target->second.first, details);
+            };
             if (context_.rewrite_requested) protocol_views_->enable_rewrite();
         }
     }
@@ -114,6 +133,7 @@ public:
             current.master->shutdown();
         }
         pairs_.clear();
+        metadata_targets_.clear();
         closed_ = true;
     }
 
@@ -233,6 +253,7 @@ private:
         bool right_fin = false;
         bool left_finish_sent = false;
         bool right_finish_sent = false;
+        std::uint64_t wire_id = 0;
     };
 
     bool paired(bool left_side, flow_handle flow) const {
@@ -404,6 +425,10 @@ private:
             return;
         }
 
+        if (protocol_views_) {
+            const auto id = downstream_->wire_flow_id(left_handle).value_or(left_handle.id);
+            metadata_targets_[id] = {proxy->to_connection_ID(), proxy->to_connection_label()};
+        }
         master->add_proxy(std::move(proxy));
         auto const left_direction = downstream_->direction_of(left_handle);
         auto const right_direction = upstream_->direction_of(right_handle);
@@ -418,6 +443,7 @@ private:
             false,
             false,
         });
+        pairs_.at(left_handle.id).wire_id = downstream_->wire_flow_id(left_handle).value_or(left_handle.id);
     }
 
     void retire_finished() {
@@ -464,6 +490,7 @@ private:
             if(found == pairs_.end()) continue;
 
             found->second.master->shutdown();
+            metadata_targets_.erase(found->second.wire_id);
             pairs_.erase(found);
         }
         retired_.clear();
@@ -476,6 +503,8 @@ private:
     flow_proxy_context context_;
     std::shared_ptr<sx::engine::ProtocolViews> protocol_views_;
     std::map<flow_id, pair> pairs_;
+    std::map<std::uint64_t, std::pair<std::string, std::string>> metadata_targets_;
+    std::uint64_t metadata_sequence_ = 0;
     std::set<flow_id> retired_;
     std::set<int> policies_;
     std::size_t limit_rejections_ = 0;

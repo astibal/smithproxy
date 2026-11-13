@@ -190,7 +190,7 @@ TEST(Http3Engine, ReplayLimitDoesNotStopLiveInspectionOrPretendToFork) {
 }
 
 void dynamic_fixture(std::vector<unsigned char>& request,
-                     std::vector<unsigned char>& encoder_stream) {
+                     std::vector<unsigned char>& encoder_stream, bool response = false) {
     lsqpack_enc encoder {};
     std::array<unsigned char, LSQPACK_LONGEST_SDTC> capacity_instruction {};
     std::size_t capacity_size = capacity_instruction.size();
@@ -202,13 +202,17 @@ void dynamic_fixture(std::vector<unsigned char>& request,
     std::array<unsigned char, 256> encoder_instructions {};
     std::vector<unsigned char> field_block_payload;
     std::size_t encoder_size = 0;
-    for(auto const& [name, value, flags]:
-        std::vector<std::tuple<std::string, std::string, lsqpack_enc_flags>>{
+    auto fields = std::vector<std::tuple<std::string, std::string, lsqpack_enc_flags>>{
             {":method", "GET", static_cast<lsqpack_enc_flags>(LQEF_NO_DYN)},
             {":scheme", "https", static_cast<lsqpack_enc_flags>(LQEF_NO_DYN)},
             {":authority", "fixture.example", static_cast<lsqpack_enc_flags>(LQEF_NO_DYN)},
             {":path", "/", static_cast<lsqpack_enc_flags>(LQEF_NO_DYN)},
-            {"x-demo", "dynamic-value", static_cast<lsqpack_enc_flags>(0)}}) {
+            {"x-demo", "dynamic-value", static_cast<lsqpack_enc_flags>(0)}};
+    if (response) {
+        fields.erase(fields.begin(), fields.begin() + 4);
+        fields.insert(fields.begin(), {":status", "200", static_cast<lsqpack_enc_flags>(LQEF_NO_DYN)});
+    }
+    for(auto const& [name, value, flags] : fields) {
         std::string field_storage = name + value;
         lsxpack_header field {};
         lsxpack_header_set_offset2(&field, field_storage.data(), 0, name.size(),
@@ -566,4 +570,279 @@ TEST(Http3Engine, HeaderSectionsPreserveDuplicatesAndTrailers) {
         EXPECT_EQ("b=2", sections[1][2].value);
         EXPECT_EQ("done", sections[2][0].value);
     }
+}
+
+TEST(Http3Engine, FinalEncodingDoesNotInheritInterimOrTrailerFields) {
+    auto views = make_views(V::Mode::Rewrite);
+    pass(views, E::Client, 0, request());
+    pass(views, E::Server, 0, encode_fields({{":status", "103"}, {"content-encoding", "gzip"}}));
+    pass(views, E::Server, 0, encode_fields({{":status", "200"}}));
+    pass(views, E::Server, 0, {0, 1, 'x'});
+    for (auto endpoint : {E::Client, E::Server}) {
+        auto const& stream = state(views, endpoint).streams.at({0, 1});
+        EXPECT_EQ(std::vector<std::string>{""}, stream.application->l7_encoding);
+        EXPECT_TRUE(h3::metadata(views.context(endpoint), 0, E::Server)
+                        ["flow.http3.decode"]["encoding_known"].get<bool>());
+    }
+    pass(views, E::Server, 0, encode_fields({{"content-encoding", "br"}}));
+    EXPECT_TRUE(state(views).streams.at({0, 1}).directions[1].encoding.empty());
+}
+
+TEST(Http3Engine, MetadataPublishesUnblockedHeadersWithoutAnotherRequestByte) {
+    std::vector<unsigned char> header, encoder;
+    dynamic_fixture(header, encoder);
+    auto views = make_views();
+    std::vector<nlohmann::json> events;
+    state(views).on_metadata = [&](auto id, auto info) {
+        info["stream_id"] = id;
+        events.push_back(std::move(info));
+    };
+    pass(views, E::Server, 3, {0, 4, 5, 1, 0x50, 0, 7, 0x10});
+    pass(views, E::Client, 0, header);
+    EXPECT_EQ("blocked", h3::metadata(views.context(E::Client), 0, E::Client)
+                             ["flow.http3.decode"]["state"]);
+    buffer empty;
+    ProtocolInput fin{E::Client, empty, ProtocolStream{0, 1}, ProtocolEvent::Fin};
+    auto token = views.begin(fin, 0);
+    views.finish(token, fin);
+    ASSERT_TRUE(views.enable_rewrite());
+    events.clear();
+    pass(views, E::Client, 2, encoder);
+    std::size_t headers = 0;
+    for (auto const& info : events) {
+        if (info["protocol_event"] != "headers") continue;
+        ++headers;
+        EXPECT_EQ(0, info["stream_id"]);
+        EXPECT_EQ("client", info["protocol_endpoint"]);
+        EXPECT_EQ("L", info["side"]);
+        EXPECT_EQ("GET", info["flow.http3.method"]);
+        EXPECT_EQ("request", info["flow.http3.header_section"]);
+        EXPECT_FALSE(info.contains("content"));
+    }
+    EXPECT_EQ(1U, headers); // Fork replay and output do not publish a second event.
+}
+
+TEST(Http3Engine, MetadataPreservesResponseSectionsDuplicatesAndTerminalErrors) {
+    auto views = make_views(V::Mode::Rewrite);
+    std::vector<nlohmann::json> events;
+    state(views).on_metadata = [&](auto, auto info) { events.push_back(std::move(info)); };
+    pass(views, E::Client, 0, request());
+    events.clear();
+    pass(views, E::Server, 0, encode_fields({{":status", "103"}, {"link", "a"}}));
+    pass(views, E::Server, 0, encode_fields({{":status", "200"}, {"set-cookie", "a=1"}, {"set-cookie", "b=2"}}));
+    pass(views, E::Server, 0, encode_fields({{"x-trailer", "done"}}));
+    std::vector<nlohmann::json> headers;
+    for (auto const& info : events)
+        if (info["protocol_event"] == "headers") headers.push_back(info);
+    ASSERT_EQ(3U, headers.size());
+    EXPECT_EQ("interim", headers[0]["flow.http3.header_section"]);
+    EXPECT_EQ("200", headers[1]["flow.http3.status"]);
+    EXPECT_EQ(nlohmann::json::array({"set-cookie", "a=1"}), headers[1]["flow.http3.headers"][1]);
+    EXPECT_EQ(nlohmann::json::array({"set-cookie", "b=2"}), headers[1]["flow.http3.headers"][2]);
+    EXPECT_EQ("trailers", headers[2]["flow.http3.header_section"]);
+    buffer empty;
+    ProtocolInput reset{E::Server, empty, ProtocolStream{0, 1}, ProtocolEvent::Reset, 0x10c};
+    auto token = views.begin(reset, 0);
+    views.finish(token, reset);
+    EXPECT_EQ("reset", events.back()["protocol_event"]);
+    EXPECT_EQ(0x10c, events.back()["protocol_error"]);
+    EXPECT_EQ("server", events.back()["protocol_endpoint"]);
+}
+
+TEST(Http3Engine, ResourceLimitsAndInvalidInputAreExplicitMetadata) {
+    auto views = make_views();
+    state(views).header_bytes = h3::Http3Connection::maximum_header_bytes;
+    std::vector<nlohmann::json> events;
+    state(views).on_metadata = [&](auto, auto info) { events.push_back(std::move(info)); };
+    pass(views, E::Client, 0, request());
+    EXPECT_EQ("header-bytes-limit", h3::metadata(views.context(E::Client), 0, E::Client)
+                                      ["flow.http3.decode"]["reason"]);
+    ASSERT_FALSE(events.empty());
+    EXPECT_EQ("headers", events.front()["protocol_event"]);
+    EXPECT_FALSE(events.front()["flow.http3.headers"].empty()); // Not silently discarded.
+
+    for (std::uint64_t id = 4; state(views).streams.size() < h3::Http3Connection::maximum_streams; id += 4)
+        views.stream_context(E::Client, {id, 1});
+    pass(views, E::Client, 20000, request());
+    EXPECT_EQ("stream-limit", events.back()["flow.http3.decode"]["reason"]);
+
+    auto invalid = make_views();
+    pass(invalid, E::Client, 0, {0, 1, 'x'}); // DATA before request HEADERS.
+    EXPECT_EQ("invalid", h3::metadata(invalid.context(E::Client), 0, E::Client)
+                             ["flow.http3.decode"]["state"]);
+}
+
+TEST(Http3Engine, CriticalEncoderStillUnblocksHeadersAtStreamStorageLimit) {
+    std::vector<unsigned char> header, encoder;
+    dynamic_fixture(header, encoder);
+    auto views = make_views();
+    pass(views, E::Server, 3, {0, 4, 5, 1, 0x50, 0, 7, 0x10});
+    pass(views, E::Client, 0, header);
+    for (std::uint64_t id = 4; state(views).streams.size() < h3::Http3Connection::maximum_streams; id += 4)
+        views.stream_context(E::Client, {id, 1});
+    std::vector<nlohmann::json> events;
+    state(views).on_metadata = [&](auto id, auto info) {
+        info["stream_id"] = id;
+        events.push_back(std::move(info));
+    };
+    pass(views, E::Client, 2, encoder);
+    EXPECT_EQ("GET", state(views).streams.at({0, 1}).application->http_data.method);
+    EXPECT_TRUE(std::any_of(events.begin(), events.end(), [](auto const& info) {
+        return info["stream_id"] == 0 && info["protocol_event"] == "headers";
+    }));
+    EXPECT_EQ("stream-limit", events.back()["flow.http3.decode"]["reason"]);
+}
+
+TEST(Http3Engine, DecoderBoundsAndResetAfterFinRemainObservable) {
+    auto views = make_views();
+    pass(views, E::Client, 0, {1, 0x80, 0x10, 0, 1}); // HEADERS length > 1 MiB.
+    EXPECT_EQ("limited", h3::metadata(views.context(E::Client), 0, E::Client)
+                             ["flow.http3.decode"]["state"]);
+    EXPECT_EQ("decoder-limit", h3::metadata(views.context(E::Client), 0, E::Client)
+                                   ["flow.http3.decode"]["reason"]);
+    std::vector<nlohmann::json> events;
+    state(views).on_metadata = [&](auto, auto info) { events.push_back(std::move(info)); };
+    buffer empty;
+    for (auto event : {ProtocolEvent::Fin, ProtocolEvent::Reset}) {
+        ProtocolInput input{E::Client, empty, ProtocolStream{0, 1}, event, 0};
+        auto token = views.begin(input, 0);
+        views.finish(token, input);
+    }
+    ASSERT_EQ(2U, events.size());
+    EXPECT_EQ("fin", events[0]["protocol_event"]);
+    EXPECT_EQ("reset", events[1]["protocol_event"]);
+    EXPECT_EQ(0, events[1]["protocol_error"]);
+}
+
+TEST(Http3Engine, MetadataPreservesNonUtf8BytesAndValidUnicode) {
+    auto views = make_views();
+    std::vector<nlohmann::json> events;
+    state(views).on_metadata = [&](auto, auto info) {
+        EXPECT_NO_THROW(info.dump());
+        events.push_back(std::move(info));
+    };
+    pass(views, E::Client, 0, request());
+    events.clear();
+    pass(views, E::Server, 0, encode_fields({{":status", "200"},
+        {"x-raw", std::string(1, char(0xff))}, {"x-text", "ž"}}));
+    ASSERT_FALSE(events.empty());
+    auto const& fields = events.front()["flow.http3.headers"];
+    EXPECT_EQ(fields[1][1], nlohmann::json({{"encoding", "base64"}, {"data", "/w=="}}));
+    EXPECT_EQ(fields[2][1], "ž");
+    // The same conversion protects content metadata, including encoding arrays.
+    nlohmann::json content = {{"L7_encoding", {std::string(1, char(0xff))}}};
+    h3::encode_metadata_bytes(content);
+    EXPECT_NO_THROW(content.dump());
+    EXPECT_EQ(content["L7_encoding"][0]["data"], "/w==");
+}
+
+TEST(Http3Engine, ConnectionFailureNotifiesIdleStreamsOnce) {
+    auto views = make_views();
+    std::vector<nlohmann::json> events;
+    state(views).on_metadata = [&](auto id, auto info) {
+        info["stream_id"] = id;
+        events.push_back(std::move(info));
+    };
+    pass(views, E::Client, 0, request());
+    pass(views, E::Client, 4, request());
+    events.clear();
+    pass(views, E::Client, 8, {0, 1, 'x'}); // DATA before HEADERS invalidates the connection.
+    for (auto id : {0, 4}) {
+        EXPECT_EQ(1, std::count_if(events.begin(), events.end(), [&](auto const& info) {
+            return info["stream_id"] == id && info["protocol_event"] == "decode-status"
+                && info["flow.http3.decode"]["state"] == "invalid"
+                && info["flow.http3.decode"]["encoding_known"] == false;
+        }));
+    }
+    events.clear();
+    pass(views, E::Client, 8, {0, 1, 'y'});
+    EXPECT_TRUE(events.empty());
+}
+
+TEST(Http3Engine, DiagnosticsKeepEndpointViewsAndReplayAvailabilitySeparate) {
+    auto views = make_views();
+    pass(views, E::Client, 0, request());
+    auto shared = h3::diagnostics(views, 0);
+    EXPECT_FALSE(shared["split"]);
+    EXPECT_EQ(shared["shared"]["request"]["flow.http3.method"], "GET");
+    ASSERT_TRUE(views.enable_rewrite());
+    exchange(views, E::Client, 4, bytes(request()), bytes(request("POST")));
+    auto split = h3::diagnostics(views, 4);
+    EXPECT_TRUE(split["split"]);
+    EXPECT_EQ(split["client"]["request"]["flow.http3.method"], "GET");
+    EXPECT_EQ(split["server"]["request"]["flow.http3.method"], "POST");
+    state(views).replayable = false;
+    split = h3::diagnostics(views, 4);
+    EXPECT_FALSE(split["client"]["replayable"]);
+    EXPECT_TRUE(split["server"]["replayable"]);
+    EXPECT_NO_THROW(split.dump());
+}
+
+TEST(Http3Engine, ConnectionLimitNotifiesIdleStreams) {
+    auto views = make_views(V::Mode::Rewrite);
+    std::vector<nlohmann::json> events;
+    state(views).on_metadata = [&](auto id, auto info) {
+        info["stream_id"] = id;
+        events.push_back(std::move(info));
+    };
+    pass(views, E::Client, 0, request());
+    pass(views, E::Client, 4, request());
+    // Advertise a QPACK table capacity exceeding the observer's 1 MiB bound.
+    pass(views, E::Server, 3, {0, 4, 5, 1, 0x80, 0x20, 0, 0});
+    events.clear();
+    pass(views, E::Client, 8, request());
+    for (auto id : {0, 4}) {
+        EXPECT_EQ(1, std::count_if(events.begin(), events.end(), [&](auto const& info) {
+            return info["stream_id"] == id && info["protocol_event"] == "decode-status"
+                && info["flow.http3.decode"]["state"] == "limited"
+                && info["flow.http3.decode"]["reason"] == "decoder-limit";
+        }));
+    }
+}
+
+TEST(Http3Engine, BlockedResponseDefersDataAndTrailersUntilQpackRelease) {
+    std::vector<unsigned char> header, encoder;
+    dynamic_fixture(header, encoder, true);
+    for (bool coalesced : {false, true}) {
+        auto views = make_views();
+        pass(views, E::Client, 2, {0, 4, 5, 1, 0x50, 0, 7, 0x10});
+        pass(views, E::Client, 0, request());
+        auto following = std::vector<unsigned char>{0, 3, 'a', 'b', 'c'};
+        auto trailers = encode_fields({{"x-trailer", "done"}});
+        following.insert(following.end(), trailers.begin(), trailers.end());
+        if (coalesced) header.insert(header.end(), following.begin(), following.end());
+        pass(views, E::Server, 0, header);
+        if (!coalesced) pass(views, E::Server, 0, following);
+        EXPECT_EQ("blocked", h3::metadata(views.context(E::Server), 0, E::Server)
+                                    ["flow.http3.decode"]["state"]);
+        buffer empty;
+        ProtocolInput fin{E::Server, empty, ProtocolStream{0, 1}, ProtocolEvent::Fin};
+        auto token = views.begin(fin, 0);
+        views.finish(token, fin);
+        ASSERT_TRUE(views.enable_rewrite());
+        pass(views, E::Server, 3, encoder);
+        for (auto endpoint : {E::Client, E::Server}) {
+            EXPECT_EQ("decoded", h3::metadata(views.context(endpoint), 0, E::Server)
+                                        ["flow.http3.decode"]["state"]);
+            auto const& sections = state(views, endpoint).streams.at({0, 1}).directions[1].headers;
+            ASSERT_EQ(2U, sections.size());
+            EXPECT_EQ("done", sections.back().front().value);
+        }
+    }
+}
+
+TEST(Http3Engine, BlockedResponseBufferLimitIsExplicitAndDoesNotRegainMetadata) {
+    std::vector<unsigned char> header, encoder;
+    dynamic_fixture(header, encoder, true);
+    auto views = make_views();
+    pass(views, E::Client, 2, {0, 4, 5, 1, 0x50, 0, 7, 0x10});
+    pass(views, E::Client, 0, request());
+    pass(views, E::Server, 0, header);
+    pass(views, E::Server, 0, std::vector<unsigned char>(64 * 1024 + 1, 'x'));
+    EXPECT_EQ("limited", h3::metadata(views.context(E::Server), 0, E::Server)
+                                ["flow.http3.decode"]["state"]);
+    pass(views, E::Server, 3, encoder);
+    EXPECT_EQ("limited", h3::metadata(views.context(E::Server), 0, E::Server)
+                                ["flow.http3.decode"]["state"]);
+    EXPECT_TRUE(state(views).streams.at({0, 1}).directions[1].headers.empty());
 }

@@ -218,6 +218,9 @@ public:
                        sx::engine::ProtocolStream stream) {
         flow_ctx_->bind_protocol(std::move(views), stream);
     }
+    nlohmann::json protocol_diagnostics() const {
+        return flow_ctx_->protocol_diagnostics();
+    }
     void protocol_event(FlowCtx::Dir dir, sx::engine::ProtocolEvent event,
                         std::optional<std::uint64_t> error = std::nullopt) {
         flow_ctx_->transport_event(dir, event, error);

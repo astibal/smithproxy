@@ -125,19 +125,19 @@ async def run_client(client, root):
     for stream, method in ((4, b'GET'), (8, b'POST')):
         body = await asyncio.wait_for(client.responses[stream], 10)
         assert body == method + b' /dynamic', body
-        # A later client input exposes the now-decoded original GET metadata.
-        client._quic.send_stream_data(stream, b'\x00\x01x', end_stream=True)
+        # No extra DATA to trigger metadata publication: the encoder-stream
+        # callback must already have announced the newly decoded request.
+        client._quic.send_stream_data(stream, b'', end_stream=True)
     client.transmit()
-    await wait_for(lambda: (root / 'dynamic-bodies-received').exists())
     await send(12)
     assert await asyncio.wait_for(client.responses[12], 10) == b'GET /dynamic'
 
 
-def verify(content):
+def verify(content, metadata):
     for stream in (0, 4, 8, 12):
         for side in ('L', 'R'):
-            observed = [i for i in content if i['stream_id'] == stream and i['side'] == side
-                        and i.get('flow.http3')]
+            observed = [i for i in content + metadata if i['stream_id'] == stream and i['side'] == side
+                        and i.get('flow.http3.method')]
             assert observed, (stream, side, content)
             for info in observed:
                 assert info['flow.http3.method'] == ('POST' if stream == 8 and side == 'R' else 'GET'), info

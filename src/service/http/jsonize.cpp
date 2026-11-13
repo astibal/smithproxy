@@ -133,6 +133,9 @@ namespace jsonize {
         }
 
         ret["oid"] = what->to_connection_ID();
+        if (auto h3 = what->protocol_diagnostics(); !h3.empty()) {
+            ret["http3"] = std::move(h3);
+        }
 
         if(auto classifications = what->sift_classifications(); !classifications.empty()) {
             ret["classification"]["sift"] = std::move(classifications);

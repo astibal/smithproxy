@@ -38,6 +38,9 @@ constexpr std::size_t maximum_tracked_push_promises = 64;
 constexpr std::size_t maximum_retained_push_promise_bytes =
     8 * maximum_field_section;
 constexpr std::size_t maximum_blocked_header_blocks = 8;
+// Only the observer pauses behind QPACK. Forwarding continues independently.
+// At most eight blocked sections retain 64 KiB each of following wire bytes.
+constexpr std::size_t maximum_blocked_stream_input = 64 * 1024;
 constexpr std::size_t maximum_pending_response_records = 8;
 
 constexpr bool is_http2_reserved_frame(std::uint64_t type) {
@@ -75,6 +78,7 @@ struct header_block_context {
     bool push_promise = false;
     std::optional<std::uint64_t> push_id;
     bool discard = false;
+    bool resource_limited = false;
 };
 
 void header_unblocked(void* opaque) {
@@ -89,7 +93,10 @@ lsxpack_header* prepare_header(
     // us to grow the same buffer once it learns the value length. Keep both
     // the bytes and the decoder-maintained offsets in that second call;
     // reinitialising the header here truncates literal names to their prefix.
-    if (space > LSXPACK_MAX_STRLEN) return nullptr;
+    if (space > LSXPACK_MAX_STRLEN) {
+        context->resource_limited = true;
+        return nullptr;
+    }
     context->storage.resize(space);
     if (existing) {
         context->header.buf = context->storage.data();
@@ -109,6 +116,7 @@ int process_header(void* opaque, lsxpack_header* header) {
        value_size > maximum_field_section - 32 - name_size ||
        name_size + value_size + 32 >
            maximum_field_section - context->field_list_size) {
+        context->resource_limited = true;
         return 1;
     }
     context->field_list_size += name_size + value_size + 32;
@@ -133,10 +141,12 @@ struct stream_state {
     std::optional<std::uint64_t> frame_type;
     std::uint64_t frame_remaining = 0;
     std::vector<unsigned char> field_section;
+    bool header_blocked = false;
     bool headers_frame_seen = false;
     bool final_response_seen = false;
     bool trailers_seen = false;
     bool semantic_invalid = false;
+    bool metadata_limited = false;
     std::optional<std::uint64_t> content_length;
     std::uint64_t data_bytes = 0;
     bool body_forbidden = false;
@@ -201,6 +211,7 @@ public:
         auto found = streams_.find(stream_id);
         if (found != streams_.end()) {
             found->second.semantic_invalid = true;
+            found->second.header_blocked = false;
             found->second.field_section.clear();
             found->second.input.clear();
         }
@@ -332,6 +343,13 @@ public:
         if(stream.semantic_invalid) return;
 
         stream.stream_type_known = true;
+        if (stream.header_blocked &&
+            size > maximum_blocked_stream_input - stream.input.size()) {
+            stream.metadata_limited = true;
+            stream.semantic_invalid = true;
+            stream.input.clear();
+            return;
+        }
         stream.input.insert(stream.input.end(), data, data + size);
         parse_request_stream(stream_id, stream);
     }
@@ -348,6 +366,28 @@ public:
 
     [[nodiscard]] bool connection_invalid() const noexcept {
         return connection_invalid_;
+    }
+
+    bool resource_limited() const { return resource_limited_; }
+
+    void mark_limited(std::uint64_t stream_id) {
+        auto found = streams_.find(stream_id);
+        if (found != streams_.end()) found->second.metadata_limited = true;
+    }
+
+    std::string status(std::uint64_t stream_id) const {
+        if (resource_limited_) return "limited";
+        if (connection_invalid_) return "invalid";
+        auto found = streams_.find(stream_id);
+        if (found == streams_.end())
+            return streams_.size() >= maximum_tracked_streams ? "limited" : "pending";
+        if (found->second.metadata_limited) return "limited";
+        if (found->second.semantic_invalid) return "invalid";
+        for (auto const& pending : pending_) {
+            if (pending->stream_id == stream_id) return "blocked";
+        }
+        if (found->second.ignored) return "opaque";
+        return found->second.headers_frame_seen ? "decoded" : "pending";
     }
 
     bool set_request_method(std::uint64_t stream_id, std::string method) {
@@ -387,6 +427,9 @@ private:
            capacity > std::numeric_limits<unsigned>::max() ||
            blocked > std::numeric_limits<unsigned>::max() ||
            !pending_.empty()) {
+            resource_limited_ = capacity > maximum_qpack_dynamic_table_capacity ||
+                capacity > std::numeric_limits<unsigned>::max() ||
+                blocked > std::numeric_limits<unsigned>::max();
             connection_invalid_ = true;
             return;
         }
@@ -576,6 +619,18 @@ private:
 
     void parse_request_stream(std::uint64_t stream_id, stream_state& stream) {
         while (true) {
+            if (stream.semantic_invalid || connection_invalid_) return;
+            if (stream.header_blocked) {
+                // DATA and later HEADERS depend on the preceding field section.
+                // Do not guess whether it was interim/final or validate trailers
+                // before QPACK resolves it. Bound even a coalesced input chunk.
+                if (stream.input.size() > maximum_blocked_stream_input) {
+                    stream.metadata_limited = true;
+                    stream.semantic_invalid = true;
+                    stream.input.clear();
+                }
+                return;
+            }
             if (!stream.frame_type) {
                 auto const type = read_varint(stream.input.data(), stream.input.size());
                 if (!type) return;
@@ -642,11 +697,13 @@ private:
                     // The omitted initial/trailer section also means this
                     // stream's later frame roles can no longer be classified.
                     stream.semantic_invalid = true;
+                    stream.metadata_limited = true;
                     stream.frame_type = h3_frame_data;
                 }
                 if (*stream.frame_type == h3_frame_push_promise
                     && stream.frame_remaining > maximum_field_section) {
                     stream.semantic_invalid = true;
+                    stream.metadata_limited = true;
                     stream.frame_type = h3_frame_data;
                 }
             }
@@ -712,6 +769,7 @@ private:
             &decoder_, context.get(), stream_id, section.size(), &cursor,
             section.size(), acknowledgement.data(), &acknowledgement_size);
 
+        if (context->resource_limited) resource_limited_ = true;
         if (status == LQRHS_DONE) {
             publish(std::move(context));
         } else if (status == LQRHS_BLOCKED) {
@@ -728,11 +786,14 @@ private:
             if(pending_.size() >= maximum_blocked_header_blocks) {
                 lsqpack_dec_unref_stream(&decoder_, context.get());
                 auto stream = streams_.find(stream_id);
-                if(stream != streams_.end())
+                if(stream != streams_.end()) {
                     stream->second.semantic_invalid = true;
+                    stream->second.metadata_limited = true;
+                }
             } else {
                 context->remaining.assign(cursor,
                                           section.data() + section.size());
+                streams_.at(stream_id).header_blocked = true;
                 pending_.push_back(std::move(context));
             }
         } else if (status == LQRHS_NEED) {
@@ -752,6 +813,7 @@ private:
             return;
         }
 
+        std::vector<std::uint64_t> resumed;
         for (auto current = pending_.begin(); current != pending_.end();) {
             if (!(*current)->unblocked) {
                 ++current;
@@ -768,9 +830,12 @@ private:
             auto const status = lsqpack_dec_header_read(
                 &decoder_, current->get(), &cursor, remaining_size,
                 acknowledgement.data(), &acknowledgement_size);
+            if ((*current)->resource_limited) resource_limited_ = true;
             if (status == LQRHS_DONE) {
                 auto decoded = std::move(*current);
                 current = pending_.erase(current);
+                streams_.at(decoded->stream_id).header_blocked = false;
+                resumed.push_back(decoded->stream_id);
                 publish(std::move(decoded));
             } else if (status == LQRHS_ERROR) {
                 current = pending_.erase(current);
@@ -787,10 +852,15 @@ private:
                 ++current;
             }
         }
+        // Resuming may encounter another blocked section and grow pending_.
+        // Keep it outside the iterator loop to preserve iterator validity.
+        for (auto id : resumed) parse_request_stream(id, streams_.at(id));
     }
 
     void publish(std::unique_ptr<header_block_context> context) {
         if(context->discard) return;
+        if (auto stream = streams_.find(context->stream_id);
+            stream != streams_.end() && stream->second.semantic_invalid) return;
         bool regular_header_seen = false;
         std::unordered_set<std::string> pseudo_headers;
         auto const ascii_equal_ci = [](std::string_view left,
@@ -1100,6 +1170,7 @@ private:
     std::deque<h3_headers_record> records_;
     std::unordered_map<std::uint64_t, std::string> request_methods_;
     bool connection_invalid_ = false;
+    bool resource_limited_ = false;
 };
 
 } // namespace
@@ -1178,10 +1249,24 @@ public:
                 }
                 if(pending_responses_.size() < maximum_pending_response_records)
                     pending_responses_.push_back(std::move(*current));
+                else server_.mark_limited(current->stream_id);
                 current = records.erase(current);
             }
         }
         return records;
+    }
+
+    std::string connection_status() {
+        std::lock_guard lock(lock_);
+        if (client_.resource_limited() || server_.resource_limited()) return "limited";
+        return connection_invalid_ ? "invalid" : "";
+    }
+
+    std::string status(socle::side_t side, std::uint64_t stream_id) {
+        std::lock_guard lock(lock_);
+        if (client_.resource_limited() || server_.resource_limited()) return "limited";
+        if (connection_invalid_) return "invalid";
+        return (side == socle::side_t::LEFT ? client_ : server_).status(stream_id);
     }
 
     void finish(socle::side_t side, std::uint64_t stream_id, bool reset) {
@@ -1214,6 +1299,14 @@ h3_capture_decoder::h3_capture_decoder()
     : implementation_(std::make_unique<implementation>()) {}
 
 h3_capture_decoder::~h3_capture_decoder() = default;
+
+std::string h3_capture_decoder::connection_status() const {
+    return implementation_->connection_status();
+}
+
+std::string h3_capture_decoder::status(socle::side_t side, std::uint64_t stream_id) const {
+    return implementation_->status(side, stream_id);
+}
 
 void h3_capture_decoder::finish(socle::side_t side, std::uint64_t stream_id, bool reset) {
     implementation_->finish(side, stream_id, reset);

@@ -2,6 +2,8 @@
 #define SX_HTTP3_HPP
 
 #include <inspect/engine/http.hpp>
+#include <functional>
+#include <nlohmann/json.hpp>
 #include <inspect/protocol_input.hpp>
 #include <proxy/quic/h3capture.hpp>
 
@@ -16,6 +18,9 @@ struct Http3Stream {
         std::optional<std::uint64_t> frame_type;
         std::uint64_t remaining = 0;
         std::string encoding;
+        bool final_headers = false;
+        std::string metadata_limit;
+        std::string published_status;
         std::vector<std::vector<sx::quic::h3_header_field>> headers;
         bool finished = false;
         std::optional<std::uint64_t> reset_error;
@@ -47,6 +52,11 @@ struct Http3Connection {
     std::size_t header_bytes = 0;
     bool replayable = true;
     bool closed = false;
+    std::string published_connection_status;
+
+    // Installed by the multiplexed owner. Output/replay never invokes this
+    // input-observation sink; the independent fork keeps the same routing sink.
+    std::function<void(std::uint64_t, nlohmann::json)> on_metadata;
 };
 
 } // namespace sx::engine::http::v3

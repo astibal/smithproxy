@@ -1,6 +1,13 @@
 #include <proxy/flowctx.hpp>
 
 #include <proxy/mitmhost.hpp>
+#include <inspect/engine/http3_adapter.hpp>
+
+nlohmann::json FlowCtx::protocol_diagnostics() const {
+    if (!session_views_ || !stream_) return {};
+    return sx::engine::http::v3::diagnostics(*session_views_, stream_->id);
+}
+
 
 void FlowCtx::attach(MitmHostCX& host, char leg) {
     const bool initiator = leg == 'L' || leg == 'l';

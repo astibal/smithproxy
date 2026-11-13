@@ -7,6 +7,7 @@
 
 #include <apphostcx.hpp>
 #include <inspect/protocol_views.hpp>
+#include <nlohmann/json.hpp>
 
 class MitmHostCX;
 
@@ -63,6 +64,7 @@ public:
         if (session_views_) return session_views_->stream_context(active_endpoint_, *stream_);
         return views_.context(active_endpoint_);
     }
+    nlohmann::json protocol_diagnostics() const;
     std::string const& protocol_fork_error() const { return protocol_views().fork_error(); }
 
 private:
