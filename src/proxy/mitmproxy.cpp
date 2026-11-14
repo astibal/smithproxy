@@ -37,6 +37,7 @@
     which carries forward this exception.
 */    
 
+#include <utils/crypto.hpp>
 #include <regex>
 #include <ctime>
 #include <cerrno>
@@ -2432,18 +2433,10 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
                          scom->opt.cert.failed_check_override_timeout);
                     return {};
                 }
-                unsigned char random_bytes[16];
-                if(RAND_bytes(random_bytes, sizeof(random_bytes)) != 1) {
+                auto token = sx::crypto::random_hex(16);
+                if(!token) {
                     _err("cannot generate TLS override challenge");
                     return {};
-                }
-
-                static constexpr char hex[] = "0123456789abcdef";
-                std::string token;
-                token.reserve(sizeof(random_bytes) * 2);
-                for(auto byte: random_bytes) {
-                    token.push_back(hex[byte >> 4]);
-                    token.push_back(hex[byte & 0x0f]);
                 }
 
                 const std::string challenge_key =
@@ -2454,7 +2447,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
                 }
                 block_override
                     << R"(<form action="/SM/IT/HP/RO/XY/override/)"
-                    << token << R"(" method="get">)";
+                    << *token << R"(" method="get">)";
                 if (not app_request->http_data.uri.empty()) {
                     block_override
                         << R"(<input type="hidden" name="orig_url" value=")"
@@ -2465,7 +2458,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
                     << R"(<input type="submit" value="Override" class="btn-red"></form>)";
 
                 override_challenges().issue(
-                    challenge_key, token, std::time(nullptr), 120);
+                    challenge_key, *token, std::time(nullptr), 120);
             }
 
             return block_override.str();
