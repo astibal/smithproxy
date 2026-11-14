@@ -419,3 +419,33 @@ TEST_F(ArchiveTest, InvalidExplicitArchiveNeverFallsBack) {
 }
 
 } // namespace
+
+TEST_F(ArchiveTest, SchemaUpgradePublishesConfigAndMissingResourcesTogether) {
+    auto tar = valid_archive();
+    tar.add("templates/replacement/en/tls_reason.txt", "custom reason");
+    tar.add("templates/replacement/en/tls_override_form.txt", "");
+    auto original = tar.write();
+    auto source = CfgArchive::read_archive(paths_.archive, original);
+    std::map<std::string, std::string> additions {
+        {"templates/replacement/en/tls_reason.txt", "stock reason"},
+        {"templates/replacement/en/tls_override_form.txt", "stock form"},
+        {"templates/replacement/en/tls_redirect.txt", "new redirect"}
+    };
+
+    auto prepared = source.prepare_save("schema = 1051;", additions);
+    auto upgraded = CfgTar::read(prepared.replacement);
+
+    ASSERT_TRUE(prepared.previous);
+    EXPECT_EQ(*prepared.previous, original);
+    EXPECT_EQ(source.archive_payload(), original);
+    EXPECT_EQ(upgraded.at("smithproxy.cfg").data, "schema = 1051;");
+    EXPECT_EQ(upgraded.at("templates/replacement/en/tls_reason.txt").data, "custom reason");
+    EXPECT_EQ(upgraded.at("templates/replacement/en/tls_override_form.txt").data, "");
+    EXPECT_EQ(upgraded.at("templates/replacement/en/tls_redirect.txt").data, "new redirect");
+    EXPECT_EQ(upgraded.at("smithproxy.startup.cfg").data, tar.at("smithproxy.startup.cfg").data);
+
+    source.accept_saved_archive(prepared.replacement);
+    EXPECT_EQ(source.prepare_save("schema = 1051;", additions).replacement, prepared.replacement);
+    EXPECT_THROW(source.prepare_save("schema = 1052;", {{"smithproxy.cfg", "bad"}}), CfgTarError);
+    EXPECT_EQ(source.archive_payload(), prepared.replacement);
+}

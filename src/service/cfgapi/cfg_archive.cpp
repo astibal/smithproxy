@@ -326,7 +326,8 @@ std::vector<std::string> CfgArchive::resources(std::string_view logical_dir) con
 // Translate a new main configuration into the bytes expected by the selected
 // persistent format. For CfgTar this also returns the exact accepted archive
 // which must be made recoverable before the replacement is installed.
-CfgSaveData CfgArchive::prepare_save(std::string main_config) const {
+CfgSaveData CfgArchive::prepare_save(std::string main_config,
+    const std::map<std::string, std::string>& additions) const {
     if (!is_cftar()) {
         return {std::move(main_config), std::nullopt};
     }
@@ -335,6 +336,16 @@ CfgSaveData CfgArchive::prepare_save(std::string main_config) const {
     // that still describes the configuration running in this process.
     auto updated = archive();
     updated.replace(main_config_path, std::move(main_config));
+
+    for(const auto& [path, content] : additions) {
+        if(!CfgManifest::is_resource_path(path)) {
+            fail("invalid schema resource path: " + path);
+        }
+        if(!updated.contains(path)) {
+            updated.add(path, content);
+        }
+    }
+
     CfgManifest::validate(updated);
     return {updated.write(), archive().write()};
 }

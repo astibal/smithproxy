@@ -55,6 +55,7 @@
 
 
 #include <service/cfgapi/cfgapi.hpp>
+#include <schema_resources.hpp>
 #include <service/cfgapi/cfg_save.hpp>
 #include <service/cfgapi/cfg_numeric.hpp>
 #include <service/cfgapi/cfg_serialization.hpp>
@@ -130,7 +131,7 @@ std::string CfgFactory::ArchiveStorage::current() const {
 
 sx::cfg::CfgSaveData CfgFactory::ArchiveStorage::prepare_main(
     std::string content) const {
-    return owner_.config_archive_->prepare_save(std::move(content));
+    return owner_.config_archive_->prepare_save(std::move(content), owner_.schema_resource_additions_);
 }
 
 sx::cfg::CfgSaveData CfgFactory::ArchiveStorage::prepare_resource(
@@ -159,6 +160,7 @@ bool CfgFactory::ArchiveStorage::publish(
     // Advance cache and monitor only after durable installation succeeds.
     owner_.config_archive_->accept_saved_archive(prepared.replacement);
     owner_.accept_archive_monitor(prepared.replacement);
+    owner_.schema_resource_additions_.clear();
     owner_.log.noti("native configuration archive publication completed");
     return true;
 }
@@ -280,6 +282,7 @@ bool CfgFactory::cfgapi_init(sx::cfg::CfgArchive source) {
 
     config_file = source.path();
     config_archive_ = std::move(source);
+    schema_resource_additions_.clear();
     configure_archive_monitor_locked();
     _not("configuration source loaded successfully: native=%d",
          config_archive_->is_cftar());
@@ -329,9 +332,27 @@ std::map<std::string, std::string> CfgFactory::native_resources(
     if (!logical_dir.empty() && logical_dir.back() != '/') logical_dir += '/';
     if (!legacy_dir.empty() && legacy_dir.back() != '/') legacy_dir += '/';
 
+    std::scoped_lock<std::recursive_mutex> lock(lock_);
     std::map<std::string, std::string> result;
+
     for (const auto& name : names) {
-        auto resource = resolve_resource(logical_dir + name, legacy_dir + name);
+        // Check-only sees the same explicit schema additions as a real upgrade,
+        // without writing them. Existing resources always remain authoritative.
+        const auto logical_path = logical_dir + name;
+        if(auto added = schema_resource_additions_.find(logical_path);
+           added != schema_resource_additions_.end()) {
+            const bool absent = using_native_archive()
+                ? !config_archive_->archive().contains(logical_path)
+                : std::filesystem::symlink_status(legacy_dir + name).type() ==
+                    std::filesystem::file_type::not_found;
+
+            if(absent) {
+                result.emplace(name, added->second);
+                continue;
+            }
+        }
+
+        auto resource = resolve_resource(logical_path, legacy_dir + name);
         if (resource.is_native()) {
             result.emplace(name, resource.content());
         }
@@ -981,6 +1002,13 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         return true;
     }
 
+    else if(upgrade_to_num == 1051) {
+        // Persist new TLS replacement fragments together with schema 1051.
+        // Existing resources are authoritative; this step only adds new names.
+        schema_resource_additions_ = sx::cfg::schema_1051_resources();
+        log.event(INF, "added TLS replacement template resources");
+        return true;
+    }
 
     return false;
 }
@@ -1037,9 +1065,11 @@ bool CfgFactory::backup_before_upgrade(
 }
 
 bool CfgFactory::save_upgrade() const {
+    if(config_file_check_only) return false;
     if(save_config()) return true;
-    _err("cannot save upgraded configuration");
-    return false;
+
+    // Do not start with a newer in-memory schema after durable publication failed.
+    throw sx::cfg::CfgTarError("cannot save upgraded configuration");
 }
 
 bool CfgFactory::upgrade_and_save() {
@@ -1077,7 +1107,7 @@ bool CfgFactory::upgrade_and_save() {
         auto& v = internal.add("version", Setting::TypeString);
         v = SMITH_VERSION;
 
-        return save_upgrade();
+        internal.add("schema", Setting::TypeInt) = 1000;
 
     }
 
@@ -1117,7 +1147,9 @@ bool CfgFactory::upgrade_and_save() {
     if(std::string v1; load_if_exists(internal, "version", v1)) {
 
         if (v1 != SMITH_VERSION) {
-            if(!backup_before_upgrade(v1)) return false;
+            if(!config_file_check_only && !backup_before_upgrade(v1)) {
+                throw sx::cfg::CfgTarError("cannot back up configuration before upgrade");
+            }
             upgrade_by_version(v1);
 
             internal["version"] = SMITH_VERSION;

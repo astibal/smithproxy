@@ -111,6 +111,7 @@ include_directories ("${SOCLE_COMMON_DIR}")
 include_directories ("${PROJECT_SOURCE_DIR}")
 include_directories ("${PROJECT_SOURCE_DIR}/src/")
 include_directories ("${PROJECT_SOURCE_DIR}/src/ext")
+include(cmake/schema_resources.cmake)
 
 add_subdirectory(${SOCLE_DIR} socle_lib)
 add_subdirectory(${SOCLE_COMMON_DIR} socle_common_lib)
@@ -1332,6 +1333,13 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                         $<TARGET_FILE:smithproxy>
                         --source ${PROJECT_SOURCE_DIR}
                         --native-archive ${SMITHPROXY_DEFAULT_CFTAR})
+                add_test(NAME integration.cftar_schema_upgrade
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/process/cftar_schema_upgrade.py
+                        $<TARGET_FILE:smithproxy>
+                        --native-archive ${SMITHPROXY_DEFAULT_CFTAR})
+                set_tests_properties(integration.cftar_schema_upgrade
+                        PROPERTIES LABELS "native;integration;config" TIMEOUT 120 RUN_SERIAL TRUE)
                 add_test(NAME integration.redirect
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/tests/transparent/redirect_integration.py
