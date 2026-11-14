@@ -1,3 +1,4 @@
+#include <vars.hpp>
 // Shared TLS warning content and scoped browser exceptions for H1/H2/H3.
 // Transport-specific framing and connection shutdown stay with their engines.
 #include <proxy/mitmproxy.hpp>
@@ -135,12 +136,12 @@ std::string certificate_details(SSLCom* verification, std::string const& host) {
     };
 
     auto printed = [](auto print) -> std::string {
-        auto bio = std::unique_ptr<BIO, decltype(&BIO_free)>(BIO_new(BIO_s_mem()), BIO_free);
+        auto bio = socle::raw::var<BIO*>(BIO_new(BIO_s_mem()), BIO_free);
 
-        if (!bio || print(bio.get()) <= 0) return {};
+        if (!bio.value || print(bio.value) <= 0) return {};
 
         char* data = nullptr;
-        auto length = BIO_get_mem_data(bio.get(), &data);
+        auto length = BIO_get_mem_data(bio.value, &data);
 
         if (length <= 0) return {};
 
