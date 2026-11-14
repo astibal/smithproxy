@@ -1,0 +1,4 @@
+# smithproxy stores runtime captures and state in this upstream-defined path.
+smithproxy: non-standard-dir-in-var
+# The shipped default configuration contains private key material.
+smithproxy: non-standard-file-perm

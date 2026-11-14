@@ -1,0 +1,5 @@
+smithproxy (0.9.32+git694.g5119eb00-1) unstable; urgency=medium
+
+  * Add native Debian packaging using the project's CMake install rules.
+
+ -- Ales Stibal <astib@mag0.net>  Tue, 10 Nov 2026 21:53:00 +0300
