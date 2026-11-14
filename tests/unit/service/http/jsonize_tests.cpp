@@ -59,7 +59,7 @@ TEST(Jsonize, ConvertsNestedLibconfigIncludingScalarLists) {
 TEST(Jsonize, RejectsNullCertificateAndSerializesSparseCertificateSafely) {
     EXPECT_TRUE(jsonize::from(static_cast<X509 const*>(nullptr), iINF).empty());
 
-    std::unique_ptr<X509, decltype(&X509_free)> certificate(X509_new(), X509_free);
+    socle::ossl::x509_ptr certificate(X509_new(), X509_free);
     ASSERT_NE(certificate, nullptr);
     ASSERT_NE(X509_gmtime_adj(X509_getm_notBefore(certificate.get()), 0), nullptr);
     ASSERT_NE(X509_gmtime_adj(X509_getm_notAfter(certificate.get()), 3600), nullptr);
@@ -75,7 +75,7 @@ TEST(Jsonize, RejectsNullCertificateAndSerializesSparseCertificateSafely) {
 }
 
 TEST(Jsonize, SerializesCertificateNamesAndVerboseMetadata) {
-    std::unique_ptr<X509, decltype(&X509_free)> certificate(X509_new(), X509_free);
+    socle::ossl::x509_ptr certificate(X509_new(), X509_free);
     ASSERT_NE(certificate, nullptr);
     ASSERT_NE(X509_gmtime_adj(X509_getm_notBefore(certificate.get()), 0), nullptr);
     ASSERT_NE(X509_gmtime_adj(X509_getm_notAfter(certificate.get()), 3600), nullptr);
@@ -110,7 +110,7 @@ TEST(CertificateSummary, CertificateIdentityIsStableAndCompact) {
     std::unique_ptr<FILE, X509FileCloser> input(
         std::fopen("etc/certs/default/srv-cert.pem", "r"));
     ASSERT_TRUE(input);
-    std::unique_ptr<X509, decltype(&X509_free)> certificate(
+    socle::ossl::x509_ptr certificate(
         PEM_read_X509(input.get(), nullptr, nullptr, nullptr), X509_free);
     ASSERT_TRUE(certificate);
 
@@ -136,12 +136,12 @@ TEST(CertificateSummary, CertificateIdentityIsStableAndCompact) {
 }
 
 TEST(CertificateSummary, CertificateDatesSerialAndAlternativeNamesAreExplicit) {
-    std::unique_ptr<X509, decltype(&X509_free)> certificate(X509_new(), X509_free);
+    socle::ossl::x509_ptr certificate(X509_new(), X509_free);
     ASSERT_TRUE(certificate);
     ASSERT_EQ(ASN1_INTEGER_set(X509_get_serialNumber(certificate.get()), 42), 1);
     ASSERT_EQ(ASN1_TIME_set_string(X509_getm_notBefore(certificate.get()), "20260102030405Z"), 1);
     ASSERT_EQ(ASN1_TIME_set_string(X509_getm_notAfter(certificate.get()), "20270102030405Z"), 1);
-    std::unique_ptr<X509_EXTENSION, decltype(&X509_EXTENSION_free)> san(
+    socle::ossl::x509_extension_ptr san(
         X509V3_EXT_conf_nid(nullptr, nullptr, NID_subject_alt_name,
                            const_cast<char*>("DNS:example.test,DNS:*.example.test,IP:192.0.2.1,IP:2001:db8::1")),
         X509_EXTENSION_free);

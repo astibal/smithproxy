@@ -1,3 +1,4 @@
+#include <ossl_util.hpp>
 #include "proxy/quic/log.hpp"
 #include <gtest/gtest.h>
 #include "../../tls/ocsp_fixture.hpp"
@@ -46,8 +47,8 @@ std::string pki_file(char const* name) {
     return test_pki_directory + "/" + name;
 }
 
-using unique_pkey = std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)>;
-using unique_x509 = std::unique_ptr<X509, decltype(&X509_free)>;
+using unique_pkey = socle::ossl::pkey_ptr;
+using unique_x509 = socle::ossl::x509_ptr;
 
 unique_pkey generate_rsa_key() {
     EVP_PKEY_CTX* context = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, nullptr);
@@ -904,7 +905,7 @@ TEST(QuicTestbed, ConcurrentVerifiedMitmSessionsAndStreams) {
         auto& client = clients[client_index];
         ASSERT_TRUE(client.connection->handshake_complete());
         EXPECT_EQ(client.connection->negotiated_alpn(), "h3");
-        std::unique_ptr<X509, decltype(&X509_free)> peer(
+        socle::ossl::x509_ptr peer(
             SSL_get1_peer_certificate(client.connection->handle_native()), X509_free);
         ASSERT_NE(peer, nullptr);
         EXPECT_EQ(X509_check_host(peer.get(), test_sni, std::strlen(test_sni), 0, nullptr), 1);

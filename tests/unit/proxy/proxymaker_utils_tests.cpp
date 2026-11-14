@@ -1,3 +1,4 @@
+#include <ossl_util.hpp>
 #include <gtest/gtest.h>
 
 #include <proxy/mitmproxy_utils.hpp>
@@ -524,7 +525,7 @@ TEST(MitmProxyReplacement, CertificateDetailsEscapePeerDataAndShowOriginalEviden
     ASSERT_EQ(X509_set_issuer_name(certificate, subject), 1);
     ASSERT_EQ(ASN1_TIME_set_string(X509_getm_notBefore(certificate), "20200101000000Z"), 1);
     ASSERT_EQ(ASN1_TIME_set_string(X509_getm_notAfter(certificate), "20210101000000Z"), 1);
-    auto san = std::unique_ptr<X509_EXTENSION, decltype(&X509_EXTENSION_free)>(
+    auto san = socle::ossl::x509_extension_ptr(
         X509V3_EXT_conf_nid(nullptr, nullptr, NID_subject_alt_name,
                            "DNS:wrong.example,DNS:other.example"), X509_EXTENSION_free);
     ASSERT_TRUE(san);
@@ -536,7 +537,7 @@ TEST(MitmProxyReplacement, CertificateDetailsEscapePeerDataAndShowOriginalEviden
     ASSERT_EQ(EVP_PKEY_CTX_set_ec_paramgen_curve_nid(context.get(), NID_X9_62_prime256v1), 1);
     EVP_PKEY* generated = nullptr;
     ASSERT_EQ(EVP_PKEY_keygen(context.get(), &generated), 1);
-    auto key = std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)>(generated, EVP_PKEY_free);
+    auto key = socle::ossl::pkey_ptr(generated, EVP_PKEY_free);
     ASSERT_EQ(X509_set_pubkey(certificate, key.get()), 1);
     ASSERT_GT(X509_sign(certificate, key.get(), EVP_sha256()), 0);
     verification.verify_reset(SSLCom::verify_status_t::VRF_INVALID);
