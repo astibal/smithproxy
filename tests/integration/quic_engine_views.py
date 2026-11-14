@@ -17,6 +17,9 @@ import sys
 
 pending = bytearray()
 dynamic = os.environ.get('H3_VIEWS_CASE', 'static').startswith('dynamic')
+datagrams = os.environ.get('H3_VIEWS_CASE') == 'datagrams'
+stop_sending = os.environ.get('H3_VIEWS_CASE') == 'stop-sending'
+resumed_fragmented = os.environ.get('H3_VIEWS_CASE') == 'resumed-fragmented'
 artifact_root = None
 
 
@@ -55,8 +58,8 @@ def webhook_reply(event, default):
     if info.get('scope') != 'stream' or info.get('stream_id') != 4:
         return default
     if event['action'] == 'connection-start':
-        # Stream 0 has already completed. Reserve rewrite only now to exercise
-        # replay of the shared session state before admitting stream 4.
+        # Stream 0 has already completed. Start the script rewrite only now;
+        # capability normalization already reserved independent endpoint views.
         return {'action': 'accept', 'control': {'rewrite': True}}
     if event['action'] != 'connection-content':
         return default
@@ -142,6 +145,12 @@ def run_case(root, proxy, hooks, config, eventually, run, sessions, cli):
             (root / 'diagnostics-cli.txt').write_text(text)
             (root / 'diagnostics-release').touch()
         assert peer.wait(timeout=30) == 0
+        if datagrams:
+            for endpoint in ('origin', 'client'):
+                settings = json.loads((root / f'{endpoint}-settings.json').read_text())
+                assert settings[str(0x33)] == 0, settings
+                assert settings[str(0xffd277)] == 0, settings
+
         # Metadata uses asynchronous connection-info delivery. Wait for the
         # final stream's header observation at both sinks before comparing.
         final_stream = 12 if dynamic else 8
@@ -161,6 +170,14 @@ def run_case(root, proxy, hooks, config, eventually, run, sessions, cli):
                          for sink in ('spider', 'sift')]
             return observed if sorted(envelopes[0]) == sorted(envelopes[1]) else False
         events = eventually(delivered)
+        if resumed_fragmented:
+            assert (root / 'resumed-fragmented-ok').exists()
+            # Existing metadata assertions describe the first connection's
+            # rewrite. Sequence numbers and stream IDs restart on resumption.
+            parent = next(e['details']['info']['parent_id'] for e in events
+                          if e.get('details', {}).get('info', {}).get('stream_id') == 4)
+            events = [e for e in events
+                      if e.get('details', {}).get('info', {}).get('parent_id') == parent]
         metadata = [e['details']['info'] for e in events if e.get('action') == 'connection-info'
                     and e['details'].get('info', {}).get('payload_layer') == 'http3.metadata'
                     and e['_test_receiver'] == 'spider']
@@ -230,7 +247,8 @@ def run_case(root, proxy, hooks, config, eventually, run, sessions, cli):
                         assert info['flow.http3.url'] == f'https://origin.runner.lab/views/{stream}', info
         assert proxy.poll() is None
         (root / 'quic-engine-views-webhooks.json').write_text(json.dumps(events, indent=2))
-        print(f'PASS H3 views ({"dynamic" if dynamic else "static"}): late split, {len(content)} annotated input callbacks', flush=True)
+        case = os.environ.get('H3_VIEWS_CASE', 'static')
+        print(f'PASS H3 views ({case}): late script rewrite, {len(content)} annotated input callbacks', flush=True)
     finally:
         if peer.poll() is None:
             peer.terminate(); peer.wait(timeout=5)
@@ -239,24 +257,46 @@ def run_case(root, proxy, hooks, config, eventually, run, sessions, cli):
 
 async def main(mode, root):
     from aioquic.asyncio import QuicConnectionProtocol, connect, serve
-    from aioquic.h3.connection import H3Connection
+    from aioquic.h3.connection import H3Connection, Setting
     from aioquic.h3.events import HeadersReceived, DataReceived
     from aioquic.quic.configuration import QuicConfiguration
+
+    class StaticQpackH3(H3Connection):
+        def _get_local_settings(self):
+            settings = super()._get_local_settings()
+            # Match Firefox: offer the RFC and older draft capability. Both
+            # real endpoints support DATAGRAM; the terminating proxy does not.
+            if datagrams:
+                settings[Setting.H3_DATAGRAM] = 1
+                settings[0xffd277] = 1
+            # These cases check transport behavior, not encoder-stream scheduling.
+            # Keep the existing immediate body-annotation assertions deterministic.
+            settings[Setting.QPACK_MAX_TABLE_CAPACITY] = 0
+            settings[Setting.QPACK_BLOCKED_STREAMS] = 0
+            return settings
 
     class Peer(QuicConnectionProtocol):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            self.http = H3Connection(self._quic)
+            self.http = (StaticQpackH3 if datagrams or stop_sending else H3Connection)(self._quic)
             self.responses = {}
             self.bodies = {}
 
         def quic_event_received(self, event):
-            for item in self.http.handle_event(event):
+            events = self.http.handle_event(event)
+            if datagrams and self.http.received_settings is not None:
+                (root / f'{mode}-settings.json').write_text(json.dumps(self.http.received_settings))
+
+            for item in events:
                 if mode == 'origin' and isinstance(item, HeadersReceived):
                     fields = dict(item.headers)
                     if dynamic:
                         with (root / 'dynamic-origin.jsonl').open('a') as log:
                             log.write(json.dumps({'stream': item.stream_id, 'method': fields[b':method'].decode()}) + '\n')
+                    # Stop only the request half. A normal response FIN must
+                    # still deliver all bytes; stream_close is not RESET_STREAM.
+                    if stop_sending and item.stream_id == 4:
+                        self._quic.stop_stream(item.stream_id, 0x100)  # H3_NO_ERROR.
                     body = fields[b':method'] + b' ' + fields[b':path']
                     self.http.send_headers(item.stream_id, [(b':status', b'200'), (b'x-raw', b'\xff'),
                         (b'set-cookie', b'a=1'), (b'set-cookie', b'b=2')])
@@ -272,6 +312,9 @@ async def main(mode, root):
                         self.responses[item.stream_id].set_result(bytes(self.bodies[item.stream_id]))
 
     config = QuicConfiguration(is_client=mode == 'client', alpn_protocols=['h3'])
+    if datagrams:
+        config.max_datagram_frame_size = 65536
+
     certs = root / 'config/certs'
     if mode == 'origin':
         config.load_cert_chain(certs / 'origin-cert.pem', certs / 'origin-key.pem')
@@ -290,11 +333,18 @@ async def main(mode, root):
             subprocess.run(['ip', *args], check=True)
         config.server_name = 'origin.runner.lab'
         config.load_verify_locations(cafile=str(certs / 'ca-cert.pem'))
-        async with connect('203.0.113.10', 443, configuration=config, create_protocol=Peer) as client:
+        tickets = []
+        async with connect('203.0.113.10', 443, configuration=config, create_protocol=Peer,
+                           session_ticket_handler=tickets.append) as client:
             if dynamic:
                 from quic_engine_dynamic import run_client
                 await run_client(client, root)
                 return
+            if datagrams:
+                async with asyncio.timeout(5):
+                    while client.http.received_settings is None:
+                        await asyncio.sleep(.01)
+
             for stream in (0, 4, 8):
                 assert client._quic.get_next_available_stream_id() == stream
                 client.responses[stream] = asyncio.get_running_loop().create_future()
@@ -304,6 +354,9 @@ async def main(mode, root):
                 body = await asyncio.wait_for(client.responses[stream], 10)
                 expected = (b'POST' if stream == 4 else b'GET') + f' /views/{stream}'.encode()
                 assert body == expected, (body, expected)
+                if datagrams:
+                    assert client.http.received_settings[0x33] == 0
+                    assert client.http.received_settings[0xffd277] == 0
                 if stream == 4:
                     # Keep this child alive while CLI/API inspect both rewrite views.
                     (root / 'diagnostics-ready').touch()
@@ -313,6 +366,69 @@ async def main(mode, root):
                         await asyncio.sleep(0.02)
                     client._quic.send_stream_data(stream, b'', end_stream=True)
                     client.transmit()
+
+
+            if resumed_fragmented:
+                await asyncio.sleep(.2)
+
+        if resumed_fragmented:
+            assert tickets, "proxy did not issue a session ticket"
+            config.session_ticket = tickets[-1]
+            from aioquic import tls
+            from aioquic.quic.events import HandshakeCompleted
+            original_hello = tls.push_client_hello
+            original_buffer = tls.Buffer
+
+            def handshake_buffer(*args, **kwargs):
+                # aioquic's PSK binder scratch buffer is only 1024 bytes.
+                if "capacity" in kwargs:
+                    kwargs["capacity"] = max(kwargs["capacity"], 8192)
+                return original_buffer(*args, **kwargs)
+
+            tls.Buffer = handshake_buffer
+
+            def padded_hello(buf, hello):
+                if not any(kind == 21 for kind, _ in hello.other_extensions):
+                    hello.other_extensions.append((21, bytes(2400)))
+                original_hello(buf, hello)
+
+            tls.push_client_hello = padded_hello
+
+            class FragmentedPeer(Peer):
+                resumed = False
+
+                def connection_made(self, transport):
+                    # Deliver the first Initial separately: the proxy accepts
+                    # the QUIC object before the complete TLS ClientHello.
+                    original_send = transport.sendto
+                    count = 0
+
+                    def delayed_send(data, address):
+                        nonlocal count
+                        count += 1
+                        if count in (2, 3):
+                            asyncio.get_running_loop().call_later(.15, original_send, data, address)
+                        else:
+                            original_send(data, address)
+
+                    transport.sendto = delayed_send
+                    super().connection_made(transport)
+
+                def quic_event_received(self, event):
+                    if isinstance(event, HandshakeCompleted):
+                        self.resumed = event.session_resumed
+                    super().quic_event_received(event)
+
+            async with connect('203.0.113.10', 443, configuration=config,
+                               create_protocol=FragmentedPeer) as client:
+                assert client.resumed, "test must exercise TLS session resumption"
+                client.responses[0] = asyncio.get_running_loop().create_future()
+                client.bodies[0] = bytearray()
+                client._quic.send_stream_data(0, request_frame(0), end_stream=True)
+                client.transmit()
+                body = await asyncio.wait_for(client.responses[0], 5)
+                assert body == b'GET /views/0', body
+                (root / 'resumed-fragmented-ok').touch()
 
 
 if __name__ == '__main__':

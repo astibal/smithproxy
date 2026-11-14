@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <functional>
 
 #include <apphostcx.hpp>
 #include <inspect/protocol_views.hpp>
@@ -14,6 +15,7 @@ class MitmHostCX;
 class FlowCtx {
 public:
     enum class Dir { I2R, R2I };
+    using OutputTransform = std::function<void(Dir, buffer&)>;
 
     struct Tx {
         Dir dir {Dir::I2R};
@@ -36,9 +38,10 @@ public:
     // A multiplexed child borrows the parent session's protocol views. The
     // logical key is stable across the two transport legs and all callbacks.
     void bind_protocol(std::shared_ptr<sx::engine::ProtocolViews> views,
-                       sx::engine::ProtocolStream stream) {
+                       sx::engine::ProtocolStream stream, OutputTransform transform = {}) {
         session_views_ = std::move(views);
         stream_ = stream;
+        output_transform_ = std::move(transform);
     }
     bool owns_content_metadata() const {
         return protocol_views().owns_content_metadata();
@@ -47,11 +50,11 @@ public:
                          std::optional<std::uint64_t> error = std::nullopt);
 
     Tx begin(Dir dir, buffer const& data, std::uint64_t read_bytes);
-    void commit(Tx const& tx, buffer const& data);
+    void commit(Tx const& tx, buffer& data);
     void discard(Tx const& tx);
 
     // Locally generated output: no raw-input ingest or input-byte accounting.
-    void inject(Dir dir, buffer const& data);
+    void inject(Dir dir, buffer& data);
     bool can_inject() const { return protocol_views().can_inject(); }
 
     // Existing metadata consumers see the current INPUT endpoint. Output
@@ -94,6 +97,7 @@ private:
     std::shared_ptr<sx::engine::ProtocolViews> session_views_;
     std::optional<sx::engine::ProtocolStream> stream_;
     Endpoint active_endpoint_ = Endpoint::Client;
+    OutputTransform output_transform_;
     Stats i2r_;
     Stats r2i_;
 };

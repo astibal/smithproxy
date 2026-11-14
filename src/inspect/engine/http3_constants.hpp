@@ -15,4 +15,9 @@ inline constexpr std::uint64_t request_rejected = 0x10b;
 inline constexpr std::uint64_t message_error = 0x10e;
 
 } // namespace sx::engine::http::v3::error_code
+
+namespace sx::engine::http::v3::setting {
+inline constexpr std::uint64_t h3_datagram = 0x33; // RFC 9297.
+inline constexpr std::uint64_t h3_datagram_draft03 = 0xffd277;
+} // namespace sx::engine::http::v3::setting
 #endif

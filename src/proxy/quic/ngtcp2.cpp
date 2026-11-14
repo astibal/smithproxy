@@ -1,6 +1,7 @@
 #include <ossl_util.hpp>
 #include "proxy/quic/error_stats.hpp"
 #include "proxy/quic/ngtcp2.hpp"
+#include "inspect/engine/http3_constants.hpp"
 #include "proxy/quic/socket_io_detail.hpp"
 #include <openssl/rand.h>
 #include <algorithm>
@@ -329,8 +330,8 @@ int connection::opened_stream(ngtcp2_conn*, int64_t id, void* self) {
 }
 
 // End TX ownership and replenish peer stream-count credit after transport close.
-int connection::closed_stream(ngtcp2_conn* conn, uint32_t flags, int64_t id,
-                              uint64_t error, void* self, void*) {
+int connection::closed_stream(ngtcp2_conn* conn, uint32_t, int64_t id,
+                              uint64_t, void* self, void*) {
     if (!self) {
         ++stats.errors.connection_closed_stream_failure;
         return NGTCP2_ERR_CALLBACK_FAILURE;
@@ -341,10 +342,12 @@ int connection::closed_stream(ngtcp2_conn* conn, uint32_t flags, int64_t id,
         state.tx_closed = true;
         state.tx.clear();
         state.tx_submitted = 0;
-        if (flags & NGTCP2_STREAM_CLOSE_FLAG_APP_ERROR_CODE_SET) {
-            state.reset = true;
-            owner.events_.push_back({mf::event_type::reset, mf::flow_handle{uint64_t(id), 1}, error});
-        }
+        // stream_close reports the first error from EITHER direction, including
+        // STOP_SENDING of our request while the peer completes its response.
+        // Example: Google sends H3_NO_ERROR on the request half, then response
+        // FIN. That must not reset the response or discard buffered RX bytes.
+        // Only reset_stream() reports an actual peer RESET_STREAM to the bridge.
+
         if (((id & 1) != 0) != owner.server_) {
             if (id & 2) ngtcp2_conn_extend_max_streams_uni(conn, 1);
             else ngtcp2_conn_extend_max_streams_bidi(conn, 1);
@@ -465,6 +468,34 @@ void connection::fail(int error, char const* operation) {
         logging::transport().war("ngtcp2 conn=%p %s %s: %s",
                                  static_cast<void*>(this), server_ ? "A" : "B",
                                  operation, ngtcp2_strerror(error));
+    } else if (error == NGTCP2_ERR_DRAINING) {
+        // ERR_DRAINING describes our state, not the peer's reason for closing.
+        // Retain the received error namespace: H3 codes are application errors.
+        auto const* peer = ngtcp2_conn_get_ccerr(conn_.value);
+        std::string reason;
+        if (peer->reason) {
+            reason.assign(reinterpret_cast<char const*>(peer->reason), peer->reasonlen);
+            for (auto& character : reason) {
+                auto const byte = static_cast<unsigned char>(character);
+                if (byte < 0x20 || byte == 0x7f) character = '?';
+            }
+        }
+
+        // A peer-initiated close can carry the actual protocol failure. Keep
+        // graceful QUIC/H3 shutdown quiet, but expose failures without debug.
+        const bool application_close = peer->type == NGTCP2_CCERR_TYPE_APPLICATION;
+        const bool graceful_transport = !application_close && peer->error_code == NGTCP2_NO_ERROR;
+        const bool graceful_http3 = application_close && negotiated_alpn() == "h3"
+            && peer->error_code == sx::engine::http::v3::error_code::no_error;
+        const bool graceful_close = graceful_transport || graceful_http3;
+        auto const& log = logging::transport();
+
+        log.log(graceful_close ? DIA : WAR, log.topic(),
+            "ngtcp2 conn=%p %s closed: %s peer_type=%s peer_code=0x%llx frame=0x%llx reason='%s'",
+            static_cast<void*>(this), server_ ? "A" : "B", ngtcp2_strerror(error),
+            peer->type == NGTCP2_CCERR_TYPE_APPLICATION ? "application" : "transport",
+            static_cast<unsigned long long>(peer->error_code),
+            static_cast<unsigned long long>(peer->frame_type), reason.c_str());
     } else {
         logging::transport().dia("ngtcp2 conn=%p %s closed: %s",
                                  static_cast<void*>(this), server_ ? "A" : "B", ngtcp2_strerror(error));
