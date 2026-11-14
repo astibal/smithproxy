@@ -37,6 +37,7 @@
     which carries forward this exception.
 */    
 
+#include <service/http/jsonize_x509.hpp>
 #include <regex>
 #include <ctime>
 #include <cerrno>
@@ -121,7 +122,7 @@ nlohmann::json peer_certificate_from_ssl(SSL* ssl) {
 
     std::unique_ptr<X509, decltype(&X509_free)> certificate(
         SSL_get_peer_certificate(ssl), X509_free);
-    return certificate ? peer_certificate(certificate.get()) : result;
+    return certificate ? jsonize::certificate_summary(certificate.get()) : result;
 }
 
 } // namespace
@@ -164,7 +165,7 @@ nlohmann::json tls_leg(SSLCom const& com, bool include_verify) {
     if(!certificate.empty()) result["peer_certificate"] = std::move(certificate);
     // The downstream peer is the client, not the certificate presented by the
     // proxy. Keep our own certificate separate on both legs (including mTLS).
-    auto local_certificate = peer_certificate(SSL_get_certificate(ssl));
+    auto local_certificate = jsonize::certificate_summary(SSL_get_certificate(ssl));
     if(!local_certificate.empty()) result["local_certificate"] = std::move(local_certificate);
 
     if(include_verify) {

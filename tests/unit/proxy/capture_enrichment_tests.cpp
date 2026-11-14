@@ -1,3 +1,5 @@
+#include <service/http/jsonize_x509.hpp>
+#include <ossl_util.hpp>
 #include <proxy/capture_enrichment.hpp>
 
 #include <gtest/gtest.h>
@@ -18,7 +20,7 @@ struct FileCloser {
 };
 
 TEST(CaptureEnrichment, NullCertificateProducesNoIdentity) {
-    EXPECT_TRUE(sx::capture::peer_certificate(nullptr).empty());
+    EXPECT_TRUE(jsonize::certificate_summary(nullptr).empty());
 }
 
 TEST(CaptureEnrichment, CertificateIdentityIsStableAndCompact) {
@@ -29,9 +31,13 @@ TEST(CaptureEnrichment, CertificateIdentityIsStableAndCompact) {
         PEM_read_X509(input.get(), nullptr, nullptr, nullptr), X509_free);
     ASSERT_TRUE(certificate);
 
-    auto const first = sx::capture::peer_certificate(certificate.get());
-    auto const second = sx::capture::peer_certificate(certificate.get());
+    auto const first = jsonize::certificate_summary(certificate.get());
+    auto const second = jsonize::certificate_summary(certificate.get());
     ASSERT_TRUE(first.contains("sha256"));
+    EXPECT_EQ(SSLFactory::fingerprint(certificate.get()).size(), 40U);
+    EXPECT_EQ(SSLFactory::fingerprint(certificate.get()),
+              socle::ossl::fingerprint(certificate.get(), EVP_sha1()));
+    EXPECT_EQ(first["sha256"], socle::ossl::fingerprint(certificate.get(), EVP_sha256(), socle::ossl::hex_case::upper));
     EXPECT_EQ(first["sha256"].get<std::string>().size(), 64U);
     EXPECT_EQ(first["sha256"], second["sha256"]);
     EXPECT_TRUE(first.contains("subject_cn"));
@@ -59,7 +65,7 @@ TEST(CaptureEnrichment, CertificateDatesSerialAndAlternativeNamesAreExplicit) {
     ASSERT_TRUE(san);
     ASSERT_EQ(X509_add_ext(certificate.get(), san.get(), -1), 1);
 
-    auto const result = sx::capture::peer_certificate(certificate.get());
+    auto const result = jsonize::certificate_summary(certificate.get());
     EXPECT_EQ(result["serial_hex"], "2A");
     EXPECT_EQ(result["not_before"], "2026-01-02T03:04:05Z");
     EXPECT_EQ(result["not_after"], "2027-01-02T03:04:05Z");
