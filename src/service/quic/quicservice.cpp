@@ -59,15 +59,15 @@ int select_h3(SSL*, const unsigned char** output, unsigned char* output_size,
 
 bool use_pem_credentials(SSL_CTX* context, const std::string& certificate,
                          const std::string& private_key) {
-    auto cert_bio = std::unique_ptr<BIO, decltype(&BIO_free)>(
+    auto cert_bio = socle::ossl::bio_ptr(
         BIO_new_mem_buf(certificate.data(), static_cast<int>(certificate.size())), BIO_free);
-    auto key_bio = std::unique_ptr<BIO, decltype(&BIO_free)>(
+    auto key_bio = socle::ossl::bio_ptr(
         BIO_new_mem_buf(private_key.data(), static_cast<int>(private_key.size())), BIO_free);
     if (!cert_bio || !key_bio) return false;
 
-    auto cert = std::unique_ptr<X509, decltype(&X509_free)>(
+    auto cert = socle::ossl::x509_ptr(
         PEM_read_bio_X509_AUX(cert_bio.get(), nullptr, nullptr, nullptr), X509_free);
-    auto key = std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)>(
+    auto key = socle::ossl::pkey_ptr(
         PEM_read_bio_PrivateKey(key_bio.get(), nullptr, nullptr, nullptr), EVP_PKEY_free);
     return cert && key && SSL_CTX_use_certificate(context, cert.get()) == 1
         && SSL_CTX_use_PrivateKey(context, key.get()) == 1
