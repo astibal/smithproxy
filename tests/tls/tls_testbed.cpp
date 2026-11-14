@@ -1,3 +1,4 @@
+#include <ossl_util.hpp>
 #include "ocsp_fixture.hpp"
 #include <gtest/gtest.h>
 
@@ -32,11 +33,11 @@
 
 namespace {
 
-using x509_ptr = std::unique_ptr<X509, decltype(&X509_free)>;
-using pkey_ptr = std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)>;
-using crl_ptr = std::unique_ptr<X509_CRL, decltype(&X509_CRL_free)>;
+using x509_ptr = socle::ossl::x509_ptr;
+using pkey_ptr = socle::ossl::pkey_ptr;
+using crl_ptr = socle::ossl::x509_crl_ptr;
 using ocsp_response_ptr = std::unique_ptr<OCSP_RESPONSE, decltype(&OCSP_RESPONSE_free)>;
-using x509_store_ptr = std::unique_ptr<X509_STORE, decltype(&X509_STORE_free)>;
+using x509_store_ptr = socle::ossl::x509_store_ptr;
 
 x509_ptr load_certificate(const std::filesystem::path& path) {
     FILE* file = fopen(path.c_str(), "r");
@@ -400,9 +401,9 @@ struct handshake_result {
 
 handshake_result memory_handshake(X509* certificate, EVP_PKEY* key, int version,
                                   bool send_sni, int alpn_mode, std::size_t payload_size) {
-    std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> server_ctx(
+    socle::ossl::ssl_ctx_ptr server_ctx(
         SSL_CTX_new(TLS_server_method()), SSL_CTX_free);
-    std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> client_ctx(
+    socle::ossl::ssl_ctx_ptr client_ctx(
         SSL_CTX_new(TLS_client_method()), SSL_CTX_free);
     if (!server_ctx || !client_ctx)
         return {};
@@ -418,8 +419,8 @@ handshake_result memory_handshake(X509* certificate, EVP_PKEY* key, int version,
     SSL_CTX_set_max_proto_version(client_ctx.get(), version);
     SSL_CTX_set_alpn_select_cb(server_ctx.get(), select_h2, nullptr);
 
-    std::unique_ptr<SSL, decltype(&SSL_free)> client(SSL_new(client_ctx.get()), SSL_free);
-    std::unique_ptr<SSL, decltype(&SSL_free)> server(SSL_new(server_ctx.get()), SSL_free);
+    socle::ossl::ssl_ptr client(SSL_new(client_ctx.get()), SSL_free);
+    socle::ossl::ssl_ptr server(SSL_new(server_ctx.get()), SSL_free);
     if (!client || !server)
         return {};
 
@@ -644,7 +645,7 @@ TEST_F(TLSIntegration, SSLComNonblockingHandshakeBidirectionalDataAndCloseNotify
     server.on_accept_socket(server.socket());
     ASSERT_FALSE(transport->error());
 
-    std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> client_ctx(
+    socle::ossl::ssl_ctx_ptr client_ctx(
         SSL_CTX_new(TLS_client_method()), SSL_CTX_free);
     ASSERT_NE(client_ctx, nullptr);
     SSL_CTX_set_verify(client_ctx.get(), SSL_VERIFY_NONE, nullptr);
@@ -766,7 +767,7 @@ TEST_F(TLSIntegration, SSLComTreatsEofWithoutCloseNotifyAsTerminal) {
     server.on_accept_socket(server.socket());
     ASSERT_FALSE(transport->error());
 
-    std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> client_ctx(
+    socle::ossl::ssl_ctx_ptr client_ctx(
         SSL_CTX_new(TLS_client_method()), SSL_CTX_free);
     ASSERT_NE(client_ctx, nullptr);
     SSL_CTX_set_verify(client_ctx.get(), SSL_VERIFY_NONE, nullptr);
@@ -833,7 +834,7 @@ TEST_F(TLSIntegration, PendingTlsWriteTerminatesAfterAbruptPeerClose) {
     server.on_accept_socket(server.socket());
     ASSERT_FALSE(transport->error());
 
-    std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> client_ctx(
+    socle::ossl::ssl_ctx_ptr client_ctx(
         SSL_CTX_new(TLS_client_method()), SSL_CTX_free);
     ASSERT_NE(client_ctx, nullptr);
     SSL_CTX_set_verify(client_ctx.get(), SSL_VERIFY_NONE, nullptr);
@@ -886,7 +887,7 @@ TEST_F(TLSIntegration, PendingTlsWriteTerminatesAfterAbruptPeerClose) {
 }
 
 TEST_F(TLSIntegration, ResumedTls12SessionRetainsCleanShutdownSemantics) {
-    std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> client_ctx(
+    socle::ossl::ssl_ctx_ptr client_ctx(
         SSL_CTX_new(TLS_client_method()), SSL_CTX_free);
     ASSERT_NE(client_ctx, nullptr);
     SSL_CTX_set_verify(client_ctx.get(), SSL_VERIFY_NONE, nullptr);
@@ -897,7 +898,7 @@ TEST_F(TLSIntegration, ResumedTls12SessionRetainsCleanShutdownSemantics) {
     bool first_reused = false;
     bool second_reused = false;
     auto run_connection = [&](SSL_SESSION* offered_session, bool& reused)
-            -> std::unique_ptr<SSL_SESSION, decltype(&SSL_SESSION_free)> {
+            -> socle::ossl::ssl_session_ptr {
         SocketPair sockets;
         if (!sockets.valid())
             return {nullptr, SSL_SESSION_free};
@@ -936,7 +937,7 @@ TEST_F(TLSIntegration, ResumedTls12SessionRetainsCleanShutdownSemantics) {
             return {nullptr, SSL_SESSION_free};
 
         reused = SSL_session_reused(client.get()) == 1;
-        std::unique_ptr<SSL_SESSION, decltype(&SSL_SESSION_free)> session(
+        socle::ossl::ssl_session_ptr session(
             SSL_get1_session(client.get()), SSL_SESSION_free);
 
         const int first_shutdown = SSL_shutdown(client.get());
@@ -972,7 +973,7 @@ TEST_F(TLSIntegration, TLS13KeyUpdatePreservesTransferAndCleanShutdown) {
     server.on_accept_socket(server.socket());
     ASSERT_FALSE(transport->error());
 
-    std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> client_ctx(
+    socle::ossl::ssl_ctx_ptr client_ctx(
         SSL_CTX_new(TLS_client_method()), SSL_CTX_free);
     ASSERT_NE(client_ctx, nullptr);
     SSL_CTX_set_verify(client_ctx.get(), SSL_VERIFY_NONE, nullptr);
@@ -1048,7 +1049,7 @@ TEST_F(TLSIntegration, TLS13KeyUpdatePreservesTransferAndCleanShutdown) {
 }
 
 TEST_F(TLSIntegration, TLS13NewSessionTicketResumesAndShutsDownCleanly) {
-    std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> client_ctx(
+    socle::ossl::ssl_ctx_ptr client_ctx(
         SSL_CTX_new(TLS_client_method()), SSL_CTX_free);
     ASSERT_NE(client_ctx, nullptr);
     SSL_CTX_set_verify(client_ctx.get(), SSL_VERIFY_NONE, nullptr);
@@ -1063,7 +1064,7 @@ TEST_F(TLSIntegration, TLS13NewSessionTicketResumesAndShutsDownCleanly) {
     });
 
     auto run_connection = [&](SSL_SESSION* offered_session, bool& reused)
-            -> std::unique_ptr<SSL_SESSION, decltype(&SSL_SESSION_free)> {
+            -> socle::ossl::ssl_session_ptr {
         SocketPair sockets;
         if (!sockets.valid())
             return {nullptr, SSL_SESSION_free};
@@ -1116,7 +1117,7 @@ TEST_F(TLSIntegration, TLS13NewSessionTicketResumesAndShutsDownCleanly) {
             }
             server.write();
         }
-        std::unique_ptr<SSL_SESSION, decltype(&SSL_SESSION_free)> session(
+        socle::ossl::ssl_session_ptr session(
             captured, SSL_SESSION_free);
         if (!session || SSL_SESSION_is_resumable(session.get()) != 1)
             return {nullptr, SSL_SESSION_free};
@@ -1155,7 +1156,7 @@ TEST_F(TLSIntegration, PeerCertificateRejectionTerminatesHandshakeWithoutRetryLo
     server.on_accept_socket(server.socket());
     ASSERT_FALSE(transport->error());
 
-    std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> client_ctx(
+    socle::ossl::ssl_ctx_ptr client_ctx(
         SSL_CTX_new(TLS_client_method()), SSL_CTX_free);
     ASSERT_NE(client_ctx, nullptr);
     // Deliberately leave the trust store empty so the client emits a real
@@ -1196,7 +1197,7 @@ TEST_F(TLSIntegration, CorruptRecordAfterApplicationDataIsTerminal) {
     server.on_accept_socket(server.socket());
     ASSERT_FALSE(transport->error());
 
-    std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> client_ctx(
+    socle::ossl::ssl_ctx_ptr client_ctx(
         SSL_CTX_new(TLS_client_method()), SSL_CTX_free);
     ASSERT_NE(client_ctx, nullptr);
     SSL_CTX_set_verify(client_ctx.get(), SSL_VERIFY_NONE, nullptr);
@@ -1277,7 +1278,7 @@ TEST_F(TLSIntegration, ControlPathPerformanceTrace) {
     const double handshake_ms = milliseconds(started);
     std::cout << "TLS_PERF_STAGE memory_handshake " << handshake_ms << std::endl;
 
-    std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> shared_ctx(
+    socle::ossl::ssl_ctx_ptr shared_ctx(
         SSL_CTX_new(TLS_server_method()), SSL_CTX_free);
     ASSERT_NE(shared_ctx, nullptr);
     ASSERT_EQ(SSL_CTX_use_certificate(shared_ctx.get(), spoofed->chain.cert), 1);
@@ -1537,7 +1538,7 @@ TEST_F(TLSIntegration, SpoofPreservesIdentityAndUsesLocalCA) {
     ASSERT_NE(ca, nullptr);
     EXPECT_EQ(X509_NAME_cmp(X509_get_issuer_name(spoofed->chain.cert),
                             X509_get_subject_name(ca.get())), 0);
-    std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)> ca_key(
+    socle::ossl::pkey_ptr ca_key(
         X509_get_pubkey(ca.get()), EVP_PKEY_free);
     ASSERT_NE(ca_key, nullptr);
     EXPECT_EQ(X509_verify(spoofed->chain.cert, ca_key.get()), 1);
@@ -1796,9 +1797,9 @@ TEST_F(TLSIntegration, StapledOcspResponseVerifiesGoodAndRevokedStatus) {
         auto response = make_ocsp_response(
             issuer.get(), issuer_key.get(), {{certificate.get(), status}});
         ASSERT_NE(response, nullptr);
-        std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> context(
+        socle::ossl::ssl_ctx_ptr context(
             SSL_CTX_new(TLS_client_method()), SSL_CTX_free);
-        std::unique_ptr<SSL, decltype(&SSL_free)> ssl(
+        socle::ossl::ssl_ptr ssl(
             context ? SSL_new(context.get()) : nullptr, SSL_free);
         ASSERT_NE(context, nullptr);
         ASSERT_NE(ssl, nullptr);
@@ -1847,9 +1848,9 @@ TEST_F(TLSIntegration, InvalidStapledOcspSignatureFallsBackWhenStaplingIsOptiona
     OCSP_BASICRESP_free(basic);
     ASSERT_NE(invalid_response, nullptr);
 
-    std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> context(
+    socle::ossl::ssl_ctx_ptr context(
         SSL_CTX_new(TLS_client_method()), SSL_CTX_free);
-    std::unique_ptr<SSL, decltype(&SSL_free)> ssl(
+    socle::ossl::ssl_ptr ssl(
         context ? SSL_new(context.get()) : nullptr, SSL_free);
     ASSERT_NE(context, nullptr);
     ASSERT_NE(ssl, nullptr);

@@ -5,6 +5,7 @@
 #pragma once
 
 #include <string>
+#include <map>
 #include <vector>
 
 #include <service/cfgapi/cfg_tar.hpp>
@@ -41,6 +42,8 @@ public:
         // startup file. Only ENOENT becomes an empty native startup entry;
         // malformed, unreadable and unsafe inputs still fail migration.
         bool allow_missing_startup = false;
+        // Explicit schema migration inputs, used only for absent resource names.
+        std::map<std::string, std::string> resource_defaults = {};
     };
 
     struct Migration {

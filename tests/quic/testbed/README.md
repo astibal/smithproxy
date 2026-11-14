@@ -101,3 +101,23 @@ QUIC_SOAK_REPEATS=50 tools/quic-soak-test.sh
 The default thresholds reject an RSS trend above 32 MiB and an FD spread above
 256. They can be adjusted with `QUIC_SOAK_RSS_GROWTH_LIMIT_KB` and
 `QUIC_SOAK_FD_SPREAD_LIMIT` for slower sanitizer or constrained CI hosts.
+
+HTTP/3 TLS replacement
+----------------------
+
+`integration.h3_replacement` exercises local responses for self-signed,
+expired, not-yet-valid, untrusted and hostname-mismatched certificates, missing
+CT/staples and revoked/unknown/stale/future OCSP responses. Clients verify the
+proxy certificate; rejected origins must receive no application bytes.
+`unit.http3_replacement` covers framing, request completion, backpressure, FIN,
+reset, critical streams, resource bounds and GOAWAY.
+
+`tests/integration/h3_engine_suite.py` also runs the production daemon through
+`quic-replacement` in disposable namespaces. It checks both disabled override
+and the complete warning/challenge/reconnect/hard-TTL-expiry path. The origin
+has the wrong hostname and the client trusts only the proxy test CA.
+
+The configured warning ports, challenge store and override lifetime are shared
+with H1/H2. A grant is scoped to client IP, destination IP/port and client SNI.
+An already blocked H3 connection remains a local endpoint: successful override
+sends GOAWAY, and only a new connection can be admitted for forwarding.

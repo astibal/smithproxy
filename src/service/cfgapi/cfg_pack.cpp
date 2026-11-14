@@ -294,6 +294,15 @@ CfgTar CfgPack::build(const Input& input) {
         archive.add(file.archive_path, read_input(file.source_path), file.executable);
     }
 
+    for(const auto& [path, content] : input.resource_defaults) {
+        if(!CfgManifest::is_resource_path(path)) {
+            fail("invalid schema resource path: " + path);
+        }
+        if(!archive.contains(path)) {
+            archive.add(path, content);
+        }
+    }
+
     // A directory input represents one closed resource subtree. Traversal is
     // descriptor-relative, so a concurrent symlink swap cannot escape it.
     for(const auto& directory : input.directories) {

@@ -399,3 +399,18 @@ TEST_F(PackTest, RetiresActualExtensionlessInputOnlyForItsOwnArchive) {
     EXPECT_EQ(CfgPack::retire_legacy_config(source + ".cftar", source), source + ".old");
     EXPECT_FALSE(std::filesystem::exists(source));
 }
+
+TEST_F(PackTest, SchemaDefaultsCompleteLegacyResourcesWithoutReplacingCustomContent) {
+    const std::string custom = "templates/replacement/en/tls_reason.txt";
+    const std::string added = "templates/replacement/en/tls_redirect.txt";
+    input_.files.push_back({custom, write("custom.txt", ""), false});
+    input_.files.push_back({added, directory_ + "/missing.txt", false, true});
+    input_.resource_defaults = {{custom, "stock reason"}, {added, "new redirect"}};
+
+    auto archive = CfgPack::build(input_);
+
+    EXPECT_EQ(archive.at(custom).data, "");
+    EXPECT_EQ(archive.at(added).data, "new redirect");
+    input_.resource_defaults.emplace("smithproxy.cfg", "not a resource");
+    EXPECT_THROW(CfgPack::build(input_), CfgTarError);
+}

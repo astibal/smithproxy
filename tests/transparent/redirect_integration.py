@@ -485,7 +485,10 @@ def _run_case(binary: Path, source: Path, runtime: Path, tls: bool,
             if b"invalid or expired" not in beta_token:
                 raise AssertionError("alpha override token was accepted for beta SNI")
             accepted = tls_http_request(redirect_port, "alpha.invalid", action)
-            if b"applied, redirecting" not in accepted:
+            # Acceptance is an HTTP success followed by a redirect to the original
+            # target. The template's human-readable wording is not the contract;
+            # the requests below also verify the effective SNI-scoped grant.
+            if not accepted.startswith(b"HTTP/1.1 200 "):
                 raise AssertionError(
                     f"alpha override was not accepted; attacked={attacked_action!r}, "
                     f"selected={action!r}: {accepted[:300]!r}")

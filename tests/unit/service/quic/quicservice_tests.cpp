@@ -1323,7 +1323,8 @@ TEST(QuicErrorStats, KeylogRejectsMissingCallbackOwner) {
 #if SMITHPROXY_OPENSSL_QUIC
 // Reusing a moved packet must never overwrite the payload now owned by its inbox.
 TEST(QuicSocketReceive, ReusedMovedPacketOwnsFreshPayload) {
-    auto socket = socle::raw::fd(::socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP));
+    socle::raw::var<int> socket {::socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP),
+        [](int& fd) { if (fd >= 0) ::close(fd); }};
     ASSERT_GE(socket.value, 0);
     sockaddr_in local {};
     local.sin_family = AF_INET;

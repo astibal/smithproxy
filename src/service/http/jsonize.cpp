@@ -1,3 +1,4 @@
+#include <ossl_util.hpp>
 #include "jsonize.hpp"
 #include <libconfig.h++>
 
@@ -13,23 +14,14 @@ namespace jsonize {
         if (com and not com->opt.bypass) {
 
             auto ssl = com->get_SSL();
-            SSL_SESSION const *session = ssl != nullptr ? SSL_get_session(ssl) : nullptr;
+            auto session = socle::ossl::session_details(ssl);
 
-            if (ssl and session) {
-                auto *cipher_str = SSL_CIPHER_get_name(SSL_SESSION_get0_cipher(session));
-                int has_ticket = SSL_SESSION_has_ticket(session);
-                unsigned long lifetime_hint = -1;
-                if (has_ticket > 0) {
-                    lifetime_hint = SSL_SESSION_get_ticket_lifetime_hint(session);
-                }
-
-                auto tls_ver = SSL_get_version(ssl);
-
-                ret["version"] = tls_ver;
-                ret["cipher"] = cipher_str;
-                ret["has_ticket"] = has_ticket > 0;
-                if (has_ticket) {
-                    ret["ticket"]["lifetime_hint"] = lifetime_hint;
+            if (session) {
+                ret["version"] = session->transport_version;
+                ret["cipher"] = session->cipher;
+                ret["has_ticket"] = session->has_ticket;
+                if (session->has_ticket) {
+                    ret["ticket"]["lifetime_hint"] = session->ticket_lifetime_hint;
                 }
 
                 if (!com->is_server()) {
@@ -48,9 +40,9 @@ namespace jsonize {
 
                 }
 
-                const char *sni = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
+                auto sni = socle::ossl::server_name(ssl);
                 if (sni) {
-                    ret["sni"] = sni;
+                    ret["sni"] = *sni;
                 }
 
                 if (not com->alpn().empty()) {

@@ -1,3 +1,4 @@
+#include <ossl_util.hpp>
 #include "proxy/quic/openssl.hpp"
 #include "service/quic/quicservice.hpp"
 
@@ -246,7 +247,7 @@ int run_client(std::string const& directory, std::string const& address,
         std::this_thread::sleep_for(1ms);
     }
     if (!connection->handshake_complete() || connection->negotiated_alpn() != "h3") {
-        std::unique_ptr<X509, decltype(&X509_free)> failed_certificate(
+        socle::ossl::x509_ptr failed_certificate(
             SSL_get1_peer_certificate(connection->handle_native()), X509_free);
         char subject[512] = "-";
         char issuer[512] = "-";
@@ -263,7 +264,7 @@ int run_client(std::string const& directory, std::string const& address,
                   << " errors=" << quic::openssl_error_stack() << '\n';
         return 3;
     }
-    std::unique_ptr<X509, decltype(&X509_free)> certificate(
+    socle::ossl::x509_ptr certificate(
         SSL_get1_peer_certificate(connection->handle_native()), X509_free);
     if (!certificate
         || X509_check_host(certificate.get(), sni.c_str(), sni.size(), 0, nullptr) != 1) {

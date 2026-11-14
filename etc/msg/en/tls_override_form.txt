@@ -1,0 +1,4 @@
+<form action="/SM/IT/HP/RO/XY/override/{{ token }}" method="get">
+    <input type="hidden" name="orig_url" value="{{ original_target }}">
+    <input type="submit" value="Override" class="btn-red">
+</form>
