@@ -1210,20 +1210,22 @@ bool SmithProxy::apply_config_hooks(bool reload) {
     // lock is needed here to not try to match against potentially empty/partial policy list
     std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
     try {
-        auto& directory = CfgFactory::get()->dir_msg_templates;
-        const auto native = CfgFactory::get()->native_resources(
-            "templates/replacement/en", directory,
-            {"test.txt", "html_page.txt", "html_img_warning.txt",
-             "tls_replacement.txt", "tls_override_form.txt",
-             "tls_reason.txt", "tls_certificate_field.txt",
-             "tls_certificate_details.txt", "tls_replacement_error.txt",
-             "tls_redirect.txt", "tls_redirect_top.txt",
-             "tls_replacement_common.txt",
-             "tls_replacement_light.txt", "tls_replacement_dark.txt",
-             "tls_replacement_branded.txt"});
-        if(reload && !html()->load_files(directory, native)) {
-            _err("Cannot reload messages from '%s'; keeping the previous complete template set",
-                 CfgFactory::get()->dir_msg_templates.c_str());
+        if(reload) {
+            auto& directory = CfgFactory::get()->dir_msg_templates;
+            const auto native = CfgFactory::get()->native_resources(
+                "templates/replacement/en", directory,
+                {"test.txt", "html_page.txt", "html_img_warning.txt",
+                 "tls_replacement.txt", "tls_override_form.txt",
+                 "tls_reason.txt", "tls_certificate_field.txt",
+                 "tls_certificate_details.txt", "tls_replacement_error.txt",
+                 "tls_redirect.txt", "tls_redirect_top.txt",
+                 "tls_replacement_common.txt",
+                 "tls_replacement_light.txt", "tls_replacement_dark.txt",
+                 "tls_replacement_branded.txt"});
+            if(!html()->load_files(directory, native)) {
+                _err("Cannot reload messages from '%s'; keeping the previous complete template set",
+                     CfgFactory::get()->dir_msg_templates.c_str());
+            }
         }
 
         // don't mess with logging if just reloading

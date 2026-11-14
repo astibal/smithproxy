@@ -1,3 +1,4 @@
+#include <schema_resources.hpp>
 #include <service/helper_log.hpp>
 /*
     Smithproxy- transparent proxy with SSL inspection capabilities.
@@ -371,13 +372,13 @@ std::vector<sx::cfg::CfgPack::File> legacy_cftar_resources(
         File{"templates/replacement/en/html_page.txt", message_directory + "html_page.txt"},
         File{"templates/replacement/en/html_img_warning.txt", message_directory + "html_img_warning.txt"},
         File{"templates/replacement/en/tls_replacement.txt", message_directory + "tls_replacement.txt"},
-        File{"templates/replacement/en/tls_override_form.txt", message_directory + "tls_override_form.txt"},
-        File{"templates/replacement/en/tls_reason.txt", message_directory + "tls_reason.txt"},
-        File{"templates/replacement/en/tls_certificate_field.txt", message_directory + "tls_certificate_field.txt"},
-        File{"templates/replacement/en/tls_certificate_details.txt", message_directory + "tls_certificate_details.txt"},
-        File{"templates/replacement/en/tls_replacement_error.txt", message_directory + "tls_replacement_error.txt"},
-        File{"templates/replacement/en/tls_redirect.txt", message_directory + "tls_redirect.txt"},
-        File{"templates/replacement/en/tls_redirect_top.txt", message_directory + "tls_redirect_top.txt"},
+        File{"templates/replacement/en/tls_override_form.txt", message_directory + "tls_override_form.txt", false, true},
+        File{"templates/replacement/en/tls_reason.txt", message_directory + "tls_reason.txt", false, true},
+        File{"templates/replacement/en/tls_certificate_field.txt", message_directory + "tls_certificate_field.txt", false, true},
+        File{"templates/replacement/en/tls_certificate_details.txt", message_directory + "tls_certificate_details.txt", false, true},
+        File{"templates/replacement/en/tls_replacement_error.txt", message_directory + "tls_replacement_error.txt", false, true},
+        File{"templates/replacement/en/tls_redirect.txt", message_directory + "tls_redirect.txt", false, true},
+        File{"templates/replacement/en/tls_redirect_top.txt", message_directory + "tls_redirect_top.txt", false, true},
         File{"templates/replacement/en/tls_replacement_common.txt", message_directory + "tls_replacement_common.txt"},
         File{"templates/replacement/en/tls_replacement_light.txt", message_directory + "tls_replacement_light.txt"},
         File{"templates/replacement/en/tls_replacement_dark.txt", message_directory + "tls_replacement_dark.txt"},
@@ -868,12 +869,18 @@ int main(int argc, char *argv[]) {
     if(CONFIG_LOADED) {
         bool upgraded_status = false;
 
-        if(not CfgFactory::get()->config_file_check_only) {
+        try {
+            // Check-only runs the same schema steps in memory, without writes.
             upgraded_status = CfgFactory::get()->upgrade_and_save();
             if(upgraded_status) {
                 _not("config file has been upgraded");
                 log.event(NOT, "Configuration updated and saved");
             }
+        }
+
+        catch(const std::exception& error) {
+            _fat("Configuration upgrade failed: %s", error.what());
+            return EXIT_FAILURE;
         }
 
         bool migrated_to_cftar = false;
@@ -891,6 +898,8 @@ int main(int argc, char *argv[]) {
                     sx::cfg::CfgArchive::native_path_for(
                         CfgFactory::get()->config_file),
                 };
+                migration.input.resource_defaults = sx::cfg::schema_1051_resources();
+
                 // Default identities are explicit files. Custom TLS identity
                 // collections move into purpose-oriented server/client and
                 // SNI/IP namespaces instead of preserving legacy cc-* names.

@@ -5,6 +5,7 @@
 #pragma once
 
 #include <optional>
+#include <map>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -154,7 +155,10 @@ public:
     // Prepare a complete replacement and, for native storage, the exact
     // previously accepted archive. The caller persists previous first and
     // must not install replacement when that recovery write fails.
-    CfgSaveData prepare_save(std::string main_config) const;
+    // Schema additions are committed in the same generation as the new schema.
+    // Existing entries, including deliberately empty/custom templates, win.
+    CfgSaveData prepare_save(std::string main_config,
+        const std::map<std::string, std::string>& additions = {}) const;
 
     // Prepare one resource edit in a copied archive. nullopt removes an
     // existing resource; content adds or replaces it. Control files cannot be

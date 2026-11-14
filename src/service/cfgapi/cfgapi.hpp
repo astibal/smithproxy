@@ -155,6 +155,8 @@ class CfgFactory : public CfgFactoryBase {
     // mutable because the historically const save_config() advances the cached
     // archive only after durable replacement succeeds.
     mutable std::optional<sx::cfg::CfgArchive> config_archive_;
+    // Populated only by explicit schema steps, published with the main config.
+    mutable std::map<std::string, std::string> schema_resource_additions_;
     // A restored archive is the next startup configuration, while cfgapi still
     // describes the running process. Block ordinary saves until restart so the
     // explicitly restored bytes cannot be overwritten by that older state.
@@ -176,7 +178,7 @@ class CfgFactory : public CfgFactoryBase {
 public:
     // Each version bump implies a config upgrade - we start on 1000
     // see upgrade_schema() - control config upgrade
-    constexpr static inline const int SCHEMA_VERSION  = 1050;
+    constexpr static inline const int SCHEMA_VERSION  = 1051;
 
     static inline std::atomic_bool LOAD_ERRORS = false;
     static constexpr std::string_view CT_UNAVAILABLE_WARNING =
