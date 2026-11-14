@@ -1,9 +1,13 @@
 #include <gtest/gtest.h>
 
 #include <proxy/mitmproxy_utils.hpp>
+#include <proxy/mitmproxy.hpp>
 #include <proxy/proxymaker_utils.hpp>
 #include <staticcontent.hpp>
 
+#include <openssl/x509v3.h>
+#include <fstream>
+#include <cstdlib>
 #include <algorithm>
 #include <map>
 #include <memory>
@@ -435,4 +439,183 @@ TEST(MitmProxyTlsState, ClientCertificateRequestIsNotACertificateValidationFailu
     EXPECT_TRUE(sx::mitmproxy::tls_verification_failed(
         invalid | requested, ok, requested));
     EXPECT_FALSE(sx::mitmproxy::tls_verification_failed(requested, ok, requested));
+}
+
+TEST(MitmProxyReplacement, SharedRendererEnforcesScopedSingleUseOverrideAndExpiry) {
+    std::string messages = "etc/msg/en/";
+    ASSERT_TRUE(html()->load_files(messages));
+    SSLCom verification;
+    verification.opt.cert.failed_check_override = true;
+    verification.opt.cert.failed_check_override_timeout = 10;
+    verification.verify_reset(SSLCom::verify_status_t::VRF_UNKNOWN_ISSUER);
+    sx::engine::http::app_HttpRequest request;
+    request.version = sx::engine::http::app_HttpRequest::HTTP_VER::HTTP3;
+    request.http_data.method = "GET";
+    request.http_data.proto = "https://";
+    request.http_data.host = "test.example";
+    request.http_data.uri = "/SM/IT/HP/RO/XY/warning";
+    request.http_data.params = "orig_url=%2Fhello%3Fx%3D1";
+    const std::string scope = "replacement-unit:one";
+    auto warning = MitmProxy::build_tls_replacement(&verification, &request, scope);
+    EXPECT_EQ(warning.status, 403);
+    EXPECT_FALSE(warning.override_applied);
+    const std::string prefix = "/SM/IT/HP/RO/XY/override/";
+    auto token_start = warning.body.find(prefix);
+    ASSERT_NE(token_start, std::string::npos);
+    auto token = warning.body.substr(token_start + prefix.size(), 32);
+    ASSERT_EQ(token.size(), 32);
+    request.http_data.uri = prefix + token;
+    auto wrong_scope = MitmProxy::build_tls_replacement(&verification, &request, "replacement-unit:two");
+    EXPECT_FALSE(wrong_scope.override_applied);
+    EXPECT_EQ(wrong_scope.status, 403);
+    auto accepted = MitmProxy::build_tls_replacement(&verification, &request, scope);
+    EXPECT_TRUE(accepted.override_applied);
+    EXPECT_EQ(accepted.status, 200);
+    EXPECT_NE(accepted.body.find("/hello?x=1"), std::string::npos);
+    EXPECT_TRUE(MitmProxy::tls_override_active(scope, verification.opt.cert));
+    EXPECT_FALSE(MitmProxy::tls_override_active("replacement-unit:two", verification.opt.cert));
+    auto replay = MitmProxy::build_tls_replacement(&verification, &request, scope);
+    EXPECT_FALSE(replay.override_applied);
+    {
+        auto lock = std::scoped_lock(MitmProxy::whitelist_verify().getlock());
+        auto entry = MitmProxy::whitelist_verify().get(scope);
+        ASSERT_TRUE(entry);
+        entry->expired_at() = std::time(nullptr) - 1;
+    }
+    EXPECT_FALSE(MitmProxy::tls_override_active(scope, verification.opt.cert));
+}
+
+TEST(MitmProxyReplacement, SharedRendererRejectsDisabledExpiredAndInvalidTtlOverrides) {
+    SSLCom verification;
+    sx::engine::http::app_HttpRequest request;
+    request.http_data.uri = "/SM/IT/HP/RO/XY/override/0123456789abcdef0123456789abcdef";
+    auto const scope = "replacement-unit:denied";
+    auto issue = [&](std::time_t now) {
+        MitmProxy::override_challenges().issue(scope,
+            "0123456789abcdef0123456789abcdef", now, 120);
+    };
+    issue(std::time(nullptr));
+    verification.opt.cert.failed_check_override = false;
+    EXPECT_EQ(MitmProxy::build_tls_replacement(&verification, &request, scope).reason, "override disabled");
+    verification.opt.cert.failed_check_override = true;
+    verification.opt.cert.failed_check_override_timeout = -1;
+    EXPECT_EQ(MitmProxy::build_tls_replacement(&verification, &request, scope).reason, "invalid override timeout");
+    verification.opt.cert.failed_check_override_timeout = 10;
+    issue(std::time(nullptr) - 121);
+    EXPECT_EQ(MitmProxy::build_tls_replacement(&verification, &request, scope).reason, "invalid override challenge");
+    EXPECT_FALSE(MitmProxy::tls_override_active(scope, verification.opt.cert));
+}
+
+
+TEST(MitmProxyReplacement, CertificateDetailsEscapePeerDataAndShowOriginalEvidence) {
+    std::string messages = "etc/msg/en/";
+    ASSERT_TRUE(html()->load_files(messages));
+    struct CertificateEvidence : SSLCom {
+        using SSLCom::sslcom_target_cert;
+    } verification;
+    verification.sslcom_target_cert = X509_new();
+    auto* certificate = verification.target_cert();
+    ASSERT_NE(certificate, nullptr);
+    ASSERT_EQ(X509_set_version(certificate, 2), 1);
+    ASSERT_EQ(ASN1_INTEGER_set(X509_get_serialNumber(certificate), 42), 1);
+    auto* subject = X509_get_subject_name(certificate);
+    ASSERT_EQ(X509_NAME_add_entry_by_txt(subject, "CN", MBSTRING_ASC,
+        reinterpret_cast<unsigned char const*>("wrong.example<script>"), -1, -1, 0), 1);
+    ASSERT_EQ(X509_set_issuer_name(certificate, subject), 1);
+    ASSERT_EQ(ASN1_TIME_set_string(X509_getm_notBefore(certificate), "20200101000000Z"), 1);
+    ASSERT_EQ(ASN1_TIME_set_string(X509_getm_notAfter(certificate), "20210101000000Z"), 1);
+    auto san = std::unique_ptr<X509_EXTENSION, decltype(&X509_EXTENSION_free)>(
+        X509V3_EXT_conf_nid(nullptr, nullptr, NID_subject_alt_name,
+                           "DNS:wrong.example,DNS:other.example"), X509_EXTENSION_free);
+    ASSERT_TRUE(san);
+    ASSERT_EQ(X509_add_ext(certificate, san.get(), -1), 1);
+    auto context = std::unique_ptr<EVP_PKEY_CTX, decltype(&EVP_PKEY_CTX_free)>(
+        EVP_PKEY_CTX_new_id(EVP_PKEY_EC, nullptr), EVP_PKEY_CTX_free);
+    ASSERT_TRUE(context);
+    ASSERT_EQ(EVP_PKEY_keygen_init(context.get()), 1);
+    ASSERT_EQ(EVP_PKEY_CTX_set_ec_paramgen_curve_nid(context.get(), NID_X9_62_prime256v1), 1);
+    EVP_PKEY* generated = nullptr;
+    ASSERT_EQ(EVP_PKEY_keygen(context.get(), &generated), 1);
+    auto key = std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)>(generated, EVP_PKEY_free);
+    ASSERT_EQ(X509_set_pubkey(certificate, key.get()), 1);
+    ASSERT_GT(X509_sign(certificate, key.get(), EVP_sha256()), 0);
+    verification.verify_reset(SSLCom::verify_status_t::VRF_INVALID);
+    verification.verify_bitset(SSLCom::verify_status_t::VRF_HOSTNAME_FAILED);
+    sx::engine::http::app_HttpRequest request;
+    request.http_data.host = "requested.example";
+    request.http_data.proto = "https://";
+    auto page = MitmProxy::replacement_ssl_page(&verification, &request, "");
+    EXPECT_NE(page.find("<summary>More information</summary>"), std::string::npos);
+    EXPECT_EQ(page.find("<script>"), std::string::npos);
+    EXPECT_NE(page.find(R"(\&lt;script\&gt;)"), std::string::npos);
+    EXPECT_NE(page.find("DNS:wrong.example, DNS:other.example"), std::string::npos);
+    EXPECT_NE(page.find("Expired."), std::string::npos);
+    EXPECT_NE(page.find("Client application asked for SNI server is not offering"), std::string::npos);
+    EXPECT_NE(page.find("SHA-256 fingerprint</dt><dd>"), std::string::npos);
+    EXPECT_EQ(page.find("SHA-256 fingerprint</dt><dd>Unavailable"), std::string::npos);
+    EXPECT_EQ(page.find("BEGIN CERTIFICATE"), std::string::npos);
+    if (auto* preview = std::getenv("SX_TLS_DETAILS_PREVIEW")) std::ofstream(preview) << page;
+
+    ASSERT_EQ(ASN1_TIME_set_string(X509_getm_notBefore(certificate), "20990101000000Z"), 1);
+    ASSERT_EQ(ASN1_TIME_set_string(X509_getm_notAfter(certificate), "21000101000000Z"), 1);
+    page = MitmProxy::replacement_ssl_page(&verification, &request, "");
+    EXPECT_NE(page.find("Not yet valid."), std::string::npos);
+}
+
+TEST(MitmProxyReplacement, CertificateDetailsHandleMissingEvidenceAndDoNotLeakBetweenPages) {
+    std::string messages = "etc/msg/en/";
+    ASSERT_TRUE(html()->load_files(messages));
+    SSLCom verification;
+    verification.verify_reset(SSLCom::verify_status_t::VRF_ALLFAILED);
+    sx::engine::http::app_HttpRequest request;
+    request.http_data.host = "missing.example";
+    auto page = MitmProxy::replacement_ssl_page(&verification, &request, "");
+    EXPECT_NE(page.find("Certificate unavailable"), std::string::npos);
+    EXPECT_NE(page.find("It was not possible to obtain certificate status"), std::string::npos);
+    page = MitmProxy::replacement_ssl_page(nullptr, &request, "");
+    EXPECT_NE(page.find("Verification details unavailable"), std::string::npos);
+    page = html()->render_tls_replacement("another.example", "", "");
+    EXPECT_EQ(page.find("<details"), std::string::npos);
+    EXPECT_EQ(page.find("missing.example"), std::string::npos);
+}
+
+TEST(MitmProxyReplacement, OverrideFormUsesFileTemplateWithEscapedValuesAndNoStaleState) {
+    std::string messages = "etc/msg/en/";
+    ASSERT_TRUE(html()->load_files(messages));
+
+    auto form = html()->render_tls_override_form(
+        "0123456789abcdef", sx::mitmproxy::html_escape("/path?x=\"<tag>&y=1"));
+
+    EXPECT_NE(form.find("/SM/IT/HP/RO/XY/override/0123456789abcdef"), std::string::npos);
+    EXPECT_NE(form.find("/path?x=&quot;&lt;tag&gt;&amp;y=1"), std::string::npos);
+    EXPECT_EQ(form.find("<tag>"), std::string::npos);
+
+    auto second = html()->render_tls_override_form("another-token", "/next");
+
+    EXPECT_EQ(second.find("0123456789abcdef"), std::string::npos);
+    EXPECT_EQ(second.find("/path?"), std::string::npos);
+    EXPECT_NE(second.find("/next"), std::string::npos);
+}
+
+TEST(MitmProxyReplacement, FragmentsEscapeTextAndKeepRenderedMarkupAndStateSeparate) {
+    std::string messages = "etc/msg/en/";
+    ASSERT_TRUE(html()->load_files(messages));
+
+    auto reason = html()->render_fields("tls_reason", {
+        {"severity_class", " reason-critical"}, {"number", "1"},
+        {"text", sx::mitmproxy::html_escape("unsafe <script> & issuer")}
+    });
+    EXPECT_NE(reason.find("class=\"reason reason-critical\""), std::string::npos);
+    EXPECT_NE(reason.find("unsafe &lt;script&gt; &amp; issuer"), std::string::npos);
+
+    auto details = html()->render_fields("tls_certificate_details", {
+        {"reasons", reason}, {"fields", ""}
+    });
+    EXPECT_NE(details.find(reason), std::string::npos);
+    EXPECT_EQ(details.find("&amp;lt;"), std::string::npos);
+
+    auto next = html()->render_fields("tls_reason", {{"number", "2"}, {"text", "next"}});
+    EXPECT_NE(next.find("class=\"reason\""), std::string::npos);
+    EXPECT_EQ(next.find("unsafe"), std::string::npos);
+    EXPECT_EQ(next.find("reason-critical"), std::string::npos);
 }

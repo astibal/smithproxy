@@ -80,10 +80,17 @@ def main():
         targets += ['smithproxy', 'smithproxy-cftar']
     stage('build', ['cmake', '--build', str(build), '--target', *targets, '-j', str(args.jobs)], 1800)
     stage('units', ['ctest', '--test-dir', str(build), '--output-on-failure',
-                    '-R', r'^unit\.(http3|http3_capture|protocol_views)$'], 180)
+                    '-R', r'^unit\.(http3|http3_capture|http3_replacement|protocol_views)$'], 180)
     if not args.unit_only:
+        stage('replacement', ['ctest', '--test-dir', str(build), '--output-on-failure',
+                              '-R', r'^integration\.h3_replacement$'], 180)
         driver = source / 'tests/integration/master_policy_revalidation.py'
         for iteration in range(1, args.repeat + 1):
+            for override in ('0', '1'):
+                stage(f'replacement-{override}-{iteration}',
+                      ['unshare', '-Urn', sys.executable, str(driver), str(build / 'smithproxy'),
+                       str(output / f'replacement-{override}-{iteration}')], 90,
+                      {'REVALIDATION_CASES': 'quic-replacement', 'H3_REPLACEMENT_OVERRIDE': override})
             for case in ('static', 'dynamic', 'dynamic-fragmented'):
                 name = f'{case}-{iteration}'
                 stage(name, ['unshare', '-Urn', sys.executable, str(driver),

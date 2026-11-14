@@ -8,6 +8,7 @@
 #include <sslcom.hpp>
 #include <vars.hpp>
 #include <atomic>
+#include <mutex>
 
 namespace sx::quic {
 
@@ -17,13 +18,19 @@ namespace sx::quic {
 class certificate_verifier final : public SSLCom {
 public:
     // Translate the session's policy snapshot into the shared SSLCom checks.
-    // QUIC admits explicit exceptions, but does not serve a replacement page.
+    // Completing TLS for a replacement never authorizes application forwarding.
     explicit certificate_verifier(proxymaker::QuicTlsPolicy policy) : policy_(policy) {
         opt.cert.allow_self_signed = policy.allow_self_signed;
         opt.cert.allow_unknown_issuer = policy.allow_untrusted_issuers;
         opt.cert.allow_self_signed_chain = policy.allow_untrusted_issuers;
         opt.cert.allow_not_valid = policy.allow_invalid_certs;
-        opt.cert.failed_check_replacement = false;
+
+        // The probe may finish TLS to consult an existing configured override.
+        // Its completion does not enable a local page or authorize forwarding.
+        opt.cert.failed_check_replacement = policy.failed_check_replacement || policy.failed_check_override;
+        opt.cert.failed_check_override = policy.failed_check_override;
+        opt.cert.failed_check_override_timeout = policy.failed_check_override_timeout;
+        opt.cert.failed_check_override_timeout_type = policy.failed_check_override_timeout_type;
 
         opt.ct_enable = policy.ct_enable;
         opt.ocsp.stapling_enabled = policy.ocsp_stapling;
@@ -45,8 +52,12 @@ public:
     // An allowed invalid origin must not produce a normally trusted MITM identity.
     bool trusted() const { return !exception_; }
 
-    // Read the worker's published result: 0 pending, 1 accepted, -1 rejected.
+    // 0 pending, 1 accepted, -2 certificate rejected, -1 internal failure.
     int verdict() const { return result_->load(std::memory_order_acquire); }
+    bool replacement_required() const { return verdict() == -2 && policy_.failed_check_replacement && !override_accepted_; }
+    bool override_accepted() const { return override_accepted_; }
+    void accept_override() { override_accepted_ = true; }
+    void reject_identity() { verify_bitset(SSLCom::verify_status_t::VRF_HOSTNAME_FAILED); finish(-2); }
 
     // Look up the verifier attached before the upstream handshake; may be null
     // for connections that intentionally bypass verification in the testbed.
@@ -103,14 +114,26 @@ public:
 
     // Advance admission without blocking the event loop. Chain/CT checks have
     // already run during TLS; revocation is submitted once and polled thereafter.
-    // Returns 0 while pending, 1 on acceptance, or -1 on any failure.
+    // Returns 0 pending, 1 accepted, -2 policy rejection, -1 internal failure.
     int progress(SSL* ssl) {
         if (!ssl) {
             ++stats.errors.verifier_progress_missing_ssl;
             return finish(-1);
         }
         if (started_) {
-            return verdict();
+            const auto result = verdict();
+
+            if (result != 0 && !revocation_imported_) {
+                std::scoped_lock lock(revocation_evidence_->lock);
+
+                if (revocation_evidence_->ready) {
+                    verify_bitset(revocation_evidence_->flags);
+                    verify_extended_info() = revocation_evidence_->details;
+                    revocation_imported_ = true;
+                }
+            }
+
+            return result;
         }
         if (!SSL_is_init_finished(ssl)) {
             return 0;
@@ -132,7 +155,8 @@ public:
         exception_ = SSL_get_verify_result(ssl) != X509_V_OK;
         if (!is_verify_status_opt_allowed()) {
             ++stats.errors.verifier_progress_policy_rejected;
-            return finish(-1);
+
+            return finish(-2);
         }
         if (!opt.ocsp.stapling_enabled && opt.ocsp.mode == 0) {
             return finish(1);
@@ -224,6 +248,7 @@ private:
     std::unique_ptr<certificate_verifier> make_revocation_snapshot(SSL* ssl) {
         auto snapshot = std::make_unique<certificate_verifier>(policy_);
         snapshot->verify_reset(static_cast<verify_status_t>(verify_get()));
+        snapshot->verify_extended_info() = verify_extended_info();
         snapshot->sslcom_ssl = SSL_new(factory()->default_tls_client_cx());
         if (!snapshot->sslcom_ssl) {
             ++stats.errors.verifier_snapshot_ssl_failed;
@@ -256,14 +281,25 @@ private:
 
     // The task owns certificate material, but only weakly references its result.
     // Session teardown can therefore discard admission without waiting for I/O.
+    struct revocation_evidence {
+        std::mutex lock;
+        unsigned flags = 0;
+
+        vrf_other_list details;
+
+        bool ready = false;
+    };
+
     struct revocation_task final : sx::tp::PoolTask {
         std::unique_ptr<certificate_verifier> snapshot;
         std::weak_ptr<std::atomic_int> result;
+        std::shared_ptr<revocation_evidence> evidence;
 
         // Take the prepared snapshot and the pending-work slot reserved by enqueue.
         revocation_task(std::unique_ptr<certificate_verifier> value,
-                        std::shared_ptr<std::atomic_int> const& output)
-            : snapshot(std::move(value)), result(output) {}
+                        std::shared_ptr<std::atomic_int> const& output,
+                        std::shared_ptr<revocation_evidence> details)
+            : snapshot(std::move(value)), result(output), evidence(std::move(details)) {}
 
         // Release the slot on completion, cancellation, or queue rejection alike.
         ~revocation_task() override { --pending_; }
@@ -280,7 +316,15 @@ private:
             try {
                 bool const accepted = SSLCom::status_resp_callback(snapshot->sslcom_ssl, nullptr) == 1
                     && snapshot->is_verify_status_opt_allowed();
-                verdict = accepted ? 1 : -1;
+                {
+                    std::scoped_lock lock(evidence->lock);
+
+                    evidence->flags = snapshot->verify_get();
+                    evidence->details = snapshot->verify_extended_info();
+                    evidence->ready = true;
+                }
+
+                verdict = accepted ? 1 : -2;
             } catch (...) {
                 ++stats.errors.certificate_verifier_execute_exception;
                 logging::ocsp().err("snapshot=%p revocation checks raised an exception",
@@ -316,7 +360,8 @@ private:
         // Allocation or queue exceptions must not permanently consume capacity.
         reserved.value = true;
         try {
-            auto task = std::make_unique<revocation_task>(std::move(snapshot), result_);
+            auto task = std::make_unique<revocation_task>(std::move(snapshot), result_, revocation_evidence_);
+
             reserved.release(); // The task destructor now releases the slot.
             if (sx::tp::ThreadPool::instance::get().enqueue(std::move(task)) > 0) return true;
             ++stats.errors.verifier_revocation_queue_rejected;
@@ -350,6 +395,9 @@ private:
         [](auto*& value) { sk_X509_pop_free(value, X509_free); }};
     bool started_ = false;
     bool exception_ = false;
+    bool override_accepted_ = false;
+    bool revocation_imported_ = false;
+    std::shared_ptr<revocation_evidence> revocation_evidence_ = std::make_shared<revocation_evidence>();
     std::shared_ptr<std::atomic_int> result_ = std::make_shared<std::atomic_int>(0);
 
     static constexpr unsigned max_pending_revocations = 64;

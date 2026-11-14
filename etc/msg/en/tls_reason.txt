@@ -1,0 +1,4 @@
+<section class="reason{{ severity_class }}">
+    <h3>Reason {{ number }}</h3>
+    <p>{{ text }}</p>
+</section>

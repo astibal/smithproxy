@@ -110,6 +110,8 @@ struct session_snapshot {
     std::uint64_t age_ms = 0;          ///< Milliseconds since the session was accepted.
     std::uint64_t idle_ms = 0;         ///< Milliseconds since bytes were last forwarded.
     std::uint64_t forwarded_bytes = 0; ///< Bytes moved across all paired streams.
+    std::uint64_t replacement_bytes = 0; ///< Client/local responder I/O, never forwarded.
+    bool local_replacement = false;
     std::size_t streams = 0;           ///< Currently paired logical streams.
     std::size_t queued_bytes = 0;       ///< Bytes held due to stream backpressure.
     std::size_t stream_limit_rejections = 0; ///< Streams refused by the resource limit.
@@ -310,11 +312,13 @@ private:
         std::shared_ptr<sx::session_traffic_log> capture_log; ///< Policy-bound wire journal.
         std::uint64_t capture_association = 0; ///< Downstream dispatcher CID family.
         std::size_t keylog_cursor = 0; ///< Number of keylog records already published.
+        bool local_replacement = false; ///< Local responder never receives an upstream endpoint.
         std::unique_ptr<multiflow::flow_proxy> proxy;
         unsigned ingress_ifindex = 0; ///< Interface captured at admission.
         datagram_endpoint client_endpoint;
         datagram_endpoint target_endpoint;
         std::uint64_t forwarded_bytes = 0;
+        std::uint64_t replacement_bytes = 0;
         std::size_t reported_stream_limit_rejections = 0; ///< Counter delta cursor.
     };
     std::vector<session> sessions_;              ///< Worker-owned live/draining sessions.

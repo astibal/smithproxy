@@ -41,6 +41,7 @@
 #ifndef MITMPROXY_HPP
  #define MITMPROXY_HPP
 
+#include <proxy/proxymaker_connect.hpp>
 #include <proxy/master_policy.hpp>
 #include <proxy/policy_input.hpp>
 #include <atomic>
@@ -282,6 +283,11 @@ public:
     bool is_white_listed(MitmHostCX const* mh, SSLCom* peercom = nullptr);
     virtual bool handle_com_response_ssl(MitmHostCX* cx);
     virtual void handle_replacement_ssl(MitmHostCX* cx);
+    using TlsReplacement = sx::proxymaker::TlsReplacement;
+    static TlsReplacement build_tls_replacement(SSLCom* verification,
+        sx::engine::http::app_HttpRequest const* request, std::string const& scope);
+    static bool tls_override_active(std::string const& scope, SSLComOptionsCert const& options);
+
     bool write_replacement_response(MitmHostCX* cx, std::string const& body,
                                     unsigned status = 200);
 

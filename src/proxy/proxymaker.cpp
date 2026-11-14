@@ -41,6 +41,7 @@
 #include <proxy/mitmproxy.hpp>
 
 #include <proxy/proxymaker.hpp>
+#include <service/cfgapi/profile_runtime_options.hpp>
 #include <proxy/proxymaker_policy.hpp>
 #include <proxy/network_policy.hpp>
 #include <proxy/revalidation_result.hpp>
@@ -416,6 +417,33 @@ namespace sx::proxymaker {
             bool rewrite_requested() const override { return rewrite_requested_; }
             sx::proxy::QuicObserver* quic_observer() override { return observer_.get(); }
 
+            bool tls_override_active(SSLCom& verification, std::string const& scope) override {
+                return MitmProxy::tls_override_active(scope, verification.opt.cert);
+            }
+
+            TlsReplacement tls_replacement(SSLCom& verification, std::string const& method,
+                std::string const& target, std::string const& sni, std::string const& scope) override {
+                sx::engine::http::app_HttpRequest request;
+
+                request.version = sx::engine::http::app_HttpRequest::HTTP_VER::HTTP3;
+                request.http_data.method = method;
+                request.http_data.uri = target;
+                request.http_data.host = sni;
+                request.http_data.proto = "https://";
+
+                if (auto query = target.find('?'); query != std::string::npos) {
+                    request.http_data.params = target.substr(query + 1);
+                    request.http_data.uri.resize(query);
+                }
+
+                auto reply = MitmProxy::build_tls_replacement(&verification, &request, scope);
+
+                log::connect().inf("QUIC TLS replacement session=%s reason=%s",
+                                   id_.c_str(), reply.reason.c_str());
+
+                return reply;
+            }
+
             std::optional<QuicTlsPolicy> tls_policy(
                 std::string const& host, std::string const& port) override {
 
@@ -450,6 +478,11 @@ namespace sx::proxymaker {
                     result.allow_self_signed = profile->allow_self_signed;
                     result.allow_invalid_certs = profile->allow_invalid_certs;
                     result.allow_untrusted_issuers = profile->allow_untrusted_issuers;
+                    result.failed_check_replacement = profile->failed_certcheck_replacement &&
+                        cfgapi_detail::replacement_redirect_port_matches(port, profile->redirect_warning_ports.ptr());
+                    result.failed_check_override = profile->failed_certcheck_override;
+                    result.failed_check_override_timeout = profile->failed_certcheck_override_timeout;
+                    result.failed_check_override_timeout_type = profile->failed_certcheck_override_timeout_type;
                     result.ct_enable = profile->opt_ct_enable;
                     result.ocsp_stapling = profile->ocsp_stapling;
                     result.ocsp_stapling_mode = profile->ocsp_stapling_mode;

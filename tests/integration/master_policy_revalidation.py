@@ -67,9 +67,11 @@ if len(sys.argv) >= 2 and sys.argv[1] == 'origin':
     run('ip', '-6', 'addr', 'add', '2001:db8:1::2/64', 'dev', 'rv-ap', 'nodad')
     run('ip', '-6', 'addr', 'add', '2001:db8:2::2/64', 'dev', 'rv-bp', 'nodad')
     if any(case in os.environ.get('REVALIDATION_CASES', '')
-           for case in ('quic-policy-drop', 'quic-engine-views')):
+           for case in ('quic-policy-drop', 'quic-engine-views', 'quic-replacement')):
         peer_file = ('quic_engine_views.py' if 'quic-engine-views' in os.environ.get('REVALIDATION_CASES', '')
                      else 'quic_revalidation_peer.py')
+        if 'quic-replacement' in os.environ.get('REVALIDATION_CASES', ''):
+            peer_file = 'h3_replacement_peer.py'
         quic = subprocess.Popen([sys.executable, str(pathlib.Path(__file__).with_name(peer_file)),
                                  'origin', sys.argv[2]], stdout=subprocess.PIPE, text=True)
         assert quic.stdout.readline().strip() == 'ready'
@@ -248,7 +250,8 @@ try:
              ('tls-policy-reload-drop', False, False, 4),
              ('udp-drop', False, False, 4),
              ('quic-policy-drop', False, False, 4),
-             ('quic-engine-views', False, False, 4)]
+             ('quic-engine-views', False, False, 4),
+             ('quic-replacement', False, False, 4)]
     selected_cases = os.environ.get('REVALIDATION_CASES', '').split(',')
     for label, allow_other, role_change, family in cases:
         if selected_cases != [''] and label not in selected_cases: continue
@@ -287,6 +290,17 @@ try:
             text, count = re.subn(r'(content_profiles\s*=\s*\{\s*default\s*=\s*\{)',
                                   r'\1 webhook_enable = TRUE;', text, count=1)
             assert count == 1, 'missing content webhook setting'
+        if label == 'quic-replacement':
+            options = {'failed_certcheck_replacement': 'TRUE',
+                       'failed_certcheck_override': 'TRUE' if os.environ.get('H3_REPLACEMENT_OVERRIDE', '1') == '1' else 'FALSE',
+                       'failed_certcheck_override_timeout': '2',
+                       'failed_certcheck_override_timeout_type': '0'}
+            for key, value in options.items():
+                text, count = re.subn(rf'({key}\s*=\s*)[^;]+;', rf'\g<1>{value};', text)
+                if not count:
+                    text, count = re.subn(r'(tls_profiles\s*=\s*\{\s*default\s*=\s*\{)',
+                                          rf'\1 {key} = {value};', text, count=1)
+                assert count, f'missing replacement profile for {key}'
         with Hooks.lock:
             Hooks.events.clear()
         cfg = root / 'config/smithproxy.cfg'; cfg.write_text(text)
@@ -296,7 +310,9 @@ try:
             proxy = subprocess.Popen([str(binary), '--no-pidfile', '--diagnose', '-c', str(cfg)], stdout=log, stderr=subprocess.STDOUT)
             eventually(lambda: api('status/ping'))
             if label.startswith('quic'):
-                if label == 'quic-engine-views':
+                if label == 'quic-replacement':
+                    from h3_replacement_peer import run_case
+                elif label == 'quic-engine-views':
                     from quic_engine_views import run_case
                 else:
                     from quic_revalidation_peer import run_case
