@@ -2031,7 +2031,7 @@ std::shared_ptr<transport_connection> listener_service::connect_upstream(
                                       current->ai_addrlen, host, &error, setup, [&](SSL* ssl) {
                 auto policy = setup ? setup->tls_policy(target_host, target_port)
                     : std::optional {proxymaker::QuicTlsPolicy {}};
-                return policy && (!verify_upstream_ || certificate_verifier::install(ssl, *policy));
+                return policy && (!verify_upstream_ || certificate_verifier::install(ssl, *policy, wake_fd_.value));
             });
         });
         if (connection) result = std::shared_ptr<transport_connection>(std::move(connection));
@@ -2052,7 +2052,7 @@ std::shared_ptr<transport_connection> listener_service::connect_upstream(
             target.size, server_name, &error, setup, [&](SSL* ssl) {
                 auto policy = setup ? setup->tls_policy(host, port)
                     : std::optional {proxymaker::QuicTlsPolicy {}};
-                return policy && (!verify_upstream_ || certificate_verifier::install(ssl, *policy));
+                return policy && (!verify_upstream_ || certificate_verifier::install(ssl, *policy, wake_fd_.value));
             });
     });
     return connection
