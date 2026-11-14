@@ -169,6 +169,7 @@ def validate(paths, origin_certificate=None, require_tls_failure=False):
         if not counts[namespace]:
             raise ValueError('missing required ' + namespace)
     tls_verified = 0
+    tls_alpn_verified = 0
     for identity, blocks in sessions.items():
         if 'unknown' in identity[1]:
             raise ValueError('lost flow tuple during teardown')
@@ -202,8 +203,14 @@ def validate(paths, origin_certificate=None, require_tls_failure=False):
                         raise ValueError('missing certificate public key details')
                 if 'origin.runner.lab' not in tls['R']['peer_certificate'].get('san', {}).get('dns', []):
                     raise ValueError('missing origin certificate SAN')
-                if tls['R'].get('alpn') != 'http/1.1':
-                    raise ValueError('unexpected controlled origin ALPN')
+                # Python matrix clients do not offer ALPN; curl does. Absence
+                # is valid for the former, but require negotiated ALPN in the
+                # overall live run so a missing exporter field cannot pass.
+                alpn = tls['R'].get('alpn')
+                if alpn is not None:
+                    if alpn != 'http/1.1':
+                        raise ValueError('unexpected controlled origin ALPN')
+                    tls_alpn_verified += 1
                 for side, role in (('L', 'server'), ('R', 'client')):
                     leg = tls[side]
                     if leg.get('role') != role or leg.get('state') != 'ready':
@@ -222,6 +229,8 @@ def validate(paths, origin_certificate=None, require_tls_failure=False):
             tls_verified += 1
     if not tls_verified:
         raise ValueError('no controlled origin TLS metadata verified')
+    if origin_certificate is not None and not tls_alpn_verified:
+        raise ValueError('no controlled origin ALPN verified')
     failed_sessions = {identity for (identity, _side), state in tls_states.items()
                        if state == 'HANDSHAKE_FAILED'}
     if require_tls_failure and len(failed_sessions) < 2:

@@ -42,6 +42,11 @@ internal_api_port = os.environ.get('SMITHPROXY_API_PORT', '55555')
 if not internal_api_port.isdigit() or not 1025 <= int(internal_api_port) < 65535:
     raise ValueError('SMITHPROXY_API_PORT must be an unprivileged TCP port')
 text = (source/'etc/smithproxy.cfg').read_text()
+# This fixture already uses captures.remote. An unversioned config would run
+# schema 1002 and deliberately disable that sink, undoing our live GRE setup.
+# Keep subsequent migrations (including conversion to cftar) under test.
+text += '\n*_internal_* : { schema = 1002; version = "0.9.0"; };\n'
+
 # Explicit legacy migration inputs keep the lab independent of /etc resources.
 text = text.replace('settings = {', 'settings = {\n'
     f'    certs_path = "{certs}/";\n'
@@ -341,9 +346,9 @@ if gre_capture_dst:
     checksum_count = udp_profile_count = 1
     if os.environ.get('CAPTURE_CALCULATE_CHECKSUMS') == '1':
         text, checksum_count = re.subn(
-            r'(tun_ttl\s*=\s*\d+\s*\n\s*\})(\s*\n\})',
-            r'\g<1>\n  options =\n  {\n    calculate_checksums = true\n  }\g<2>',
-            text, count=1, flags=re.IGNORECASE,
+            r'(captures\s*=\s*\{.*?options\s*=\s*\{)',
+            r'\g<1>\n    calculate_checksums = true;',
+            text, count=1, flags=re.IGNORECASE | re.DOTALL,
         )
     if os.environ.get('CAPTURE_UDP_CONTENT_PROFILE') == '1':
         text, udp_profile_count = re.subn(

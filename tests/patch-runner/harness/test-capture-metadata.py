@@ -5,6 +5,8 @@ from pathlib import Path
 import struct
 import tempfile
 import unittest
+from unittest import mock
+import hashlib
 
 spec = importlib.util.spec_from_file_location('validator', Path(__file__).with_name('verify-capture-metadata.py'))
 validator = importlib.util.module_from_spec(spec)
@@ -17,7 +19,7 @@ def block(kind, body, endian):
     return struct.pack(endian + 'II', kind, size) + body + struct.pack(endian + 'I', size)
 
 
-def capture(endian='<', http_fingerprints=('test-ja4h',)):
+def capture(endian='<', http_fingerprints=('test-ja4h',), tls_details=None):
     data = block(0x0a0d0d0a, struct.pack(endian + 'IHHq', 0x1a2b3c4d, 1, 0, -1), endian)
     identity = dict(session_id='session-test', proxy_session_key='tcp_192.0.2.1:50000-198.51.100.1:443')
     for seq, (side, event) in enumerate((('R', 'HANDSHAKE_STARTED'), ('R', 'HANDSHAKE_READY'),
@@ -26,7 +28,7 @@ def capture(endian='<', http_fingerprints=('test-ja4h',)):
                    f'{seq},{side},tls,connection,,{event},ok,').encode()
         data += block(0xBAD, struct.pack(endian + 'I4sHHI', 67005, b'SXPP', 1, 2, len(payload)) + payload, endian)
     for ns, schema, extra in [('SXME', 'metadata', {'ja4': {'client': 'test-ja4', 'server': 'test-ja4s', 'http': http_fingerprints}}),
-                              ('SXST', 'statistics', {}), ('SXTL', 'tls', {'transport': 'tcp', 'R': {'sni': 'origin.runner.lab'}})]:
+                              ('SXST', 'statistics', {}), ('SXTL', 'tls', tls_details or {'transport': 'tcp', 'R': {'sni': 'origin.runner.lab'}})]:
         payload = json.dumps(dict(identity, schema='smithproxy.' + schema + '.v1', **extra)).encode()
         data += block(0xBAD, struct.pack(endian + 'I4sHHI', 67005, ns.encode(), 1, 1, len(payload)) + payload, endian)
     return data
@@ -89,6 +91,34 @@ class MetadataGateTest(unittest.TestCase):
             path = Path(temporary) / 'test.pcapng'
             path.write_bytes(data)
             return validator.validate([path])
+
+    def test_live_alpn_must_be_present_somewhere_but_not_in_every_session(self):
+        certificate = dict(sha256=hashlib.sha256(b'certificate').hexdigest(),
+                           subject='CN=origin.runner.lab', issuer='CN=Test CA',
+                           serial_hex='01', not_before='start', not_after='end',
+                           public_key={'bits': 2048}, san={'dns': ['origin.runner.lab']})
+        leg = dict(state='ready', version='TLSv1.3', cipher='test')
+        details = dict(transport='tcp',
+                       L=dict(leg, role='server', local_certificate=certificate),
+                       R=dict(leg, role='client', sni='origin.runner.lab',
+                              peer_certificate=certificate))
+        without_alpn = capture(tls_details=details)
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'capture.pcapng'
+            origin = Path(temporary) / 'origin.pem'
+            origin.write_text('test certificate')
+            with mock.patch.object(validator.ssl, 'PEM_cert_to_DER_cert', return_value=b'certificate'):
+                path.write_bytes(without_alpn)
+                with self.assertRaisesRegex(ValueError, 'no controlled origin ALPN'):
+                    validator.validate([path], origin)
+                details['R']['alpn'] = 'http/1.1'
+                with_alpn = capture(tls_details=details).replace(b'session-test', b'session-alpn')
+                path.write_bytes(without_alpn + with_alpn)
+                self.assertEqual(validator.validate([path], origin)['controlled_tls_sessions'], 2)
+                details['R']['alpn'] = 'unexpected'
+                path.write_bytes(capture(tls_details=details))
+                with self.assertRaisesRegex(ValueError, 'unexpected controlled origin ALPN'):
+                    validator.validate([path], origin)
 
     def test_both_byte_orders(self):
         for endian in ('<', '>'):
