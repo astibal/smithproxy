@@ -31,6 +31,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('binary', type=Path)
     parser.add_argument('--native-archive', required=True, type=Path)
+    parser.add_argument('--from-schema', type=int, choices=(1050, 1051), default=1050)
     args = parser.parse_args()
     binary = args.binary.resolve()
     tool = binary.with_name('smithproxy-cftar')
@@ -43,7 +44,7 @@ def main():
             port = sock.getsockname()[1]
         config = payload['smithproxy.cfg'].decode()
         config = re.sub(r'\*_internal_\*\s*[:=]\s*\{[^}]*\}\s*;?', '', config)
-        config += '\n*_internal_* : { schema = 1050; version = "schema-upgrade-test"; };\n'
+        config += f'\n*_internal_* : {{ schema = {args.from_schema}; version = "schema-upgrade-test"; }};\n'
         for name, value in {
             'accept_tproxy': 'FALSE;', 'accept_redirect': 'FALSE;',
             'accept_socks': 'FALSE;', 'accept_http_connect': 'FALSE;', 'accept_api': 'FALSE;',
@@ -53,6 +54,11 @@ def main():
         }.items():
             config = replace_or_add_setting(config, name, value)
         config = config.replace('/var/smithproxy/data', str(root / 'data'))
+        # Preserve an explicit opt-in, while migration supplies the absent flags.
+        capture_options = r'(captures\s*[:=]\s*\{.*?options\s*[:=]\s*\{)(.*?)(\})'
+        config, changed = re.subn(capture_options,
+            lambda m: m[1] + ' metadata = TRUE; ' + m[3], config, count=1, flags=re.S)
+        assert changed == 1, 'fixture has no captures.options group'
         (root / 'config').write_text(config)
         (root / 'startup').write_bytes(payload['smithproxy.startup.cfg'])
         command = [str(tool), 'create', '--config', str(root / 'config'),
@@ -103,7 +109,14 @@ def main():
 
         boot('upgrade')
         upgraded = contents(archive)
-        assert re.search(rb'schema\s*=\s*1051', upgraded['smithproxy.cfg'])
+        assert re.search(rb'schema\s*=\s*1052', upgraded['smithproxy.cfg'])
+        options = re.search(rb'captures\s*[:=]\s*\{.*?options\s*[:=]\s*\{([^}]*)',
+                            upgraded['smithproxy.cfg'], re.S)
+        assert options, 'capture options were not saved'
+        for name, value in [('metadata', 'true'), ('statistics', 'false'),
+                            ('transport', 'false'), ('protocol_events', 'false')]:
+            assert re.search(name.encode() + rb'\s*=\s*' + value.encode(),
+                             options[1], re.I), name
         for name in NEW:
             assert PREFIX + name in upgraded, name
         for name, value in previous.items():
@@ -121,7 +134,7 @@ def main():
         result = subprocess.run(check, cwd=root, env=env, capture_output=True, text=True, timeout=30)
         assert result.returncode != 0, 'current-schema corruption was silently repaired'
         assert archive.read_bytes() == damaged
-    print('PASS: 1050 -> 1051 resource upgrade, read-only check, custom templates, restart and strict current schema')
+    print(f'PASS: {args.from_schema} -> 1052: capture options, TLS resources, read-only check and restart')
 
 
 if __name__ == '__main__':

@@ -1002,6 +1002,17 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         return true;
     }
     else if(upgrade_to_num == 1051) {
+        // Persist new TLS replacement fragments together with schema 1051.
+        // Existing resources are authoritative; this step only adds new names.
+        schema_resource_additions_ = sx::cfg::schema_1051_resources();
+        log.event(INF, "added TLS replacement template resources");
+        return true;
+    }
+    else if(upgrade_to_num == 1052) {
+        // Repair archives written by the experimental capture branch, where
+        // schema 1051 shadowed the master's TLS resource migration.
+        // Existing resources remain authoritative.
+        schema_resource_additions_ = sx::cfg::schema_1051_resources();
         auto& root = cfgapi.getRoot();
         if(!root.exists("captures")) root.add("captures", Setting::TypeGroup);
         auto& captures = root["captures"];
@@ -1014,13 +1025,6 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         return true;
     }
 
-    else if(upgrade_to_num == 1051) {
-        // Persist new TLS replacement fragments together with schema 1051.
-        // Existing resources are authoritative; this step only adds new names.
-        schema_resource_additions_ = sx::cfg::schema_1051_resources();
-        log.event(INF, "added TLS replacement template resources");
-        return true;
-    }
 
     return false;
 }

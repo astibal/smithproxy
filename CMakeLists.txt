@@ -1351,6 +1351,13 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                         ${PROJECT_SOURCE_DIR}/tests/process/cftar_schema_upgrade.py
                         $<TARGET_FILE:smithproxy>
                         --native-archive ${SMITHPROXY_DEFAULT_CFTAR})
+                add_test(NAME integration.cftar_capture_schema_upgrade
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/process/cftar_schema_upgrade.py
+                        $<TARGET_FILE:smithproxy>
+                        --native-archive ${SMITHPROXY_DEFAULT_CFTAR} --from-schema 1051)
+                set_tests_properties(integration.cftar_capture_schema_upgrade
+                        PROPERTIES LABELS "native;integration;config;capture" TIMEOUT 120 RUN_SERIAL TRUE)
                 set_tests_properties(integration.cftar_schema_upgrade
                         PROPERTIES LABELS "native;integration;config" TIMEOUT 120 RUN_SERIAL TRUE)
                 add_test(NAME integration.redirect

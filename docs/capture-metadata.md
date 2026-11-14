@@ -20,8 +20,10 @@ content_profiles = {
 };
 ```
 
-Configuration schema 1051 adds missing options as false and preserves explicit
-values. Options are resolved when a connection content policy is applied; a
+Configuration schema 1052 adds missing options as false and preserves explicit
+values. The upgrade also adds any missing TLS replacement fragments from schema
+1051, including archives produced by the earlier experimental capture branch;
+existing customized fragments are preserved. Options are resolved when a connection content policy is applied; a
 change does not retroactively export metadata for existing sessions.
 
 All four options default to false, are independent, and apply equally to local
