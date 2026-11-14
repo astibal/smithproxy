@@ -66,8 +66,12 @@ FlowCtx::Tx FlowCtx::begin(Dir dir, buffer const& data,
     return tx;
 }
 
-void FlowCtx::commit(Tx const& tx, buffer const& data) {
+void FlowCtx::commit(Tx const& tx, buffer& data) {
     if(not tx.active) return;
+
+    // Transport capabilities constrain the final wire output, including script
+    // rewrites. Observe only the normalized bytes in the recipient context.
+    if (output_transform_) output_transform_(tx.dir, data);
 
     auto& count = stats(tx.dir);
     count.out_bytes += data.size();
@@ -84,7 +88,9 @@ void FlowCtx::discard(Tx const& tx) {
     if (tx.protocol_token) protocol_views().abandon(tx.protocol_token);
 }
 
-void FlowCtx::inject(Dir dir, buffer const& data) {
+void FlowCtx::inject(Dir dir, buffer& data) {
+    if (output_transform_) output_transform_(dir, data);
+
     const auto recipient = dir == Dir::I2R ? Endpoint::Server : Endpoint::Client;
     if (session_views_) {
         const auto sender = dir == Dir::I2R ? Endpoint::Client : Endpoint::Server;
