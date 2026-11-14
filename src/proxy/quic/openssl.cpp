@@ -1,3 +1,4 @@
+#include <ossl_util.hpp>
 #include "proxy/quic/error_stats.hpp"
 #include "proxy/quic/tls_log.hpp"
 #include <privileged_socket.hpp>
@@ -123,16 +124,7 @@ std::vector<std::string> keylog_store::snapshot(std::size_t known_lines) const {
 #endif
 
 std::string openssl_error_stack() {
-    std::ostringstream output;
-    bool first = true;
-    while (auto const error = ERR_get_error()) {
-        std::array<char, 256> message {};
-        ERR_error_string_n(error, message.data(), message.size());
-        if (!first) output << "; ";
-        output << message.data();
-        first = false;
-    }
-    return output.str();
+    return socle::ossl::drain_error_text();
 }
 
 unique_ssl_ctx make_openssl_quic_context(bool server) {
