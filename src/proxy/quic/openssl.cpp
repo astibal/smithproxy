@@ -768,18 +768,11 @@ bool openssl_connection::handshake_complete() const {
 }
 
 std::string openssl_connection::server_name() const {
-    if (!connection_) return {};
-    auto const* name = SSL_get_servername(connection_.get(), TLSEXT_NAMETYPE_host_name);
-    return name ? std::string(name) : std::string {};
+    return socle::ossl::server_name(connection_.get()).value_or("");
 }
 
 std::string openssl_connection::negotiated_alpn() const {
-    if (!connection_) return {};
-    const unsigned char* data = nullptr;
-    unsigned int size = 0;
-    SSL_get0_alpn_selected(connection_.get(), &data, &size);
-    return data && size != 0
-        ? std::string(reinterpret_cast<char const*>(data), size) : std::string {};
+    return socle::ossl::selected_alpn(connection_.get());
 }
 
 std::shared_ptr<keylog_store> openssl_connection::keylog() const {

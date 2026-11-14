@@ -1,3 +1,4 @@
+#include <ossl_util.hpp>
 #include "proxy/quic/error_stats.hpp"
 #include <privileged_socket.hpp>
 #include <vars.hpp>
@@ -1109,8 +1110,8 @@ static tls_snapshot snapshot_tls(SSL* ssl) {
     result.available = true;
     result.established = SSL_is_init_finished(ssl) != 0;
     result.state = SSL_state_string_long(ssl);
-    if (const auto* name = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name)) {
-        result.server_name = name;
+    if (auto name = socle::ossl::server_name(ssl)) {
+        result.server_name = *name;
     }
 
     result.verify_peer = (SSL_get_verify_mode(ssl) & SSL_VERIFY_PEER) != 0;
@@ -1132,17 +1133,17 @@ static tls_snapshot snapshot_tls(SSL* ssl) {
     }
 
     result.version = "unknown";
-    const auto* session = SSL_get_session(ssl);
+    auto session = socle::ossl::session_details(ssl);
     if (!session) return result;
 
     // SSL_get_version() describes the QUIC transport, not its TLS handshake.
-    const auto version = SSL_SESSION_get_protocol_version(session);
+    const auto version = session->protocol_version;
     result.version = version == TLS1_3_VERSION
         ? "TLSv1.3" : "unknown (" + std::to_string(version) + ")";
 
-    result.has_ticket = SSL_SESSION_has_ticket(session) != 0;
+    result.has_ticket = session->has_ticket;
     if (result.has_ticket) {
-        result.ticket_lifetime_hint = SSL_SESSION_get_ticket_lifetime_hint(session);
+        result.ticket_lifetime_hint = session->ticket_lifetime_hint;
     }
     return result;
 }
