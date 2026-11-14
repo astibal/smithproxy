@@ -5,6 +5,7 @@
 #include <staticcontent.hpp>
 #include <utils/crypto.hpp>
 #include <openssl/x509v3.h>
+#include <ossl_util.hpp>
 
 #include <algorithm>
 #include <ctime>
@@ -135,19 +136,12 @@ std::string certificate_details(SSLCom* verification, std::string const& host) {
     };
 
     auto printed = [](auto print) -> std::string {
-        auto bio = std::unique_ptr<BIO, decltype(&BIO_free)>(BIO_new(BIO_s_mem()), BIO_free);
-
+        socle::ossl::memory_bio bio;
         if (!bio || print(bio.get()) <= 0) return {};
 
-        char* data = nullptr;
-        auto length = BIO_get_mem_data(bio.get(), &data);
-
-        if (length <= 0) return {};
-
-        constexpr long limit = 8192;
-        auto text = std::string(data, static_cast<std::size_t>(std::min(length, limit)));
-
-        if (length > limit) text += " [truncated]";
+        constexpr size_t limit = 8192;
+        auto text = bio.str(limit);
+        if (bio.size() > limit) text += " [truncated]";
 
         return text;
     };
