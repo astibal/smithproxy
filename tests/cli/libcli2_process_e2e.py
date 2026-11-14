@@ -507,7 +507,7 @@ script_profiles = {
                     "Response: 600:webhook response exceeds configured limit")
             require(output, "Response: 600:webhook response exceeds configured limit")
             diag_roots = cli.tab("diag ")
-            for root in ("tls", "sig", "workers", "mem", "dns", "proxy", "writer", "api", "neighbor"):
+            for root in ("tls", "sig", "workers", "mem", "dns", "proxy", "writer", "capture", "api", "neighbor"):
                 require(diag_roots, root)
             require(cli.command_ok("diag tls cache stats"), "certificate store")
             require(cli.command_ok("diag tls cache list"), "'pki.cert.mitm' certificate store entries")
@@ -517,6 +517,10 @@ script_profiles = {
             cli.command_ok("diag dns cache stats")
             cli.command_ok("diag proxy policy list")
             require(cli.command_ok("diag writer stats"), "Pending ops:")
+            require(cli.command_ok("diag capture status"), "Capture enrichment:")
+            schemas = cli.command_ok("diag capture schemas")
+            require(schemas, "smithproxy.tls.v1")
+            require(schemas, "smithproxy.protocol-profile.csv.v2")
             require(cli.command_ok("diag api info"), "API keys")
             cli.command_ok("diag neighbor stats")
 
@@ -561,7 +565,7 @@ script_profiles = {
                 "diag proxy session active", "diag proxy io list",
                 "diag proxy session list active tls io-all nonames ips 8 ignored",
                 "diag proxy quic list",
-                "diag writer stats", "diag api info",
+                "diag writer stats", "diag capture status", "diag capture schemas", "diag api info",
                 "diag neighbor list", "diag neighbor stats", "diag neighbor clear",
                 "diag neighbor webhook-update-all", "diag neighbor webhook-update-ping",
             ):
@@ -592,6 +596,15 @@ script_profiles = {
             # transaction acquires its commit lease.
             cli.command_ok("edit settings")
             require(cli.command_ok("set policy_fail_open false"), "(config:/settings)")
+            cli.command_ok("end")
+
+            cli.command_ok("edit captures")
+            cli.command_ok("edit options")
+            for name, value in (("metadata", "false"), ("statistics", "true"),
+                                ("transport", "false"), ("protocol_events", "true")):
+                cli.command_ok(f"set {name} {value}")
+            cli.command_failed("set statistics basic")
+            cli.command_ok("end")
             cli.command_ok("end")
 
             cli.command_ok("edit address_objects")
@@ -726,7 +739,18 @@ script_profiles = {
             require(tls_profile.group("body"), "failed_certcheck_override = false")
             require(tls_profile.group("body"), "sni_filter_use_dns_cache = false")
             require(tls_profile.group("body"), "sni_filter_use_dns_domain_tree = false")
+            capture_options = re.search(
+                r"options\s*=\s*\{(?P<body>[^}]*\bprotocol_events[^}]*)\}", saved_config)
+            if capture_options is None:
+                raise AssertionError("saved configuration lost capture options")
+            for setting in ("metadata = false", "statistics = true", "transport = false",
+                            "protocol_events = true"):
+                require(capture_options.group("body"), setting)
             require(cli.command_ok("execute reload"), "Configuration file reloaded")
+            capture_status = cli.command_ok("diag capture status")
+            for setting in ("metadata (SXME): disabled", "statistics (SXST): enabled",
+                            "transport (SXTL): disabled", "protocol events (SXPP): enabled"):
+                require(capture_status, setting)
             require(cli.command_ok("diag proxy policy list"),
                     "script=libcli2_e2e_script")
             for section, name, _ in named_objects:
@@ -772,6 +796,11 @@ script_profiles = {
                 f'"{source / "etc/certs/default"}/";')
             upgraded_text = replace_or_add_setting(
                 upgraded_text, "messages_dir", f'"{source / "etc/msg/en"}/";')
+            upgraded_text, removed_options = re.subn(
+                r"options\s*=\s*\{[^}]*\bprotocol_events[^}]*\}\s*;?",
+                "", upgraded_text, count=1)
+            if removed_options != 1:
+                raise AssertionError("cannot prepare pre-capture-options migration fixture")
             config.write_text(upgraded_text)
             # Re-enter through the legacy migration boundary deliberately: the
             # downgrade fixture validates schema upgrades, while ordinary save
@@ -796,6 +825,12 @@ script_profiles = {
                 r"(?m)^\s*schema\s*=\s*(\d+)\s*;?\s*$", saved_config)
             if schema is None or int(schema.group(1)) <= 1000:
                 raise AssertionError("schema migration did not persist its result")
+            migrated_options = re.search(
+                r"options\s*=\s*\{(?P<body>[^}]*\bprotocol_events[^}]*)\}", saved_config)
+            if migrated_options is None:
+                raise AssertionError("schema migration did not add capture options")
+            for name in ("metadata", "statistics", "transport", "protocol_events"):
+                require(migrated_options.group("body"), f"{name} = false")
             if not (tmp / "smithproxy.cfg.0.9.22.bak.cfg").is_file():
                 raise AssertionError("version migration did not preserve a backup")
 

@@ -359,6 +359,12 @@ if os.environ.get('CAPTURE_GRE_FORMAT') == 'pcapng' or os.environ.get('QUIC_REMO
                           r'\g<1>"pcapng"', text, count=1)
     if count != 1:
         raise RuntimeError('cannot enable remote PCAPNG capture')
+if os.environ.get('CAPTURE_METADATA_TEST') == '1':
+    for setting in ('metadata', 'statistics', 'transport', 'protocol_events'):
+        text, count = re.subn(r'(' + setting + r'\s*=\s*)FALSE', r'\g<1>TRUE',
+                              text, count=1, flags=re.IGNORECASE)
+        if count != 1:
+            raise RuntimeError('cannot enable ' + setting)
 if capture_prefix:
     if not re.fullmatch(r'[A-Za-z0-9_.-]+', capture_prefix):
         raise ValueError('CAPTURE_FILE_PREFIX contains unsafe characters')

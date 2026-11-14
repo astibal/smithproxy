@@ -52,6 +52,7 @@ DIAGS = (
     "diag mem udp stats", "diag dns cache stats",
     "diag proxy policy list", "diag proxy session list", "diag proxy session tls-info",
     "diag proxy session active", "diag proxy io list", "diag writer stats",
+    "diag capture status", "diag capture schemas",
     "diag neighbor stats",
 )
 

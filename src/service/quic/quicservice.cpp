@@ -3,6 +3,7 @@
 #include <vars.hpp>
 #include "service/quic/quicservice.hpp"
 
+#include "proxy/capture_protocol_tracer.hpp"
 #include "proxy/quic/spq1.hpp"
 #include "service/quic/quiclog.hpp"
 #include "service/quic/worker_dispatcher.hpp"
@@ -773,6 +774,33 @@ bool listener_service::accept_connections() {
         }
         attach_staged_upstream(incoming);
 
+        if (incoming.capture_log && protocol_event_capture_ && protocol_event_capture_()) {
+            incoming.protocol_tracer =
+                std::make_unique<CaptureProtocolTracer>(
+                    incoming.capture_log.get(),
+                    [](void* context, std::string_view row) {
+                        auto* journal = static_cast<sx::session_traffic_log*>(context);
+                        auto encoded = CaptureProtocolTracer::encode_block(row);
+                        buffer block(encoded.data(), encoded.size());
+                        journal->write_protocol_metadata(block);
+                    });
+            incoming.protocol_tracer->trace({
+                socle::trace_side::left, socle::trace_component::quic,
+                socle::trace_scope::connection, 0, false,
+                socle::trace_event::accepted, socle::trace_status::ok, {}});
+            incoming.protocol_tracer->trace({
+                socle::trace_side::left, socle::trace_component::quic,
+                socle::trace_scope::connection, 0, false,
+                socle::trace_event::handshake_started,
+                socle::trace_status::pending, {}});
+            if (incoming.upstream) incoming.protocol_tracer->trace({
+                socle::trace_side::right, socle::trace_component::quic,
+                socle::trace_scope::connection, 0, false,
+                socle::trace_event::handshake_started,
+                socle::trace_status::pending, {}});
+            incoming.upstream_handshake_traced = incoming.upstream != nullptr;
+        }
+
         sessions_.push_back(std::move(incoming));
         snapshots_dirty_ = true;
         ++connection_count_;
@@ -808,8 +836,22 @@ void listener_service::progress_session(
 void listener_service::progress_handshake(
     session& value, std::chrono::steady_clock::time_point now) {
     attach_staged_upstream(value);
+    if (value.upstream && value.protocol_tracer
+        && !value.upstream_handshake_traced) {
+        value.upstream_handshake_traced = true;
+        value.protocol_tracer->trace({
+            socle::trace_side::right, socle::trace_component::quic,
+            socle::trace_scope::connection, 0, false,
+            socle::trace_event::handshake_started,
+            socle::trace_status::pending, {}});
+    }
 
     if (now - value.created >= lifecycle_.handshake_timeout) {
+        if (value.protocol_tracer) value.protocol_tracer->trace({
+            socle::trace_side::proxy, socle::trace_component::quic,
+            socle::trace_scope::connection, 0, false,
+            socle::trace_event::timed_out,
+            socle::trace_status::timeout, "handshake"});
         ++handshake_timeouts_;
         logging::session().war("session %llu handshake timed out",
                                static_cast<unsigned long long>(value.id));
@@ -838,6 +880,11 @@ void listener_service::progress_handshake(
     }
 
     if (value.downstream->closed()) {
+        if (value.protocol_tracer) value.protocol_tracer->trace({
+            socle::trace_side::left, socle::trace_component::quic,
+            socle::trace_scope::connection, 0, false,
+            socle::trace_event::handshake_failed,
+            socle::trace_status::failed, {}});
         ++handshake_failures_;
         logging::info().war("session %llu downstream handshake failed",
                             static_cast<unsigned long long>(value.id));
@@ -869,6 +916,11 @@ void listener_service::progress_handshake(
         return;
     }
     if (value.upstream->closed()) {
+        if (value.protocol_tracer) value.protocol_tracer->trace({
+            socle::trace_side::right, socle::trace_component::quic,
+            socle::trace_scope::connection, 0, false,
+            socle::trace_event::handshake_failed,
+            socle::trace_status::failed, {}});
         ++upstream_failures_;
         logging::info().war("session %llu upstream handshake failed",
                             static_cast<unsigned long long>(value.id));
@@ -918,7 +970,8 @@ void listener_service::progress_handshake(
         auto [source_host, source_port] = endpoint_parts(value.client_endpoint);
         auto [target_host, target_port] = endpoint_parts(value.target_endpoint);
         auto capture = std::make_shared<spq1::connection_context>(
-            value.id, downstream_alpn, value.capture_log);
+            value.id, downstream_alpn, value.capture_log,
+            value.protocol_tracer.get());
         multiflow::flow_proxy_context flow_context {
             std::move(source_host), std::move(source_port),
             std::move(target_host), std::move(target_port),
@@ -948,6 +1001,18 @@ void listener_service::progress_handshake(
 
     value.state = session_state::active;
     value.last_activity = now;
+    if (value.protocol_tracer) {
+        value.protocol_tracer->trace({
+            socle::trace_side::left, socle::trace_component::quic,
+            socle::trace_scope::connection, 0, false,
+            socle::trace_event::handshake_ready,
+            socle::trace_status::ok, downstream_alpn});
+        value.protocol_tracer->trace({
+            socle::trace_side::right, socle::trace_component::quic,
+            socle::trace_scope::connection, 0, false,
+            socle::trace_event::handshake_ready,
+            socle::trace_status::ok, upstream_alpn});
+    }
     logging::session().inf("session %llu active sni='%s' alpn='%s' target=%s",
                            static_cast<unsigned long long>(value.id),
                            value.downstream->server_name().c_str(),
@@ -1301,6 +1366,11 @@ void listener_service::start_draining(session& value,
         value.sift_classifications = value.proxy->sift_classifications();
     }
     value.proxy.reset();
+    if (value.protocol_tracer) value.protocol_tracer->trace({
+        socle::trace_side::proxy, socle::trace_component::quic,
+        socle::trace_scope::session, 0, false,
+        socle::trace_event::closed, socle::trace_status::info,
+        protocol_error == 0 ? std::string_view{} : std::string_view{"protocol_error"}});
     if (value.downstream) value.downstream->close(protocol_error);
     if (value.upstream) value.upstream->close(protocol_error);
 }

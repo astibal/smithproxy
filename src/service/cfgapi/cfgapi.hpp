@@ -176,7 +176,7 @@ class CfgFactory : public CfgFactoryBase {
 public:
     // Each version bump implies a config upgrade - we start on 1000
     // see upgrade_schema() - control config upgrade
-    constexpr static inline const int SCHEMA_VERSION  = 1050;
+    constexpr static inline const int SCHEMA_VERSION  = 1051;
 
     static inline std::atomic_bool LOAD_ERRORS = false;
     static constexpr std::string_view CT_UNAVAILABLE_WARNING =
@@ -392,6 +392,17 @@ public:
         int tun_ttl {1};
         std::string bind_interface;
     } capture_remote;
+
+    struct capture_options_t {
+        bool metadata = false;
+        bool statistics = false;
+        bool transport = false;
+        bool protocol_events = false;
+
+        [[nodiscard]] capture_options_t for_payload(bool enabled) const noexcept {
+            return enabled ? *this : capture_options_t{};
+        }
+    } capture_options;
 
     struct settings_webhook_t {
         bool enabled = false;

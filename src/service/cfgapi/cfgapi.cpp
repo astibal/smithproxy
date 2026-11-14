@@ -980,6 +980,18 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "removed legacy product resource paths from configuration");
         return true;
     }
+    else if(upgrade_to_num == 1051) {
+        auto& root = cfgapi.getRoot();
+        if(!root.exists("captures")) root.add("captures", Setting::TypeGroup);
+        auto& captures = root["captures"];
+        if(!captures.exists("options")) captures.add("options", Setting::TypeGroup);
+        auto& options = captures["options"];
+        for(auto const* name : {"metadata", "statistics", "transport", "protocol_events"}) {
+            if(!options.exists(name)) options.add(name, Setting::TypeBoolean) = false;
+        }
+        log.event(INF, "added independent capture block options (disabled by default)");
+        return true;
+    }
 
 
     return false;
@@ -1580,6 +1592,7 @@ bool CfgFactory::load_captures() {
 
     auto factory = CfgFactory::get();
 
+    capture_options = {};
     if(cfgapi.getRoot().exists("captures")) {
         Setting const& captures = cfgapi.getRoot()["captures"];
 
@@ -1641,6 +1654,11 @@ bool CfgFactory::load_captures() {
         if(captures.exists("options")) {
             Setting const& remote = captures["options"];
             load_if_exists(remote, "calculate_checksums", socle::pcap::CONFIG::CALCULATE_CHECKSUMS);
+            load_if_exists(remote, "metadata", capture_options.metadata);
+            load_if_exists(remote, "statistics", capture_options.statistics);
+            load_if_exists(remote, "transport", capture_options.transport);
+            load_if_exists(remote, "protocol_events", capture_options.protocol_events);
+            if(capture_options.metadata) SSLComOptions::server_hello_copy = true;
         }
     }
     else {
@@ -3583,14 +3601,23 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, MitmProxy *mitm_pro
             mitm_proxy->acct_opts.ja4_clienthello = pc->ja4_tls_ch;
             mitm_proxy->acct_opts.ja4_clienthello_ignore_sni = pc->ja4_tls_ch_ignore_sni;
             mitm_proxy->acct_opts.ja4_serverhello = pc->ja4_tls_sh;
+            mitm_proxy->acct_opts.ja4_http = pc->ja4_http;
+            const auto options = capture_options.for_payload(pc->write_payload);
+            mitm_proxy->writer_opts()->capture_metadata = options.metadata;
+            mitm_proxy->writer_opts()->capture_statistics = options.statistics;
+            mitm_proxy->writer_opts()->capture_transport = options.transport;
+            mitm_proxy->writer_opts()->capture_protocol_events = options.protocol_events;
+            mitm_proxy->acct_opts.ja4_clienthello |= options.metadata;
+            mitm_proxy->acct_opts.ja4_serverhello |= options.metadata;
+            mitm_proxy->acct_opts.ja4_http |= options.metadata;
             auto* mh = MitmHostCX::from_baseHostCX(originator);
             if(mh) {
                 cfgapi_detail::apply_ja4_http_option(
-                    pc->ja4_http,
+                    mitm_proxy->acct_opts.ja4_http,
                     mitm_proxy->acct_opts,
                     mh->engine().options.http);
             } else {
-                mitm_proxy->acct_opts.ja4_http = pc->ja4_http;
+                mitm_proxy->acct_opts.ja4_http = pc->ja4_http or options.metadata;
             }
 
             bool filter_ok = true;
@@ -3616,13 +3643,30 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, MitmProxy *mitm_pro
         else if(load_if_exists(cfgapi.getRoot()["settings"], "default_write_payload", cfg_wrt)) {
             _dia("policy_apply: global content profile: %d", cfg_wrt);
             mitm_proxy->writer_opts()->write_payload = cfg_wrt;
+            const auto options = capture_options.for_payload(cfg_wrt);
+            mitm_proxy->writer_opts()->capture_metadata = options.metadata;
+            mitm_proxy->writer_opts()->capture_statistics = options.statistics;
+            mitm_proxy->writer_opts()->capture_transport = options.transport;
+            mitm_proxy->writer_opts()->capture_protocol_events = options.protocol_events;
+            mitm_proxy->acct_opts.ja4_clienthello |= options.metadata;
+            mitm_proxy->acct_opts.ja4_serverhello |= options.metadata;
+            mitm_proxy->acct_opts.ja4_http |= options.metadata;
+            if(auto* mh = MitmHostCX::from_baseHostCX(originator); mh) {
+                cfgapi_detail::apply_ja4_http_option(
+                    mitm_proxy->acct_opts.ja4_http,
+                    mitm_proxy->acct_opts,
+                    mh->engine().options.http);
+            }
         }
         
         if(mitm_proxy->writer_opts()->write_payload) {
+            mitm_proxy->prepare_capture_identity();
             mitm_proxy->toggle_tlog();
 
             if(mitm_proxy->tlog())
                 mitm_proxy->tlog()->write_left("Connection start\n");
+            if(mitm_proxy->writer_opts()->capture_protocol_events)
+                mitm_proxy->enable_protocol_profiling();
         }
     } else {
         _war("policy_apply: cannot apply content profile: cast to MitmProxy failed.");
@@ -3870,7 +3914,7 @@ bool CfgFactory::prof_script_apply (baseHostCX *originator, MitmProxy *new_proxy
 void CfgFactory::policy_apply_features(std::shared_ptr<PolicyRule> const & policy_rule, MitmProxy *mitm_proxy) {
 
     // apply feature tags
-    if(policy_rule and not policy_rule->features.empty()) {
+    if(policy_rule) {
         FilterProxy* sink_filter = nullptr;
         FilterProxy* statistics_filter = nullptr;
         FilterProxy* access_filter = nullptr;
@@ -3895,6 +3939,10 @@ void CfgFactory::policy_apply_features(std::shared_ptr<PolicyRule> const & polic
                         mitm_proxy, policy_access_request_fail_open);
                 }
             }
+        }
+
+        if(not statistics_filter and mitm_proxy->writer_opts()->capture_statistics) {
+            statistics_filter = new StatsFilter(mitm_proxy);
         }
 
         if(access_filter) {
@@ -6524,6 +6572,10 @@ int CfgFactory::save_captures(Config& ex) const {
 
     auto& options = ex.getRoot()["captures"]["options"];
     options.add("calculate_checksums", Setting::TypeBoolean) = socle::pcap::CONFIG::CALCULATE_CHECKSUMS;
+    options.add("metadata", Setting::TypeBoolean) = CfgFactory::get()->capture_options.metadata;
+    options.add("statistics", Setting::TypeBoolean) = CfgFactory::get()->capture_options.statistics;
+    options.add("transport", Setting::TypeBoolean) = CfgFactory::get()->capture_options.transport;
+    options.add("protocol_events", Setting::TypeBoolean) = CfgFactory::get()->capture_options.protocol_events;
 
 
     return 1;

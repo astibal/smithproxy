@@ -19,6 +19,8 @@
 #include <string>
 #include <vector>
 
+class CaptureProtocolTracer;
+
 namespace sx::quic {
 
 class worker_dispatcher;
@@ -151,6 +153,10 @@ public:
 
     /** Join a receiver before prepare(); each index has one session owner. */
     void assign_worker(std::shared_ptr<worker_dispatcher> dispatcher, std::size_t index);
+    // Evaluate for each new session so capture changes do not require listener restart.
+    void protocol_event_capture(std::function<bool()> enabled) {
+        protocol_event_capture_ = std::move(enabled);
+    }
     std::size_t worker_index() const { return worker_index_; }
     std::size_t worker_count() const;
     std::uint64_t dropped_datagrams() const;
@@ -256,6 +262,7 @@ private:
     resource_limits limits_;                     ///< Resource-exhaustion policy.
     proxymaker::SessionSetupFactory setup_factory_;
     flow_proxy_factory proxy_factory_;           ///< Production per-stream proxy strategy.
+    std::function<bool()> protocol_event_capture_;
     bool capture_native_;                        ///< Buffer downstream wire records for policy.
     socle::raw::var<int> udp_fd_ {-1, close_descriptor};                            ///< Socket owned by this service.
     socle::raw::var<int> wake_fd_ {-1, close_descriptor};                           ///< eventfd used to interrupt an idle poll.
@@ -308,6 +315,8 @@ private:
         tls_snapshot draining_upstream_tls;
         std::shared_ptr<keylog_store> keylog; ///< Downstream secrets for capture export.
         std::shared_ptr<sx::session_traffic_log> capture_log; ///< Policy-bound wire journal.
+        std::unique_ptr<CaptureProtocolTracer> protocol_tracer; ///< Buffered SXPP events.
+        bool upstream_handshake_traced = false;
         std::uint64_t capture_association = 0; ///< Downstream dispatcher CID family.
         std::size_t keylog_cursor = 0; ///< Number of keylog records already published.
         std::unique_ptr<multiflow::flow_proxy> proxy;
