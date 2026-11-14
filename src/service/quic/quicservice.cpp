@@ -695,13 +695,31 @@ void listener_service::attach_staged_upstream(session& value) {
 
 bool listener_service::prepare_resumed_upstream(session& value) {
 
+    // A fragmented ClientHello may finish after accept_connections() published
+    // the session. Resumption skips the certificate callback which normally
+    // carries this tuple forward, so collect the completed binding here.
+    auto* key = value.downstream->handle_native();
+    if (auto binding = dispatcher_bindings_.find(key); binding != dispatcher_bindings_.end()) {
+        value.client_endpoint = binding->second.client;
+        value.target_endpoint = binding->second.destination;
+        value.setup = binding->second.setup;
+        value.ingress_ifindex = binding->second.ingress_ifindex;
+    }
+
     auto const server_name = value.downstream->server_name();
     auto const [target_host, target_port] = endpoint_parts(value.target_endpoint);
-    if(server_name.empty() || !value.client_endpoint.valid()
-       || (transparent_ && (target_host.empty() || target_port != std::to_string(bound_port_)))) {
+    const bool missing_sni = server_name.empty();
+    const bool missing_client = !value.client_endpoint.valid();
+    const bool invalid_target = transparent_
+        && (target_host.empty() || target_port != std::to_string(bound_port_));
+
+    if (missing_sni || missing_client || invalid_target) {
         ++upstream_failures_;
-        log().war("resumed session %llu has no valid SNI or original tuple",
-                  static_cast<unsigned long long>(value.id));
+        log().war("resumed session %llu rejected: missing_sni=%d missing_client=%d "
+                  "invalid_target=%d sni='%s' client=%s target=%s listener_port=%u",
+                  static_cast<unsigned long long>(value.id), missing_sni, missing_client,
+                  invalid_target, server_name.c_str(), endpoint_text(value.client_endpoint).c_str(),
+                  endpoint_text(value.target_endpoint).c_str(), bound_port_);
         return false;
     }
 

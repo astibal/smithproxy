@@ -19,6 +19,7 @@ pending = bytearray()
 dynamic = os.environ.get('H3_VIEWS_CASE', 'static').startswith('dynamic')
 datagrams = os.environ.get('H3_VIEWS_CASE') == 'datagrams'
 stop_sending = os.environ.get('H3_VIEWS_CASE') == 'stop-sending'
+resumed_fragmented = os.environ.get('H3_VIEWS_CASE') == 'resumed-fragmented'
 artifact_root = None
 
 
@@ -169,6 +170,14 @@ def run_case(root, proxy, hooks, config, eventually, run, sessions, cli):
                          for sink in ('spider', 'sift')]
             return observed if sorted(envelopes[0]) == sorted(envelopes[1]) else False
         events = eventually(delivered)
+        if resumed_fragmented:
+            assert (root / 'resumed-fragmented-ok').exists()
+            # Existing metadata assertions describe the first connection's
+            # rewrite. Sequence numbers and stream IDs restart on resumption.
+            parent = next(e['details']['info']['parent_id'] for e in events
+                          if e.get('details', {}).get('info', {}).get('stream_id') == 4)
+            events = [e for e in events
+                      if e.get('details', {}).get('info', {}).get('parent_id') == parent]
         metadata = [e['details']['info'] for e in events if e.get('action') == 'connection-info'
                     and e['details'].get('info', {}).get('payload_layer') == 'http3.metadata'
                     and e['_test_receiver'] == 'spider']
@@ -324,7 +333,9 @@ async def main(mode, root):
             subprocess.run(['ip', *args], check=True)
         config.server_name = 'origin.runner.lab'
         config.load_verify_locations(cafile=str(certs / 'ca-cert.pem'))
-        async with connect('203.0.113.10', 443, configuration=config, create_protocol=Peer) as client:
+        tickets = []
+        async with connect('203.0.113.10', 443, configuration=config, create_protocol=Peer,
+                           session_ticket_handler=tickets.append) as client:
             if dynamic:
                 from quic_engine_dynamic import run_client
                 await run_client(client, root)
@@ -355,6 +366,69 @@ async def main(mode, root):
                         await asyncio.sleep(0.02)
                     client._quic.send_stream_data(stream, b'', end_stream=True)
                     client.transmit()
+
+
+            if resumed_fragmented:
+                await asyncio.sleep(.2)
+
+        if resumed_fragmented:
+            assert tickets, "proxy did not issue a session ticket"
+            config.session_ticket = tickets[-1]
+            from aioquic import tls
+            from aioquic.quic.events import HandshakeCompleted
+            original_hello = tls.push_client_hello
+            original_buffer = tls.Buffer
+
+            def handshake_buffer(*args, **kwargs):
+                # aioquic's PSK binder scratch buffer is only 1024 bytes.
+                if "capacity" in kwargs:
+                    kwargs["capacity"] = max(kwargs["capacity"], 8192)
+                return original_buffer(*args, **kwargs)
+
+            tls.Buffer = handshake_buffer
+
+            def padded_hello(buf, hello):
+                if not any(kind == 21 for kind, _ in hello.other_extensions):
+                    hello.other_extensions.append((21, bytes(2400)))
+                original_hello(buf, hello)
+
+            tls.push_client_hello = padded_hello
+
+            class FragmentedPeer(Peer):
+                resumed = False
+
+                def connection_made(self, transport):
+                    # Deliver the first Initial separately: the proxy accepts
+                    # the QUIC object before the complete TLS ClientHello.
+                    original_send = transport.sendto
+                    count = 0
+
+                    def delayed_send(data, address):
+                        nonlocal count
+                        count += 1
+                        if count in (2, 3):
+                            asyncio.get_running_loop().call_later(.15, original_send, data, address)
+                        else:
+                            original_send(data, address)
+
+                    transport.sendto = delayed_send
+                    super().connection_made(transport)
+
+                def quic_event_received(self, event):
+                    if isinstance(event, HandshakeCompleted):
+                        self.resumed = event.session_resumed
+                    super().quic_event_received(event)
+
+            async with connect('203.0.113.10', 443, configuration=config,
+                               create_protocol=FragmentedPeer) as client:
+                assert client.resumed, "test must exercise TLS session resumption"
+                client.responses[0] = asyncio.get_running_loop().create_future()
+                client.bodies[0] = bytearray()
+                client._quic.send_stream_data(0, request_frame(0), end_stream=True)
+                client.transmit()
+                body = await asyncio.wait_for(client.responses[0], 5)
+                assert body == b'GET /views/0', body
+                (root / 'resumed-fragmented-ok').touch()
 
 
 if __name__ == '__main__':
