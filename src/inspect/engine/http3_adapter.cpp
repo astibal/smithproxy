@@ -8,6 +8,16 @@ namespace {
 using E = ProtocolEndpoint;
 using Event = ProtocolEvent;
 
+char const* event_name(Event event) {
+    switch (event) {
+        case Event::Data: return "data";
+        case Event::Fin: return "fin";
+        case Event::Reset: return "reset";
+        case Event::ConnectionClose: return "connection-close";
+    }
+    return "unknown";
+}
+
 socle::side_t side(E sender) {
     return sender == E::Client ? socle::side_t::LEFT : socle::side_t::RIGHT;
 }
@@ -200,7 +210,13 @@ void apply_headers(Http3Stream& stream, sx::quic::h3_headers_record const& recor
 }
 
 std::unique_ptr<EngineCtx> fork_context(EngineCtx const& source) {
+    auto const& log = log::http3;
+
     auto const& original = std::any_cast<Http3Connection const&>(source.state_data);
+    _deb("ctx=%p fork replayable=%d history_events=%zu history_bytes=%zu",
+         static_cast<void const*>(&source), original.replayable,
+         original.history.size(), original.history_bytes);
+
     if (!original.replayable) {
         throw std::runtime_error("HTTP/3 fork unavailable: QPACK replay history limit exceeded");
     }
@@ -308,10 +324,13 @@ public:
     }
 
     Preparation prepare(EngineCtx& ctx, bool, buffer const&) const override {
+        auto const& log = log::http3;
+
         // QUIC supplies the negotiated protocol before any stream input. Do
         // not sniff arbitrary TCP bytes for HTTP/3 or replay raw TCP history.
         if (owns(ctx)) return Preparation::Ready;
         if (ctx.negotiated_alpn != "h3") return Preparation::Unavailable;
+        _deb("ctx=%p initialized from negotiated h3 ALPN", static_cast<void*>(&ctx));
         ctx.state_data = Http3Connection();
         ctx.status = EngineCtx::status_t::OK;
         return Preparation::Ready;
@@ -337,7 +356,17 @@ public:
 
     void observe(EngineCtx& ctx, ProtocolInput const& input,
                  std::uint64_t read_bytes) const override {
+        auto const& log = log::http3;
+
         auto& state = connection(ctx);
+        // Correlate stream lifecycle without dumping payloads or header values.
+        const auto endpoint = input.sender == E::Client ? "client" : "server";
+        _deb("ctx=%p sender=%s event=%s stream=%s bytes=%zu error=%s",
+             static_cast<void*>(&ctx), endpoint, event_name(input.event),
+             input.stream ? std::to_string(input.stream->id).c_str() : "none",
+             input.bytes.size(),
+             input.error_code ? std::to_string(*input.error_code).c_str() : "none");
+
         if (input.event == Event::ConnectionClose) {
             state.closed = true;
             for (auto const& [key, stream] : state.streams)
@@ -373,6 +402,10 @@ public:
             side(input.sender), input.stream->id,
             static_cast<unsigned char const*>(input.bytes.data()), input.bytes.size());
         for (auto const& record : records) {
+            _deb("ctx=%p decoded headers stream=%llu side=%s fields=%zu",
+                 static_cast<void*>(&ctx), static_cast<unsigned long long>(record.stream_id),
+                 record.side == socle::side_t::LEFT ? "client" : "server", record.fields.size());
+
             // A QPACK encoder stream can release another stream's field section.
             // QUIC never reuses a wire ID within a connection.
             auto found = state.streams.lower_bound(ProtocolStream{record.stream_id, 0});
@@ -405,6 +438,9 @@ public:
         const auto snapshot = metadata(ctx, input.stream->id, input.sender);
         auto current_status = snapshot["flow.http3.decode"].dump();
         if (current_status != direction->published_status) {
+            _deb("ctx=%p sender=%s stream=%llu decode=%s",
+                 static_cast<void*>(&ctx), endpoint,
+                 static_cast<unsigned long long>(input.stream->id), current_status.c_str());
             publish(ctx, input, input.stream->id, side(input.sender), "decode-status");
         }
 

@@ -452,7 +452,8 @@ script_profiles = {
                     "libcli2_e2e_script")
             require(cli.command_ok("diag proxy policy list"),
                     "script=libcli2_e2e_script")
-            require(cli.command_ok("debug set"), "Variable list:")
+            require(cli.command_ok("debug set"), "com.app.http3")
+            require(cli.command_ok("debug set com.app.http3 8"), "com.app.http3: 8")
             require(cli.command_ok("debug set filter integration"),
                     "Logging context filter set")
             require(cli.command_ok("debug set filter"),
