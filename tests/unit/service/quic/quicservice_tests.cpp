@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include "service/quic/quicservice.hpp"
+#include "service/quic/verification_result.hpp"
 #include "service/quic/worker_dispatcher.hpp"
 
 #include "proxy/multiflow/mfflowcom.hpp"
@@ -1344,5 +1345,57 @@ TEST(QuicSocketReceive, ReusedMovedPacketOwnsFreshPayload) {
     EXPECT_EQ(retained.data.string_view(), "one!");
     EXPECT_EQ(packet.data.string_view(), "two!");
     EXPECT_NE(retained.data.data(), packet.data.data());
+}
+#endif
+
+#if SMITHPROXY_OPENSSL_QUIC
+TEST(QuicVerificationWakeup, CompletionInterruptsPollAndPublishesVerdict) {
+    socle::raw::var<int> wake {::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC), sx::quic::close_descriptor};
+    ASSERT_GE(wake.value, 0);
+    auto result = std::make_shared<sx::quic::verification_result>(wake.value);
+    pollfd ready {wake.value, POLLIN, 0};
+    EXPECT_EQ(::poll(&ready, 1, 0), 0);
+
+    std::thread completion([result] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        result->complete(-2); // Rejections must wake admission just like success.
+    });
+    const auto polled = ::poll(&ready, 1, 1000);
+    completion.join();
+
+    ASSERT_EQ(polled, 1);
+    EXPECT_TRUE(ready.revents & POLLIN);
+    EXPECT_EQ(result->load(), -2);
+    eventfd_t count = 0;
+    ASSERT_EQ(::eventfd_read(wake.value, &count), 0);
+    EXPECT_EQ(count, 1U);
+}
+
+TEST(QuicVerificationWakeup, LateCompletionDoesNotSignalReusedDescriptor) {
+    socle::raw::var<int> original {::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC), sx::quic::close_descriptor};
+    ASSERT_GE(original.value, 0);
+    auto result = std::make_shared<sx::quic::verification_result>(original.value);
+    const int old_fd = original.value;
+    sx::quic::close_descriptor(original.value);
+
+    socle::raw::var<int> replacement {::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC), sx::quic::close_descriptor};
+    ASSERT_GE(replacement.value, 0);
+    ASSERT_EQ(replacement.value, old_fd);
+    result->complete(1);
+
+    pollfd ready {replacement.value, POLLIN, 0};
+    EXPECT_EQ(::poll(&ready, 1, 0), 0);
+    EXPECT_EQ(result->load(), 1);
+}
+
+TEST(QuicVerificationWakeup, ExpiredSessionDiscardsCompletionAndInvalidFdFails) {
+    std::weak_ptr<sx::quic::verification_result> task;
+    {
+        auto result = std::make_shared<sx::quic::verification_result>();
+        task = result;
+        EXPECT_EQ(result->load(), 0);
+    }
+    EXPECT_FALSE(task.lock());
+    EXPECT_THROW(sx::quic::verification_result(2147483647), std::system_error);
 }
 #endif

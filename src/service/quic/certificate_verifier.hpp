@@ -4,6 +4,7 @@
 
 #include "proxy/proxymaker_connect.hpp"
 #include "service/tpool.hpp"
+#include "service/quic/verification_result.hpp"
 
 #include <sslcom.hpp>
 #include <vars.hpp>
@@ -53,7 +54,7 @@ public:
     bool trusted() const { return !exception_; }
 
     // 0 pending, 1 accepted, -2 certificate rejected, -1 internal failure.
-    int verdict() const { return result_->load(std::memory_order_acquire); }
+    int verdict() const { return result_->load(); }
     bool replacement_required() const { return verdict() == -2 && policy_.failed_check_replacement && !override_accepted_; }
     bool override_accepted() const { return override_accepted_; }
     void accept_override() { override_accepted_ = true; }
@@ -68,12 +69,19 @@ public:
 
     // Attach ownership and verification callbacks before the first ClientHello.
     // False aborts connection setup; once attached, SSL also owns failure cleanup.
-    static bool install(SSL* ssl, proxymaker::QuicTlsPolicy const& policy) {
+    static bool install(SSL* ssl, proxymaker::QuicTlsPolicy const& policy, int wake_fd = -1) {
         if (!ssl) {
             ++stats.errors.verifier_install_missing_ssl;
             return false;
         }
         auto verifier = std::make_unique<certificate_verifier>(policy);
+        try {
+            verifier->result_ = std::make_shared<verification_result>(wake_fd);
+        } catch (std::system_error const& error) {
+            logging::verify().war("cannot prepare verification wakeup: %s", error.what());
+            return false;
+        }
+
         if (index() < 0 || SSL_set_ex_data(ssl, index(), verifier.get()) != 1) {
             ++stats.errors.verifier_install_attachment_failed;
             return false;
@@ -292,12 +300,12 @@ private:
 
     struct revocation_task final : sx::tp::PoolTask {
         std::unique_ptr<certificate_verifier> snapshot;
-        std::weak_ptr<std::atomic_int> result;
+        std::weak_ptr<verification_result> result;
         std::shared_ptr<revocation_evidence> evidence;
 
         // Take the prepared snapshot and the pending-work slot reserved by enqueue.
         revocation_task(std::unique_ptr<certificate_verifier> value,
-                        std::shared_ptr<std::atomic_int> const& output,
+                        std::shared_ptr<verification_result> const& output,
                         std::shared_ptr<revocation_evidence> details)
             : snapshot(std::move(value)), result(output), evidence(std::move(details)) {}
 
@@ -335,7 +343,7 @@ private:
             if (verdict > 0) logging::ocsp().dia("snapshot=%p revocation accepted", static_cast<void*>(snapshot.get()));
             else logging::ocsp().war("snapshot=%p revocation rejected", static_cast<void*>(snapshot.get()));
             if (auto output = result.lock()) {
-                output->store(verdict, std::memory_order_release);
+                output->complete(verdict);
             }
         }
 
@@ -398,7 +406,7 @@ private:
     bool override_accepted_ = false;
     bool revocation_imported_ = false;
     std::shared_ptr<revocation_evidence> revocation_evidence_ = std::make_shared<revocation_evidence>();
-    std::shared_ptr<std::atomic_int> result_ = std::make_shared<std::atomic_int>(0);
+    std::shared_ptr<verification_result> result_ = std::make_shared<verification_result>();
 
     static constexpr unsigned max_pending_revocations = 64;
     static inline std::atomic_uint pending_ {0};
