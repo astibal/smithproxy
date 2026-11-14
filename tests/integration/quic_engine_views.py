@@ -17,6 +17,7 @@ import sys
 
 pending = bytearray()
 dynamic = os.environ.get('H3_VIEWS_CASE', 'static').startswith('dynamic')
+datagrams = os.environ.get('H3_VIEWS_CASE') == 'datagrams'
 artifact_root = None
 
 
@@ -55,8 +56,8 @@ def webhook_reply(event, default):
     if info.get('scope') != 'stream' or info.get('stream_id') != 4:
         return default
     if event['action'] == 'connection-start':
-        # Stream 0 has already completed. Reserve rewrite only now to exercise
-        # replay of the shared session state before admitting stream 4.
+        # Stream 0 has already completed. Start the script rewrite only now;
+        # capability normalization already reserved independent endpoint views.
         return {'action': 'accept', 'control': {'rewrite': True}}
     if event['action'] != 'connection-content':
         return default
@@ -142,6 +143,12 @@ def run_case(root, proxy, hooks, config, eventually, run, sessions, cli):
             (root / 'diagnostics-cli.txt').write_text(text)
             (root / 'diagnostics-release').touch()
         assert peer.wait(timeout=30) == 0
+        if datagrams:
+            for endpoint in ('origin', 'client'):
+                settings = json.loads((root / f'{endpoint}-settings.json').read_text())
+                assert settings[str(0x33)] == 0, settings
+                assert settings[str(0xffd277)] == 0, settings
+
         # Metadata uses asynchronous connection-info delivery. Wait for the
         # final stream's header observation at both sinks before comparing.
         final_stream = 12 if dynamic else 8
@@ -230,7 +237,8 @@ def run_case(root, proxy, hooks, config, eventually, run, sessions, cli):
                         assert info['flow.http3.url'] == f'https://origin.runner.lab/views/{stream}', info
         assert proxy.poll() is None
         (root / 'quic-engine-views-webhooks.json').write_text(json.dumps(events, indent=2))
-        print(f'PASS H3 views ({"dynamic" if dynamic else "static"}): late split, {len(content)} annotated input callbacks', flush=True)
+        case = os.environ.get('H3_VIEWS_CASE', 'static')
+        print(f'PASS H3 views ({case}): late script rewrite, {len(content)} annotated input callbacks', flush=True)
     finally:
         if peer.poll() is None:
             peer.terminate(); peer.wait(timeout=5)
@@ -239,19 +247,36 @@ def run_case(root, proxy, hooks, config, eventually, run, sessions, cli):
 
 async def main(mode, root):
     from aioquic.asyncio import QuicConnectionProtocol, connect, serve
-    from aioquic.h3.connection import H3Connection
+    from aioquic.h3.connection import H3Connection, Setting
     from aioquic.h3.events import HeadersReceived, DataReceived
     from aioquic.quic.configuration import QuicConfiguration
+
+    class DatagramOfferingH3(H3Connection):
+        def _get_local_settings(self):
+            settings = super()._get_local_settings()
+            # Match Firefox: offer the RFC and older draft capability. Both
+            # real endpoints support DATAGRAM; the terminating proxy does not.
+            settings[Setting.H3_DATAGRAM] = 1
+            settings[0xffd277] = 1
+            # This case checks capabilities, not encoder-stream scheduling.
+            # Keep the existing immediate body-annotation assertions deterministic.
+            settings[Setting.QPACK_MAX_TABLE_CAPACITY] = 0
+            settings[Setting.QPACK_BLOCKED_STREAMS] = 0
+            return settings
 
     class Peer(QuicConnectionProtocol):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            self.http = H3Connection(self._quic)
+            self.http = (DatagramOfferingH3 if datagrams else H3Connection)(self._quic)
             self.responses = {}
             self.bodies = {}
 
         def quic_event_received(self, event):
-            for item in self.http.handle_event(event):
+            events = self.http.handle_event(event)
+            if datagrams and self.http.received_settings is not None:
+                (root / f'{mode}-settings.json').write_text(json.dumps(self.http.received_settings))
+
+            for item in events:
                 if mode == 'origin' and isinstance(item, HeadersReceived):
                     fields = dict(item.headers)
                     if dynamic:
@@ -272,6 +297,9 @@ async def main(mode, root):
                         self.responses[item.stream_id].set_result(bytes(self.bodies[item.stream_id]))
 
     config = QuicConfiguration(is_client=mode == 'client', alpn_protocols=['h3'])
+    if datagrams:
+        config.max_datagram_frame_size = 65536
+
     certs = root / 'config/certs'
     if mode == 'origin':
         config.load_cert_chain(certs / 'origin-cert.pem', certs / 'origin-key.pem')
@@ -295,6 +323,11 @@ async def main(mode, root):
                 from quic_engine_dynamic import run_client
                 await run_client(client, root)
                 return
+            if datagrams:
+                async with asyncio.timeout(5):
+                    while client.http.received_settings is None:
+                        await asyncio.sleep(.01)
+
             for stream in (0, 4, 8):
                 assert client._quic.get_next_available_stream_id() == stream
                 client.responses[stream] = asyncio.get_running_loop().create_future()
@@ -304,6 +337,9 @@ async def main(mode, root):
                 body = await asyncio.wait_for(client.responses[stream], 10)
                 expected = (b'POST' if stream == 4 else b'GET') + f' /views/{stream}'.encode()
                 assert body == expected, (body, expected)
+                if datagrams:
+                    assert client.http.received_settings[0x33] == 0
+                    assert client.http.received_settings[0xffd277] == 0
                 if stream == 4:
                     # Keep this child alive while CLI/API inspect both rewrite views.
                     (root / 'diagnostics-ready').touch()

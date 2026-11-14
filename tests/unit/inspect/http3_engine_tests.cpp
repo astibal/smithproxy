@@ -1,4 +1,5 @@
 #include <inspect/engine/http3.hpp>
+#include <inspect/engine/http3_settings.hpp>
 #include <inspect/engine/http3_adapter.hpp>
 #include <inspect/protocol_views.hpp>
 #include <gtest/gtest.h>
@@ -846,3 +847,100 @@ TEST(Http3Engine, BlockedResponseBufferLimitIsExplicitAndDoesNotRegainMetadata) 
                                 ["flow.http3.decode"]["state"]);
     EXPECT_TRUE(state(views).streams.at({0, 1}).directions[1].headers.empty());
 }
+
+namespace {
+TEST(Http3Engine, FirefoxSettingsNormalizationPreservesFramesAtEverySplit) {
+    // Captured Firefox control stream rejected by Fastly with H3_FRAME_ERROR:
+    // both DATAGRAM settings advertised true on our non-DATAGRAM QUIC leg.
+    const std::vector<unsigned char> original {
+        0x00, 0x04, 0x15, 0x01, 0x80, 0x01, 0x00, 0x00, 0x07, 0x14,
+        0xab, 0x60, 0x37, 0x42, 0x00, 0x80, 0xff, 0xd2, 0x77, 0x01,
+        0x33, 0x01, 0x08, 0x01, 0xd8, 0x50, 0xb2, 0xb6, 0xf1, 0x5c,
+        0xd3, 0x97, 0x01, 0x26};
+    auto expected = original;
+    expected[19] = 0;
+    expected[21] = 0;
+
+    for (std::size_t split = 0; split <= original.size(); ++split) {
+        SCOPED_TRACE(split);
+        h3::SettingsNormalizer normalizer;
+        buffer result;
+
+        for (auto const& bounds : {std::pair{std::size_t{0}, split},
+                                   std::pair{split, original.size()}}) {
+            auto chunk = bytes({original.begin() + bounds.first, original.begin() + bounds.second});
+            normalizer.apply(chunk);
+            result.append(chunk.data(), chunk.size());
+        }
+        EXPECT_EQ(result.string_view(), bytes(expected).string_view());
+    }
+}
+
+TEST(Http3Engine, SettingsNormalizationPreservesAllVarintWidthsByteByByte) {
+    for (unsigned width : {1U, 2U, 4U, 8U}) {
+        SCOPED_TRACE(width);
+        std::vector<unsigned char> original {0, 4, static_cast<unsigned char>(1 + width), 0x33};
+        const unsigned char tag = width == 1 ? 0 : width == 2 ? 0x40 : width == 4 ? 0x80 : 0xc0;
+        original.resize(4 + width, 0);
+        original[4] = tag;
+        original.back() |= 1;
+        auto expected = original;
+        expected.back() &= 0xfe;
+        h3::SettingsNormalizer normalizer;
+        buffer result;
+
+        for (auto byte : original) {
+            auto chunk = bytes({byte});
+            normalizer.apply(chunk);
+            result.append(chunk.data(), chunk.size());
+        }
+        EXPECT_EQ(result.string_view(), bytes(expected).string_view());
+    }
+}
+
+TEST(Http3Engine, SettingsNormalizationSkipsOtherStreamsFramesAndSettings) {
+    for (auto const& original : std::vector<std::vector<unsigned char>> {
+            {2, 0, 4, 2, 0x33, 1}, // QPACK encoder, not control.
+            {3, 0, 4, 2, 0x33, 1}, // QPACK decoder.
+            {0x21, 0, 4, 2, 0x33, 1}, // Unknown unidirectional stream.
+            {0, 4, 0, 7, 2, 0x33, 1}, // Empty SETTINGS and opaque GOAWAY payload.
+            {0, 4, 6, 1, 1, 7, 1, 8, 1}}) {
+        h3::SettingsNormalizer normalizer;
+        auto output = bytes(original);
+        normalizer.apply(output);
+        EXPECT_EQ(output.string_view(), bytes(original).string_view());
+    }
+}
+
+TEST(Http3Engine, SettingsNormalizationRejectsMalformedPairsAndBooleanValues) {
+    for (auto const& original : std::vector<std::vector<unsigned char>> {
+            {0, 4, 1, 0x33}, {0, 4, 2, 0x33, 0x40}, {0, 4, 2, 0x33, 2}}) {
+        h3::SettingsNormalizer normalizer;
+        auto output = bytes(original);
+        EXPECT_THROW(normalizer.apply(output), std::runtime_error);
+    }
+}
+
+TEST(Http3Engine, NormalizedSettingsRemainSeparateInEndpointHistory) {
+    auto views = make_views();
+    ASSERT_TRUE(views.enable_rewrite());
+    std::array<h3::SettingsNormalizer, 2> normalizers;
+
+    for (auto sender : {E::Client, E::Server}) {
+        auto input = bytes({0, 4, 2, 0x33, 1});
+        auto output = bytes({0, 4, 2, 0x33, 1});
+        const ProtocolStream stream{sender == E::Client ? 2U : 3U, 1};
+        auto token = views.begin(ProtocolInput{sender, input, stream}, input.size());
+        normalizers[sender == E::Client ? 0 : 1].apply(output);
+        views.finish(token, output);
+
+        const auto recipient = sender == E::Client ? E::Server : E::Client;
+        ASSERT_FALSE(state(views, sender).history.empty());
+        ASSERT_FALSE(state(views, recipient).history.empty());
+        EXPECT_EQ(state(views, sender).history.back().bytes.back(), 1);
+        EXPECT_EQ(state(views, recipient).history.back().bytes.back(), 0);
+    }
+    EXPECT_TRUE(views.split());
+    EXPECT_TRUE(views.fork_error().empty());
+}
+} // namespace
