@@ -18,6 +18,7 @@ import sys
 pending = bytearray()
 dynamic = os.environ.get('H3_VIEWS_CASE', 'static').startswith('dynamic')
 datagrams = os.environ.get('H3_VIEWS_CASE') == 'datagrams'
+stop_sending = os.environ.get('H3_VIEWS_CASE') == 'stop-sending'
 artifact_root = None
 
 
@@ -251,14 +252,15 @@ async def main(mode, root):
     from aioquic.h3.events import HeadersReceived, DataReceived
     from aioquic.quic.configuration import QuicConfiguration
 
-    class DatagramOfferingH3(H3Connection):
+    class StaticQpackH3(H3Connection):
         def _get_local_settings(self):
             settings = super()._get_local_settings()
             # Match Firefox: offer the RFC and older draft capability. Both
             # real endpoints support DATAGRAM; the terminating proxy does not.
-            settings[Setting.H3_DATAGRAM] = 1
-            settings[0xffd277] = 1
-            # This case checks capabilities, not encoder-stream scheduling.
+            if datagrams:
+                settings[Setting.H3_DATAGRAM] = 1
+                settings[0xffd277] = 1
+            # These cases check transport behavior, not encoder-stream scheduling.
             # Keep the existing immediate body-annotation assertions deterministic.
             settings[Setting.QPACK_MAX_TABLE_CAPACITY] = 0
             settings[Setting.QPACK_BLOCKED_STREAMS] = 0
@@ -267,7 +269,7 @@ async def main(mode, root):
     class Peer(QuicConnectionProtocol):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            self.http = (DatagramOfferingH3 if datagrams else H3Connection)(self._quic)
+            self.http = (StaticQpackH3 if datagrams or stop_sending else H3Connection)(self._quic)
             self.responses = {}
             self.bodies = {}
 
@@ -282,6 +284,10 @@ async def main(mode, root):
                     if dynamic:
                         with (root / 'dynamic-origin.jsonl').open('a') as log:
                             log.write(json.dumps({'stream': item.stream_id, 'method': fields[b':method'].decode()}) + '\n')
+                    # Stop only the request half. A normal response FIN must
+                    # still deliver all bytes; stream_close is not RESET_STREAM.
+                    if stop_sending and item.stream_id == 4:
+                        self._quic.stop_stream(item.stream_id, 0x100)  # H3_NO_ERROR.
                     body = fields[b':method'] + b' ' + fields[b':path']
                     self.http.send_headers(item.stream_id, [(b':status', b'200'), (b'x-raw', b'\xff'),
                         (b'set-cookie', b'a=1'), (b'set-cookie', b'b=2')])
