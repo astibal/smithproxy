@@ -35,6 +35,10 @@ TEST(StaticContent, LoadsAndRendersCompleteTemplateSet) {
         << "{{ title }}|{{ meta }}|{{ message }}|{{ window_width }}";
     std::ofstream(root / "tls_replacement.txt")
         << "TLS|{{ target }}|{{ reasons }}|{{ action }}";
+    std::ofstream(root / "tls_override_form.txt") << "{{ token }}|{{ original_target }}";
+    for (auto const* name : {"tls_reason", "tls_certificate_field", "tls_certificate_details", "tls_replacement_error", "tls_redirect", "tls_redirect_top"}) {
+        std::ofstream(root / (std::string(name) + ".txt")) << "{{ message }}";
+    }
     auto directory = root.string() + "/";
 
     ASSERT_TRUE(html()->load_files(directory));
@@ -89,6 +93,10 @@ TEST(StaticContent, NativeTemplateOverridesOnlyItsExactLegacyFile) {
     std::ofstream(root / "html_img_warning.txt") << "legacy warning";
     std::ofstream(root / "html_page.txt") << "legacy {{ message }}";
     std::ofstream(root / "tls_replacement.txt") << "legacy tls";
+    std::ofstream(root / "tls_override_form.txt") << "{{ token }}|{{ original_target }}";
+    for (auto const* name : {"tls_reason", "tls_certificate_field", "tls_certificate_details", "tls_replacement_error", "tls_redirect", "tls_redirect_top"}) {
+        std::ofstream(root / (std::string(name) + ".txt")) << "{{ message }}";
+    }
     auto directory = root.string() + "/";
 
     ASSERT_TRUE(html()->load_files(directory, {{"test.txt", "native test"}}));

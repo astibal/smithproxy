@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Redirecting</title>
+    <script>top.location.href="{{ target }}";</script>
+</head>
+<body></body>
+</html>

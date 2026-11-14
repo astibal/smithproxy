@@ -1,0 +1,10 @@
+<details class="tls-details">
+    <summary>More information</summary>
+    <h3>Recorded verification findings</h3>
+    {{ reasons }}
+    <p>These are the findings recorded by the proxy. An unlisted check is not necessarily a passed check.</p>
+    <h3>Original server certificate</h3>
+    <dl>
+        {{ fields }}
+    </dl>
+</details>

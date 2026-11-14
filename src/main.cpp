@@ -300,7 +300,11 @@ bool prepare_html_renderer() {
     const auto native = CfgFactory::get()->native_resources(
         "templates/replacement/en", directory,
         {"test.txt", "html_page.txt", "html_img_warning.txt",
-         "tls_replacement.txt", "tls_replacement_common.txt",
+         "tls_replacement.txt", "tls_override_form.txt",
+         "tls_reason.txt", "tls_certificate_field.txt",
+         "tls_certificate_details.txt", "tls_replacement_error.txt",
+         "tls_redirect.txt", "tls_redirect_top.txt",
+         "tls_replacement_common.txt",
          "tls_replacement_light.txt", "tls_replacement_dark.txt",
          "tls_replacement_branded.txt"});
     if(!html()->load_files(directory, native)) {
@@ -367,6 +371,13 @@ std::vector<sx::cfg::CfgPack::File> legacy_cftar_resources(
         File{"templates/replacement/en/html_page.txt", message_directory + "html_page.txt"},
         File{"templates/replacement/en/html_img_warning.txt", message_directory + "html_img_warning.txt"},
         File{"templates/replacement/en/tls_replacement.txt", message_directory + "tls_replacement.txt"},
+        File{"templates/replacement/en/tls_override_form.txt", message_directory + "tls_override_form.txt"},
+        File{"templates/replacement/en/tls_reason.txt", message_directory + "tls_reason.txt"},
+        File{"templates/replacement/en/tls_certificate_field.txt", message_directory + "tls_certificate_field.txt"},
+        File{"templates/replacement/en/tls_certificate_details.txt", message_directory + "tls_certificate_details.txt"},
+        File{"templates/replacement/en/tls_replacement_error.txt", message_directory + "tls_replacement_error.txt"},
+        File{"templates/replacement/en/tls_redirect.txt", message_directory + "tls_redirect.txt"},
+        File{"templates/replacement/en/tls_redirect_top.txt", message_directory + "tls_redirect_top.txt"},
         File{"templates/replacement/en/tls_replacement_common.txt", message_directory + "tls_replacement_common.txt"},
         File{"templates/replacement/en/tls_replacement_light.txt", message_directory + "tls_replacement_light.txt"},
         File{"templates/replacement/en/tls_replacement_dark.txt", message_directory + "tls_replacement_dark.txt"},

@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>TLS replacement error</title></head>
+<body>
+    <p>Failed to override</p>
+    <p>{{ message }}</p>
+</body>
+</html>

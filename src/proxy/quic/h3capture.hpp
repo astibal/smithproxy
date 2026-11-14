@@ -48,6 +48,11 @@ public:
 
     void finish(socle::side_t side, std::uint64_t stream_id, bool reset);
 
+    // Endpoint admission after request FIN: no truncated frame or missing body.
+    // Observation alone deliberately does not enforce this on forwarded streams.
+    bool complete_request(std::uint64_t stream_id) const;
+    bool critical_stream(socle::side_t side, std::uint64_t stream_id) const;
+
     // Observability only: an unavailable decoder must not masquerade as an
     // empty, successfully decoded field section.
     std::string connection_status() const;
