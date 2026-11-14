@@ -302,6 +302,15 @@ void publish_connection_status(EngineCtx& ctx, ProtocolInput const& input) {
     if (ctx.protocol_only || !state.on_metadata) return;
     auto status = state.decoder->connection_status();
     if (status == state.published_connection_status) return;
+
+    // Critical-stream failures affect the whole decoder. Report the transition
+    // once, before publishing the resulting metadata for each affected stream.
+    if (status == "invalid") {
+        auto const& log = log::http3;
+        _war("ctx=%p sender=%s connection decode=invalid",
+             static_cast<void*>(&ctx), input.sender == E::Client ? "client" : "server");
+    }
+
     state.published_connection_status = std::move(status);
     for (auto& [key, stream] : state.streams) {
         for (std::size_t index = 0; index < stream.directions.size(); ++index) {
@@ -438,9 +447,13 @@ public:
         const auto snapshot = metadata(ctx, input.stream->id, input.sender);
         auto current_status = snapshot["flow.http3.decode"].dump();
         if (current_status != direction->published_status) {
-            _deb("ctx=%p sender=%s stream=%llu decode=%s",
-                 static_cast<void*>(&ctx), endpoint,
-                 static_cast<unsigned long long>(input.stream->id), current_status.c_str());
+            // Pending/blocked decoding is normal with QPACK. A transition to
+            // invalid means inspection failed and must be visible without debug.
+            const bool invalid = snapshot["flow.http3.decode"].value("state", "") == "invalid";
+            log.log(invalid ? WAR : DEB, log.topic(),
+                    "ctx=%p sender=%s stream=%llu decode=%s",
+                    static_cast<void*>(&ctx), endpoint,
+                    static_cast<unsigned long long>(input.stream->id), current_status.c_str());
             publish(ctx, input, input.stream->id, side(input.sender), "decode-status");
         }
 
