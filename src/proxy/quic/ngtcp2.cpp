@@ -468,6 +468,25 @@ void connection::fail(int error, char const* operation) {
         logging::transport().war("ngtcp2 conn=%p %s %s: %s",
                                  static_cast<void*>(this), server_ ? "A" : "B",
                                  operation, ngtcp2_strerror(error));
+    } else if (error == NGTCP2_ERR_DRAINING) {
+        // ERR_DRAINING describes our state, not the peer's reason for closing.
+        // Retain the received error namespace: H3 codes are application errors.
+        auto const* peer = ngtcp2_conn_get_ccerr(conn_.value);
+        std::string reason;
+        if (peer->reason) {
+            reason.assign(reinterpret_cast<char const*>(peer->reason), peer->reasonlen);
+            for (auto& character : reason) {
+                auto const byte = static_cast<unsigned char>(character);
+                if (byte < 0x20 || byte == 0x7f) character = '?';
+            }
+        }
+
+        logging::transport().dia(
+            "ngtcp2 conn=%p %s closed: %s peer_type=%s peer_code=0x%llx frame=0x%llx reason='%s'",
+            static_cast<void*>(this), server_ ? "A" : "B", ngtcp2_strerror(error),
+            peer->type == NGTCP2_CCERR_TYPE_APPLICATION ? "application" : "transport",
+            static_cast<unsigned long long>(peer->error_code),
+            static_cast<unsigned long long>(peer->frame_type), reason.c_str());
     } else {
         logging::transport().dia("ngtcp2 conn=%p %s closed: %s",
                                  static_cast<void*>(this), server_ ? "A" : "B", ngtcp2_strerror(error));

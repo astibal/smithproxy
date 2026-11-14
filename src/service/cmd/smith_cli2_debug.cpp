@@ -3,6 +3,7 @@
 #include "cli_debug_state.hpp"
 
 #include <inspect/dns.hpp>
+#include <inspect/engine/http.hpp>
 #include <inspect/dnsinspector.hpp>
 #include <proxy/mitmproxy.hpp>
 #include <proxy/socks5/socksproxy.hpp>
@@ -86,6 +87,7 @@ void register_smithproxy_cli2_debug(libcli2::Cli& cli) {
     // Register the topic even when QUIC is disabled by the linked OpenSSL.
     // This keeps `debug set com.quic <level>` stable across installations.
     (void)sx::quic::log();
+    (void)sx::engine::http::log::http3.level();
 #ifdef USE_LIBSSH
     // Register these topics before the first SSH session so `debug set` and
     // completion can discover them immediately.

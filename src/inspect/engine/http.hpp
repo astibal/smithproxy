@@ -589,6 +589,7 @@ namespace sx::engine::http {
 
     struct log {
         static inline logan_lite http1 {"com.app.http1" };
+        static inline logan_lite http3 {"com.app.http3" };
         static inline logan_lite http2 {"com.app.http2" };
         static inline logan_lite http2_state {"com.app.http2.state" };
         static inline logan_lite http2_headers {"com.app.http2.headers" };
