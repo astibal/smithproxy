@@ -3,21 +3,10 @@
 #include <proxy/quic_observer.hpp>
 #include <proxy/proxymaker_connect.hpp>
 #include <log/logan.hpp>
-#include <openssl/pem.h>
+#include <ossl_util.hpp>
 
 namespace sx::quic {
 namespace {
-
-void append_certificate(HookEvent& event, X509* certificate) {
-
-    if(!certificate) return;
-    std::unique_ptr<BIO, decltype(&BIO_free)> output(BIO_new(BIO_s_mem()), BIO_free);
-    if(!output || PEM_write_bio_X509(output.get(), certificate) != 1) return;
-
-    char* data = nullptr;
-    const auto size = BIO_get_mem_data(output.get(), &data);
-    if(size > 0) event.certificates.emplace_back(data, size);
-}
 
 bool dispatch(proxymaker::SessionSetup* setup, HookEvent& event) {
 
@@ -112,24 +101,17 @@ bool hook_outcome(proxymaker::SessionSetup* setup, SSL* ssl, bool client,
     event.client = client;
     event.kind = established ? HookEvent::Kind::established : HookEvent::Kind::failed;
     if(!established) event.error = failure;
-    if(const auto* name = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name)) {
-        event.sni = name;
+    if(auto name = socle::ossl::server_name(ssl)) {
+        event.sni = *name;
     }
     if(const auto* cipher = SSL_get_current_cipher(ssl)) {
         event.cipher = SSL_CIPHER_get_name(cipher);
     }
 
-    const unsigned char* alpn = nullptr;
-    unsigned int size = 0;
-    SSL_get0_alpn_selected(ssl, &alpn, &size);
-    if(size) event.alpn.assign(reinterpret_cast<const char*>(alpn), size);
+    event.alpn = socle::ossl::selected_alpn(ssl);
 
-    std::unique_ptr<X509, decltype(&X509_free)> leaf(SSL_get1_peer_certificate(ssl), X509_free);
-    append_certificate(event, leaf.get());
-    const auto* chain = SSL_get_peer_cert_chain(ssl);
-    for(int i = 0; chain && i < sk_X509_num(chain); ++i) {
-        auto* certificate = sk_X509_value(chain, i);
-        if(!leaf || X509_cmp(leaf.get(), certificate) != 0) append_certificate(event, certificate);
+    for(auto& pem : socle::ossl::peer_certificates_pem(ssl)) {
+        if(!pem.empty()) event.certificates.push_back(std::move(pem));
     }
 
     return dispatch(setup, event);

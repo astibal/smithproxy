@@ -1,3 +1,4 @@
+#include <ossl_util.hpp>
 #include "proxy/quic/error_stats.hpp"
 #include "proxy/quic/ngtcp2.hpp"
 #include "proxy/quic/socket_io_detail.hpp"
@@ -204,16 +205,12 @@ void connection::progress_transport() {
 
 // Return the ClientHello SNI, or an empty name before it is available.
 std::string connection::server_name() const {
-    auto* value = SSL_get_servername(ssl_.value, TLSEXT_NAMETYPE_host_name);
-    return value ? value : "";
+    return socle::ossl::server_name(ssl_.value).value_or("");
 }
 
 // Copy the negotiated ALPN without retaining OpenSSL-owned storage.
 std::string connection::negotiated_alpn() const {
-    unsigned char const* value = nullptr;
-    unsigned size = 0;
-    SSL_get0_alpn_selected(ssl_.value, &value, &size);
-    return size ? std::string(reinterpret_cast<char const*>(value), size) : "";
+    return socle::ossl::selected_alpn(ssl_.value);
 }
 
 // Attach downstream secrets to the common capture journal, never a global sink.

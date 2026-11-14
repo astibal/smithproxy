@@ -1,3 +1,4 @@
+#include <ossl_util.hpp>
 #include "proxy/quic/error_stats.hpp"
 #include <service/core/session_interfaces.hpp>
 /*
@@ -2178,21 +2179,13 @@ auto get_tls_info(MitmHostCX const* lf, MitmHostCX const* rg, int sl_flags, int 
             if (com && not com->opt.bypass) {
                 auto ssl = com->get_SSL();
 
-                SSL_SESSION *session = nullptr;
-                if(ssl) {
-                    session = SSL_get_session(ssl);
-                }
+                auto session = socle::ossl::session_details(ssl);
 
-                if (ssl and session) {
-
-                    auto *cipher_str = SSL_CIPHER_get_name(SSL_SESSION_get0_cipher(session));
-                    int has_ticket = SSL_SESSION_has_ticket(session);
-                    unsigned long lifetime_hint = -1;
-                    if (has_ticket > 0) {
-                        lifetime_hint = SSL_SESSION_get_ticket_lifetime_hint(session);
-                    }
-
-                    auto tls_ver = SSL_get_version(ssl);
+                if (session) {
+                    auto const& cipher_str = session->cipher;
+                    auto has_ticket = session->has_ticket;
+                    auto lifetime_hint = session->ticket_lifetime_hint;
+                    auto const& tls_ver = session->transport_version;
                     bool tls_rsm = (com->target_cert() == nullptr);
 
                     tls_ss << "\n  " << label << ": version: " << tls_ver << ", cipher: ";
@@ -2221,9 +2214,9 @@ auto get_tls_info(MitmHostCX const* lf, MitmHostCX const* rg, int sl_flags, int 
                         }
                     }
 
-                    const char *sni = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
+                    auto sni = socle::ossl::server_name(ssl);
                     if (sni) {
-                        tls_ss << "\n    sni: " << sni;
+                        tls_ss << "\n    sni: " << *sni;
 
                         if (lf) {
                             auto *app = lf->engine().application_data.get();
@@ -2231,7 +2224,7 @@ auto get_tls_info(MitmHostCX const* lf, MitmHostCX const* rg, int sl_flags, int 
                             if (http_app) {
 
                                 if (!http_app->http_data.host.empty()) {
-                                    if (sni == http_app->http_data.host) {
+                                    if (*sni == http_app->http_data.host) {
                                         tls_ss << " -> http host ok";
                                     } else {
                                         tls_ss << " -> http host DOESN'T MATCH";

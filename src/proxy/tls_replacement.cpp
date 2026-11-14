@@ -3,11 +3,11 @@
 #include <proxy/mitmproxy.hpp>
 #include <proxy/mitmproxy_utils.hpp>
 #include <staticcontent.hpp>
-#include <openssl/rand.h>
+#include <utils/crypto.hpp>
 #include <openssl/x509v3.h>
+#include <ossl_util.hpp>
 
 #include <algorithm>
-#include <array>
 #include <ctime>
 
 sx::mitmproxy::override_challenge_store& MitmProxy::override_challenges() {
@@ -136,19 +136,12 @@ std::string certificate_details(SSLCom* verification, std::string const& host) {
     };
 
     auto printed = [](auto print) -> std::string {
-        auto bio = std::unique_ptr<BIO, decltype(&BIO_free)>(BIO_new(BIO_s_mem()), BIO_free);
-
+        socle::ossl::memory_bio bio;
         if (!bio || print(bio.get()) <= 0) return {};
 
-        char* data = nullptr;
-        auto length = BIO_get_mem_data(bio.get(), &data);
-
-        if (length <= 0) return {};
-
-        constexpr long limit = 8192;
-        auto text = std::string(data, static_cast<std::size_t>(std::min(length, limit)));
-
-        if (length > limit) text += " [truncated]";
+        constexpr size_t limit = 8192;
+        auto text = bio.str(limit);
+        if (bio.size() > limit) text += " [truncated]";
 
         return text;
     };
@@ -340,21 +333,11 @@ MitmProxy::TlsReplacement MitmProxy::build_tls_replacement(
 
         if (options.failed_check_override && !scope.empty() &&
             override_ttl_seconds(options.failed_check_override_timeout)) {
-            std::array<unsigned char, 16> bytes {};
-
-            if (RAND_bytes(bytes.data(), bytes.size()) == 1) {
-                static constexpr char hex[] = "0123456789abcdef";
-                std::string token;
-
-                for (auto byte : bytes) {
-                    token += hex[byte >> 4];
-                    token += hex[byte & 15];
-                }
-
-                form = html()->render_tls_override_form(html_escape(token), html_escape(original()));
+            if (auto token = sx::crypto::random_hex(16)) {
+                form = html()->render_tls_override_form(html_escape(*token), html_escape(original()));
 
                 if (!form.empty()) {
-                    override_challenges().issue(scope, token, std::time(nullptr), 120);
+                    override_challenges().issue(scope, *token, std::time(nullptr), 120);
                 }
             }
         }

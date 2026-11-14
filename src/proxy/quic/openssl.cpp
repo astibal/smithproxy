@@ -1,3 +1,4 @@
+#include <ossl_util.hpp>
 #include "proxy/quic/error_stats.hpp"
 #include "proxy/quic/tls_log.hpp"
 #include <privileged_socket.hpp>
@@ -123,16 +124,7 @@ std::vector<std::string> keylog_store::snapshot(std::size_t known_lines) const {
 #endif
 
 std::string openssl_error_stack() {
-    std::ostringstream output;
-    bool first = true;
-    while (auto const error = ERR_get_error()) {
-        std::array<char, 256> message {};
-        ERR_error_string_n(error, message.data(), message.size());
-        if (!first) output << "; ";
-        output << message.data();
-        first = false;
-    }
-    return output.str();
+    return socle::ossl::drain_error_text();
 }
 
 unique_ssl_ctx make_openssl_quic_context(bool server) {
@@ -776,18 +768,11 @@ bool openssl_connection::handshake_complete() const {
 }
 
 std::string openssl_connection::server_name() const {
-    if (!connection_) return {};
-    auto const* name = SSL_get_servername(connection_.get(), TLSEXT_NAMETYPE_host_name);
-    return name ? std::string(name) : std::string {};
+    return socle::ossl::server_name(connection_.get()).value_or("");
 }
 
 std::string openssl_connection::negotiated_alpn() const {
-    if (!connection_) return {};
-    const unsigned char* data = nullptr;
-    unsigned int size = 0;
-    SSL_get0_alpn_selected(connection_.get(), &data, &size);
-    return data && size != 0
-        ? std::string(reinterpret_cast<char const*>(data), size) : std::string {};
+    return socle::ossl::selected_alpn(connection_.get());
 }
 
 std::shared_ptr<keylog_store> openssl_connection::keylog() const {
