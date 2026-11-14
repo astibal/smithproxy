@@ -1,3 +1,4 @@
+#include <ossl_util.hpp>
 #include <proxy/proxy_hooks.hpp>
 #include <proxy/retirement.hpp>
 #include <proxy/mitmproxy.hpp>
@@ -91,18 +92,6 @@ nlohmann::json socket_endpoint(baseHostCX* cx, bool peer) {
         return nullptr;
 
     return nlohmann::json::array({host, std::stoi(port)});
-}
-
-std::string certificate_pem(X509* certificate) {
-
-    auto output = std::unique_ptr<BIO, decltype(&BIO_free)>(BIO_new(BIO_s_mem()), BIO_free);
-    if(!output || !PEM_write_bio_X509(output.get(), certificate)) {
-        return {};
-    }
-
-    char* bytes = nullptr;
-    const auto length = BIO_get_mem_data(output.get(), &bytes);
-    return length > 0 ? std::string(bytes, static_cast<std::size_t>(length)) : std::string{};
 }
 
 std::string b64_encode(buffer &buffer) {
@@ -889,14 +878,14 @@ nlohmann::json ProxyHooks::tls_details(const TlsArgs& args) {
         auto leaf = std::unique_ptr<X509, decltype(&X509_free)>(
             SSL_get_peer_certificate(ssl), X509_free);
         if(leaf) {
-            details["certificates"].push_back(certificate_pem(leaf.get()));
+            details["certificates"].push_back(socle::ossl::certificate_pem(leaf.get()));
         }
 
         const auto* chain = SSL_get_peer_cert_chain(ssl);
         for(int index = 0; chain && index < sk_X509_num(chain); ++index) {
             auto* certificate = sk_X509_value(chain, index);
             if(!leaf || X509_cmp(leaf.get(), certificate) != 0) {
-                details["certificates"].push_back(certificate_pem(certificate));
+                details["certificates"].push_back(socle::ossl::certificate_pem(certificate));
             }
         }
     }

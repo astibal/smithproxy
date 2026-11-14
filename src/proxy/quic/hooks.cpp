@@ -3,20 +3,15 @@
 #include <proxy/quic_observer.hpp>
 #include <proxy/proxymaker_connect.hpp>
 #include <log/logan.hpp>
-#include <openssl/pem.h>
+#include <ossl_util.hpp>
 
 namespace sx::quic {
 namespace {
 
 void append_certificate(HookEvent& event, X509* certificate) {
 
-    if(!certificate) return;
-    std::unique_ptr<BIO, decltype(&BIO_free)> output(BIO_new(BIO_s_mem()), BIO_free);
-    if(!output || PEM_write_bio_X509(output.get(), certificate) != 1) return;
-
-    char* data = nullptr;
-    const auto size = BIO_get_mem_data(output.get(), &data);
-    if(size > 0) event.certificates.emplace_back(data, size);
+    auto pem = socle::ossl::certificate_pem(certificate);
+    if(!pem.empty()) event.certificates.push_back(std::move(pem));
 }
 
 bool dispatch(proxymaker::SessionSetup* setup, HookEvent& event) {
