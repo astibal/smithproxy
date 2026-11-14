@@ -41,7 +41,7 @@
 #ifndef JSONIZE_HPP_
 #define JSONIZE_HPP_
 
-#include <openssl/x509.h>
+#include "jsonize_x509.hpp"
 #include <nlohmann/json.hpp>
 
 #include "src/proxy/mitmproxy.hpp"
@@ -49,7 +49,6 @@
 
 namespace jsonize {
 
-    nlohmann::json from(X509 const* x, int verbosity);
     nlohmann::json from(baseCom* xcom, int verbosity);
     nlohmann::json from(MitmProxy* what, int verbosity);
     nlohmann::json from(MitmHostCX* what, int verbosity);

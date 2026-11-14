@@ -1,3 +1,7 @@
+#include <service/http/jsonize_x509.hpp>
+#include <ossl_util.hpp>
+#include <openssl/pem.h>
+#include <cstdio>
 #include <gtest/gtest.h>
 
 #include <service/http/jsonize.hpp>
@@ -89,3 +93,69 @@ TEST(Jsonize, SerializesCertificateNamesAndVerboseMetadata) {
     EXPECT_EQ(serialized["issuer"], "/CN=example.test");
     EXPECT_TRUE(serialized.contains("extensions"));
 }
+
+namespace {
+
+struct X509FileCloser {
+    void operator()(FILE* file) const noexcept {
+        if(file) std::fclose(file);
+    }
+};
+
+TEST(CertificateSummary, NullCertificateProducesNoIdentity) {
+    EXPECT_TRUE(jsonize::certificate_summary(nullptr).empty());
+}
+
+TEST(CertificateSummary, CertificateIdentityIsStableAndCompact) {
+    std::unique_ptr<FILE, X509FileCloser> input(
+        std::fopen("etc/certs/default/srv-cert.pem", "r"));
+    ASSERT_TRUE(input);
+    std::unique_ptr<X509, decltype(&X509_free)> certificate(
+        PEM_read_X509(input.get(), nullptr, nullptr, nullptr), X509_free);
+    ASSERT_TRUE(certificate);
+
+    auto const first = jsonize::certificate_summary(certificate.get());
+    auto const second = jsonize::certificate_summary(certificate.get());
+    ASSERT_TRUE(first.contains("sha256"));
+    EXPECT_EQ(SSLFactory::fingerprint(certificate.get()).size(), 40U);
+    EXPECT_EQ(SSLFactory::fingerprint(certificate.get()),
+              socle::ossl::fingerprint(certificate.get(), EVP_sha1()));
+    EXPECT_EQ(first["sha256"], socle::ossl::fingerprint(certificate.get(), EVP_sha256(), socle::ossl::hex_case::upper));
+    EXPECT_EQ(first["sha256"].get<std::string>().size(), 64U);
+    EXPECT_EQ(first["sha256"], second["sha256"]);
+    EXPECT_TRUE(first.contains("subject_cn"));
+    EXPECT_TRUE(first.contains("issuer_cn"));
+    EXPECT_FALSE(first["subject"].get<std::string>().empty());
+    EXPECT_FALSE(first["issuer"].get<std::string>().empty());
+    EXPECT_FALSE(first["serial_hex"].get<std::string>().empty());
+    EXPECT_GT(first["public_key"]["bits"].get<int>(), 0);
+    EXPECT_EQ(first["not_before"].get<std::string>().back(), 'Z');
+    EXPECT_EQ(first["not_after"].get<std::string>().back(), 'Z');
+    EXPECT_FALSE(first.contains("private_key"));
+    EXPECT_FALSE(first.contains("pem"));
+}
+
+TEST(CertificateSummary, CertificateDatesSerialAndAlternativeNamesAreExplicit) {
+    std::unique_ptr<X509, decltype(&X509_free)> certificate(X509_new(), X509_free);
+    ASSERT_TRUE(certificate);
+    ASSERT_EQ(ASN1_INTEGER_set(X509_get_serialNumber(certificate.get()), 42), 1);
+    ASSERT_EQ(ASN1_TIME_set_string(X509_getm_notBefore(certificate.get()), "20260102030405Z"), 1);
+    ASSERT_EQ(ASN1_TIME_set_string(X509_getm_notAfter(certificate.get()), "20270102030405Z"), 1);
+    std::unique_ptr<X509_EXTENSION, decltype(&X509_EXTENSION_free)> san(
+        X509V3_EXT_conf_nid(nullptr, nullptr, NID_subject_alt_name,
+                           const_cast<char*>("DNS:example.test,DNS:*.example.test,IP:192.0.2.1,IP:2001:db8::1")),
+        X509_EXTENSION_free);
+    ASSERT_TRUE(san);
+    ASSERT_EQ(X509_add_ext(certificate.get(), san.get(), -1), 1);
+
+    auto const result = jsonize::certificate_summary(certificate.get());
+    EXPECT_EQ(result["serial_hex"], "2A");
+    EXPECT_EQ(result["not_before"], "2026-01-02T03:04:05Z");
+    EXPECT_EQ(result["not_after"], "2027-01-02T03:04:05Z");
+    EXPECT_EQ(result["san"]["dns"], nlohmann::json::array({"example.test", "*.example.test"}));
+    EXPECT_EQ(result["san"]["ip"], nlohmann::json::array({"192.0.2.1", "2001:db8::1"}));
+    EXPECT_FALSE(result.contains("san_truncated"));
+}
+
+
+} // namespace
