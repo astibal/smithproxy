@@ -1214,7 +1214,11 @@ bool SmithProxy::apply_config_hooks(bool reload) {
         const auto native = CfgFactory::get()->native_resources(
             "templates/replacement/en", directory,
             {"test.txt", "html_page.txt", "html_img_warning.txt",
-             "tls_replacement.txt", "tls_replacement_common.txt",
+             "tls_replacement.txt", "tls_override_form.txt",
+             "tls_reason.txt", "tls_certificate_field.txt",
+             "tls_certificate_details.txt", "tls_replacement_error.txt",
+             "tls_redirect.txt", "tls_redirect_top.txt",
+             "tls_replacement_common.txt",
              "tls_replacement_light.txt", "tls_replacement_dark.txt",
              "tls_replacement_branded.txt"});
         if(reload && !html()->load_files(directory, native)) {

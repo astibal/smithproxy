@@ -75,6 +75,10 @@ public:
     bool load_files(std::string& dir,
                     std::map<std::string, std::string> native = {});
     
+    // Values are already escaped for their template context, or are trusted
+    // rendered fragments. This method never escapes a value a second time.
+    std::string render_fields(std::string const& name,
+                              std::map<std::string, std::string> const& fields);
     std::string render_noargs(std::string const& s);
 
     std::string render_server_response(std::string const& message, unsigned int code=200,
@@ -82,7 +86,10 @@ public:
     std::string render_msg_html_page(std::string const& caption, std::string const& meta, std::string const& content,const char* window_width="450px");
     std::string render_tls_replacement(std::string const& target,
                                        std::string const& reasons,
-                                       std::string const& action);
+                                       std::string const& action,
+                                       std::string const& details = {});
+    std::string render_tls_override_form(std::string const& token,
+                                         std::string const& original_target);
     std::shared_ptr<Template> get(std::string const& s);
 
     static StaticContent* get() {

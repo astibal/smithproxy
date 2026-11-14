@@ -4,6 +4,9 @@
 #include "service/quic/quicservice.hpp"
 
 #include "proxy/quic/spq1.hpp"
+#include <proxy/quic/h3_replacement.hpp>
+#include <inspect/engine/http3_constants.hpp>
+#include <proxy/mitmproxy_utils.hpp>
 #include "service/quic/quiclog.hpp"
 #include "service/quic/worker_dispatcher.hpp"
 #include <stdexcept>
@@ -503,10 +506,10 @@ void listener_service::run() {
         // Revisit productive sessions without sleeping, but give every A:B
         // pair its turn. Reads, FIN/reset and lifecycle changes count too.
         for (auto& linked : sessions_) {
-            auto const before = linked.forwarded_bytes;
+            auto const before = linked.forwarded_bytes + linked.replacement_bytes;
             auto const previous_state = linked.state;
             progress_session(linked, now);
-            application_progress = application_progress || linked.forwarded_bytes != before
+            application_progress = application_progress || (linked.forwarded_bytes + linked.replacement_bytes) != before
                 || linked.state != previous_state;
             if (linked.downstream)
                 application_progress = linked.downstream->take_application_progress() || application_progress;
@@ -741,7 +744,7 @@ bool listener_service::accept_connections() {
                 capture_routes_.erase(binding->second.association);
                 dispatcher_bindings_.erase(binding);
             }
-            connection->close(0x107);
+            connection->close(sx::engine::http::v3::error_code::excessive_load);
             continue;
         }
 
@@ -804,6 +807,39 @@ void listener_service::progress_session(
         break;
     }
 }
+
+namespace {
+
+std::string replacement_scope(datagram_endpoint const& client, datagram_endpoint const& target,
+                              std::string const& sni) {
+    if (!client.valid() || !target.valid() || sni.empty()) return {};
+
+    auto const source = endpoint_parts(client).first;
+    auto const destination = endpoint_parts(target);
+
+    return sx::mitmproxy::override_scope_key(source + ":" + destination.first + ":" + destination.second, sni);
+}
+
+void apply_tls_override(proxymaker::SessionSetup* setup, certificate_verifier* verifier, std::string const& scope) {
+    // A session without policy setup or verification evidence cannot grant an exception.
+    if (!setup || !verifier) return;
+
+    bool const override_enabled = verifier->policy().failed_check_override;
+    bool const already_accepted = verifier->override_accepted();
+
+    if (override_enabled && !already_accepted) {
+        // Only a completed certificate decision may consult the exception store.
+        // Pending verification and internal failures must never be overridden.
+        auto const verdict = verifier->verdict();
+        bool const certificate_decided = verdict == 1 || verdict == -2;
+
+        if (certificate_decided && setup->tls_override_active(*verifier, scope)) {
+            verifier->accept_override();
+        }
+    }
+}
+
+} // namespace
 
 void listener_service::progress_handshake(
     session& value, std::chrono::steady_clock::time_point now) {
@@ -883,10 +919,34 @@ void listener_service::progress_handshake(
     // The same upstream supplies the certificate and carries application data.
     // Keep this guard for resumed downstreams, which skip certificate callbacks.
     auto* verifier = certificate_verifier::get(value.upstream->handle_native());
-    int const verdict = verifier ? verifier->progress(value.upstream->handle_native())
-        : (SSL_get_verify_result(value.upstream->handle_native()) == X509_V_OK ? 1 : -1);
+    int verdict = -1;
+
+    if (verifier) {
+        verdict = verifier->progress(value.upstream->handle_native());
+    } else if (SSL_get_verify_result(value.upstream->handle_native()) == X509_V_OK) {
+        verdict = 1;
+    }
+
     if (verify_upstream_ && verdict == 0) return;
-    if (verify_upstream_ && verdict < 0) {
+
+    const auto scope = replacement_scope(value.client_endpoint, value.target_endpoint, value.downstream->server_name());
+
+    apply_tls_override(value.setup.get(), verifier, scope);
+
+    // A rejected certificate may lead to a local warning or an accepted
+    // override. An internal verification failure cannot use the override.
+    bool rejection_handled = false;
+
+    if (verifier) {
+        constexpr int rejected_certificate_verdict = -2;
+        bool const replacement_required = verifier->replacement_required();
+        bool const certificate_rejected = verdict == rejected_certificate_verdict;
+        bool const rejection_overridden = certificate_rejected && verifier->override_accepted();
+
+        rejection_handled = replacement_required || rejection_overridden;
+    }
+
+    if (verify_upstream_ && verdict < 0 && !rejection_handled) {
         ++upstream_failures_;
         log().war("session %llu forwarding upstream verification failed",
                   static_cast<unsigned long long>(value.id));
@@ -914,7 +974,37 @@ void listener_service::progress_handshake(
         limits_.max_streams_per_session,
         limits_.stream_buffer_bytes,
     };
-    if (proxy_factory_) {
+
+    if (verify_upstream_ && verifier && verifier->replacement_required()) {
+        // Retain verification evidence, but pass ONLY the downstream to the
+        // responder. No stream can reach the rejected origin through this path.
+        auto evidence = value.upstream;
+        auto const sni = value.downstream->server_name();
+
+        value.local_replacement = true;
+        value.proxy = std::make_unique<h3_replacement>(value.downstream,
+            [evidence, setup = value.setup, scope, sni](h3_headers_record const& record) {
+                std::string method, target;
+
+                for (auto const& field : record.fields) {
+                    if (field.name == ":method") method = field.value;
+                    else if (field.name == ":path") target = field.value;
+                }
+
+                // Scope and display identity come from TLS, never HTTP authority.
+                proxymaker::TlsReplacement response;
+                auto* verification = certificate_verifier::get(evidence->handle_native());
+
+                if (setup && verification) {
+                    response = setup->tls_replacement(*verification, method, target, sni, scope);
+                }
+
+                return h3_replacement_reply{std::move(response.body), response.status,
+                    method == "HEAD", response.override_applied};
+            }, proxy_limits);
+
+        value.upstream->close(sx::engine::http::v3::error_code::no_error);
+    } else if (proxy_factory_) {
         auto [source_host, source_port] = endpoint_parts(value.client_endpoint);
         auto [target_host, target_port] = endpoint_parts(value.target_endpoint);
         auto capture = std::make_shared<spq1::connection_context>(
@@ -963,7 +1053,9 @@ void listener_service::progress_active(
     auto const moved = value.proxy->pump_once();
     if (moved != 0) {
         value.last_activity = now;
-        value.forwarded_bytes += moved;
+
+        if (value.local_replacement) value.replacement_bytes += moved;
+        else value.forwarded_bytes += moved;
     }
 
     // Convert the proxy-local cumulative counter into the service cumulative
@@ -974,16 +1066,18 @@ void listener_service::progress_active(
         value.reported_stream_limit_rejections = rejected;
     }
 
-    if (!value.downstream->closed() && !value.upstream->closed()
-        && now - value.last_activity < lifecycle_.idle_timeout) {
+    const bool transport_closed = value.downstream->closed() ||
+        (!value.local_replacement && value.upstream->closed());
+    if (!transport_closed && now - value.last_activity < lifecycle_.idle_timeout) {
         return;
     }
-    if (!value.downstream->closed() && !value.upstream->closed()) {
+
+    if (!transport_closed) {
         ++idle_timeouts_;
         log().dia("session %llu idle timeout", static_cast<unsigned long long>(value.id));
     }
     start_draining(value, now, 0,
-        value.downstream->closed() || value.upstream->closed() ? "transport closed" : "idle timeout");
+        transport_closed ? "transport closed" : "idle timeout");
 }
 
 bool listener_service::flush_session_output(session& value) {
@@ -1224,6 +1318,8 @@ void listener_service::publish_session_snapshots(
         item.idle_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - linked.last_activity).count();
         item.forwarded_bytes = linked.forwarded_bytes;
+        item.replacement_bytes = linked.replacement_bytes;
+        item.local_replacement = linked.local_replacement;
         item.stream_summary = linked.proxy ? linked.proxy->summary() : linked.stream_summary;
         item.sift_classifications = linked.proxy
             ? linked.proxy->sift_classifications() : linked.sift_classifications;
@@ -1653,7 +1749,23 @@ bool listener_service::progress_certificate_jobs() {
             job.state = certificate_state::certificate_check;
             continue;
         }
-        if (verdict < 0) {
+
+        apply_tls_override(job.setup.get(), verifier, replacement_scope(job.client, job.destination, job.server_name));
+
+        // A rejected certificate may lead to a local warning or an accepted
+        // override. An internal verification failure cannot use the override.
+        bool rejection_handled = false;
+
+        if (verifier) {
+            constexpr int rejected_certificate_verdict = -2;
+            bool const replacement_required = verifier->replacement_required();
+            bool const certificate_rejected = verdict == rejected_certificate_verdict;
+            bool const rejection_overridden = certificate_rejected && verifier->override_accepted();
+
+            rejection_handled = replacement_required || rejection_overridden;
+        }
+
+        if (verdict < 0 && !rejection_handled) {
             logging::verify().war("QUIC certificate policy rejected sni='%s'", job.server_name.c_str());
             job.upstream->close(1);
             ++upstream_failures_;
@@ -1680,11 +1792,34 @@ bool listener_service::progress_certificate_jobs() {
 listener_service::verified_certificate listener_service::verify_and_spoof(
     std::shared_ptr<transport_connection> const& upstream,
     datagram_endpoint destination, std::string const& server_name) {
+    constexpr int accepted_verdict = 1;
+    constexpr int rejected_certificate_verdict = -2;
+
     verified_certificate verified;
     auto* verifier = certificate_verifier::get(upstream->handle_native());
-    if (!upstream->handshake_complete()
-        || (verifier ? verifier->progress(upstream->handle_native()) != 1
-            : SSL_get_verify_result(upstream->handle_native()) != X509_V_OK)) {
+    bool const handshake_complete = upstream->handshake_complete();
+    bool identity_can_be_issued = false;
+
+    // Do not advance certificate verification until the TLS handshake finishes.
+    // Issuing a downstream identity may serve a local warning; it does not by
+    // itself permit forwarding traffic to the rejected origin.
+    if (handshake_complete) {
+        if (verifier) {
+            auto const verdict = verifier->progress(upstream->handle_native());
+            bool const certificate_accepted = verdict == accepted_verdict;
+            bool const replacement_required = verifier->replacement_required();
+            bool const certificate_rejected = verifier->verdict() == rejected_certificate_verdict;
+            bool const rejection_overridden = certificate_rejected && verifier->override_accepted();
+
+            identity_can_be_issued = certificate_accepted || replacement_required || rejection_overridden;
+        } else {
+            // Without the policy verifier, only ordinary successful TLS
+            // certificate verification permits issuing the downstream identity.
+            identity_can_be_issued = SSL_get_verify_result(upstream->handle_native()) == X509_V_OK;
+        }
+    }
+
+    if (!identity_can_be_issued) {
         logging::verify().war("upstream verification failed sni='%s' target=%s verify=%ld",
                               server_name.c_str(), endpoint_text(destination).c_str(),
                               SSL_get_verify_result(upstream->handle_native()));
@@ -1715,13 +1850,36 @@ listener_service::verified_certificate listener_service::verify_and_spoof(
     if (identity_matches != 1) {
         logging::verify().war("upstream identity mismatch sni='%s'", server_name.c_str());
 
-        upstream->close(1);
-        return verified;
+        bool identity_failure_handled = false;
+
+        if (verifier) {
+            verifier->reject_identity();
+
+            // Re-evaluate after recording the hostname/IP mismatch: the new
+            // failure may require a warning page or fall under an active override.
+            bool const replacement_required = verifier->replacement_required();
+            bool const certificate_rejected = verifier->verdict() == rejected_certificate_verdict;
+            bool const rejection_overridden = certificate_rejected && verifier->override_accepted();
+
+            identity_failure_handled = replacement_required || rejection_overridden;
+        }
+
+        if (!identity_failure_handled) {
+            upstream->close(1);
+
+            return verified;
+        }
     }
 
     SpoofOptions options;
     options.sni = server_name;
-    options.self_signed = verifier && !verifier->trusted();
+
+    const bool replacement_identity = verifier && (verifier->replacement_required() || verifier->override_accepted());
+
+    options.self_signed = verifier && !verifier->trusted() && !replacement_identity;
+
+    if (replacement_identity) options.sans.push_back((numeric_identity ? "IP:" : "DNS:") + server_name);
+
     auto& factory = SSLFactory::factory();
     auto const store_key = SSLFactory::make_store_key(certificate, options);
     auto lock = std::scoped_lock(factory.lock());
@@ -1779,7 +1937,8 @@ listener_service::verified_certificate listener_service::verify_and_spoof(
     auto cached = factory.find_mitm(store_key);
     bool ready = cached && retain(cached->chain.cert, cached->chain.key);
     if (!ready) {
-        auto forged = factory.spoof(certificate, options.self_signed, nullptr);
+        auto forged = factory.spoof(certificate, options.self_signed, &options.sans);
+
         if (forged && forged->chain.cert && forged->chain.key) {
             ready = retain(forged->chain.cert, forged->chain.key);
             // ptr_cache uses allocator state tied to the allocating thread.

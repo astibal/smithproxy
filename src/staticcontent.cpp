@@ -128,7 +128,10 @@ bool StaticContent::load_files(std::string& dir,
         std::vector<std::pair<std::string, std::unique_ptr<Template>>> loaded;
 
         for(const std::string name: { "test", "html_page", "html_img_warning",
-                                      "tls_replacement"} ) {
+                                      "tls_replacement", "tls_override_form",
+                                      "tls_reason", "tls_certificate_field",
+                                      "tls_certificate_details", "tls_replacement_error",
+                                      "tls_redirect", "tls_redirect_top"} ) {
             _dia("StaticContent::load_files: loading template %s", name.c_str());
 
             auto t_temp = std::make_unique<Template>(loader_file_);
@@ -147,9 +150,31 @@ bool StaticContent::load_files(std::string& dir,
     return ret;
 }
 
+std::string StaticContent::render_fields(
+        std::string const& name, std::map<std::string, std::string> const& fields) {
+    auto lock_guard = std::scoped_lock(lock);
+    auto t = get(name);
+
+    if (!t) return {};
+
+    // Reset shared template state even if rendering throws partway through.
+    struct clear_fields {
+        Template* value;
+        ~clear_fields() { value->get_properties().clear(); }
+    } cleanup {t.get()};
+
+    t->get_properties().clear();
+
+    for (auto const& [key, value] : fields) {
+        t->set(key, value);
+    }
+
+    return t->render();
+}
+
 std::string StaticContent::render_tls_replacement(
         std::string const& target, std::string const& reasons,
-        std::string const& action) {
+        std::string const& action, std::string const& details) {
     auto t = get("tls_replacement");
     if(!t) return {};
 
@@ -157,7 +182,27 @@ std::string StaticContent::render_tls_replacement(
     t->set("target", target);
     t->set("reasons", reasons);
     t->set("action", action);
+    t->set("details", details);
+
     auto result = t->render();
+    t->get_properties().clear();
+    return result;
+}
+
+// Values are HTML-escaped by the caller, like the other replacement renderers.
+std::string StaticContent::render_tls_override_form(
+        std::string const& token, std::string const& original_target) {
+    auto t = get("tls_override_form");
+
+    if (!t) return {};
+
+    auto lock_guard = std::scoped_lock(lock);
+
+    t->set("token", token);
+    t->set("original_target", original_target);
+
+    auto result = t->render();
+
     t->get_properties().clear();
     return result;
 }

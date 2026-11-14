@@ -375,6 +375,38 @@ public:
         if (found != streams_.end()) found->second.metadata_limited = true;
     }
 
+    bool critical_stream(std::uint64_t stream_id) const {
+        // QUIC bit 1 marks unidirectional streams; only these can be H3 critical streams.
+        if ((stream_id & 2U) == 0) return false;
+
+        auto found = streams_.find(stream_id);
+
+        if (found == streams_.end() || !found->second.stream_type_known) return false;
+
+        auto const type = found->second.stream_type;
+
+        return type == h3_stream_control || type == h3_stream_qpack_encoder ||
+            type == h3_stream_qpack_decoder;
+    }
+
+    bool complete_request(std::uint64_t stream_id) const {
+        auto found = streams_.find(stream_id);
+
+        // H3 requests are client-initiated bidirectional streams (both low bits zero).
+        if ((stream_id & 3U) != 0 || found == streams_.end()) return false;
+
+        auto const& value = found->second;
+
+        // Headers must be decoded, with no partial frame left at the peer's FIN.
+        bool const headers_complete = status(stream_id) == "decoded" && !value.header_blocked;
+        bool const framing_complete = !value.frame_type && value.input.empty();
+
+        // An absent Content-Length is valid; a declared length must match exactly.
+        bool const body_complete = !value.content_length || value.data_bytes == *value.content_length;
+
+        return headers_complete && framing_complete && body_complete;
+    }
+
     std::string status(std::uint64_t stream_id) const {
         if (resource_limited_) return "limited";
         if (connection_invalid_) return "invalid";
@@ -1256,6 +1288,18 @@ public:
         return records;
     }
 
+    bool critical_stream(socle::side_t side, std::uint64_t stream_id) {
+        std::lock_guard lock(lock_);
+
+        return (side == socle::side_t::LEFT ? client_ : server_).critical_stream(stream_id);
+    }
+
+    bool complete_request(std::uint64_t stream_id) {
+        std::lock_guard lock(lock_);
+
+        return !connection_invalid_ && client_.complete_request(stream_id);
+    }
+
     std::string connection_status() {
         std::lock_guard lock(lock_);
         if (client_.resource_limited() || server_.resource_limited()) return "limited";
@@ -1320,3 +1364,11 @@ std::vector<h3_headers_record> h3_capture_decoder::ingest(
 }
 
 } // namespace sx::quic
+
+bool sx::quic::h3_capture_decoder::complete_request(std::uint64_t stream_id) const {
+    return implementation_->complete_request(stream_id);
+}
+
+bool sx::quic::h3_capture_decoder::critical_stream(socle::side_t side, std::uint64_t stream_id) const {
+    return implementation_->critical_stream(side, stream_id);
+}

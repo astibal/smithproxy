@@ -984,6 +984,8 @@ quic::datagram_endpoint loopback_endpoint(int family, std::uint16_t port) {
 class CertificatePolicySetup final : public sx::proxymaker::SessionSetup {
 public:
     sx::proxymaker::QuicTlsPolicy policy;
+    std::atomic_bool grant {false};
+    bool tls_override_active(SSLCom&, std::string const&) override { return grant.load(); }
     std::optional<sx::proxymaker::QuicTlsPolicy> tls_policy(
         std::string const&, std::string const&) override { return policy; }
     bool start(std::string const&, std::string const&) override { return true; }
@@ -1085,6 +1087,137 @@ INSTANTIATE_TEST_SUITE_P(TlsParity, QuicCertificatePolicy, ::testing::Values(
     "future_reject_v6", "future_allow_v6", "untrusted_reject_v6", "untrusted_allow_v6", "require_staple_v6",
     "require_ct_v6", "configured_identity_only_v6"),
     [](auto const& info) { return info.param; });
+
+class QuicCertificateReplacement : public ::testing::TestWithParam<std::string> {};
+
+TEST_P(QuicCertificateReplacement, ServesLocalResponseWithoutSendingOriginData) {
+    auto const identity = GetParam();
+    std::optional<test_pki::ocsp_parameters> staple;
+    if (identity == "revoked") staple = test_pki::ocsp_cases[1];
+    if (identity == "ocsp_unknown") staple = test_pki::ocsp_cases[2];
+    if (identity == "ocsp_expired") staple = test_pki::ocsp_cases[3];
+    if (identity == "ocsp_future") staple = test_pki::ocsp_cases[4];
+    const bool invalid_certificate = identity == "self_signed" || identity == "expired" ||
+        identity == "future" || identity == "untrusted";
+    origin_server origin(0ms, false, invalid_certificate ? identity : "", staple);
+    ASSERT_TRUE(origin.ready());
+    auto setup = std::make_shared<CertificatePolicySetup>();
+    setup->policy.failed_check_replacement = true;
+    setup->policy.ocsp_stapling = staple.has_value() || identity == "missing_staple";
+    setup->policy.ocsp_stapling_mode = setup->policy.ocsp_stapling ? 2 : 0;
+    setup->policy.ct_enable = identity == "missing_ct";
+    setup->policy.sni_based_cert = setup->policy.ip_based_cert = false;
+    quic::lifecycle_options lifecycle;
+    lifecycle.handshake_timeout = 3s;
+    lifecycle.drain_timeout = 50ms;
+    quic::listener_service proxy(0, pki_file("srv-cert.pem"), pki_file("srv-key.pem"), false,
+        origin.port(), true, lifecycle, {}, "127.0.0.1", {}, false,
+        [setup](auto const&, auto const&) { return setup; });
+    ASSERT_TRUE(proxy.prepare()) << proxy.last_error();
+    running_service runner(proxy);
+    auto context = make_verified_client_context();
+    ASSERT_NE(context, nullptr);
+    auto address = loopback(proxy.bound_port());
+    auto client = quic::connect_openssl_quic(context.get(),
+        reinterpret_cast<sockaddr const*>(&address), sizeof(address),
+        identity == "hostname" ? "wrong.example" : test_sni);
+    ASSERT_NE(client, nullptr);
+    auto deadline = std::chrono::steady_clock::now() + 4s;
+    while (!client->handshake_complete() && std::chrono::steady_clock::now() < deadline) {
+        client->drain_events();
+        std::this_thread::sleep_for(1ms);
+    }
+    ASSERT_TRUE(client->handshake_complete());
+    EXPECT_EQ(SSL_get_verify_result(client->handle_native()), X509_V_OK);
+
+    // Static/literal QPACK GET https://localhost/. No dynamic state or
+    // test-side verification bypass is involved in receiving this response.
+    unsigned char request[] {1, 16, 0, 0, 0xd1, 0xd7, 0x50, 9,
+        'l', 'o', 'c', 'a', 'l', 'h', 'o', 's', 't', 0xc1};
+    auto control = client->open_flow(mf::direction::send_only);
+    unsigned char settings[] {0, 4, 0};
+    ASSERT_EQ(client->write(control, settings, sizeof(settings)).size, sizeof(settings));
+    auto flow = client->open_flow(mf::direction::bidirectional);
+    ASSERT_EQ(client->write(flow, request, sizeof(request)).size, sizeof(request));
+    ASSERT_EQ(client->finish(flow), mf::io_status::ok);
+    std::string response;
+    bool finished = false;
+    deadline = std::chrono::steady_clock::now() + 3s;
+    while (!finished && std::chrono::steady_clock::now() < deadline) {
+        client->drain_events();
+        unsigned char bytes[4096];
+        auto input = client->read(flow, bytes, sizeof(bytes));
+        response.append(reinterpret_cast<char const*>(bytes), input.size);
+        finished = input.status == mf::io_status::eof;
+        std::this_thread::sleep_for(1ms);
+    }
+    EXPECT_TRUE(finished);
+    EXPECT_NE(response.find("Upstream certificate rejected."), std::string::npos);
+    EXPECT_EQ(origin.received_bytes(), 0U);
+    for (auto const& snapshot : proxy.session_diagnostics()) {
+        EXPECT_TRUE(snapshot.local_replacement);
+        EXPECT_EQ(snapshot.forwarded_bytes, 0U);
+    }
+    client->close();
+}
+
+INSTANTIATE_TEST_SUITE_P(TlsParity, QuicCertificateReplacement, ::testing::Values(
+    "self_signed", "expired", "future", "untrusted", "hostname", "revoked",
+    "ocsp_unknown", "ocsp_expired", "ocsp_future", "missing_staple", "missing_ct"));
+
+TEST(QuicTestbed, ReplacementOverrideIsReevaluatedOnEachConnection) {
+    origin_server origin(0ms, false, "expired");
+    ASSERT_TRUE(origin.ready());
+    auto setup = std::make_shared<CertificatePolicySetup>();
+    setup->policy.failed_check_replacement = true;
+    setup->policy.failed_check_override = true;
+    setup->policy.sni_based_cert = setup->policy.ip_based_cert = false;
+    quic::listener_service proxy(0, pki_file("srv-cert.pem"), pki_file("srv-key.pem"), false,
+        origin.port(), true, {}, {}, "127.0.0.1", {}, false,
+        [setup](auto const&, auto const&) { return setup; });
+    ASSERT_TRUE(proxy.prepare());
+    running_service runner(proxy);
+    auto context = make_verified_client_context();
+    ASSERT_NE(context, nullptr);
+    auto address = loopback(proxy.bound_port());
+    // The application challenge/TTL store has its own tests. Here the real
+    // transport must reevaluate its decision and never promote an old session.
+    for (bool granted : {false, true, false}) {
+        setup->grant.store(granted);
+        auto client = quic::connect_openssl_quic(context.get(),
+            reinterpret_cast<sockaddr const*>(&address), sizeof(address), test_sni);
+        ASSERT_NE(client, nullptr);
+        auto deadline = std::chrono::steady_clock::now() + 4s;
+        while (!client->handshake_complete() && std::chrono::steady_clock::now() < deadline) {
+            client->drain_events();
+            std::this_thread::sleep_for(1ms);
+        }
+        ASSERT_TRUE(client->handshake_complete());
+        EXPECT_EQ(SSL_get_verify_result(client->handle_native()), X509_V_OK);
+        auto flow = client->open_flow(mf::direction::bidirectional);
+        // This intentionally is not H3: only an explicitly granted forwarding
+        // connection can echo it. The local endpoint must reject it.
+        auto const before = origin.received_bytes();
+        ASSERT_EQ(client->write(flow, "test", 4).size, 4U);
+        ASSERT_EQ(client->finish(flow), mf::io_status::ok);
+        std::string received;
+        deadline = std::chrono::steady_clock::now() + 300ms;
+        while (std::chrono::steady_clock::now() < deadline) {
+            client->drain_events();
+            unsigned char bytes[64];
+            auto input = client->read(flow, bytes, sizeof(bytes));
+            received.append(reinterpret_cast<char const*>(bytes), input.size);
+            if (received.size() >= 4 || input.status == mf::io_status::reset) break;
+            std::this_thread::sleep_for(1ms);
+        }
+        if (granted) EXPECT_EQ(received, "test");
+        else {
+            EXPECT_TRUE(received.empty());
+            EXPECT_EQ(origin.received_bytes(), before);
+        }
+        client->close();
+    }
+}
 
 TEST(QuicTestbed, ConfiguredIdentityIncludesIntermediateChain) {
     auto context = quic::make_openssl_quic_context(true);

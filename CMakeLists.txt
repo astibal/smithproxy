@@ -328,6 +328,13 @@ add_custom_command(
                 --file templates/replacement/en/html_page.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/html_page.txt
                 --file templates/replacement/en/html_img_warning.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/html_img_warning.txt
                 --file templates/replacement/en/tls_replacement.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement.txt
+                --file templates/replacement/en/tls_override_form.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_override_form.txt
+                --file templates/replacement/en/tls_reason.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_reason.txt
+                --file templates/replacement/en/tls_certificate_field.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_certificate_field.txt
+                --file templates/replacement/en/tls_certificate_details.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_certificate_details.txt
+                --file templates/replacement/en/tls_replacement_error.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_error.txt
+                --file templates/replacement/en/tls_redirect.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_redirect.txt
+                --file templates/replacement/en/tls_redirect_top.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_redirect_top.txt
                 --file templates/replacement/en/tls_replacement_common.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_common.txt
                 --file templates/replacement/en/tls_replacement_light.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_light.txt
                 --file templates/replacement/en/tls_replacement_dark.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_dark.txt
@@ -352,6 +359,13 @@ add_custom_command(
                 ${PROJECT_SOURCE_DIR}/etc/msg/en/html_page.txt
                 ${PROJECT_SOURCE_DIR}/etc/msg/en/html_img_warning.txt
                 ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement.txt
+                ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_override_form.txt
+                ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_reason.txt
+                ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_certificate_field.txt
+                ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_certificate_details.txt
+                ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_error.txt
+                ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_redirect.txt
+                ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_redirect_top.txt
                 ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_common.txt
                 ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_light.txt
                 ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_dark.txt
@@ -388,6 +402,7 @@ add_executable(smithproxy
         src/service/cfgapi/cfg_archive.cpp
         src/service/cfgapi/cfg_pack.cpp
         src/staticcontent.cpp
+        src/proxy/tls_replacement.cpp
 
         src/proxy/mitmhost.cpp
         src/proxy/flowctx.cpp
@@ -410,6 +425,8 @@ add_executable(smithproxy
         src/proxy/multiflow/mfproxy.cpp
         src/proxy/multiflow/mfmitmproxy.cpp
         src/proxy/quic/wire.cpp
+        src/inspect/engine/http3_response.cpp
+        src/proxy/quic/h3_replacement.cpp
         src/proxy/quic/h3capture.cpp
         src/proxy/quic/spq1.cpp
         src/proxy/quic/openssl.cpp
@@ -656,6 +673,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 src/utils/fs.cpp
                 src/utils/mem.cpp
                 src/staticcontent.cpp
+                src/proxy/tls_replacement.cpp
                 src/ext/nltemplate/nltemplate.cpp
                 src/smithlog.cpp
                 src/service/daemon.cpp
@@ -697,6 +715,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 socle/common/tests/meter_tests.cpp
                 src/proxy/quic/wire.cpp
                 tests/unit/proxy/quic/wire_tests.cpp
+                src/inspect/engine/http3_response.cpp
+                src/proxy/quic/h3_replacement.cpp
                 src/proxy/quic/h3capture.cpp
                 src/proxy/quic/spq1.cpp
                 tests/unit/proxy/quic/h3capture_tests.cpp
@@ -825,6 +845,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/inspect/protocol_views_tests.cpp
                 tests/unit/inspect/http3_engine_tests.cpp
                 tests/unit/inspect/http_diagnostics_tests.cpp
+                src/inspect/engine/http3_response.cpp
+                src/proxy/quic/h3_replacement.cpp
                 src/proxy/quic/h3capture.cpp
                 tests/unit/inspect/protocol_fork_tests.cpp
                 tests/unit/inspect/protocol_fork_benchmark.cpp
@@ -1031,6 +1053,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 socle/common/tests/meter_tests.cpp
                 src/proxy/quic/wire.cpp
                 tests/unit/proxy/quic/wire_tests.cpp
+                src/inspect/engine/http3_response.cpp
+                src/proxy/quic/h3_replacement.cpp
                 src/proxy/quic/h3capture.cpp
                 src/proxy/quic/spq1.cpp
                 tests/unit/proxy/quic/h3capture_tests.cpp
@@ -1054,6 +1078,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 src/proxy/multiflow/mfflowcom.cpp
                 src/proxy/multiflow/mfproxy.cpp
                 src/proxy/quic/wire.cpp
+                src/inspect/engine/http3_response.cpp
+                src/proxy/quic/h3_replacement.cpp
                 src/proxy/quic/h3capture.cpp
                 src/proxy/quic/spq1.cpp
                 src/proxy/quic/openssl.cpp
@@ -1078,6 +1104,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                     --gtest_filter=-HTTP1.benchmark:ProtocolForkBenchmark.*)
             add_test(NAME unit.http_diagnostics COMMAND sx_gtests_http1 --gtest_filter=HttpDiagnostics.*)
             add_test(NAME unit.http3 COMMAND sx_gtests_http1 --gtest_filter=Http3Engine.*)
+            add_test(NAME unit.http3_replacement COMMAND quic_testbed
+                    --gtest_filter=H3Replacement.*:H3Capture.Replacement*)
             add_test(NAME unit.http3_capture COMMAND quic_testbed
                     --gtest_filter=H3Capture.*:QpackVendor.*)
             add_test(NAME unit.protocol_views COMMAND sx_gtests_http1
@@ -1097,6 +1125,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
             add_test(NAME integration.tls_testbed COMMAND tls_testbed)
             add_test(NAME integration.transfer_testbed COMMAND transfer_testbed)
             add_test(NAME integration.quic_testbed COMMAND quic_testbed)
+            add_test(NAME integration.h3_replacement COMMAND quic_testbed
+                    --gtest_filter=TlsParity/QuicCertificateReplacement.*:QuicTestbed.ReplacementOverride*)
             add_test(NAME benchmark.http1 COMMAND sx_gtests_http1 --gtest_filter=HTTP1.benchmark)
             add_test(NAME benchmark.protocol_fork COMMAND sx_gtests_http1
                     --gtest_filter=ProtocolForkBenchmark.*)
@@ -1119,7 +1149,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
             add_test(NAME platform.linux_distros
                     COMMAND ${PROJECT_SOURCE_DIR}/tools/test-linux-distros.sh)
             set_tests_properties(
-                    unit.core unit.listener_lifecycle unit.http1 unit.startstoptls unit.httpconnect unit.reloadable
+                    unit.core unit.listener_lifecycle unit.http1 unit.http3_replacement unit.startstoptls unit.httpconnect unit.reloadable
                     unit.cfg_archive_monitor unit.network_context
                     PROPERTIES LABELS "native;unit")
             set_tests_properties(unit.listener_lifecycle
@@ -1129,7 +1159,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                     unit.webhook_broker
                     PROPERTIES LABELS "native;unit;security;privsep")
             set_tests_properties(
-                    integration.tls_testbed integration.transfer_testbed integration.quic_testbed
+                    integration.tls_testbed integration.transfer_testbed integration.quic_testbed integration.h3_replacement
                     PROPERTIES LABELS "native;integration")
             set_tests_properties(benchmark.http1 PROPERTIES LABELS "benchmark")
             set_tests_properties(external.inet external.pcap_experiments external.dns

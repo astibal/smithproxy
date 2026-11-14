@@ -1904,6 +1904,11 @@ static void print_quic_sessions(DiagCli* cli, int flags, bool listener_summary, 
                 traffic.lored_classifications);
             cli->context.print(title);
 
+            if (session.local_replacement) {
+                cli_print(cli, "    TLS replacement: local HTTP/3 warning page; origin forwarding blocked (%lluB local I/O)",
+                          static_cast<unsigned long long>(session.replacement_bytes));
+            }
+
             if (tls_details) {
                 print_quic_tls(cli, "Left ", session.downstream_tls,
                                session.downstream_alpn, verbosity);

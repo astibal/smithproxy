@@ -1,10 +1,16 @@
 #include <gtest/gtest.h>
+#include <inspect/engine/http3_response.hpp>
+#include <inspect/engine/http3_wire.hpp>
+#include <proxy/quic/h3_replacement.hpp>
+#include <proxy/multiflow/fake.hpp>
+
 
 #include "proxy/quic/h3capture.hpp"
 
 #include <lsqpack.h>
 #include <lsxpack_header.h>
 
+#include <cstring>
 #include <algorithm>
 #include <array>
 #include <string>
@@ -1434,4 +1440,248 @@ TEST(H3Capture, BoundsTrackedStreamState) {
     EXPECT_TRUE(decoder.ingest(
         socle::side_t::RIGHT, (stream_limit - 1) * 4,
         response.data(), response.size()).empty());
+}
+
+// Local replacements are an endpoint, so request completion is stricter than
+// passive header observation. Incomplete messages must never consume a token.
+TEST(H3Capture, ReplacementRequiresCompleteRequestBodyAndFrames) {
+    sx::quic::h3_capture_decoder decoder;
+    auto request = encode_fields({{":method", "POST"}, {":scheme", "https"},
+        {":authority", "fixture.example"}, {":path", "/"}, {"content-length", "3"}});
+    ASSERT_FALSE(request.empty());
+    decoder.ingest(socle::side_t::LEFT, 0, request.data(), request.size());
+    EXPECT_FALSE(decoder.complete_request(0));
+    unsigned char first[] {0, 3, 'a'};
+    decoder.ingest(socle::side_t::LEFT, 0, first, sizeof(first));
+    EXPECT_FALSE(decoder.complete_request(0));
+    unsigned char rest[] {'b', 'c'};
+    decoder.ingest(socle::side_t::LEFT, 0, rest, sizeof(rest));
+    EXPECT_TRUE(decoder.complete_request(0));
+    unsigned char truncated_frame[] {0x40};
+    decoder.ingest(socle::side_t::LEFT, 0, truncated_frame, sizeof(truncated_frame));
+    EXPECT_FALSE(decoder.complete_request(0));
+}
+
+
+namespace {
+// Adapt fake handles to the QUIC stream classes. Keep the production fake's
+// transport-neutral numbering untouched for all existing multiflow tests.
+class replacement_peer final : public sx::multiflow::connection {
+public:
+    sx::multiflow::fake_connection io {7};
+    using flow_handle = sx::multiflow::flow_handle;
+    using direction = sx::multiflow::direction;
+    using io_status = sx::multiflow::io_status;
+    using io_result = sx::multiflow::io_result;
+    std::map<std::uint64_t, std::uint64_t> wires;
+    std::optional<std::uint64_t> closed;
+    std::uint64_t next_bidi = 0, next_uni = 2;
+    flow_handle open_flow(direction value) override {
+        auto handle = io.open_flow(value);
+        if (io.contains(handle)) {
+            if (value == direction::send_only) wires[handle.id] = 3;
+            else if (value == direction::receive_only) { wires[handle.id] = next_uni; next_uni += 4; }
+            else { wires[handle.id] = next_bidi; next_bidi += 4; }
+        }
+        return handle;
+    }
+    bool contains(flow_handle f) const override { return io.contains(f); }
+    std::optional<direction> direction_of(flow_handle f) const override { return io.direction_of(f); }
+    std::optional<sx::multiflow::flow_id> wire_flow_id(flow_handle f) const override {
+        auto found = wires.find(f.id);
+        return found == wires.end() ? std::nullopt : std::optional(found->second);
+    }
+    io_result read(flow_handle f, void* b, std::size_t n) override { return io.read(f, b, n); }
+    io_result write(flow_handle f, void const* b, std::size_t n) override { return io.write(f, b, n); }
+    io_status finish(flow_handle f) override { return io.finish(f); }
+    io_status reset(flow_handle f, std::uint64_t e) override { return io.reset(f, e); }
+    void close(std::uint64_t e) override { closed = e; io.close(e); }
+    bool readable(flow_handle f) const override { return io.readable(f); }
+    bool writable(flow_handle f) const override { return io.writable(f); }
+    std::vector<sx::multiflow::event> drain_events() override { return io.drain_events(); }
+};
+
+std::vector<unsigned char> replacement_request() {
+    return encode_fields({{":method", "GET"}, {":scheme", "https"},
+        {":authority", "fixture.example"}, {":path", "/"}});
+}
+}
+
+TEST(H3Replacement, IndependentResponseDecodesWithZeroDynamicCapacity) {
+    for (unsigned status : {200, 403, 500}) {
+        auto response = sx::engine::http::v3::make_response("denied", status);
+        ASSERT_TRUE(response);
+        sx::quic::h3_capture_decoder decoder;
+        auto request = replacement_request();
+        decoder.ingest(socle::side_t::LEFT, 0, request.data(), request.size());
+        auto fields = decoder.ingest(socle::side_t::RIGHT, 0, response->data(), response->size());
+        ASSERT_EQ(fields.size(), 1);
+        EXPECT_TRUE(std::any_of(fields[0].fields.begin(), fields[0].fields.end(), [status](auto const& field) {
+            return field.name == ":status" && field.value == std::to_string(status);
+        }));
+        EXPECT_EQ(decoder.status(socle::side_t::RIGHT, 0), "decoded");
+    }
+    EXPECT_FALSE(sx::engine::http::v3::make_response("", 199));
+    EXPECT_FALSE(sx::engine::http::v3::make_response("", 600));
+}
+
+TEST(H3Replacement, HeadAndBodylessStatusesDoNotEmitData) {
+    for (unsigned status : {200, 204, 205, 304, 403}) {
+        auto response = sx::engine::http::v3::make_response(std::string(20000, 'x'), status, true);
+        ASSERT_TRUE(response);
+        // A field section is small even when the represented body is large.
+        EXPECT_LT(response->size(), 256);
+        if (status == 204 || status == 205 || status == 304) {
+            auto regular = sx::engine::http::v3::make_response(std::string(20000, 'x'), status);
+            ASSERT_TRUE(regular);
+            EXPECT_EQ(regular->str(), response->str());
+        }
+    }
+}
+
+TEST(H3Replacement, WaitsForFinAndRetriesPartialWritesAndBlockedFinish) {
+    auto peer = std::make_shared<replacement_peer>();
+    int calls = 0;
+    sx::quic::h3_replacement endpoint(peer, [&](auto const&) {
+        ++calls;
+        return sx::quic::h3_replacement_reply {std::string(20000, 'z'), 403};
+    }, {});
+    auto flow = peer->open_flow(sx::multiflow::direction::bidirectional);
+    auto request = replacement_request();
+    peer->io.inject_receive(flow, request.data(), request.size());
+    for (int i = 0; i < 20; ++i) endpoint.pump_once(3);
+    EXPECT_EQ(calls, 0);
+    peer->io.block_finish(flow, true);
+    peer->io.inject_peer_fin(flow);
+    std::vector<unsigned char> received;
+    for (int i = 0; i < 10000; ++i) {
+        endpoint.pump_once(7);
+        auto bytes = peer->io.consume_send(flow);
+        received.insert(received.end(), bytes.begin(), bytes.end());
+    }
+    EXPECT_EQ(calls, 1);
+    EXPECT_FALSE(peer->io.local_finished(flow));
+    auto expected = sx::engine::http::v3::make_response(std::string(20000, 'z'), 403);
+    ASSERT_TRUE(expected);
+    EXPECT_EQ(std::string(received.begin(), received.end()), expected->str());
+    peer->io.block_finish(flow, false);
+    endpoint.pump_once();
+    EXPECT_TRUE(peer->io.local_finished(flow));
+    EXPECT_EQ(endpoint.pair_count(), 0);
+}
+
+TEST(H3Replacement, TruncatedOrResetRequestsNeverInvokeAction) {
+    for (bool reset : {false, true}) {
+        auto peer = std::make_shared<replacement_peer>();
+        int calls = 0;
+        sx::quic::h3_replacement endpoint(peer, [&](auto const&) {
+            ++calls;
+            return sx::quic::h3_replacement_reply {};
+        }, {});
+        auto flow = peer->open_flow(sx::multiflow::direction::bidirectional);
+        auto request = replacement_request();
+        request.push_back(0x40); // Incomplete frame type after valid headers.
+        peer->io.inject_receive(flow, request.data(), request.size());
+        endpoint.pump_once();
+        if (reset) peer->io.reset(flow, 0x10c);
+        else peer->io.inject_peer_fin(flow);
+        endpoint.pump_once();
+        EXPECT_EQ(calls, 0);
+        EXPECT_TRUE(peer->io.reset_code(flow));
+    }
+}
+
+TEST(H3Replacement, ClosingCriticalStreamClosesConnection) {
+    auto peer = std::make_shared<replacement_peer>();
+    sx::quic::h3_replacement endpoint(peer, [](auto const&) { return sx::quic::h3_replacement_reply {}; }, {});
+    auto control = peer->open_flow(sx::multiflow::direction::receive_only);
+    unsigned char settings[] {0, 4, 0};
+    peer->io.inject_receive(control, settings, sizeof(settings));
+    peer->io.inject_peer_fin(control);
+    endpoint.pump_once();
+    endpoint.pump_once();
+    ASSERT_TRUE(peer->closed);
+    EXPECT_EQ(*peer->closed, 0x104);
+}
+
+TEST(H3Replacement, OverrideSendsGoawayAndRejectsNewRequests) {
+    auto peer = std::make_shared<replacement_peer>();
+    int calls = 0;
+    sx::quic::h3_replacement endpoint(peer, [&](auto const&) {
+        ++calls;
+        return sx::quic::h3_replacement_reply {"granted", 200, false, true};
+    }, {});
+    auto first = peer->open_flow(sx::multiflow::direction::bidirectional);
+    auto concurrent = peer->open_flow(sx::multiflow::direction::bidirectional);
+    auto request = replacement_request();
+    peer->io.inject_receive(first, request.data(), request.size());
+    peer->io.inject_peer_fin(first);
+    endpoint.pump_once();
+    endpoint.pump_once();
+    EXPECT_EQ(calls, 1);
+    // Both already accepted request IDs (0, 4) are below the GOAWAY limit.
+    auto control = sx::multiflow::flow_handle {0, 1};
+    auto bytes = peer->io.consume_send(control);
+    endpoint.pump_once();
+    auto more = peer->io.consume_send(control);
+    bytes.insert(bytes.end(), more.begin(), more.end());
+    EXPECT_EQ(bytes, (std::vector<unsigned char>{0, 4, 0, 7, 1, 8}));
+    auto late = peer->open_flow(sx::multiflow::direction::bidirectional);
+    endpoint.pump_once();
+    EXPECT_EQ(peer->io.reset_code(late), 0x10b);
+    EXPECT_FALSE(peer->io.reset_code(concurrent));
+    EXPECT_EQ(calls, 1);
+}
+
+TEST(H3Replacement, OversizedLocalBodyAndStreamLimitAreBounded) {
+    auto peer = std::make_shared<replacement_peer>();
+    sx::quic::h3_replacement endpoint(peer, [](auto const&) {
+        return sx::quic::h3_replacement_reply {std::string(1024 * 1024 + 1, 'x')};
+    }, {1, 16 * 1024});
+    auto first = peer->open_flow(sx::multiflow::direction::bidirectional);
+    auto excess = peer->open_flow(sx::multiflow::direction::bidirectional);
+    auto request = replacement_request();
+    peer->io.inject_receive(first, request.data(), request.size());
+    peer->io.inject_peer_fin(first);
+    endpoint.pump_once();
+    endpoint.pump_once();
+    EXPECT_EQ(peer->io.reset_code(excess), 0x10b);
+    EXPECT_EQ(peer->io.reset_code(first), 0x107);
+    EXPECT_LT(endpoint.queued_bytes(), 16);
+    EXPECT_EQ(endpoint.limit_rejections(), 2);
+}
+
+
+TEST(H3Replacement, VarintEncodingCoversEveryWidthBoundary) {
+    using namespace sx::engine::http::v3;
+    struct example {
+        std::uint64_t value;
+        std::vector<unsigned char> wire;
+    };
+    std::vector<example> examples {
+        {0, {0}}, {63, {0x3f}}, {64, {0x40, 0x40}},
+        {16383, {0x7f, 0xff}}, {16384, {0x80, 0, 0x40, 0}},
+        {(1ULL << 30) - 1, {0xbf, 0xff, 0xff, 0xff}},
+        {1ULL << 30, {0xc0, 0, 0, 0, 0x40, 0, 0, 0}},
+        {(1ULL << 62) - 1, {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}}
+    };
+
+    for (auto const& item : examples) {
+        SCOPED_TRACE(item.value);
+        buffer encoded;
+
+        EXPECT_EQ(varint_size(item.value), item.wire.size());
+        ASSERT_TRUE(append_varint(encoded, item.value));
+        ASSERT_EQ(encoded.size(), item.wire.size());
+        EXPECT_EQ(std::memcmp(encoded.data(), item.wire.data(), item.wire.size()), 0);
+    }
+
+    buffer unchanged;
+    ASSERT_TRUE(append_varint(unchanged, 7));
+    auto original = unchanged.str();
+
+    EXPECT_EQ(varint_size(1ULL << 62), 0);
+    EXPECT_FALSE(append_varint(unchanged, 1ULL << 62));
+    EXPECT_FALSE(append_varint(unchanged, UINT64_MAX));
+    EXPECT_EQ(unchanged.str(), original);
 }
