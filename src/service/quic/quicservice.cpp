@@ -59,18 +59,18 @@ int select_h3(SSL*, const unsigned char** output, unsigned char* output_size,
 
 bool use_pem_credentials(SSL_CTX* context, const std::string& certificate,
                          const std::string& private_key) {
-    auto cert_bio = socle::raw::var<BIO*>(
+    auto cert_bio = std::unique_ptr<BIO, decltype(&BIO_free)>(
         BIO_new_mem_buf(certificate.data(), static_cast<int>(certificate.size())), BIO_free);
-    auto key_bio = socle::raw::var<BIO*>(
+    auto key_bio = std::unique_ptr<BIO, decltype(&BIO_free)>(
         BIO_new_mem_buf(private_key.data(), static_cast<int>(private_key.size())), BIO_free);
-    if (!cert_bio.value || !key_bio.value) return false;
+    if (!cert_bio || !key_bio) return false;
 
-    auto cert = socle::raw::var<X509*>(
-        PEM_read_bio_X509_AUX(cert_bio.value, nullptr, nullptr, nullptr), X509_free);
-    auto key = socle::raw::var<EVP_PKEY*>(
-        PEM_read_bio_PrivateKey(key_bio.value, nullptr, nullptr, nullptr), EVP_PKEY_free);
-    return cert.value && key.value && SSL_CTX_use_certificate(context, cert.value) == 1
-        && SSL_CTX_use_PrivateKey(context, key.value) == 1
+    auto cert = std::unique_ptr<X509, decltype(&X509_free)>(
+        PEM_read_bio_X509_AUX(cert_bio.get(), nullptr, nullptr, nullptr), X509_free);
+    auto key = std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)>(
+        PEM_read_bio_PrivateKey(key_bio.get(), nullptr, nullptr, nullptr), EVP_PKEY_free);
+    return cert && key && SSL_CTX_use_certificate(context, cert.get()) == 1
+        && SSL_CTX_use_PrivateKey(context, key.get()) == 1
         && SSL_CTX_check_private_key(context) == 1;
 }
 
