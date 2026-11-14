@@ -8,12 +8,6 @@
 namespace sx::quic {
 namespace {
 
-void append_certificate(HookEvent& event, X509* certificate) {
-
-    auto pem = socle::ossl::certificate_pem(certificate);
-    if(!pem.empty()) event.certificates.push_back(std::move(pem));
-}
-
 bool dispatch(proxymaker::SessionSetup* setup, HookEvent& event) {
 
     const auto callback = Hooks::registry().handshake;
@@ -116,12 +110,8 @@ bool hook_outcome(proxymaker::SessionSetup* setup, SSL* ssl, bool client,
 
     event.alpn = socle::ossl::selected_alpn(ssl);
 
-    std::unique_ptr<X509, decltype(&X509_free)> leaf(SSL_get1_peer_certificate(ssl), X509_free);
-    append_certificate(event, leaf.get());
-    const auto* chain = SSL_get_peer_cert_chain(ssl);
-    for(int i = 0; chain && i < sk_X509_num(chain); ++i) {
-        auto* certificate = sk_X509_value(chain, i);
-        if(!leaf || X509_cmp(leaf.get(), certificate) != 0) append_certificate(event, certificate);
+    for(auto& pem : socle::ossl::peer_certificates_pem(ssl)) {
+        if(!pem.empty()) event.certificates.push_back(std::move(pem));
     }
 
     return dispatch(setup, event);

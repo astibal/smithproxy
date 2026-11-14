@@ -872,23 +872,7 @@ nlohmann::json ProxyHooks::tls_details(const TlsArgs& args) {
         details["tls_version"] = SSL_get_version(ssl);
     }
 
-    // OpenSSL includes the leaf in the client-side chain but not necessarily
-    // in the server-side chain. Publish it once, followed by its issuers.
-    if(ssl) {
-        auto leaf = std::unique_ptr<X509, decltype(&X509_free)>(
-            SSL_get_peer_certificate(ssl), X509_free);
-        if(leaf) {
-            details["certificates"].push_back(socle::ossl::certificate_pem(leaf.get()));
-        }
-
-        const auto* chain = SSL_get_peer_cert_chain(ssl);
-        for(int index = 0; chain && index < sk_X509_num(chain); ++index) {
-            auto* certificate = sk_X509_value(chain, index);
-            if(!leaf || X509_cmp(leaf.get(), certificate) != 0) {
-                details["certificates"].push_back(socle::ossl::certificate_pem(certificate));
-            }
-        }
-    }
+    details["certificates"] = socle::ossl::peer_certificates_pem(ssl);
 
     return details;
 }
