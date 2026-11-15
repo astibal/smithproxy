@@ -325,6 +325,7 @@ MitmProxy::~MitmProxy() {
 
         for(auto const* cx: ls()) {
             if(! cx->comlog().empty()) {
+                capture_payload_bytes_ += cx->comlog().size();
                 if(tlog()) tlog()->write(side_t::LEFT, cx->comlog());
                 cx->comlog().clear();
             }
@@ -332,6 +333,7 @@ MitmProxy::~MitmProxy() {
         
         for(auto const* cx: rs()) {
             if(! cx->comlog().empty()) {
+                capture_payload_bytes_ += cx->comlog().size();
                 if(tlog()) tlog()->write_right(cx->comlog());
                 cx->comlog().clear();
             }
@@ -340,6 +342,22 @@ MitmProxy::~MitmProxy() {
         if(tlog()) tlog()->write_left("Connection stop\n");
     }
 
+
+    auto const& capture = CfgFactory::get()->capture_local;
+    if (writer_opts()->write_payload && capture.enabled
+        && (capture.format.value == ContentCaptureFormat::type_t::PCAP
+            || capture.format.value == ContentCaptureFormat::type_t::PCAP_SINGLE)) {
+        auto const packets = tlog() ? tlog()->capture_packets() : std::optional<std::uint64_t>{0};
+        if (packets && *packets == 0) {
+            if (capture_payload_bytes_ != 0) {
+                _war("capture: no packets accepted by writer, payload=%lluB logger=%s session=%s",
+                     static_cast<unsigned long long>(capture_payload_bytes_),
+                     tlog() ? "present" : "missing", to_string(iINF).c_str());
+            } else {
+                _deb("capture: no packets and no payload to capture");
+            }
+        }
+    }
 
     current_sessions()--;
 }
@@ -1662,6 +1680,7 @@ void MitmProxy::write_traffic_log(side_t side, baseHostCX* cx, buffer* custom_bu
             buffer = &cx->to_read();
         }
 
+        capture_payload_bytes_ += buffer->size();
         toggle_tlog();
 
         if(! cx->comlog().empty()) {
@@ -1677,6 +1696,7 @@ void MitmProxy::write_stream_traffic(sx::stream_direction direction,
                                      std::string_view plaintext) {
     if(!writer_opts()->write_payload || plaintext.empty()) return;
 
+    capture_payload_bytes_ += plaintext.size();
     toggle_tlog();
     if(!tlog()) return;
 

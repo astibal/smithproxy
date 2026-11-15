@@ -118,6 +118,7 @@ class MitmProxy : public baseProxy, public IOController {
     std::string replacement_msg;
     static inline long half_timeout_ = 5;
     std::time_t created_at_ = std::time(nullptr);
+    std::uint64_t capture_payload_bytes_ = 0;
     std::uint64_t session_id_ = 0;
 public:
     std::optional<sx::proxy::policy_input_t> policy_input;

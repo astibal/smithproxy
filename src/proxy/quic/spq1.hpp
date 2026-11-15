@@ -86,6 +86,7 @@ public:
     stream_log(std::unique_ptr<socle::baseTrafficLogger> output,
                stream_context context);
     ~stream_log() override;
+    std::optional<std::uint64_t> capture_packets() const override;
 
     void write(socle::side_t side, buffer const& data) override;
     void write(socle::side_t side, std::string const& comment) override;
