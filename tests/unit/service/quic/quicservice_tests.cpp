@@ -8,6 +8,8 @@
 #include <gtest/gtest.h>
 
 #include "service/quic/quicservice.hpp"
+#include "proxy/trafficcapture.hpp"
+#include "proxy/capture_protocol_tracer.hpp"
 #include "service/quic/verification_result.hpp"
 #include "service/quic/worker_dispatcher.hpp"
 
@@ -1398,5 +1400,100 @@ TEST(QuicVerificationWakeup, ExpiredSessionDiscardsCompletionAndInvalidFdFails) 
     }
     EXPECT_FALSE(task.lock());
     EXPECT_THROW(sx::quic::verification_result(2147483647), std::system_error);
+}
+#endif
+
+#if SMITHPROXY_OPENSSL_QUIC
+namespace sx::quic {
+namespace {
+class capture_test_connection final : public transport_connection {
+public:
+    explicit capture_test_connection(SSL* ssl) : ssl_(ssl) {}
+    SSL* handle_native() const override { return ssl_; }
+    datagram_endpoint peer_endpoint() const override { return {}; }
+    bool handshake_complete() const override { return false; }
+    bool closed() const override { return false; }
+    std::string server_name() const override { return {}; }
+    std::string negotiated_alpn() const override { return "h3"; }
+    std::shared_ptr<keylog_store> keylog() const override { return {}; }
+    void progress_transport() override {}
+    bool take_application_progress() override { return false; }
+    multiflow::flow_handle open_flow(multiflow::direction) override { return {}; }
+    bool contains(multiflow::flow_handle) const override { return false; }
+    std::optional<multiflow::direction> direction_of(multiflow::flow_handle) const override { return {}; }
+    multiflow::io_result read(multiflow::flow_handle, void*, std::size_t) override { return {}; }
+    multiflow::io_result write(multiflow::flow_handle, const void*, std::size_t) override { return {}; }
+    multiflow::io_status finish(multiflow::flow_handle) override { return {}; }
+    multiflow::io_status reset(multiflow::flow_handle, std::uint64_t) override { return {}; }
+    void close(std::uint64_t) override {}
+    bool readable(multiflow::flow_handle) const override { return false; }
+    bool writable(multiflow::flow_handle) const override { return false; }
+    std::vector<multiflow::event> drain_events() override { return {}; }
+private:
+    SSL* ssl_;
+};
+
+class capture_test_output final : public socle::baseTrafficLogger {
+public:
+    std::vector<std::string> records;
+    void write(socle::side_t, buffer const&) override {}
+    void write(socle::side_t, std::string const&) override {}
+    void write_packet(socle::side_t, buffer const&) override { records.push_back("packet"); }
+    void write_secret(socle::traffic_secret_format, buffer const&) override { records.push_back("secret"); }
+};
+}
+
+struct listener_capture_test_access {
+    static void verify(bool late, bool enabled) {
+        listener_service service(0, "", "", false);
+        service.capture_native_ = enabled;
+        unique_ssl_ctx context(SSL_CTX_new(TLS_method()));
+        ASSERT_TRUE(context);
+        unique_ssl ssl(SSL_new(context.get()));
+        ASSERT_TRUE(ssl);
+        listener_service::session accepted;
+        accepted.downstream = std::make_shared<capture_test_connection>(ssl.get());
+        if (late) {
+            service.attach_staged_upstream(accepted);
+            ASSERT_FALSE(accepted.capture_log);
+        }
+        auto journal = std::make_shared<sx::session_traffic_log>(4096);
+        buffer packet("packet", 6);
+        buffer secret("secret", 6);
+        journal->write_packet(socle::side_t::LEFT, packet);
+        journal->write_secret(socle::traffic_secret_format::tls_key_log, secret);
+        service.pending_captures_[42] = {journal, std::chrono::steady_clock::now()};
+        service.capture_routes_[42] = journal;
+        service.dispatcher_bindings_[ssl.get()].association = 42;
+
+        // The real handshake path must pick up a binding published after accept.
+        service.attach_staged_upstream(accepted);
+        EXPECT_EQ(accepted.capture_association, 42U);
+        if (!enabled) {
+            EXPECT_FALSE(accepted.capture_log);
+            return;
+        }
+        ASSERT_EQ(accepted.capture_log, journal);
+        EXPECT_TRUE(service.pending_captures_.empty());
+        auto output = std::make_shared<capture_test_output>();
+        ASSERT_TRUE(accepted.capture_log->install(output));
+        service.attach_staged_upstream(accepted);
+        EXPECT_EQ(accepted.capture_log, journal);
+        // A later datagram must still reach that same installed logger.
+        auto route = service.capture_routes_.at(42).lock();
+        ASSERT_EQ(route, journal);
+        route->write_packet(socle::side_t::RIGHT, packet);
+        EXPECT_EQ(output->records, (std::vector<std::string>{"secret", "packet", "packet"}));
+    }
+};
+}
+TEST(QuicCaptureAttachment, LateClientHelloPreservesBufferedAndFuturePackets) {
+    sx::quic::listener_capture_test_access::verify(true, true);
+}
+TEST(QuicCaptureAttachment, EarlyClientHelloDoesNotReplayTwice) {
+    sx::quic::listener_capture_test_access::verify(false, true);
+}
+TEST(QuicCaptureAttachment, DisabledNativeCaptureStaysDisabled) {
+    sx::quic::listener_capture_test_access::verify(true, false);
 }
 #endif

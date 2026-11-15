@@ -197,6 +197,7 @@ public:
 #endif
 
 private:
+    friend struct listener_capture_test_access;
 #ifdef SMITHPROXY_QUIC_LIFECYCLE_PROBE
     lifecycle_probe lifecycle_probe_;
     void probe_lifecycle(char const* event, std::uint64_t id,
@@ -381,6 +382,8 @@ private:
     std::map<SSL*, dispatcher_binding> dispatcher_bindings_; ///< ClientHello until accept.
     std::uint64_t next_dispatcher_binding_generation_ = 1;
 
+    /** Adopt late ClientHello capture routing before its binding is consumed. */
+    void attach_capture_session(session& value, SSL* ssl);
     /** Transfer verified upstream ownership to the matching accepted session. */
     void attach_staged_upstream(session& value);
     /** Restore the forwarding leg when resumption skips certificate selection. */
