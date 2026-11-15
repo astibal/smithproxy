@@ -41,7 +41,13 @@ FlowCtx::Tx FlowCtx::begin(Dir dir, buffer const& data,
 
     active_endpoint_ = dir == Dir::I2R ? Endpoint::Client : Endpoint::Server;
     const char side = dir == Dir::I2R ? 'r' : 'w';
+    const auto previous_matches = i_->matched_signatures().size();
     const bool ingested = i_->ingest(side, data);
+    const auto& matches = i_->matched_signatures();
+    for (auto index = previous_matches; index < matches.size(); ++index) {
+        if (!tx.capture_detection.empty()) tx.capture_detection += "\n";
+        tx.capture_detection += "Detected application: " + matches[index];
+    }
 
     if (session_views_) {
         engine(); // Select this child's metadata before the synchronous pass.

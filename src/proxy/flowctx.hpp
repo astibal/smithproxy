@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <functional>
 
 #include <apphostcx.hpp>
@@ -22,6 +23,7 @@ public:
         std::size_t raw_size = 0;
         bool active = false;
         std::uint64_t protocol_token = 0;
+        std::string capture_detection {};
     };
 
     void attach(MitmHostCX& host, char leg);

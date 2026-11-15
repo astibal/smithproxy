@@ -278,10 +278,6 @@ void MitmHostCX::on_detect(std::shared_ptr<duplexFlowMatch> x_sig, flowMatchStat
              sig_sig->name().c_str(),
              vrangetos(r).c_str());
     }
-    this->comlog().append( string_format("\nDetected application: cat='%s', name='%s'\n",
-            sig_sig->sig_category.c_str(),
-            sig_sig->name().c_str()));
-
 
     auto prep_ctx = [&]() {
         auto& ctx = engine();

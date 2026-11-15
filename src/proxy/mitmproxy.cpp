@@ -1998,7 +1998,8 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
         }
 
         if(tx) flow_ctx_->commit(*tx, outgoing);
-        write_traffic_log(side, from, replacement ? &*replacement : nullptr);
+        write_traffic_log(side, from, replacement ? &*replacement : nullptr,
+                          tx ? tx->capture_detection : std::string{});
         inject(reverse_output, side);
         to->to_write(outgoing, replacement.has_value() || consume_source);
         _dia("mitmproxy::proxy-%c: queued %dB", from_side(side), size);
@@ -2063,7 +2064,8 @@ void MitmProxy::inject(buffer& data, side_t side) {
     }
 }
 
-void MitmProxy::write_traffic_log(side_t side, baseHostCX* cx, buffer* custom_buffer) {
+void MitmProxy::write_traffic_log(side_t side, baseHostCX* cx, buffer* custom_buffer,
+                                  std::string const& detection) {
 
     if(not cx) return;
 
@@ -2086,7 +2088,7 @@ void MitmProxy::write_traffic_log(side_t side, baseHostCX* cx, buffer* custom_bu
             cx->comlog().clear();
         }
 
-        if(tlog()) tlog()->write(side, *buffer);
+        if(tlog()) tlog()->write_detected(side, *buffer, detection);
     }
 }
 

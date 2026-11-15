@@ -1,4 +1,6 @@
 #include <gtest/gtest.h>
+#include <traflog/pcapapi.hpp>
+#include <cstring>
 
 #include "proxy/capture_protocol_tracer.hpp"
 
@@ -154,4 +156,33 @@ TEST(CaptureProtocolTracer, BoundsPendingDetailBytes) {
     EXPECT_EQ(tracer.records().capture_dropped, 1U);
     tracer.set_identity("stream-6", "quic_test", 6);
     EXPECT_EQ(rows.size(), 1U);
+}
+
+
+TEST(CaptureDetection, AnnotatesOnlyLastPayloadSegment) {
+    socle::pcap::tcp_details details;
+    details.ip_version = 4;
+    details.max_data_size = 8;
+    reinterpret_cast<sockaddr_in*>(&details.source)->sin_family = AF_INET;
+    reinterpret_cast<sockaddr_in*>(&details.destination)->sin_family = AF_INET;
+    std::string payload(23, 'x');
+    std::string note = "Detected application: www/http2/start";
+    buffer output;
+    socle::pcapng::pcapng_epb packet;
+    packet.append_TCP(output, payload.data(), payload.size(), 0, socle::pcap::TCPFLAG_ACK, details, note);
+    auto const* bytes = reinterpret_cast<char const*>(output.data());
+    std::size_t offset = 0;
+    unsigned frames = 0;
+    while (offset < output.size()) {
+        ASSERT_GE(output.size() - offset, 12U);
+        std::uint32_t length = 0;
+        std::memcpy(&length, bytes + offset + 4, sizeof(length));
+        ASSERT_GE(length, 12U);
+        ASSERT_LE(offset + length, output.size());
+        std::string block(bytes + offset, length);
+        EXPECT_EQ(block.find(note) != std::string::npos, offset + length == output.size());
+        offset += length;
+        ++frames;
+    }
+    EXPECT_EQ(frames, 3U);
 }

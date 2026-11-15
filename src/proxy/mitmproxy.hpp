@@ -282,7 +282,8 @@ public:
     StartStopTls const& start_stop_tls() const noexcept { return start_stop_tls_; }
 
     // actual proxy functions manipulating data buffers
-    void write_traffic_log(side_t side, baseHostCX* cx, buffer* custom_buffer  = nullptr);
+    void write_traffic_log(side_t side, baseHostCX* cx, buffer* custom_buffer = nullptr,
+                           std::string const& detection = {});
     void write_stream_traffic(sx::stream_direction direction, std::string_view plaintext);
     void write_stream_event(sx::stream_direction direction, std::string_view event);
     void proxy_dump_packet(side_t sid, buffer const& buf);
