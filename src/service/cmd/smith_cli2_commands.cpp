@@ -665,14 +665,22 @@ void register_smithproxy_cli2_commands(libcli2::Cli& cli, std::string subscriber
             return 0;
         });
 
-    cli.command("execute pcap rollover")
-        .reset_definition()
-        .help("Rollover PCAP file now")
-        .available_if(privileged)
-        .handler([](libcli2::Context&, const libcli2::Invocation&) {
-            socle::traflog::PcapLog::single_instance().rotate_now = true;
-            return 0;
-        });
+    const auto rotate_pcap = [](libcli2::Context& context, const libcli2::Invocation&) {
+        auto& capture = socle::traflog::PcapLog::single_instance();
+        {
+            const auto lock = std::lock_guard(capture.fs_lock_);
+            capture.rotate_now = true;
+        }
+        context.print("PCAP rotation requested; the shared capture will rotate on its next write.");
+        return 0;
+    };
+    for (const auto* command : {"execute pcap rotate", "execute pcap rollover"}) {
+        cli.command(command)
+            .reset_definition()
+            .help("Request shared PCAP rotation on the next capture write")
+            .available_if(privileged_exec)
+            .handler(rotate_pcap);
+    }
 
     cli.command("save config")
         .reset_definition()
