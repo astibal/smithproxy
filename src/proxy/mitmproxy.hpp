@@ -216,8 +216,8 @@ public:
 
     void attach_flow(MitmHostCX& host, char leg);
     void bind_protocol(std::shared_ptr<sx::engine::ProtocolViews> views,
-                       sx::engine::ProtocolStream stream) {
-        flow_ctx_->bind_protocol(std::move(views), stream);
+                       sx::engine::ProtocolStream stream, FlowCtx::OutputTransform transform = {}) {
+        flow_ctx_->bind_protocol(std::move(views), stream, std::move(transform));
     }
     nlohmann::json protocol_diagnostics() const {
         return flow_ctx_->protocol_diagnostics();
