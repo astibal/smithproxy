@@ -126,6 +126,12 @@ public:
         protocol_tracing_.store(enabled, std::memory_order_release);
     }
 
+    [[nodiscard]] std::optional<std::uint64_t> capture_packets() const {
+        std::lock_guard output_lock(output_mutex_);
+        std::lock_guard state_lock(state_mutex_);
+        return output_ ? output_->capture_packets() : std::optional<std::uint64_t>{0};
+    }
+
     [[nodiscard]] std::size_t pending_bytes() const {
         std::lock_guard lock(state_mutex_);
         return pending_bytes_;
@@ -214,7 +220,7 @@ private:
 
     std::size_t maximum_pending_bytes_;
     mutable std::mutex state_mutex_;
-    std::mutex output_mutex_;
+    mutable std::mutex output_mutex_;
     std::shared_ptr<socle::baseTrafficLogger> output_;
     std::deque<record> pending_;
     std::size_t pending_bytes_ = 0;

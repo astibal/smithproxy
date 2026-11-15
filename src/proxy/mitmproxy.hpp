@@ -139,6 +139,7 @@ class MitmProxy : public baseProxy, public IOController {
     std::optional<nlohmann::json> capture_statistics_payload_;
     std::optional<nlohmann::json> capture_tls_payload_;
     bool capture_tls_written_ = false;
+    std::uint64_t capture_payload_bytes_ = 0;
     std::unique_ptr<CaptureProtocolTracer> protocol_tracer_;
     socle::ProtocolTracer* active_protocol_tracer_ = nullptr;
     std::optional<std::uint64_t> protocol_trace_subject_;

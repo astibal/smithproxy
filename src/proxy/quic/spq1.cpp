@@ -240,6 +240,13 @@ stream_log::stream_log(std::shared_ptr<socle::baseTrafficLogger> output,
                        stream_context context, shared_output_tag)
     : output_(std::move(output)), context_(std::move(context)) {}
 
+std::optional<std::uint64_t> stream_log::capture_packets() const {
+    // Native packets belong to the QUIC connection, not an individual H3 stream.
+    if (context_.connection && context_.connection->native_log)
+        return context_.connection->native_log->capture_packets();
+    return output_ ? output_->capture_packets() : std::nullopt;
+}
+
 stream_log::~stream_log() {
     // A MitmProxy is destroyed only after its buffered stream data has been
     // handled. Emit synthetic FIN records last so Wireshark can close streams.

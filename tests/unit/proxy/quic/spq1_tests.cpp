@@ -441,3 +441,76 @@ TEST(Spq1, AdapterAlignsHttp3ContentEncodingWithDataRanges) {
     ASSERT_TRUE(metadata.has_value());
     EXPECT_EQ((std::vector<std::string>{"gzip", "gzip"}), metadata->encodings);
 }
+
+namespace {
+class counting_test_writer final : public socle::baseFileWriter {
+public:
+    bool fail = false;
+    bool open(std::string const&) override { return true; }
+    bool opened() override { return true; }
+    bool close(std::string const&) override { return true; }
+    bool flush(std::string const&) override { return true; }
+    std::size_t write(std::string const&, std::string const& value) override {
+        return fail ? 0 : value.size();
+    }
+    std::size_t write(std::string const&, buffer const& value) override {
+        return fail ? 0 : value.size();
+    }
+};
+}
+
+TEST(CaptureAccounting, CountsPacketsButNotSecretsOrRejectedWrites) {
+    counting_test_writer writer;
+    auto output = std::make_shared<socle::traflog::PcapLog>(nullptr, "/tmp", "counter", "pcapng", false);
+    output->writer_ = &writer;
+    unsigned char bytes[] {0x45,0,0,24,0,0,0,0,64,17,0,0,192,0,2,1,192,0,2,2,1,2,3,4};
+    buffer packet(bytes, sizeof(bytes));
+    buffer secret("CLIENT_RANDOM test\n", 19);
+    sx::session_traffic_log journal(4096);
+    journal.write_packet(socle::side_t::LEFT, packet);
+    EXPECT_EQ(journal.capture_packets(), 0U); // Buffered is not written.
+    ASSERT_TRUE(journal.install(output));
+    EXPECT_EQ(journal.capture_packets(), 1U);
+    journal.write_secret(socle::traffic_secret_format::tls_key_log, secret);
+    EXPECT_EQ(journal.capture_packets(), 1U);
+    writer.fail = true;
+    journal.write_packet(socle::side_t::LEFT, packet);
+    EXPECT_EQ(journal.capture_packets(), 1U);
+    writer.fail = false;
+    journal.write_packet(socle::side_t::RIGHT, packet);
+    EXPECT_EQ(journal.capture_packets(), 2U);
+}
+
+TEST(CaptureAccounting, CountsSegmentedTcpPerLogger) {
+    counting_test_writer writer;
+    socle::traflog::PcapLog first(nullptr, "/tmp", "counter", "pcapng", false);
+    socle::traflog::PcapLog second(nullptr, "/tmp", "counter", "pcapng", false);
+    first.writer_ = second.writer_ = &writer;
+    first.details.max_data_size = 2;
+    first.details.next_proto = socle::pcap::connection_details::TCP;
+    buffer data("abcde", 5);
+    first.write(socle::side_t::LEFT, data);
+    EXPECT_EQ(first.capture_packets(), 6U); // Three handshake and three data packets.
+    EXPECT_EQ(second.capture_packets(), 0U);
+}
+
+TEST(CaptureAccounting, Http3StreamsReportTheirSharedConnectionCounter) {
+    counting_test_writer writer;
+    auto journal = std::make_shared<sx::session_traffic_log>(4096);
+    auto connection = std::make_shared<sx::quic::spq1::connection_context>(9, "h3", journal);
+    sx::quic::spq1::stream_log_adapter first({connection, 0}), second({connection, 4});
+    auto output = std::make_unique<socle::traflog::PcapLog>(nullptr, "/tmp", "counter", "pcapng", false);
+    output->writer_ = &writer;
+    auto first_log = first.wrap(std::move(output));
+    auto second_log = second.wrap(std::make_unique<socle::traflog::PcapLog>(
+        nullptr, "/tmp", "counter", "pcapng", false));
+    EXPECT_EQ(second_log->capture_packets(), 0U);
+    unsigned char bytes[] {0x45,0,0,24,0,0,0,0,64,17,0,0,192,0,2,1,192,0,2,2,1,2,3,4};
+    buffer packet(bytes, sizeof(bytes));
+    journal->write_packet(socle::side_t::LEFT, packet);
+    EXPECT_EQ(first_log->capture_packets(), 1U);
+    EXPECT_EQ(second_log->capture_packets(), 1U);
+    first_log.reset();
+    journal->write_packet(socle::side_t::RIGHT, packet);
+    EXPECT_EQ(second_log->capture_packets(), 2U);
+}
