@@ -660,12 +660,38 @@ void listener_service::publish_capture_secrets(session& value) {
     value.keylog_cursor = lines.size();
 }
 
+void listener_service::attach_capture_session(session& value, SSL* ssl) {
+    if (!ssl) return;
+    if (auto binding = dispatcher_bindings_.find(ssl);
+        binding != dispatcher_bindings_.end()) {
+        if(binding->second.client.valid()) value.client_endpoint = binding->second.client;
+        value.target_endpoint = binding->second.destination;
+        value.capture_association = binding->second.association;
+        value.setup = binding->second.setup;
+        value.ingress_ifindex = binding->second.ingress_ifindex;
+        if (capture_native_ && !value.capture_log) {
+            if (auto pending = pending_captures_.find(value.capture_association);
+                pending != pending_captures_.end()) {
+                value.capture_log = std::move(pending->second.log);
+                pending_captures_.erase(pending);
+            }
+            if (!value.capture_log) {
+                value.capture_log = std::make_shared<sx::session_traffic_log>(
+                    limits_.native_capture_buffer_bytes);
+            }
+            capture_routes_[value.capture_association] = value.capture_log;
+        }
+    }
+
+}
+
 void listener_service::attach_staged_upstream(session& value) {
     if (!value.downstream || value.upstream) return;
 
     // The certificate callback knows the transparent tuple before OpenSSL
     // publishes the accepted connection object. Preserve it across that gap.
     auto* key = value.downstream->handle_native();
+    attach_capture_session(value, key);
     if (auto pending = certificate_jobs_.find(key); pending != certificate_jobs_.end()) {
         value.created = std::min(value.created, pending->second.created);
         value.client_endpoint = pending->second.client;
@@ -700,6 +726,7 @@ bool listener_service::prepare_resumed_upstream(session& value) {
     // the session. Resumption skips the certificate callback which normally
     // carries this tuple forward, so collect the completed binding here.
     auto* key = value.downstream->handle_native();
+    attach_capture_session(value, key);
     if (auto binding = dispatcher_bindings_.find(key); binding != dispatcher_bindings_.end()) {
         value.client_endpoint = binding->second.client;
         value.target_endpoint = binding->second.destination;
@@ -773,26 +800,7 @@ bool listener_service::accept_connections() {
         incoming.keylog = incoming.downstream->keylog();
         incoming.client_endpoint = incoming.downstream->peer_endpoint();
         auto* ssl = incoming.downstream->handle_native();
-        if (auto binding = dispatcher_bindings_.find(ssl);
-            binding != dispatcher_bindings_.end()) {
-            if(binding->second.client.valid()) incoming.client_endpoint = binding->second.client;
-            incoming.target_endpoint = binding->second.destination;
-            incoming.capture_association = binding->second.association;
-            incoming.setup = binding->second.setup;
-            incoming.ingress_ifindex = binding->second.ingress_ifindex;
-            if (capture_native_) {
-                if (auto pending = pending_captures_.find(incoming.capture_association);
-                    pending != pending_captures_.end()) {
-                    incoming.capture_log = std::move(pending->second.log);
-                    pending_captures_.erase(pending);
-                }
-                if (!incoming.capture_log) {
-                    incoming.capture_log = std::make_shared<sx::session_traffic_log>(
-                        limits_.native_capture_buffer_bytes);
-                }
-                capture_routes_[incoming.capture_association] = incoming.capture_log;
-            }
-        }
+        attach_capture_session(incoming, ssl);
         attach_staged_upstream(incoming);
 
         sessions_.push_back(std::move(incoming));
