@@ -127,7 +127,7 @@ std::string status_text(const libcli2::Decorator& decor) {
         ? sx::status_build::smithproxy_version : SMITH_VERSION;
     const auto socle_version = *sx::status_build::socle_version
         ? sx::status_build::socle_version : SOCLE_VERSION;
-    output << decor.key("Version:") << ' ' << decor.value(smith_version) << (SMITH_DEVEL ? decor.warning(" (dev)") : "") << '\n';
+    output << '\n' << decor.key("Version:") << ' ' << decor.value(smith_version) << (SMITH_DEVEL ? decor.warning(" (dev)") : "") << "\n\n";
     output << decor.key("Socle:") << ' ' << decor.value(socle_version) << (SOCLE_DEVEL ? decor.warning(" (dev)") : "") << '\n';
 #if (SMITH_DEVEL > 0) || (SOCLE_DEVEL > 0)
     output << "Smithproxy source info: " << SX_GIT_VERSION << '\n';
@@ -153,7 +153,7 @@ std::string status_text(const libcli2::Decorator& decor) {
         output << "disabled at build time\n";
     }
 
-    output << decor.key("Built with:") << ' ';
+    output << '\n' << decor.key("Built with:") << ' ';
 #ifndef BUILD_RELEASE
     output << "DEBUG ";
 #endif
@@ -175,7 +175,7 @@ std::string status_text(const libcli2::Decorator& decor) {
 #ifdef USE_EXPERIMENT
     output << "EXPERIMENTAL ";
 #endif
-    output << "\n\n";
+    output << '\n';
 
     const auto workers = [](const auto& proxies) {
         std::size_t count = 0;
