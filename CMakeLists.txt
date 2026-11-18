@@ -953,6 +953,12 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
         target_link_options(sx_gtests_atomic_json PRIVATE
                 -Wl,--wrap=fsync -Wl,--wrap=fclose -Wl,--wrap=rename)
 
+        add_executable(custom_cert_fallback_tests tests/tls/custom_cert_fallback_tests.cpp)
+        target_link_libraries(custom_cert_fallback_tests gtest gtest_main socle_lib pthread crypto ssl)
+        add_test(NAME unit.custom_cert_fallback COMMAND custom_cert_fallback_tests)
+        set_tests_properties(unit.custom_cert_fallback PROPERTIES
+                WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}" LABELS "native;unit;tls")
+
         add_executable(tls_testbed
                 tests/tls/tls_testbed.cpp)
         add_executable(transfer_testbed

@@ -47,6 +47,7 @@ def main():
         for name, value in {
             'accept_tproxy': 'FALSE;', 'accept_redirect': 'FALSE;',
             'accept_socks': 'FALSE;', 'accept_http_connect': 'FALSE;', 'accept_api': 'FALSE;',
+            'custom_cert_fallback_dir': f'"{root}/external";',
             'port': f'{port};', 'log_file': '"";', 'log_console': 'TRUE;',
             'sslkeylog_file': f'"{root}/sslkeylog.%s.log";',
             'write_payload_dir': f'"{root}/payload";',
@@ -69,6 +70,10 @@ def main():
             path.write_bytes(value)
             command += ['--file', f'{name}={path}']
         subprocess.run(command, check=True, capture_output=True)
+        external = root / 'external/sni/external.test'
+        external.mkdir(parents=True)
+        (external / 'cert.pem').write_bytes(payload['pki/ca/default/srv-cert.pem'])
+        (external / 'key.pem').write_bytes(payload['pki/ca/default/srv-key.pem'])
         before = archive.read_bytes()
         previous = contents(archive)
         env = {**os.environ, 'SMITHPROXY_PID_FILE': str(root / 'proxy.pid')}
@@ -103,7 +108,10 @@ def main():
 
         boot('upgrade')
         upgraded = contents(archive)
-        assert re.search(rb'schema\s*=\s*1051', upgraded['smithproxy.cfg'])
+        assert re.search(rb'schema\s*=\s*1052', upgraded['smithproxy.cfg'])
+        assert str(root / 'external').encode() in upgraded['smithproxy.cfg']
+        assert not any('external.test' in name for name in upgraded), 'fallback identity was imported'
+        assert (external / 'cert.pem').exists(), 'external identity was retired'
         for name in NEW:
             assert PREFIX + name in upgraded, name
         for name, value in previous.items():
@@ -121,7 +129,7 @@ def main():
         result = subprocess.run(check, cwd=root, env=env, capture_output=True, text=True, timeout=30)
         assert result.returncode != 0, 'current-schema corruption was silently repaired'
         assert archive.read_bytes() == damaged
-    print('PASS: 1050 -> 1051 resource upgrade, read-only check, custom templates, restart and strict current schema')
+    print('PASS: 1050 -> 1052 resource upgrade and external custom certificate persistence, read-only check, custom templates, restart and strict current schema')
 
 
 if __name__ == '__main__':

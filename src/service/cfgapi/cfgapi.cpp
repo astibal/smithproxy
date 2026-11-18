@@ -1,3 +1,5 @@
+#include <service/cfgapi/custom_cert_directory.hpp>
+
 #include <proxy/master_policy.hpp>
 #include <service/interface_roles.hpp>
 #include <proxy/proxymaker.hpp>
@@ -1009,6 +1011,10 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added TLS replacement template resources");
         return true;
     }
+    else if(upgrade_to_num == 1052) {
+        log.event(INF, "added optional custom certificate fallback directory");
+        return true;
+    }
 
     return false;
 }
@@ -1360,6 +1366,11 @@ bool CfgFactory::load_settings () {
     // failed first migration must remain bootable from its original files.
     // Native archives override the filesystem paths below with their private
     // materialized tree.
+    auto& fallback_dir = SSLFactory::factory().custom_cert_fallback_dir();
+    fallback_dir.clear();
+    load_if_exists(cfgapi.getRoot()["settings"], "custom_cert_fallback_dir", fallback_dir);
+    fallback_dir = cfgapi_detail::custom_cert_directory(fallback_dir);
+
     configured_certs_path = "/etc/smithproxy/certs/default/";
     configured_ca_bundle_path.clear();
     configured_ca_bundle_file.clear();
@@ -6355,6 +6366,9 @@ int save_settings(Config& ex) {
         objects.add("messages_dir", Setting::TypeString) =
             CfgFactory::get()->dir_msg_templates;
     }
+
+    objects.add("custom_cert_fallback_dir", Setting::TypeString) =
+        SSLFactory::factory().custom_cert_fallback_dir();
 
     objects.add("certs_ca_key_password", Setting::TypeString) = SSLFactory::factory().certs_password();
     objects.add("certs_ctlog", Setting::TypeString) = SSLFactory::factory().ctlogfile();
