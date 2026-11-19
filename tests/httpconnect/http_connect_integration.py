@@ -9,6 +9,7 @@ from template_resources import template_directory
 import argparse
 import os
 import pathlib
+import re
 import socket
 import ssl
 import subprocess
@@ -156,13 +157,22 @@ def make_config(source, destination, worktree, runtime, listener_port, cli_port,
             f'log_file = "{runtime}/messages.%s.log";',
         'sslkeylog_file = "/var/log/smithproxy/sslkeylog.%s.log";':
             f'sslkeylog_file = "{runtime}/sslkeylog.%s.log";',
-        'dir = "/var/smithproxy/data"': f'dir = "{runtime}"',
         "enabled = true": "enabled = false",
     }
     for old, new in replacements.items():
         if old not in config:
             raise RuntimeError(f"configuration fixture is missing {old!r}")
         config = config.replace(old, new, 1)
+    config, capture_dir_count = re.subn(
+        r'(captures\s*=\s*\{\s*local\s*=\s*\{.*?\bdir\s*=\s*)'
+        r'"/var/smithproxy/data"',
+        rf'\g<1>"{runtime}"',
+        config,
+        count=1,
+        flags=re.DOTALL,
+    )
+    if capture_dir_count != 1:
+        raise RuntimeError("configuration fixture is missing captures.local.dir")
     if reject_tcp:
         action = 'action = "accept";'
         position = config.rfind(action)

@@ -1175,6 +1175,11 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
             set_tests_properties(unit.core integration.quic_testbed
                     external.inet external.pcap_experiments external.dns PROPERTIES
                     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+            # unit.core and both dedicated testbeds exercise the same QUIC/UDP
+            # loopback corpus. Keep those three processes from racing over
+            # transient kernel transport state while unrelated tests remain P8.
+            set_tests_properties(unit.core integration.quic_testbed PROPERTIES
+                    RESOURCE_LOCK quic_runtime)
             if(SMITHPROXY_COVERAGE)
                 # The TLS/revocation corpus is intentionally broad and gcov
                 # makes it several times slower than the normal unit run.
@@ -1638,6 +1643,7 @@ if(SMITHPROXY_ENABLE_NGTCP2)
         set_tests_properties(integration.quic_ngtcp2_testbed PROPERTIES
             ENVIRONMENT "SMITHPROXY_QUIC_BACKEND=ngtcp2"
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-            LABELS "native;integration;quic;ngtcp2" TIMEOUT 300)
+            LABELS "native;integration;quic;ngtcp2" TIMEOUT 300
+            RESOURCE_LOCK quic_runtime)
     endif()
 endif()

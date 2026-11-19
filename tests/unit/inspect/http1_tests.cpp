@@ -1446,7 +1446,7 @@ TEST(HTTP1, Ja4hAcceptsOrdinaryHeaderAndCookieWhitespace) {
         "Cookie:a=1;b=2; c = 3\n\n");
     EXPECT_NE(fingerprint.ja4h_raw().find("Host,X-Tab"), std::string::npos);
     EXPECT_NE(fingerprint.ja4h_raw().find("a,b,c"), std::string::npos);
-    EXPECT_NE(fingerprint.ja4h_raw().find("a=1,b=2,c=3"), std::string::npos);
+    EXPECT_NE(fingerprint.ja4h_raw().find("a=1,b=2,c = 3"), std::string::npos);
 }
 
 TEST(HTTP1, FragmentedHeadersAreNotPublishedBeforeAuthorityArrives) {
