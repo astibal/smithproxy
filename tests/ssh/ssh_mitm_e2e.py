@@ -468,14 +468,21 @@ def main() -> None:
         config = tmp / "smithproxy.cfg"
         shutil.copyfile(source / "etc/smithproxy.cfg", config)
         text = config.read_text()
+        # The stock CFtar configuration no longer carries legacy filesystem
+        # resource paths; provide them only for this disposable fixture.
+        text = text.replace(
+            "settings = {",
+            "settings = {\n"
+            f'    certs_path = "{source / "etc/certs/default"}/";\n'
+            f'    messages_dir = "{template_directory(source)}/";',
+            1,
+        )
         for name, value in (
             ("accept_tproxy", "FALSE;"),
             ("accept_redirect", "FALSE;"),
             ("accept_socks", "TRUE;"),
             ("extended_local_destination_protection", "FALSE;"),
             ("socks_workers", "1;"),
-            ("certs_path", f'"{source / "etc/certs/default"}/";'),
-            ("messages_dir", f'"{template_directory(source)}/";'),
             ("log_file", '"";'),
             ("log_console", "TRUE;"),
             ("sslkeylog_file", f'"{tmp}/sslkeylog.%s.log";'),
@@ -500,8 +507,16 @@ def main() -> None:
             "content_profiles = {\n"
             "    ssh_e2e = { write_payload = TRUE; write_format = \"pcap_single\"; };",
             1)
-        text = text.replace(
-            'dir = "/var/smithproxy/data"', f'dir = "{tmp}/capture"', 1)
+        text, capture_dir_count = re.subn(
+            r'(captures\s*=\s*\{\s*local\s*=\s*\{.*?\bdir\s*=\s*)'
+            r'"/var/smithproxy/data"',
+            rf'\g<1>"{tmp}/capture"',
+            text,
+            count=1,
+            flags=re.DOTALL,
+        )
+        if capture_dir_count != 1:
+            raise AssertionError("captures.local.dir not found")
         policy = f'''policy = (
     {{
         proto = "tcp";

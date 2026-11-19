@@ -21,6 +21,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 #include <sstream>
 #include <thread>
 #endif
@@ -228,8 +229,22 @@ buffer complete_udp_packet(quic::datagram_view const& datagram) {
 }
 
 bool flush_capture_writer(socle::traflog::PcapLog& capture) {
-    // The threaded writer defines flush/close as completion barriers: both
-    // drain accepted writes before touching the backing stream.
+    // PcapLog queues records in the shared threaded writer, while flush()
+    // itself only touches the backing stream. Wait under the queue lock so the
+    // worker has finished the last accepted write before closing the file.
+    if (auto* threaded = dynamic_cast<socle::threadedPoolFileWriter*>(capture.writer_)) {
+        auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+        while (std::chrono::steady_clock::now() < deadline) {
+            std::unique_lock lock(threaded->queue_lock());
+            if (threaded->queue().empty()) {
+                return capture.writer_->flush(capture.FS.filename_full)
+                    && capture.writer_->close(capture.FS.filename_full);
+            }
+            lock.unlock();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        return false;
+    }
     return capture.writer_->flush(capture.FS.filename_full)
         && capture.writer_->close(capture.FS.filename_full);
 }

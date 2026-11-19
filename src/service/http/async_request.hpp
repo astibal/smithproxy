@@ -73,6 +73,7 @@ class AsyncRequest {
         std::string url;
         std::string dns_servers;
         bool verify_tls = true;
+        bool connection_start_synchronous = false;
         std::string bind_interface;
         std::string unix_socket_path;
         helper_debug::Service service = helper_debug::Service::webhook;
@@ -168,6 +169,8 @@ class AsyncRequest {
         settings.enabled = factory->settings_webhook.enabled;
         settings.url = factory->settings_webhook.active_url();
         settings.verify_tls = factory->settings_webhook.active_tls_verify();
+        settings.connection_start_synchronous =
+            factory->settings_webhook.connection_start_synchronous();
         settings.bind_interface = factory->settings_webhook.bind_interface;
         settings.unix_socket_path = sx::comm::webhook::transport_path();
         std::ostringstream dns;

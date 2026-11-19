@@ -376,9 +376,18 @@ TEST_F(QuicListenerService, DeniedSetupPreventsProbeAndForwardingDatagrams) {
         address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         address.sin_port = htons(proxy.bound_port());
         std::string error;
-        auto client = quic::connect_openssl_quic(
-            client_context.get(), reinterpret_cast<sockaddr*>(&address), sizeof(address),
-            "Smithproxy-Server-Certificate", &error);
+        std::unique_ptr<quic::openssl_connection> client;
+        // A freshly started UDP listener can inherit a transient asynchronous
+        // socket error from a recently released loopback tuple. This setup is
+        // incidental to the denied-session assertion, so retry with a new
+        // client socket before exercising the policy path.
+        for (int attempt = 0; attempt < 10 && !client; ++attempt) {
+            error.clear();
+            client = quic::connect_openssl_quic(
+                client_context.get(), reinterpret_cast<sockaddr*>(&address), sizeof(address),
+                "Smithproxy-Server-Certificate", &error);
+            if (!client) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
         ASSERT_NE(client, nullptr) << error;
 
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);

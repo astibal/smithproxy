@@ -223,23 +223,32 @@ namespace sx::http::webhooks {
             };
         }
 
-        bool webhook_emit(std::string payload, std::string const& action,
+        bool webhook_emit(sx::http::AsyncRequest::request_settings settings,
+                          std::string payload, std::string const& action,
                           sx::http::AsyncRequest::reply_hook hook, bool content = false) {
             webhook_request_started(payload.size(), action, false, content);
             auto trace = std::make_shared<webhook_request_trace>();
             auto tracked = webhook_tracked_hook(std::move(hook), std::move(trace));
             if(action == "connection-stop") {
                 sx::http::AsyncRequest::emit_terminal(
-                    sx::http::AsyncRequest::settings_snapshot(), payload, tracked);
+                    settings, payload, tracked);
                 webhook_request_accepted(true);
                 return true;
             }
-            const auto accepted = sx::http::AsyncRequest::emit(payload, tracked);
+            const auto accepted = sx::http::AsyncRequest::enqueue(
+                std::move(settings), payload, tracked);
             webhook_request_accepted(accepted);
             return accepted;
         }
 
-        void webhook_emit_wait(std::string const& payload, std::string const& action,
+        bool webhook_emit(std::string payload, std::string const& action,
+                          sx::http::AsyncRequest::reply_hook hook, bool content = false) {
+            return webhook_emit(sx::http::AsyncRequest::settings_snapshot(),
+                                std::move(payload), action, std::move(hook), content);
+        }
+
+        void webhook_emit_wait(sx::http::AsyncRequest::request_settings settings,
+                               std::string const& payload, std::string const& action,
                                sx::http::AsyncRequest::reply_hook hook, bool content = false) {
             webhook_request_started(payload.size(), action, true, content);
             webhook_request_accepted(true);
@@ -249,7 +258,6 @@ namespace sx::http::webhooks {
             if(action == "http-connect") {
                 // Rejected CONNECT requests still expose Authorization to the
                 // addon. Keep both request and reply out of transport diagnostics.
-                auto settings = sx::http::AsyncRequest::settings_snapshot();
                 settings.sensitive = true;
 
                 std::stringstream private_log;
@@ -257,7 +265,15 @@ namespace sx::http::webhooks {
                 return;
             }
 
-            sx::http::AsyncRequest::emit_wait(payload, tracked);
+            std::stringstream log;
+            sx::http::AsyncRequest::emit_url_wait_log(
+                settings, payload, log, tracked);
+        }
+
+        void webhook_emit_wait(std::string const& payload, std::string const& action,
+                               sx::http::AsyncRequest::reply_hook hook, bool content = false) {
+            webhook_emit_wait(sx::http::AsyncRequest::settings_snapshot(),
+                              payload, action, std::move(hook), content);
         }
 
         void sift_request_started(std::size_t bytes, bool content) {
@@ -894,8 +910,10 @@ namespace sx::http::webhooks {
     static void send_action_impl(std::string const& action,
                                  std::optional<std::string> const& action_id,
                                  nlohmann::json const& details,
-                                 std::shared_ptr<webhook_control_t> control = {}) {
-        if(enabled) {
+                                 std::shared_ptr<webhook_control_t> control = {},
+                                 std::optional<sx::http::AsyncRequest::request_settings> settings = {}) {
+        const bool active = settings ? settings->enabled : enabled.load();
+        if(active) {
 
 
             std::string msg_str;
@@ -949,8 +967,14 @@ namespace sx::http::webhooks {
                         }
                     }
                 };
-                webhook_emit(std::move(msg_str), action, action_hook(std::move(control)),
-                             action == "connection-content");
+                if(settings) {
+                    webhook_emit(std::move(*settings), std::move(msg_str), action,
+                                 action_hook(std::move(control)),
+                                 action == "connection-content");
+                } else {
+                    webhook_emit(std::move(msg_str), action, action_hook(std::move(control)),
+                                 action == "connection-content");
+                }
 
             }
         }
@@ -963,6 +987,31 @@ namespace sx::http::webhooks {
     void send_action(std::string const& action, std::string const& action_id,
                      nlohmann::json const& details, std::shared_ptr<webhook_control_t> control) {
         send_action_impl(action, action_id, details, std::move(control));
+    }
+
+    bool send_connection_start(
+            std::string const& action_id, nlohmann::json details,
+            sx::http::AsyncRequest::reply_hook hook) {
+        // Keep the endpoint and delivery mode from the same lease-owner view.
+        auto settings = sx::http::AsyncRequest::settings_snapshot();
+        if(!settings.enabled) return false;
+        const bool synchronous = settings.connection_start_synchronous;
+        details["info"]["synchronous"] = synchronous;
+        if(!synchronous) {
+            send_action_impl("connection-start", action_id, details, {}, std::move(settings));
+            return false;
+        }
+
+        nlohmann::json message = {
+            {"action", "connection-start"}, {"id", action_id},
+            {"source", get_hostid()}, {"type", "proxy"},
+            {"details", std::move(details)}};
+        webhook_emit_wait(
+            std::move(settings), to_string(message), "connection-start",
+            [hook = std::move(hook)](sx::http::expected_reply const& reply) {
+                if(hook && (!reply || reply->response.first > 0)) hook(reply);
+            });
+        return true;
     }
 
     // Send an action synchronously and deliver its response to the caller.

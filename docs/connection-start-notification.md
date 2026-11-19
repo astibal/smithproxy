@@ -1,25 +1,24 @@
 # Connection-start notification
 
-`connection-start` is an asynchronous lifecycle notification for TCP and QUIC.
-It uses the existing bounded webhook queue. Receiver delay, HTTP failure, a
-malformed response, or a `drop` response must not delay or reject connection setup.
-When the notification queue is full, the existing queue rejection diagnostics
-apply; establishing the connection does not wait for delivery.
+`connection-start` is an asynchronous lifecycle notification for TCP and QUIC
+unless the active webhook override explicitly requests synchronous delivery.
+The default path uses the existing bounded webhook queue. Receiver delay, HTTP
+failure, a malformed response, or a `drop` response does not delay or reject
+connection setup. Queue rejection diagnostics apply as before.
 
-The reply no longer negotiates rewrite, strict mode, or server/TLS/QUIC lifecycle
-observation. Integrations relying on those connection-start replies need a
-separate `inspection-start` request. The former synchronous implementation is
-preserved as `inspection_start()`, including reply-driven rewrite, strict mode,
-and lifecycle options. Normal TCP and QUIC connection setup calls only `start()`;
-there is no automatic inspection request or new configuration switch.
+The default delivery is asynchronous and its reply does not negotiate rewrite,
+strict mode, or server/TLS/QUIC lifecycle observation. A webhook override may
+request `connection_start_synchronous: true` while it registers. Smithproxy then
+sends the same single `connection-start` synchronously, marks
+`details.info.synchronous: true`, and applies its setup reply. The field is false
+for asynchronous webhook and SIFT delivery.
 
-When explicitly wired in later, inspection must run after the notification and
-before content processing. QUIC setup keeps a separate inspection-start guard,
-so calling the notification does not suppress inspection. Both entry points bind
-to the same destination; an inspection verdict cannot be reused for another one.
-Locally configured content replacement rules still apply. Policy-selected
-`access-request` remains synchronous and retains its existing fail-open setting.
-SIFT continues receiving asynchronous connection-start notifications.
+Synchronous delivery runs before content processing and before optional server,
+TLS or QUIC lifecycle callbacks. Its verdict belongs to that connection and
+destination. Locally configured content replacement rules still apply.
+Policy-selected `access-request` remains synchronous and retains its existing
+fail-open setting. SIFT always receives asynchronous connection-start
+notifications.
 
 Regression test (isolated test host only):
 
@@ -33,9 +32,9 @@ checks continued data transfer. All certificates are disposable test fixtures;
 the test does not contact production services. QUIC wire behavior is not exercised
 by this TCP/TLS regression.
 
-The same harness accepts `--inspection` for a test-only binary that calls
-`ProxyHooks::inspection_start(..., InspectionStartArgs{})` after a successful
-`ProxyHooks::start(...)` in `MitmProxy::webhook_session_start()`. It verifies that
-setup waits for the response, then accepts, rejects `drop`, or follows the existing
-fail-open behavior for invalid JSON. This wiring is never part of the production
-patch. Do not deploy the test-only binary.
+The synchronous integration test acquires a webhook override with
+`connection_start_synchronous: true`. It verifies that setup waits for the reply,
+then accepts, rejects `drop`, or follows the existing fail-open behavior for an
+invalid reply. It then replaces that lease with a default-mode owner, blocks the
+new owner's `drop` response, and verifies that forwarding remains asynchronous
+with `details.info.synchronous: false`.

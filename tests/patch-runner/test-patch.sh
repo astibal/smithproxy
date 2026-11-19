@@ -998,6 +998,14 @@ elif [[ ( $PROFILE == full || $PROFILE == sanity || $PROFILE == traffic || $PROF
 else
     BINARY=$BUILD_DIR/smithproxy
     [[ -x $BINARY ]] || { echo "Missing executable: $BINARY" >&2; exit 1; }
+    CONFIG_SCHEMA=$(sed -nE 's/.*\bSCHEMA_VERSION[[:space:]]*=[[:space:]]*([0-9]+)[[:space:]]*;.*/\1/p' \
+        "$ROOT/src/service/cfgapi/cfgapi.hpp")
+    CONFIG_VERSION=$(sed -nE 's/^#define[[:space:]]+SMITH_VERSION[[:space:]]+"([^"]+)".*/\1/p' \
+        "$ROOT/src/main.hpp")
+    [[ $CONFIG_SCHEMA =~ ^[0-9]+$ && $CONFIG_VERSION =~ ^[0-9A-Za-z.+_-]+$ ]] || {
+        echo "Cannot determine current configuration schema" >&2
+        exit 1
+    }
 
     TAG=$(printf '%x' $$)
     TAG=${TAG:0:6}
@@ -1109,6 +1117,8 @@ print(*(x.getsockname()[1] for x in s))'
         "CAPTURE_TEST=1" "HTTP2_OBSERVABILITY_TEST=1" "CAPTURE_MATRIX_TEST=1" "RTT_TEST=1" "TLS_SUITE_TEST=1" "TLS_TRANSFER_TEST=0" "TLS_THROUGHPUT_TEST=0" "STARTTLS_SUITE_TEST=1" "POLICY_TEST=1" "ROUTING_TEST=1" "SESSION_LIST_STRESS_TEST=1"
         "PPLAY_PY=$LAB_ROOT/pplay.py" "PPLAY_SUITE=$LAB_ROOT/corpus"
         "PPLAY_RESULTS_NAME=corpus-all" "PPLAY_SMOKE_TEST=1"
+        "SMITHPROXY_CONFIG_SCHEMA=$CONFIG_SCHEMA"
+        "SMITHPROXY_CONFIG_VERSION=$CONFIG_VERSION"
     )
     for variable in RTT_SAMPLES RTT_HANDSHAKE_SAMPLES RTT_WARMUP \
         RTT_TLS_TOTAL_P50_LIMIT_MS RTT_TLS_TOTAL_P50_FLAKY_LIMIT_MS \

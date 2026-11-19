@@ -329,7 +329,7 @@ struct ProxyHooks::HttpConnectReplyArgs {
     HttpConnectDecision& decision;
 };
 
-struct ProxyHooks::InspectionStartReplyArgs {
+struct ProxyHooks::StartReplyArgs {
     const sx::http::expected_reply& reply;
     bool local_rewrite = false;
 };
@@ -549,7 +549,7 @@ ProxyHooks::HttpConnectDecision ProxyHooks::http_connect(
     return decision;
 }
 
-bool ProxyHooks::inspection_start_reply(MitmProxy& proxy, const InspectionStartReplyArgs& args) {
+bool ProxyHooks::start_reply(MitmProxy& proxy, const StartReplyArgs& args) {
     if(!args.reply) return false;
 
     auto result = sx::proxy::parse_setup_reply(
@@ -622,57 +622,31 @@ bool ProxyHooks::start(MitmProxy& proxy, const StartArgs&) {
     const bool enabled = sx::http::webhooks::is_enabled();
     if (!enabled && !sx::http::webhooks::sift_enabled()) return true;
 
-    const auto details = proxy.connection_start_details();
+    auto details = proxy.connection_start_details();
     proxy.wh_start = true;
 
-    // Lifecycle notification only. Receiver latency and replies must not
-    // participate in connection setup or retain a reference to this proxy.
     if (enabled) {
-        sx::http::webhooks::send_action("connection-start", proxy.to_connection_ID(), details);
-    }
-    sx::http::webhooks::send_sift_action("connection-start", proxy.to_connection_ID(), details);
-
-    return true;
-}
-
-bool ProxyHooks::inspection_start(MitmProxy& proxy, const InspectionStartArgs&) {
-
-    // Local replacement rules are known before content arrives. They need the
-    // same two views, independently of a remote receiver's rewrite permission.
-    const bool local_rewrite = proxy.content_rule() && !proxy.content_rule()->empty();
-    proxy.flow_ctx_->allow_rewrite(local_rewrite);
-
-    const bool enabled = sx::http::webhooks::is_enabled();
-    if (!enabled && !sx::http::webhooks::sift_enabled()) return true;
-
-    auto& log = proxy.log_content;
-    const auto details = proxy.connection_start_details();
-
-    // When explicitly invoked, this gate must complete before
-    // FlowCtx::begin or an exclusive stream handler can consume content.
-    // The reply callback runs within send_action_wait, not after this returns.
-    bool valid_reply = false;
-
-    if (enabled) {
-        sx::http::webhooks::send_action_wait("inspection-start", proxy.to_connection_ID(), details,
+        bool valid_reply = false;
+        auto& log = proxy.log_content;
+        const bool synchronous = sx::http::webhooks::send_connection_start(
+            proxy.to_connection_ID(), details,
             [&](sx::http::expected_reply reply) {
-                InspectionStartReplyArgs reply_args{reply};
+                StartReplyArgs reply_args{reply};
                 reply_args.local_rewrite = local_rewrite;
-                valid_reply = inspection_start_reply(proxy, reply_args);
+                valid_reply = start_reply(proxy, reply_args);
             });
-
-        if (!valid_reply) {
-            _war("inspection-start: missing or invalid setup reply (%s)",
+        if (synchronous && !valid_reply) {
+            _war("synchronous connection-start: missing or invalid setup reply (%s)",
                  proxy.webhook_control_->strict() ? "fail-closed" : "fail-open");
             if (proxy.webhook_control_->strict()) proxy.state().dead(true);
         }
     }
-
-    // SIFT remains a notification consumer, not a second setup authority.
-    sx::http::webhooks::send_sift_action("inspection-start", proxy.to_connection_ID(), details);
+    auto sift_details = details;
+    sift_details["info"]["synchronous"] = false;
+    sx::http::webhooks::send_sift_action(
+        "connection-start", proxy.to_connection_ID(), sift_details);
 
     if (proxy.state().dead()) proxy.shutdown();
-
     return !proxy.state().dead();
 }
 

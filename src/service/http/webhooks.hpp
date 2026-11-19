@@ -240,6 +240,9 @@ namespace sx::http::webhooks {
     void send_action(std::string const& action, nlohmann::json const& details);
     void send_action(std::string const& action, std::string const& action_id, nlohmann::json const& details,
                      std::shared_ptr<webhook_control_t> control = {});
+    bool send_connection_start(
+        std::string const& action_id, nlohmann::json details,
+        sx::http::AsyncRequest::reply_hook hook);
     bool send_action_wait(std::string const& action, std::string const& action_id, nlohmann::json const& details, sx::http::AsyncRequest::reply_hook hook);
     bool send_content_wait(std::string const& action_id, nlohmann::json details,
                            std::string_view payload, sx::http::AsyncRequest::reply_hook hook);

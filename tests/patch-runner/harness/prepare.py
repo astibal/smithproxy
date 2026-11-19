@@ -42,11 +42,29 @@ internal_api_port = os.environ.get('SMITHPROXY_API_PORT', '55555')
 if not internal_api_port.isdigit() or not 1025 <= int(internal_api_port) < 65535:
     raise ValueError('SMITHPROXY_API_PORT must be an unprivileged TCP port')
 text = (source/'etc/smithproxy.cfg').read_text()
-# This fixture already uses captures.remote. An unversioned config would run
-# schema 1002 and deliberately disable that sink, undoing our live GRE setup.
-# Keep subsequent migrations (including conversion to cftar) under test.
-text += '\n*_internal_* : { schema = 1002; version = "0.9.0"; };\n'
-
+# The stock configuration has the current layout but deliberately omits
+# persistence metadata.  Mark the generated lab fixture with the schema of the
+# source under test so startup migrations do not rewrite test-only overrides
+# applied below (notably captures.remote.enabled).
+config_schema = os.environ.get('SMITHPROXY_CONFIG_SCHEMA', '')
+config_version = os.environ.get('SMITHPROXY_CONFIG_VERSION', '')
+if not config_schema or not config_version:
+    # Native integration tests invoke this helper directly from the checkout;
+    # standalone labs receive the same values from test-patch.sh.
+    checkout = pathlib.Path(__file__).resolve().parents[3]
+    schema_header = checkout / 'src/service/cfgapi/cfgapi.hpp'
+    version_header = checkout / 'src/main.hpp'
+    if schema_header.is_file() and version_header.is_file():
+        schema_match = re.search(
+            r'\bSCHEMA_VERSION\s*=\s*(\d+)\s*;', schema_header.read_text())
+        version_match = re.search(
+            r'#define\s+SMITH_VERSION\s+"([^"]+)"', version_header.read_text())
+        config_schema = schema_match.group(1) if schema_match else ''
+        config_version = version_match.group(1) if version_match else ''
+if not config_schema.isdigit() or not re.fullmatch(r'[0-9A-Za-z.+_-]+', config_version):
+    raise RuntimeError('current configuration schema was not provided by the runner')
+text += (f'\n*_internal_* = {{ version = "{config_version}"; '
+         f'schema = {config_schema}; }};\n')
 # Explicit legacy migration inputs keep the lab independent of /etc resources.
 text = text.replace('settings = {', 'settings = {\n'
     f'    certs_path = "{certs}/";\n'

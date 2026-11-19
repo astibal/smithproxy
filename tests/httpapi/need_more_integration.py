@@ -13,11 +13,13 @@ import json
 import os
 import pathlib
 import socket
+import ssl
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+import urllib.request
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'tls'))
 from starttls_socks_integration import ADDRESSES, free_port, make_config, socks_connect
@@ -158,7 +160,8 @@ def main():
         make_config(source / 'etc/smithproxy.cfg', config, source, runtime, port, free_port())
         text = config.read_text().replace('settings = {',
             'settings = {\n webhook = { enabled = true; tls_verify = false; '
-            f'url = "http://127.0.0.1:{server.server_port}/"; }};', 1)
+            f'url = "http://127.0.0.1:{server.server_port}/"; '
+            f'api_override = {"true" if args.setup_only else "false"}; }};', 1)
         text = text.replace('        write_payload = FALSE;',
                             '        write_payload = FALSE; webhook_enable = TRUE; webhook_lock_traffic = FALSE;', 1)
         if args.setup_only:
@@ -168,6 +171,12 @@ def main():
             for name in ('allow_invalid_certs', 'allow_untrusted_issuers', 'allow_self_signed'):
                 text = text.replace(f'{name} = FALSE;', f'{name} = TRUE;')
             text = text.replace('inspect = TRUE;', 'inspect = TRUE; ct_enable = FALSE;', 1)
+            api_key = 'connection-start-integration-key'
+            api_port = free_port()
+            text = text.replace('accept_api = FALSE;', f'''accept_api = TRUE;
+    http_api = {{ keys = [ "{api_key}" ]; key_timeout = 60;
+        key_extend_on_access = TRUE; loopback_only = TRUE;
+        allow_api_header = TRUE; port = {api_port}; pam_login = FALSE; }};''', 1)
         config.write_text(text)
         log = open(runtime / 'stdout.log', 'w+')
         process = subprocess.Popen([str(args.smithproxy.resolve()), '--config-file', str(config), '--diagnose'],
@@ -272,8 +281,49 @@ def main():
                 time.sleep(.1)
 
             if args.setup_only:
+                api_context = ssl._create_unverified_context()
+                api_opener = urllib.request.build_opener(
+                    urllib.request.ProxyHandler({}),
+                    urllib.request.HTTPSHandler(context=api_context))
+                authorize = urllib.request.Request(
+                    f'https://127.0.0.1:{api_port}/api/authorize',
+                    data=json.dumps({'access_key': api_key}).encode(),
+                    headers={'Content-Type': 'application/json'})
+                with api_opener.open(authorize, timeout=5) as response:
+                    tokens = json.load(response)
+                register = urllib.request.Request(
+                    f'https://127.0.0.1:{api_port}/api/v2/webhook/lease',
+                    data=json.dumps({**tokens, 'params': {
+                        'url': f'http://127.0.0.1:{server.server_port}/',
+                        'tls_verify': False, 'ttl_seconds': 60,
+                        'connection_start_synchronous': True}}).encode(),
+                    headers={'Content-Type': 'application/json'})
+                with api_opener.open(register, timeout=5) as response:
+                    lease = json.load(response)
+                    assert lease['status'] == 'acquired'
+
+                def switch_to_async_owner():
+                    release = urllib.request.Request(
+                        f'https://127.0.0.1:{api_port}/api/v2/webhook/lease/release',
+                        data=json.dumps({**tokens, 'params': {
+                            'lease_id': lease['lease_id']}}).encode(),
+                        headers={'Content-Type': 'application/json'})
+                    with api_opener.open(release, timeout=5) as response:
+                        assert json.load(response)['status'] == 'released'
+
+                    async_register = urllib.request.Request(
+                        f'https://127.0.0.1:{api_port}/api/v2/webhook/lease',
+                        data=json.dumps({**tokens, 'params': {
+                            'url': f'http://127.0.0.1:{server.server_port}/',
+                            'tls_verify': False, 'ttl_seconds': 60,
+                            'connection_start_synchronous': False}}).encode(),
+                        headers={'Content-Type': 'application/json'})
+                    with api_opener.open(async_register, timeout=5) as response:
+                        assert json.load(response)['status'] == 'acquired'
+
                 from connection_start_integration import run
-                run(connection, send, set_reply, server, source, pending_connection, tls=args.setup_tls)
+                run(connection, send, set_reply, server, source, pending_connection,
+                    switch_to_async_owner, tls=args.setup_tls)
                 return
 
             if args.h2_views:
