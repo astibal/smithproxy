@@ -9,11 +9,14 @@ Available complete variants:
 - `tls_replacement_dark.txt`
 - `tls_replacement_light.txt`
 
-Select a variant by copying it over the active file, for example:
+Export with `maintenance template export DIRECTORY`, then select a variant
+inside `DIRECTORY/en` by copying it over the active file:
 
 ```sh
 cp tls_replacement_light.txt tls_replacement.txt
 ```
+
+Import the complete directory with `maintenance template import DIRECTORY`.
 
 Do not use a symbolic link. Template files are deliberately opened with
 `O_NOFOLLOW`, must be regular files, and are limited to this directory and to

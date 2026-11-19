@@ -1,4 +1,4 @@
-#include <schema_resources.hpp>
+#include <resources/default_templates.hpp>
 #include <service/helper_log.hpp>
 /*
     Smithproxy- transparent proxy with SSL inspection capabilities.
@@ -365,27 +365,17 @@ std::vector<sx::cfg::CfgPack::File> legacy_cftar_resources(
     if(!message_directory.empty() && message_directory.back() != '/') {
         message_directory += '/';
     }
-    return {
-        // The renderer consumes four base templates. Keep the established
-        // variants as portable configuration data for later theme selection.
-        File{"templates/replacement/en/test.txt", message_directory + "test.txt"},
-        File{"templates/replacement/en/html_page.txt", message_directory + "html_page.txt"},
-        File{"templates/replacement/en/html_img_warning.txt", message_directory + "html_img_warning.txt"},
-        File{"templates/replacement/en/tls_replacement.txt", message_directory + "tls_replacement.txt"},
-        File{"templates/replacement/en/tls_override_form.txt", message_directory + "tls_override_form.txt", false, true},
-        File{"templates/replacement/en/tls_reason.txt", message_directory + "tls_reason.txt", false, true},
-        File{"templates/replacement/en/tls_certificate_field.txt", message_directory + "tls_certificate_field.txt", false, true},
-        File{"templates/replacement/en/tls_certificate_details.txt", message_directory + "tls_certificate_details.txt", false, true},
-        File{"templates/replacement/en/tls_replacement_error.txt", message_directory + "tls_replacement_error.txt", false, true},
-        File{"templates/replacement/en/tls_redirect.txt", message_directory + "tls_redirect.txt", false, true},
-        File{"templates/replacement/en/tls_redirect_top.txt", message_directory + "tls_redirect_top.txt", false, true},
-        File{"templates/replacement/en/tls_replacement_common.txt", message_directory + "tls_replacement_common.txt"},
-        File{"templates/replacement/en/tls_replacement_light.txt", message_directory + "tls_replacement_light.txt"},
-        File{"templates/replacement/en/tls_replacement_dark.txt", message_directory + "tls_replacement_dark.txt"},
-        File{"templates/replacement/en/tls_replacement_branded.txt", message_directory + "tls_replacement_branded.txt"},
-
-        File{"pki/mitm/ssh/hostkeys/ed25519", "/etc/smithproxy/ssh_host_ed25519_key", false, true},
-    };
+    std::vector<File> files;
+    // Only absent files use built-in defaults. Existing files still pass the
+    // packer's strict readability, regular-file and no-symlink checks.
+    for(const auto& [path, content] : sx::resources::default_templates::all()) {
+        // dir_msg_templates already selects the legacy English directory.
+        const auto name = path.substr(path.find_last_of('/') + 1);
+        files.push_back({path, message_directory + name, false, true});
+    }
+    files.push_back({"pki/mitm/ssh/hostkeys/ed25519",
+                     "/etc/smithproxy/ssh_host_ed25519_key", false, true});
+    return files;
 }
 
 void prepare_mem_debugs() {
@@ -898,7 +888,7 @@ int main(int argc, char *argv[]) {
                     sx::cfg::CfgArchive::native_path_for(
                         CfgFactory::get()->config_file),
                 };
-                migration.input.resource_defaults = sx::cfg::schema_1051_resources();
+                migration.input.resource_defaults = sx::resources::default_templates::all();
 
                 // Default identities are explicit files. Custom TLS identity
                 // collections move into purpose-oriented server/client and

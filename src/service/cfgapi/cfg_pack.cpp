@@ -257,6 +257,14 @@ void add_resource_descriptions(CfgTar& archive) {
 
 } // namespace
 
+CfgTar CfgPack::read_directory(const std::string& source, const std::string& prefix) {
+    Fd root(::open(source.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
+    if(root.get() < 0) fail_errno("cannot open resource directory " + source);
+    CfgTar result;
+    add_directory(result, root.get(), source, prefix);
+    return result;
+}
+
 CfgTar CfgPack::build(const Input& input) {
     if (input.main_config.empty() || input.startup_config.empty()) {
         fail("CfgTar main and startup input paths are required");

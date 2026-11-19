@@ -606,8 +606,11 @@ run_distributed_sections() {
     fi
 
     cp -a "$HERE" "$bundle_local/tests/patch-runner"
+    cp "$ROOT/tests/template_resources.py" "$bundle_local/tests/"
+    mkdir -p "$bundle_local/src/resources"
+    cp "$ROOT/src/resources/default_templates.cpp" "$bundle_local/src/resources/"
     cp "$ROOT/etc/smithproxy.cfg" "$bundle_local/etc/"
-    cp -a "$ROOT/etc/msg/en" "$bundle_local/etc/msg/"
+    python3 "$ROOT/tests/template_resources.py" --source "$ROOT" --output "$bundle_local/etc/msg/en"
     cp "$ROOT/tools/wireshark/spquic.lua" "$bundle_local/tools/wireshark/"
     cp "$FUZZ_SEED_REGISTRY" "$bundle_local/tests/docs/covered-seeds"
     cp "$BUILD_DIR/smithproxy" "$bundle_local/build/smithproxy"
@@ -1036,7 +1039,10 @@ print(*(x.getsockname()[1] for x in s))'
         scp "${SCP_OPTIONS[@]}" -r "$HERE/corpus/." "$REMOTE:$LAB_ROOT/corpus/" >/dev/null
         scp "${SCP_OPTIONS[@]}" "$HERE/vendor/pplay.py" "$REMOTE:$LAB_ROOT/pplay.py" >/dev/null
         scp "${SCP_OPTIONS[@]}" "$ROOT/etc/smithproxy.cfg" "$REMOTE:$LAB_ROOT/src/etc/" >/dev/null
-        scp "${SCP_OPTIONS[@]}" -r "$ROOT/etc/msg/en/." "$REMOTE:$LAB_ROOT/src/etc/msg/en/" >/dev/null
+        template_fixture=$(mktemp -d)
+        python3 "$ROOT/tests/template_resources.py" --source "$ROOT" --output "$template_fixture"
+        scp "${SCP_OPTIONS[@]}" -r "$template_fixture/." "$REMOTE:$LAB_ROOT/src/etc/msg/en/" >/dev/null
+        rm -rf "$template_fixture"
         if [[ $ONLY_SUITE == quic || $ONLY_SUITE == quic-pcapng || $ONLY_SUITE == quic-throughput || $ONLY_SUITE == quic-cert.* ]]; then
             [[ -x $QUIC_CURL_PREFIX/bin/curl-h3 ]] || {
                 echo "Missing HTTP/3 curl: $QUIC_CURL_PREFIX/bin/curl-h3" >&2
@@ -1067,7 +1073,7 @@ print(*(x.getsockname()[1] for x in s))'
         cp -a "$HERE/corpus/." "$LAB_ROOT/corpus/"
         cp "$HERE/vendor/pplay.py" "$LAB_ROOT/pplay.py"
         cp "$ROOT/etc/smithproxy.cfg" "$LAB_ROOT/src/etc/"
-        cp -a "$ROOT/etc/msg/en/." "$LAB_ROOT/src/etc/msg/en/"
+        python3 "$ROOT/tests/template_resources.py" --source "$ROOT" --output "$LAB_ROOT/src/etc/msg/en"
         if [[ $ONLY_SUITE == quic || $ONLY_SUITE == quic-pcapng || $ONLY_SUITE == quic-throughput || $ONLY_SUITE == quic-cert.* ]]; then
             [[ -x $QUIC_CURL_PREFIX/bin/curl-h3 ]] || {
                 echo "Missing HTTP/3 curl: $QUIC_CURL_PREFIX/bin/curl-h3" >&2

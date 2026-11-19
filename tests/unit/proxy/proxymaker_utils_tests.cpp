@@ -1,3 +1,4 @@
+#include <resources/default_templates.hpp>
 #include <ossl_util.hpp>
 #include <gtest/gtest.h>
 
@@ -17,8 +18,12 @@
 #include <vector>
 
 TEST(MitmProxyReplacement, IsSelfContainedBrandedAndEscapesTheTarget) {
-    std::string messages = "etc/msg/en/";
-    ASSERT_TRUE(html()->load_files(messages));
+    std::string messages;
+    std::map<std::string, std::string> native;
+    for(const auto& [path, content] : sx::resources::default_templates::all()) {
+        native.emplace(path.substr(path.find_last_of('/') + 1), content);
+    }
+    ASSERT_TRUE(html()->load_files(messages, native));
 
     const auto target = sx::mitmproxy::html_escape(
         "https://unsafe.example/<script>");
@@ -443,8 +448,12 @@ TEST(MitmProxyTlsState, ClientCertificateRequestIsNotACertificateValidationFailu
 }
 
 TEST(MitmProxyReplacement, SharedRendererEnforcesScopedSingleUseOverrideAndExpiry) {
-    std::string messages = "etc/msg/en/";
-    ASSERT_TRUE(html()->load_files(messages));
+    std::string messages;
+    std::map<std::string, std::string> native;
+    for(const auto& [path, content] : sx::resources::default_templates::all()) {
+        native.emplace(path.substr(path.find_last_of('/') + 1), content);
+    }
+    ASSERT_TRUE(html()->load_files(messages, native));
     SSLCom verification;
     verification.opt.cert.failed_check_override = true;
     verification.opt.cert.failed_check_override_timeout = 10;
@@ -509,8 +518,12 @@ TEST(MitmProxyReplacement, SharedRendererRejectsDisabledExpiredAndInvalidTtlOver
 
 
 TEST(MitmProxyReplacement, CertificateDetailsEscapePeerDataAndShowOriginalEvidence) {
-    std::string messages = "etc/msg/en/";
-    ASSERT_TRUE(html()->load_files(messages));
+    std::string messages;
+    std::map<std::string, std::string> native;
+    for(const auto& [path, content] : sx::resources::default_templates::all()) {
+        native.emplace(path.substr(path.find_last_of('/') + 1), content);
+    }
+    ASSERT_TRUE(html()->load_files(messages, native));
     struct CertificateEvidence : SSLCom {
         using SSLCom::sslcom_target_cert;
     } verification;
@@ -564,8 +577,12 @@ TEST(MitmProxyReplacement, CertificateDetailsEscapePeerDataAndShowOriginalEviden
 }
 
 TEST(MitmProxyReplacement, CertificateDetailsHandleMissingEvidenceAndDoNotLeakBetweenPages) {
-    std::string messages = "etc/msg/en/";
-    ASSERT_TRUE(html()->load_files(messages));
+    std::string messages;
+    std::map<std::string, std::string> native;
+    for(const auto& [path, content] : sx::resources::default_templates::all()) {
+        native.emplace(path.substr(path.find_last_of('/') + 1), content);
+    }
+    ASSERT_TRUE(html()->load_files(messages, native));
     SSLCom verification;
     verification.verify_reset(SSLCom::verify_status_t::VRF_ALLFAILED);
     sx::engine::http::app_HttpRequest request;
@@ -581,8 +598,12 @@ TEST(MitmProxyReplacement, CertificateDetailsHandleMissingEvidenceAndDoNotLeakBe
 }
 
 TEST(MitmProxyReplacement, OverrideFormUsesFileTemplateWithEscapedValuesAndNoStaleState) {
-    std::string messages = "etc/msg/en/";
-    ASSERT_TRUE(html()->load_files(messages));
+    std::string messages;
+    std::map<std::string, std::string> native;
+    for(const auto& [path, content] : sx::resources::default_templates::all()) {
+        native.emplace(path.substr(path.find_last_of('/') + 1), content);
+    }
+    ASSERT_TRUE(html()->load_files(messages, native));
 
     auto form = html()->render_tls_override_form(
         "0123456789abcdef", sx::mitmproxy::html_escape("/path?x=\"<tag>&y=1"));
@@ -599,8 +620,12 @@ TEST(MitmProxyReplacement, OverrideFormUsesFileTemplateWithEscapedValuesAndNoSta
 }
 
 TEST(MitmProxyReplacement, FragmentsEscapeTextAndKeepRenderedMarkupAndStateSeparate) {
-    std::string messages = "etc/msg/en/";
-    ASSERT_TRUE(html()->load_files(messages));
+    std::string messages;
+    std::map<std::string, std::string> native;
+    for(const auto& [path, content] : sx::resources::default_templates::all()) {
+        native.emplace(path.substr(path.find_last_of('/') + 1), content);
+    }
+    ASSERT_TRUE(html()->load_files(messages, native));
 
     auto reason = html()->render_fields("tls_reason", {
         {"severity_class", " reason-critical"}, {"number", "1"},

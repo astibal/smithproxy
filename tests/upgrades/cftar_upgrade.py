@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
 """Process-level master -> CFtar upgrade gate, isolated in mount/network namespaces."""
+from pathlib import Path as _TemplatePath
+import sys as _template_sys
+_template_sys.path.insert(0, str(next(p for p in _TemplatePath(__file__).resolve().parents
+                                     if (p / 'template_resources.py').is_file())))
+from template_resources import template_directory
+
 import argparse
 from contextlib import contextmanager
 import hashlib
@@ -71,7 +77,7 @@ class Gate:
         (case / 'config').mkdir()
         (case / 'runtime').mkdir()
         shutil.copytree(self.args.master_source / 'etc/certs/default', case / 'certs')
-        shutil.copytree(self.args.master_source / 'etc/msg/en', case / 'templates')
+        shutil.copytree(template_directory(self.args.master_source), case / 'templates')
         cfg = case / 'config' / filename
         text = self.base or (self.args.master_source / 'etc/smithproxy.cfg').read_text()
         values = {
@@ -393,18 +399,10 @@ class Gate:
 
         def missing_template(case, cfg):
             (case / 'templates/test.txt').unlink()
-            # Missing legacy resources may keep the old runtime usable or
-            # reject startup cleanly. Never accept a signal crash or swallow a
-            # forwarding assertion from a process that did become ready.
-            with self.process(self.args.tlc, case, cfg, expect_running=None) as cli:
-                if cli is not None:
-                    self.marker(cli)
-            self.check_log(case, 'cannot create native configuration archive')
-            assert cfg.is_file() and not native_path(cfg).exists()
-            assert not cfg.with_name(cfg.name + '.old').exists()
-            shutil.copyfile(self.args.master_source / 'etc/msg/en/test.txt', case / 'templates/test.txt')
             self.native(case, cfg)
-        self.case('missing-migration-resource-and-retry', missing_template)
+            archive = native_path(cfg)
+            run(self.args.cftar, 'get', archive, 'templates/replacement/en/test.txt')
+        self.case('missing-migration-resource-default', missing_template)
 
         def backup_symlink(case, cfg):
             target = case / 'protected-backup'

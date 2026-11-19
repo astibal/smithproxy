@@ -57,7 +57,7 @@
 
 
 #include <service/cfgapi/cfgapi.hpp>
-#include <schema_resources.hpp>
+#include <resources/default_templates.hpp>
 #include <service/cfgapi/cfg_save.hpp>
 #include <service/cfgapi/cfg_numeric.hpp>
 #include <service/cfgapi/cfg_serialization.hpp>
@@ -103,6 +103,36 @@ sx::cfg::SaveResult CfgFactory::save_running(
         [factory] { return factory->save_config(); },
     });
     return saver.save(expected_revision, source);
+}
+
+std::size_t CfgFactory::import_templates(const std::string& directory) {
+    auto factory = get();
+    sx::cfg::CfgTemplateMaintainer maintainer({
+        *board(), *write_gate(), lock(), factory->archive_storage_,
+    });
+    const auto changed = maintainer.import_directory(directory);
+    factory->log.noti("template import completed: changed=%zu", changed);
+    return changed;
+}
+
+void CfgFactory::export_templates(const std::string& directory) {
+    auto factory = get();
+    sx::cfg::CfgTemplateMaintainer maintainer({
+        *board(), *write_gate(), lock(), factory->archive_storage_,
+    });
+    maintainer.export_directory(directory);
+}
+
+std::size_t CfgFactory::maintain_templates(sx::cfg::TemplateMaintenance mode) {
+    auto factory = get();
+    sx::cfg::CfgTemplateMaintainer maintainer({
+        *board(), *write_gate(), lock(), factory->archive_storage_,
+    });
+    const auto changed = maintainer.apply(mode);
+    factory->log.noti("template maintenance: mode=%s changed=%zu",
+                      mode == sx::cfg::TemplateMaintenance::rollback ? "rollback" : "fix-missing",
+                      changed);
+    return changed;
 }
 
 sx::cfg::ArchiveRestoreResult CfgFactory::restore_startup_archive(
@@ -1005,14 +1035,21 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
     }
 
     else if(upgrade_to_num == 1051) {
-        // Persist new TLS replacement fragments together with schema 1051.
+        // Supply offline templates even when the legacy directory is incomplete.
         // Existing resources are authoritative; this step only adds new names.
-        schema_resource_additions_ = sx::cfg::schema_1051_resources();
+        schema_resource_additions_ = sx::resources::default_templates::all();
         log.event(INF, "added TLS replacement template resources");
         return true;
     }
     else if(upgrade_to_num == 1052) {
         log.event(INF, "added optional custom certificate fallback directory");
+        return true;
+    }
+    else if(upgrade_to_num == 1053) {
+        // Earlier native archives may lack base templates or theme variants.
+        // prepare_save inserts absent names without replacing custom content.
+        schema_resource_additions_ = sx::resources::default_templates::all();
+        log.event(INF, "completed built-in template resources");
         return true;
     }
 

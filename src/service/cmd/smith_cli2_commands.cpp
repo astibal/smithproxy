@@ -751,6 +751,66 @@ void register_smithproxy_cli2_commands(libcli2::Cli& cli, std::string subscriber
             }
         });
 
+    for(const bool importing : {false, true}) {
+        cli.command(importing ? "maintenance template import" : "maintenance template export")
+            .reset_definition()
+            .help(importing
+                ? "Export first, edit the exported files, then import the directory back. No manual CFtar extraction is needed."
+                : "Export current English templates to a new directory for editing")
+            .available_if(privileged_exec)
+            .argument({"directory", importing ? "Export first, edit the exported files, then import the directory back. No manual CFtar extraction is needed."
+                                              : "New writable directory (must not exist)", true, false})
+            .handler([importing](libcli2::Context& context, const libcli2::Invocation& call) {
+                try {
+                    if(importing) {
+                        const auto changed = CfgFactory::import_templates(call.arguments.at(0));
+                        context.print(context.decor().success(changed == 0
+                            ? "Templates unchanged; archive unchanged."
+                            : "Imported " + std::to_string(changed) +
+                              " templates; previous archive backed up. Restart to activate."));
+                    }
+                    else {
+                        CfgFactory::export_templates(call.arguments.at(0));
+                        context.print(context.decor().success("Templates exported under en/. Edit, then import this directory."));
+                    }
+                    return 0;
+                }
+                catch(const std::exception& error) {
+                    context.print(context.decor().error(std::string("Template transfer failed: ") + error.what()));
+                    return -1;
+                }
+            });
+    }
+
+    for(const auto mode : {sx::cfg::TemplateMaintenance::rollback,
+                           sx::cfg::TemplateMaintenance::fix_missing}) {
+        const bool rollback = mode == sx::cfg::TemplateMaintenance::rollback;
+        auto& command = cli.command(rollback ? "maintenance template rollback"
+                                             : "maintenance template fix-missing");
+        command.reset_definition()
+            .help(rollback ? "Restore all shipped templates to built-in defaults"
+                           : "Install missing shipped templates without replacing existing content")
+            .available_if(privileged_exec)
+            .handler([mode](libcli2::Context& context, const libcli2::Invocation&) {
+                try {
+                    const auto changed = CfgFactory::maintain_templates(mode);
+                    context.print(context.decor().success(changed == 0
+                        ? "Templates already satisfy the request; archive unchanged."
+                        : "Updated " + std::to_string(changed) +
+                          " templates; previous archive backed up. Restart to activate."));
+                    return 0;
+                }
+                catch(const std::exception& error) {
+                    context.print(context.decor().error(
+                        std::string("Template maintenance failed: ") + error.what()));
+                    return -1;
+                }
+            });
+        if(rollback) {
+            command.confirm("Replace all shipped templates, including custom edits, with built-in defaults? [y/N] ");
+        }
+    }
+
     cli.command("execute reload")
         .reset_definition()
         .help("Reload configuration file")

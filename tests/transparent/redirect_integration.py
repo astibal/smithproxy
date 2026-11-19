@@ -3,6 +3,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path as _TemplatePath
+import sys as _template_sys
+_template_sys.path.insert(0, str(next(p for p in _TemplatePath(__file__).resolve().parents
+                                     if (p / 'template_resources.py').is_file())))
+from template_resources import template_directory
+
 import argparse
 import base64
 import html
@@ -372,7 +378,7 @@ def _run_case(binary: Path, source: Path, runtime: Path, tls: bool,
         ("socks_workers", "-1;"),
         ("http_connect_workers", "-1;"),
         ("certs_path", f'"{source / "etc/certs/default"}/";'),
-        ("messages_dir", f'"{source / "etc/msg/en"}/";'),
+        ("messages_dir", f'"{template_directory(source)}/";'),
         ("write_payload_dir", f'"{capture_dir}";'),
         ("log_file", f'"{runtime_log}";'),
         ("log_console", "TRUE;"),

@@ -3,6 +3,8 @@
 #include <service/cfgapi/cfg_archive_session.hpp>
 #include <service/cfgapi/cftar_cli.hpp>
 
+#include <resources/default_templates.hpp>
+
 #include <iostream>
 #include <optional>
 #include <set>
@@ -17,7 +19,7 @@ using sx::cfg::CfgTar;
 void usage(std::ostream& output) {
     output << "Usage:\n"
            << "  smithproxy-cftar create --config FILE --startup FILE --output FILE\n"
-           << "      [--file ARCHIVE_PATH=FILE] [--executable ARCHIVE_PATH=FILE]\n"
+           << "      [--default-templates] [--file ARCHIVE_PATH=FILE] [--executable ARCHIVE_PATH=FILE]\n"
            << "  smithproxy-cftar verify FILE\n"
            << "  smithproxy-cftar get FILE ARCHIVE_PATH\n"
            << "  smithproxy-cftar inspect FILE\n"
@@ -51,6 +53,10 @@ int create(int argc, char** argv) {
 
     for (int index = 2; index < argc; ++index) {
         const std::string_view option = argv[index];
+        if(option == "--default-templates") {
+            input.resource_defaults = sx::resources::default_templates::all();
+            continue;
+        }
         if (index + 1 >= argc) {
             throw sx::cfg::CfgTarError("missing value after " + std::string(option));
         }
