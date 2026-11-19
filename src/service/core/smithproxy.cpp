@@ -187,6 +187,11 @@ bool SmithProxy::create_quic_listeners() {
                 std::move(credentials.certificate_pem),
                 std::move(credentials.private_key_pem), family,
                 CfgFactory::get()->quic_listener_rcvbuf);
+            service->protocol_event_capture([] {
+                auto config = CfgFactory::get();
+                std::scoped_lock lock(CfgFactory::lock());
+                return config->capture_options.protocol_events;
+            });
             if (receiver) service->assign_worker(receiver, worker);
             if (!service->prepare()) {
                 _err("Failed to setup QUIC worker %u: %s", worker, service->last_error().c_str());

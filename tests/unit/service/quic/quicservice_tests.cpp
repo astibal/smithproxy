@@ -9,6 +9,7 @@
 
 #include "service/quic/quicservice.hpp"
 #include "proxy/trafficcapture.hpp"
+#include "proxy/capture_protocol_tracer.hpp"
 #include "service/quic/verification_result.hpp"
 #include "service/quic/worker_dispatcher.hpp"
 

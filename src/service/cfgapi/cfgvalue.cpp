@@ -775,7 +775,6 @@ void CfgValueHelp::init() {
             .value_filter(is_in_vector([]() -> std::vector<std::string> { return {"smcap", "pcap", "pcap_single"}; },"smcap, pcap or pcap_single"))
             .suggestion_generator([](std::string const& section, std::string const& variable) -> std::vector<std::string> {  return {"smcap", "pcap", "pcap_single"};   });
 
-
     add("detection_profiles.[x].mode", "0 = disabled, 1 = pre-read detection, 2 = post-read detection")
             .help_quick("<integer>: 0-2")
             .may_be_empty(false)
@@ -878,6 +877,30 @@ void CfgValueHelp::init_routing() {
 }
 
 void CfgValueHelp::init_captures () {
+    add("captures.options.metadata", "export SXME connection metadata and fingerprints")
+        .help_quick(CfgValue::HELP_BOOL)
+        .may_be_empty(false)
+        .value_filter(CfgValue::VALUE_BOOL)
+        .suggestion_generator(CfgValue::SUGGESTION_BOOL);
+
+    add("captures.options.statistics", "collect and export full SXST entropy and flow statistics")
+        .help_quick(CfgValue::HELP_BOOL)
+        .may_be_empty(false)
+        .value_filter(CfgValue::VALUE_BOOL)
+        .suggestion_generator(CfgValue::SUGGESTION_BOOL);
+
+    add("captures.options.transport", "export SXTL negotiated transport security metadata")
+        .help_quick(CfgValue::HELP_BOOL)
+        .may_be_empty(false)
+        .value_filter(CfgValue::VALUE_BOOL)
+        .suggestion_generator(CfgValue::SUGGESTION_BOOL);
+
+    add("captures.options.protocol_events", "export SXPP protocol lifecycle events")
+        .help_quick(CfgValue::HELP_BOOL)
+        .may_be_empty(false)
+        .value_filter(CfgValue::VALUE_BOOL)
+        .suggestion_generator(CfgValue::SUGGESTION_BOOL);
+
     add("captures.local.enabled", "globally enable/disable file captures")
             .may_be_empty(false)
             .value_filter(CfgValue::VALUE_BOOL)

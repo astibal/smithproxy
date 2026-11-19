@@ -23,13 +23,14 @@ namespace sx::quic::spq1 {
 /** Shared identity and packet-number space for one exported QUIC connection. */
 struct connection_context {
     connection_context(std::uint64_t id, std::string protocol,
-                       std::shared_ptr<sx::session_traffic_log> native_log = {})
+                       std::shared_ptr<sx::session_traffic_log> native_log = {},
+                       socle::ProtocolTracer* protocol_tracer = nullptr)
         : session_id(id), alpn(std::move(protocol)),
           h3_decoder(alpn.rfind("h3", 0) == 0
               ? std::make_shared<h3_capture_decoder>() : nullptr),
           h3_observer_decoder(alpn.rfind("h3", 0) == 0
               ? std::make_shared<h3_capture_decoder>() : nullptr),
-          native_log(std::move(native_log)) {}
+          native_log(std::move(native_log)), protocol_tracer(protocol_tracer) {}
 
     std::uint64_t session_id = 0;
     std::string alpn;
@@ -40,6 +41,8 @@ struct connection_context {
     std::shared_ptr<h3_capture_decoder> h3_observer_decoder;
     /** Encrypted session packets and secrets routed into the selected logger. */
     std::shared_ptr<sx::session_traffic_log> native_log;
+    /** Non-owning session tracer; listener outlives all stream adapters. */
+    socle::ProtocolTracer* protocol_tracer = nullptr;
 
     /** Remember decoded Content-Encoding across H3 DATA messages. */
     void content_encoding(socle::side_t side, std::uint64_t stream_id,
@@ -95,6 +98,8 @@ public:
     /** Forward session secrets to the capture implementation unchanged. */
     void write_secret(socle::traffic_secret_format format,
                       buffer const& data) override;
+    /** Forward serialized PCAPNG metadata blocks unchanged. */
+    void write_metadata(buffer const& block) override;
     void finish(socle::side_t side);
 
 private:
@@ -125,6 +130,11 @@ public:
 
     std::unique_ptr<socle::baseTrafficLogger> wrap(
         std::unique_ptr<socle::baseTrafficLogger> output) override;
+    void protocol_tracing(bool enabled) noexcept override;
+    [[nodiscard]] std::optional<std::uint64_t>
+    protocol_trace_subject() const noexcept override;
+    [[nodiscard]] socle::ProtocolTracer*
+    session_protocol_tracer() const noexcept override;
     std::optional<content_metadata> inspect_content(
         socle::side_t side, buffer const& data) override;
     void on_flow_observation(observation_hook hook) override {

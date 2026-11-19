@@ -45,6 +45,9 @@
 #include <proxy/master_policy.hpp>
 #include <proxy/policy_input.hpp>
 #include <atomic>
+#include <array>
+#include <optional>
+#include <nlohmann/json.hpp>
 #include <memory>
 #include <service/http/webhook_control.hpp>
 #include <proxy/connection_readiness.hpp>
@@ -85,6 +88,7 @@ struct whitelist_verify_entry {
 };
 
 class FilterProxy;
+class CaptureProtocolTracer;
 namespace sx::proxy { class TlsObserver; }
 
 namespace sx {
@@ -118,10 +122,42 @@ class MitmProxy : public baseProxy, public IOController {
     std::string replacement_msg;
     static inline long half_timeout_ = 5;
     std::time_t created_at_ = std::time(nullptr);
+    void write_capture_enrichment();
+    void prepare_capture_stop() noexcept;
+    bool capture_stopped_ = false;
+    void observe_tls_ready();
+    void write_capture_block(std::array<uint8_t, 4> name_space,
+                             nlohmann::json const& payload);
+    [[nodiscard]] nlohmann::json capture_identity() const;
+    mutable std::optional<nlohmann::json> capture_identity_;
+    std::string capture_connection_label_;
+    [[nodiscard]] std::optional<nlohmann::json>
+    capture_protocol_profile();
+    std::optional<nlohmann::json> capture_tls_left_;
+    std::optional<nlohmann::json> capture_tls_right_;
+    std::optional<nlohmann::json> capture_metadata_payload_;
+    std::optional<nlohmann::json> capture_statistics_payload_;
+    std::optional<nlohmann::json> capture_tls_payload_;
+    bool capture_tls_written_ = false;
     std::uint64_t capture_payload_bytes_ = 0;
+    std::unique_ptr<CaptureProtocolTracer> protocol_tracer_;
+    socle::ProtocolTracer* active_protocol_tracer_ = nullptr;
+    std::optional<std::uint64_t> protocol_trace_subject_;
+    void attach_protocol_tracer() noexcept;
     std::uint64_t session_id_ = 0;
 public:
     std::optional<sx::proxy::policy_input_t> policy_input;
+    struct CaptureDiagnostics {
+        uint64_t sxme_written = 0;
+        uint64_t sxst_written = 0;
+        uint64_t sxtl_written = 0;
+        uint64_t sxpp_written = 0;
+        uint64_t tls_left_ready = 0;
+        uint64_t tls_right_ready = 0;
+    };
+
+    [[nodiscard]] static CaptureDiagnostics capture_diagnostics() noexcept;
+    static void reset_capture_diagnostics() noexcept;
 
     using whitelist_verify_entry_t = expiring<whitelist_verify_entry> ;
     using whitelist_map_t = ptr_cache<std::string,whitelist_verify_entry_t>;
@@ -139,6 +175,10 @@ public:
 
     struct Opts_ContentWriter {
         bool write_payload = false;
+        bool capture_metadata = false;
+        bool capture_statistics = false;
+        bool capture_transport = false;
+        bool capture_protocol_events = false;
 
         bool webhook_enable = false;
         bool webhook_lock_traffic = false;
@@ -197,6 +237,10 @@ public:
         traffic_log_adapter_ = std::move(adapter);
     }
     void toggle_tlog ();
+    void prepare_capture_identity();
+    void enable_protocol_profiling();
+    void trace_protocol(socle::protocol_trace_event const& event) noexcept;
+    void write_protocol_profile(std::string_view csv_row);
 
     // Transfer exclusive stream I/O to a protocol-specific handler. The
     // handler is intentionally generic; MitmProxy does not know about SSH,
@@ -241,7 +285,8 @@ public:
     StartStopTls const& start_stop_tls() const noexcept { return start_stop_tls_; }
 
     // actual proxy functions manipulating data buffers
-    void write_traffic_log(side_t side, baseHostCX* cx, buffer* custom_buffer  = nullptr);
+    void write_traffic_log(side_t side, baseHostCX* cx, buffer* custom_buffer = nullptr,
+                           std::string const& detection = {});
     void write_stream_traffic(sx::stream_direction direction, std::string_view plaintext);
     void write_stream_event(sx::stream_direction direction, std::string_view event);
     void proxy_dump_packet(side_t sid, buffer const& buf);
@@ -440,6 +485,13 @@ public:
     DECLARE_LOGGING(to_string)
 
 private:
+    static std::atomic_uint64_t& capture_sxme_written();
+    static std::atomic_uint64_t& capture_sxst_written();
+    static std::atomic_uint64_t& capture_sxtl_written();
+    static std::atomic_uint64_t& capture_sxpp_written();
+    static std::atomic_uint64_t& capture_tls_left_ready();
+    static std::atomic_uint64_t& capture_tls_right_ready();
+
     // A content webhook may permanently decline the rest of this connection.
     // SIFT has its own path and is deliberately unaffected.
     bool webhook_content_wanted_ = true;

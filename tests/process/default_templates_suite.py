@@ -22,7 +22,7 @@ def main():
             ['python3', str(source / 'tests/process/cftar_schema_upgrade.py'),
              str(build / 'smithproxy'), '--native-archive',
              str(build / 'defaults/smithproxy.cftar'), '--schema', str(schema)]
-            for schema in (1039, 1050, 1051, 1052)
+            for schema in (1039, 1050, 1051, 1052, 1053)
         ]
 
     for name, commands in sections.items():

@@ -167,3 +167,21 @@ TEST(CfgValue, QuicListenerReceiveBufferAllowsSystemDefault) {
         EXPECT_FALSE(validate(input).accepted()) << input;
     EXPECT_NE(value->get().help_quick().find("restart"), std::string::npos);
 }
+
+TEST(CfgValue, CaptureBlocksHaveIndependentBooleanOptions) {
+    for(auto const* name : {"metadata", "statistics", "transport", "protocol_events"}) {
+        const auto path = std::string("captures.options.") + name;
+        auto value = CfgValueHelp::get().find(path);
+        ASSERT_TRUE(value) << path;
+        EXPECT_EQ(value->get().suggestion_generate("captures.options", name),
+                  (std::vector<std::string>{"true", "false"}));
+        for(auto const* allowed : {"true", "false"}) {
+            const auto [accepted, error] = CfgValueHelp::get().value_check(path, allowed);
+            EXPECT_TRUE(accepted) << path << ": " << error;
+        }
+        for(auto const* rejected : {"basic", "detailed", "invalid"}) {
+            const auto [accepted, error] = CfgValueHelp::get().value_check(path, rejected);
+            EXPECT_FALSE(accepted) << path;
+        }
+    }
+}

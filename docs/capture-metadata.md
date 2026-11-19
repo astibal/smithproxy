@@ -1,0 +1,244 @@
+# Automatic capture metadata
+
+Smithproxy can add structured metadata to captured PCAPNG traffic. Metadata is
+written to local PCAPNG output and, in PCAPNG pickup mode, to the GRE capture
+stream as well.
+
+## Configuration
+
+```libconfig
+captures = {
+    options = {
+        metadata = TRUE;        // SXME
+        statistics = FALSE;     // SXST
+        transport = TRUE;       // SXTL (currently TLS)
+        protocol_events = FALSE; // SXPP
+    };
+};
+content_profiles = {
+    recorded = { write_payload = TRUE; };
+};
+```
+
+Configuration schema 1054 adds missing options as false and preserves explicit
+values. The upgrade also adds any missing TLS replacement fragments from schema
+1051, including archives produced by the earlier experimental capture branch;
+existing customized fragments are preserved. Options are resolved when a connection content policy is applied; a
+change does not retroactively export metadata for existing sessions.
+
+All four options default to false, are independent, and apply equally to local
+PCAPNG and remote GRE PCAPNG output. `write_payload` must also be enabled by the
+selected content profile (or `settings.default_write_payload` without a profile).
+`captures.local.enabled` and `captures.remote.enabled` control the destinations;
+remote custom blocks require `captures.remote.gre_format = "pcapng"`.
+
+Enabling a block exports its complete defined payload. Statistics enables the
+statistics filter even without a policy statistics feature and exports detailed
+deltas as well as aggregate rates. It does not enable any other block. Metadata
+enables JA4/JA4S/JA4H collection. Transport snapshots and protocol events can each
+be collected without metadata, fingerprints, statistics or webhooks. Disabling
+an export does not disable data collection independently needed by policy or
+webhooks. DSB decryption secrets remain on their existing independent path.
+
+The former experimental `settings.capture_auto_metadata`,
+`settings.capture_auto_statistics`, and profile `capture_proto_profiling` switches
+are replaced by `captures.options`; they are not aliases. When migrating an old
+metadata-branch configuration, explicitly select the desired four options.
+
+## PCAPNG envelope
+
+All records use the copyable PCAPNG Custom Block (`0x00000BAD`) and PEN
+`67005`. The payload envelope is:
+
+```text
+u32 block type
+u32 total length
+u32 PEN = 67005
+char namespace[4]
+u16 entry type = 1
+u16 version = 1
+u32 payload length
+byte payload[]
+zero padding to 32-bit boundary
+u32 total length
+```
+
+Numeric fields follow the byte order of the containing PCAPNG section.
+
+The Lua dissector in `tools/wireshark/smithproxy.lua` exposes the envelope,
+JSON correlation fields and typed SXPP columns as Wireshark display-filter
+fields. See `tools/wireshark/README.md` for installation and examples. A
+deterministic capture containing HTTP, TLS 1.3 and all four custom namespaces
+is available as `tools/wireshark/samples/smithproxy-reference.pcapng` and can be
+regenerated with `tools/wireshark/generate_sample.py`.
+
+The JSON snapshots (`SXME`, `SXST`, `SXTL`) contain both correlation keys:
+
+- `session_id`: process-local capture-session identifier. A monotonic `CAP`
+  suffix distinguishes sessions even when the allocator reuses a proxy address.
+- `proxy_session_key`: stable traffic-log key derived from the protocol and
+  client/origin tuple.
+
+The correlation identity is frozen when protocol profiling is enabled, while
+both connection contexts still exist. Final SXME/SXST records reuse that identity
+at retirement instead of recomputing an `unknown-unknown` tuple. Native keys
+prefix both endpoints, for example `tcp_192.0.2.1:50000-tcp_198.51.100.1:443`;
+intercepted TLS uses the `ssli` endpoint prefix.
+
+## Synthetic TCP ordering
+
+For reconstructed TCP traffic, the file contains SYN, SYN/ACK and ACK before
+the flow's buffered metadata, followed by application payload. Early SXPP and
+SXTL records are retained by the individual flow logger, not the shared file
+sink. Their original event timestamps and sequence numbers are preserved;
+they describe proxy observations, not observed wire timestamps of the synthetic
+packets. Other connections may interleave in the shared output.
+
+If a session never produces payload, its metadata is flushed at teardown without
+inventing a successful TCP handshake. Native packet and datagram logging do not
+create synthetic TCP handshakes for metadata.
+
+The live metadata gate checks handshake/block ordering for the generated Linux
+cooked TCP captures. Native logger regression tests also check the no-payload
+case and exact TCP flag sequence.
+
+## Namespaces
+
+### SXME — connection metadata
+
+Written once when the capture session retires, before connection contexts are
+destroyed. The same owned snapshot is included in the final connection-info
+webhook; deferred destruction does not emit a duplicate summary. Destruction
+retains a fallback for sessions which did not take the normal retirement path.
+Schema: `smithproxy.metadata.v1`.
+
+The payload includes connection start/end time, duration, policy index,
+connection label, detected application and JA4 client/server fingerprints.
+The fields are `ja4.client` (JA4) and `ja4.server` (JA4S), not SXPP event fields.
+`ja4.http` is an array of JA4H values from the HTTP inspector's current request
+and retained request history (HTTP/1 or HTTP/2). It is empty when HTTP
+fingerprinting is disabled or no HTTP fingerprint was collected. This is not
+an exhaustive per-request timeline; it uses the same bounded history as webhooks.
+The controlled HTTP-over-TLS live gate requires nonempty JA4, JA4S and a
+nonempty JA4H array; it does not yet independently recompute and compare the
+fingerprint hashes.
+
+### SXST — statistics
+
+Written when the capture session closes if automatic statistics are enabled and
+the statistics filter collected usable data. Schema:
+`smithproxy.statistics.v1`.
+
+### SXTL — negotiated TLS
+
+Written exactly once when both TLS legs reach `READY`. It is intentionally not
+collected during connection teardown, because shutdown or error handling may
+already have changed the live OpenSSL state. Schema: `smithproxy.tls.v1`.
+
+```text
+client --- L ---> Smithproxy --- R ---> origin
+             server role     client role
+```
+
+Both `L` and `R` contain the negotiated TLS version, cipher, cipher strength,
+key-exchange group (OpenSSL 3), ALPN, SNI and session reuse state.
+`peer_certificate` describes the remote peer; `local_certificate` describes
+the certificate presented by this proxy leg. In particular, the downstream
+server certificate is `L.local_certificate`, not `L.peer_certificate` (which
+may instead describe an authenticated mTLS client).
+
+Certificate summaries contain SHA-256, subject/issuer CN and full RFC2253 names,
+`serial_hex`, UTC ISO-8601 `not_before`/`not_after`, public-key algorithm/bits,
+and `san.dns`/`san.ip` lists. SAN export is bounded to 256 names and reports
+`san_truncated` when limited. No private key or complete certificate DER/PEM
+is included. These are additive fields in `smithproxy.tls.v1`.
+
+The TCP lifecycle gate tracks each session and leg separately: STARTED must
+precede READY/FAILED, terminal events cannot repeat, and SXTL must follow READY
+on both legs. Native QUIC lifecycle is deliberately outside this TCP check.
+
+The `R.verify` object records whether Smithproxy verification ran, its combined
+result, OpenSSL result code/text, Smithproxy verification origin and extended
+flags. Verification normally belongs to `R`, where Smithproxy acts as the TLS
+client. Failed or incomplete handshakes do not produce `SXTL v1`.
+
+### SXPP — protocol profile
+
+An ordered protocol audit trail. SXPP version 2 contains one RFC 4180 CSV row
+with fixed columns:
+
+```text
+timestamp,timestamp_unix_us,delta_us,session_id,proxy_session_key,seq,side,component,scope,stream_id,event,status,detail
+```
+
+`timestamp` is UTC with microsecond precision. `delta_us` uses a monotonic clock
+and measures time since the previous relevant row: session events form the
+shared timeline, while a stream event compares against the newer of the last
+shared event and the last event for that stream. Sibling streams do not affect
+each other's delta. The first event on a timeline has delta zero. `side` is
+`L`, `R`, or `P` (proxy).
+The optional `stream_id` correlates multiplexed QUIC streams. `detail` is a
+CSV-escaped free-form field for small technical facts such as an ALPN, selected
+route, policy, or load-balancer target.
+
+Typical rows are handshake start/ready/failure, TCP connect, QUIC stream open,
+policy match, routing decisions, timeouts, and close. Payload read/write calls
+are deliberately not logged, so profiling remains an audit trail rather than a
+packet-by-packet duplicate. QUIC handshake entries are buffered in the bounded
+native-capture journal and exported only after a matching content policy turns
+protocol profiling on.
+
+Example (header shown for readability; it is not stored in each block):
+
+```csv
+timestamp,timestamp_unix_us,delta_us,session_id,proxy_session_key,seq,side,component,scope,stream_id,event,status,detail
+2026-09-11T12:00:00.000120Z,1789128000000120,0,Proxy-DEADBEEF-PTR-1,quic_10.0.0.1:45634-1.1.1.1:443,1,L,quic,connection,,HANDSHAKE_STARTED,pending,
+2026-09-11T12:00:00.018420Z,1789128000018420,18300,Proxy-DEADBEEF-PTR-1,quic_10.0.0.1:45634-1.1.1.1:443,2,R,quic,connection,,HANDSHAKE_READY,ok,h3
+2026-09-11T12:00:00.020010Z,1789128000020010,1590,Proxy-DEADBEEF-PTR-1,quic_10.0.0.1:45634-1.1.1.1:443,3,P,stream,stream,6,OPENED,ok,
+```
+
+## Diagnostics
+
+```text
+diag capture status
+diag capture schemas
+```
+
+`status` shows the active automation settings, local/remote capture state,
+written block counters and the number of captured `L`/`R` TLS-ready snapshots.
+`schemas` prints the PEN, block type and registered namespace/schema versions.
+Counters are process-local and reset when Smithproxy restarts.
+
+## Webhook parity
+
+When webhooks are enabled, the final `connection-info` event mirrors generated
+capture enrichment under `capture`:
+
+```json
+{
+  "capture": {
+    "metadata": { "schema": "smithproxy.metadata.v1" },
+    "statistics": { "schema": "smithproxy.statistics.v1" },
+    "tls": { "schema": "smithproxy.tls.v1" },
+    "protocol_profile": {
+      "schema": "smithproxy.protocol-profile.v2",
+      "session_id": "Proxy-DEADBEEF-PTR-1",
+      "proxy_session_key": "tcp_10.0.0.1:45634-1.1.1.1:443",
+      "dropped": 0,
+      "events": []
+    }
+  }
+}
+```
+
+The JSON objects for metadata, statistics and TLS are the same values written
+to `SXME`, `SXST` and `SXTL`. Protocol events are represented as structured JSON
+instead of CSV. The in-memory webhook journal is bounded to 1024 events; SXPP
+capture remains complete, while `dropped` reports records omitted from the
+webhook payload. Before correlation identity is available, capture rows are
+buffered up to 1024 entries and 1 MiB of detail text. Further rows are omitted;
+`capture_dropped` in the protocol-profile webhook reports this separately from
+webhook journal truncation. Once identity is available, capture emission is
+not subject to the pending-buffer limit.
+For QUIC streams, each webhook receives connection-level
+events plus events for its own stream ID, not events from sibling streams.

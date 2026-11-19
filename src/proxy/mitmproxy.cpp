@@ -37,15 +37,20 @@
     which carries forward this exception.
 */    
 
+#include <service/http/jsonize_x509.hpp>
 #include <regex>
 #include <ctime>
 #include <cerrno>
 #include <chrono>
 #include <thread>
-#include <limits>
+#include <memory>
 #include <openssl/rand.h>
 
 #include <proxy/mitmproxy.hpp>
+#include <proxy/capture_enrichment.hpp>
+#include <proxy/capture_protocol_tracer.hpp>
+#include <limits>
+
 #include <proxy/proxy_hooks.hpp>
 #include <proxy/retirement.hpp>
 #include <proxy/content_webhook_metadata.hpp>
@@ -68,6 +73,7 @@
 #include <staticcontent.hpp>
 
 #include <traflog/fsoutput.hpp>
+#include <traflog/traflog.hpp>
 #include <service/tpool.hpp>
 
 #include <algorithm>
@@ -105,6 +111,84 @@ std::string_view content_payload_layer(baseHostCX* context) {
 }
 
 } // namespace
+
+namespace sx::capture {
+
+namespace {
+
+nlohmann::json peer_certificate_from_ssl(SSL* ssl) {
+    nlohmann::json result;
+    if(!ssl) return result;
+
+    std::unique_ptr<X509, decltype(&X509_free)> certificate(
+        SSL_get_peer_certificate(ssl), X509_free);
+    return certificate ? jsonize::certificate_summary(certificate.get()) : result;
+}
+
+} // namespace
+
+nlohmann::json tls_leg(SSLCom const& com, bool include_verify) {
+    nlohmann::json result = {
+        {"role", com.is_server() ? "server" : "client"},
+        {"state", "ready"},
+    };
+    SSL* ssl = com.get_SSL();
+    if(!ssl) return result;
+
+    if(auto const* version = SSL_get_version(ssl); version) result["version"] = version;
+    if(auto const* cipher = SSL_get_current_cipher(ssl); cipher) {
+        result["cipher"] = SSL_CIPHER_get_name(cipher);
+        int algorithm_bits = 0;
+        result["cipher_bits"] = SSL_CIPHER_get_bits(cipher, &algorithm_bits);
+    }
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+    if(auto const group = SSL_get_negotiated_group(ssl); group > 0) {
+        if(auto const* group_name = OBJ_nid2sn(group); group_name) {
+            result["group"] = group_name;
+        }
+    }
+#endif
+
+    unsigned char const* alpn = nullptr;
+    unsigned int alpn_size = 0;
+    SSL_get0_alpn_selected(ssl, &alpn, &alpn_size);
+    if(alpn && alpn_size) {
+        result["alpn"] = std::string(
+            reinterpret_cast<char const*>(alpn), alpn_size);
+    }
+    if(auto const* sni = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name); sni) {
+        result["sni"] = sni;
+    }
+    result["session_reused"] = SSL_session_reused(ssl) == 1;
+
+    auto certificate = peer_certificate_from_ssl(ssl);
+    if(!certificate.empty()) result["peer_certificate"] = std::move(certificate);
+    // The downstream peer is the client, not the certificate presented by the
+    // proxy. Keep our own certificate separate on both legs (including mTLS).
+    auto local_certificate = jsonize::certificate_summary(SSL_get_certificate(ssl));
+    if(!local_certificate.empty()) result["local_certificate"] = std::move(local_certificate);
+
+    if(include_verify) {
+        auto const openssl_code = SSL_get_verify_result(ssl);
+        std::vector<std::string> extended;
+        for(auto const value : com.verify_extended_info()) {
+            extended.emplace_back(MitmProxy::verify_flag_string_extended(value));
+        }
+        result["verify"] = {
+            {"performed", com.verify_get() != SSLCom::verify_status_t::VRF_NOTTESTED},
+            {"ok", openssl_code == X509_V_OK
+                   && com.verify_get() == SSLCom::verify_status_t::VRF_OK},
+            {"openssl_code", openssl_code},
+            {"openssl_text", X509_verify_cert_error_string(openssl_code)},
+            {"sx_flag", MitmProxy::verify_flag_string(com.verify_get())},
+            {"origin", SSLCom::verify_origin_str(com.verify_origin())},
+            {"extended_info", std::move(extended)},
+        };
+    }
+    return result;
+}
+
+} // namespace sx::capture
 
 MitmProxy::MitmProxy(baseCom* c):
     baseProxy(c),
@@ -208,6 +292,8 @@ void MitmProxy::toggle_tlog () {
         auto install_logger = [this](
                 std::unique_ptr<socle::baseTrafficLogger> output) {
             if (traffic_log_adapter_) {
+                traffic_log_adapter_->protocol_tracing(
+                    writer_opts()->capture_protocol_events);
                 output = traffic_log_adapter_->wrap(std::move(output));
             }
             tlog_ = std::move(output);
@@ -317,6 +403,8 @@ void MitmProxy::shutdown() {
 }
 
 MitmProxy::~MitmProxy() {
+    prepare_capture_stop();
+    baseProxy::protocol_tracer(nullptr);
     // Base destruction must not dispatch back into the retired derived object.
     tls_observer_enabled(false);
 
@@ -360,6 +448,304 @@ MitmProxy::~MitmProxy() {
     }
 
     current_sessions()--;
+}
+
+void MitmProxy::attach_protocol_tracer() noexcept {
+    if(!active_protocol_tracer_) return;
+    baseProxy::protocol_tracer(active_protocol_tracer_);
+    for(auto* context : {first_left(), first_right()}) {
+        if(context && context->com()
+           && context->com()->protocol_tracer() != active_protocol_tracer_) {
+            context->com()->protocol_tracer(active_protocol_tracer_);
+        }
+    }
+}
+
+void MitmProxy::prepare_capture_identity() {
+    if(!writer_opts()->write_payload) return;
+    if(!writer_opts()->capture_metadata && !writer_opts()->capture_statistics
+       && !writer_opts()->capture_transport && !writer_opts()->capture_protocol_events) return;
+    (void)capture_identity();
+    capture_connection_label_ = to_connection_label(false);
+}
+
+void MitmProxy::enable_protocol_profiling() {
+    if(active_protocol_tracer_) return;
+    auto const identity = capture_identity();
+    capture_connection_label_ = to_connection_label(false);
+    if(traffic_log_adapter_) traffic_log_adapter_->protocol_tracing(true);
+    auto const subject = traffic_log_adapter_
+        ? traffic_log_adapter_->protocol_trace_subject() : std::nullopt;
+    protocol_trace_subject_ = subject;
+    active_protocol_tracer_ = traffic_log_adapter_
+        ? traffic_log_adapter_->session_protocol_tracer() : nullptr;
+    if(!active_protocol_tracer_) {
+        protocol_tracer_ = std::make_unique<CaptureProtocolTracer>(
+            this, [](void* context, std::string_view row) {
+                static_cast<MitmProxy*>(context)->write_protocol_profile(row);
+            }, subject);
+        active_protocol_tracer_ = protocol_tracer_.get();
+    }
+    if(auto* capture_tracer = dynamic_cast<CaptureProtocolTracer*>(
+           active_protocol_tracer_)) {
+        capture_tracer->set_identity(
+            identity.at("session_id").get<std::string>(),
+            identity.at("proxy_session_key").get<std::string>(),
+            protocol_trace_subject_);
+    }
+    attach_protocol_tracer();
+    trace_protocol({socle::trace_side::proxy,
+                    subject ? socle::trace_component::stream
+                            : socle::trace_component::proxy,
+                    subject ? socle::trace_scope::stream
+                            : socle::trace_scope::session,
+                    0, false, subject ? socle::trace_event::opened
+                                      : socle::trace_event::created,
+                    socle::trace_status::ok, {}});
+    if(!subject) trace_protocol({socle::trace_side::left,
+                    socle::trace_component::tcp,
+                    socle::trace_scope::connection, 0, false,
+                    socle::trace_event::accepted, socle::trace_status::ok, {}});
+    if(matched_policy() >= 0) {
+        auto const detail = string_format("policy=%d", matched_policy());
+        trace_protocol({socle::trace_side::proxy, socle::trace_component::policy,
+                        subject ? socle::trace_scope::stream
+                                : socle::trace_scope::session, 0, false,
+                        socle::trace_event::matched, socle::trace_status::ok,
+                        detail});
+    }
+}
+
+void MitmProxy::trace_protocol(
+    socle::protocol_trace_event const& event) noexcept {
+    if(!active_protocol_tracer_) return;
+    if(!protocol_trace_subject_ || event.has_subject_id) {
+        active_protocol_tracer_->trace(event);
+        return;
+    }
+    auto stream_event = event;
+    stream_event.subject_id = *protocol_trace_subject_;
+    stream_event.has_subject_id = true;
+    if(stream_event.scope == socle::trace_scope::session)
+        stream_event.scope = socle::trace_scope::stream;
+    active_protocol_tracer_->trace(stream_event);
+}
+
+void MitmProxy::write_protocol_profile(std::string_view csv_row) {
+    if(!tlog() || !writer_opts()->write_payload || !writer_opts()->capture_protocol_events)
+        return;
+    auto encoded = CaptureProtocolTracer::encode_block(csv_row);
+    if(encoded.empty()) return;
+    buffer serialized(encoded.data(), encoded.size());
+    tlog()->write_metadata(serialized);
+    capture_sxpp_written()++;
+}
+
+nlohmann::json MitmProxy::capture_identity() const {
+    // Contexts may already be gone during teardown; pointer addresses can also
+    // be reused by subsequent connections. Freeze identity while contexts exist.
+    if(capture_identity_) return *capture_identity_;
+    static std::atomic_uint64_t next_capture_id{0};
+    capture_identity_ = nlohmann::json {
+        {"session_id", to_connection_ID() + "-CAP-" +
+                       std::to_string(next_capture_id.fetch_add(1, std::memory_order_relaxed))},
+        {"proxy_session_key", socle::traflog::traflog_file_key(
+            const_cast<MitmProxy*>(this), 'L')},
+    };
+    return *capture_identity_;
+}
+
+std::optional<nlohmann::json> MitmProxy::capture_protocol_profile() {
+    if(!writer_opts()->capture_protocol_events || !active_protocol_tracer_)
+        return std::nullopt;
+    auto const* tracer = dynamic_cast<CaptureProtocolTracer const*>(
+        active_protocol_tracer_);
+    if(!tracer) return std::nullopt;
+
+    auto const snapshot = tracer->records(protocol_trace_subject_);
+    if(snapshot.records.empty() && snapshot.dropped == 0)
+        return std::nullopt;
+
+    nlohmann::json events = nlohmann::json::array();
+    for(auto const& entry : snapshot.records) {
+        nlohmann::json item = {
+            {"seq", entry.sequence},
+            {"timestamp", entry.timestamp},
+            {"timestamp_unix_us", entry.timestamp_unix_us},
+            {"delta_us", entry.delta_us},
+            {"side", socle::to_string(entry.side)},
+            {"component", socle::to_string(entry.component)},
+            {"scope", socle::to_string(entry.scope)},
+            {"event", socle::to_string(entry.event)},
+            {"status", socle::to_string(entry.status)},
+            {"detail", entry.detail},
+        };
+        if(entry.subject_id) item["stream_id"] = *entry.subject_id;
+        events.push_back(std::move(item));
+    }
+
+    auto const identity = capture_identity();
+    return nlohmann::json {
+        {"schema", "smithproxy.protocol-profile.v2"},
+        {"session_id", identity["session_id"]},
+        {"proxy_session_key", identity["proxy_session_key"]},
+        {"dropped", snapshot.dropped},
+        {"capture_dropped", snapshot.capture_dropped},
+        {"events", std::move(events)},
+    };
+}
+
+std::atomic_uint64_t& MitmProxy::capture_sxme_written() {
+    static std::atomic_uint64_t value{};
+    return value;
+}
+
+std::atomic_uint64_t& MitmProxy::capture_sxst_written() {
+    static std::atomic_uint64_t value{};
+    return value;
+}
+
+std::atomic_uint64_t& MitmProxy::capture_sxtl_written() {
+    static std::atomic_uint64_t value{};
+    return value;
+}
+
+std::atomic_uint64_t& MitmProxy::capture_sxpp_written() {
+    static std::atomic_uint64_t value{};
+    return value;
+}
+
+std::atomic_uint64_t& MitmProxy::capture_tls_left_ready() {
+    static std::atomic_uint64_t value{};
+    return value;
+}
+
+std::atomic_uint64_t& MitmProxy::capture_tls_right_ready() {
+    static std::atomic_uint64_t value{};
+    return value;
+}
+
+MitmProxy::CaptureDiagnostics MitmProxy::capture_diagnostics() noexcept {
+    return {
+        capture_sxme_written().load(),
+        capture_sxst_written().load(),
+        capture_sxtl_written().load(),
+        capture_sxpp_written().load()
+            + sx::session_traffic_log::metadata_records_written(),
+        capture_tls_left_ready().load(),
+        capture_tls_right_ready().load(),
+    };
+}
+
+void MitmProxy::reset_capture_diagnostics() noexcept {
+    capture_sxme_written() = 0;
+    capture_sxst_written() = 0;
+    capture_sxtl_written() = 0;
+    capture_sxpp_written() = 0;
+    sx::session_traffic_log::reset_metadata_records_written();
+    capture_tls_left_ready() = 0;
+    capture_tls_right_ready() = 0;
+}
+
+void MitmProxy::write_capture_block(std::array<uint8_t, 4> name_space,
+                                    nlohmann::json const& payload) {
+    if(!tlog()) return;
+
+    auto const text = payload.dump();
+    socle::pcapng::pcapng_custom_block block;
+    block.copyable = true;
+    block.pen = 67005U;
+    block.name_space = name_space;
+    block.entry_type = 1;
+    block.version = 1;
+    block.payload = std::make_shared<buffer>(text.data(), text.size());
+    buffer serialized;
+    if(block.append(serialized) == 0U) return;
+    tlog()->write_metadata(serialized);
+    if(name_space == std::array<uint8_t, 4>{'S', 'X', 'M', 'E'}) {
+        capture_sxme_written()++;
+    } else if(name_space == std::array<uint8_t, 4>{'S', 'X', 'S', 'T'}) {
+        capture_sxst_written()++;
+    } else if(name_space == std::array<uint8_t, 4>{'S', 'X', 'T', 'L'}) {
+        capture_sxtl_written()++;
+    }
+}
+
+void MitmProxy::observe_tls_ready() {
+    if(capture_tls_written_ || !writer_opts()->write_payload
+       || !writer_opts()->capture_transport) return;
+
+    auto observe = [](MitmHostCX const* context, bool include_verify)
+        -> std::optional<nlohmann::json> {
+        auto const* tls = context
+                          ? dynamic_cast<SSLCom const*>(context->com()) : nullptr;
+        if(!tls || tls->opt.bypass || !tls->get_SSL()) return std::nullopt;
+        if(tls->sslcom_op_state != SSLCom::sslcom_op_state_t::READY
+           && !SSL_is_init_finished(tls->get_SSL())) return std::nullopt;
+        return sx::capture::tls_leg(*tls, include_verify);
+    };
+
+    if(!capture_tls_left_) {
+        capture_tls_left_ = observe(first_left(), false);
+        if(capture_tls_left_) capture_tls_left_ready()++;
+    }
+    if(!capture_tls_right_) {
+        capture_tls_right_ = observe(first_right(), true);
+        if(capture_tls_right_) capture_tls_right_ready()++;
+    }
+    if(!capture_tls_left_ || !capture_tls_right_ || !tlog()) return;
+
+    capture_tls_payload_ = sx::capture::tls_payload(
+        capture_identity(),
+        session_protocol().empty() ? "tcp" : std::string(session_protocol()),
+        std::move(*capture_tls_left_), std::move(*capture_tls_right_));
+    write_capture_block({'S', 'X', 'T', 'L'}, *capture_tls_payload_);
+    capture_tls_written_ = true;
+}
+
+void MitmProxy::write_capture_enrichment() {
+    if(!tlog() || !writer_opts()->write_payload) return;
+
+    if(writer_opts()->capture_metadata) {
+        auto metadata = capture_identity();
+        metadata["schema"] = "smithproxy.metadata.v1";
+        metadata["started_at"] = created_at_;
+        metadata["ended_at"] = std::time(nullptr);
+        metadata["duration_seconds"] = age();
+        metadata["policy_index"] = matched_policy();
+        metadata["connection"] = capture_connection_label_.empty()
+            ? to_connection_label(false) : capture_connection_label_;
+        metadata["application"] = get_application().value_or("");
+        metadata["ja4"] = {
+            {"client", ja4.ClientHello},
+            {"client_standard", ja4.ClientHelloStandard},
+            {"client_no_sni", ja4.ClientHelloNoSNI},
+            {"client_ignore_sni", acct_opts.ja4_clienthello_ignore_sni},
+            {"server", ja4.ServerHello},
+            {"http", nlohmann::json::array()},
+        };
+        if(auto const* left = first_left(); left) {
+            auto app = left->engine().application_data;
+            if(app && app->custom_list_name() == "ja4h") {
+                metadata["ja4"]["http"] = app->custom_list();
+            }
+        }
+        capture_metadata_payload_ = std::move(metadata);
+        write_capture_block({'S', 'X', 'M', 'E'}, *capture_metadata_payload_);
+    }
+
+    if(writer_opts()->capture_statistics) {
+        for(auto& [name, filter] : filters_) {
+            if(name != "statistics" || !filter || !filter->update_states()) continue;
+            auto statistics = capture_identity();
+            statistics["schema"] = "smithproxy.statistics.v1";
+            statistics["statistics"] = filter->to_json(iDEB);
+            capture_statistics_payload_ = std::move(statistics);
+            write_capture_block({'S', 'X', 'S', 'T'},
+                                *capture_statistics_payload_);
+            break;
+        }
+    }
 }
 
 std::string MitmProxy::to_connection_label(bool force_resolve) const {
@@ -566,7 +952,25 @@ std::optional<std::string> MitmProxy::get_application() const {
     return std::nullopt;
 }
 
+void MitmProxy::prepare_capture_stop() noexcept {
+    if(capture_stopped_) return;
+    capture_stopped_ = true;
+    trace_protocol({socle::trace_side::proxy,
+                    protocol_trace_subject_ ? socle::trace_component::stream
+                                            : socle::trace_component::proxy,
+                    socle::trace_scope::session, 0, false,
+                    socle::trace_event::closed, socle::trace_status::ok, {}});
+    sx::proxy::retirement_step([&] { observe_tls_ready(); }, [&] {
+        _err("capture: failed to collect final transport snapshot");
+    });
+    sx::proxy::retirement_step([&] { write_capture_enrichment(); }, [&] {
+        _err("capture: failed to write final metadata");
+    });
+}
+
 void MitmProxy::prepare_session_stop() {
+    // Capture output also retires without webhooks, while CXs still exist.
+    prepare_capture_stop();
     if(!wh_start || wh_stop || (!sx::http::webhooks::is_enabled() &&
                                !sx::http::webhooks::sift_enabled())) return;
 
@@ -599,6 +1003,15 @@ void MitmProxy::prepare_session_stop() {
             if(filter->update_states()) epitaph_->filter_info[name] = filter->to_json(iINF);
         });
     }
+    attempt("capture snapshot", [&] {
+        auto capture = nlohmann::json::object();
+        if(capture_metadata_payload_) capture["metadata"] = *capture_metadata_payload_;
+        if(capture_statistics_payload_) capture["statistics"] = *capture_statistics_payload_;
+        if(capture_tls_payload_) capture["tls"] = *capture_tls_payload_;
+        if(auto profile = capture_protocol_profile(); profile)
+            capture["protocol_profile"] = std::move(*profile);
+        if(!capture.empty()) epitaph_->filter_info["capture"] = std::move(capture);
+    });
 }
 
 
@@ -921,6 +1334,7 @@ void MitmProxy::on_right_pc_error(baseHostCX* cx) {
 }
 
 bool MitmProxy::handle_cx_events(unsigned char side, baseHostCX* cx) {
+    observe_tls_ready();
     // Sample again after transport I/O advanced a handshake. Retire the record
     // before baseProxy can reconnect, including reuse of the same numeric fd.
     observe_readiness(side, cx);
@@ -935,6 +1349,7 @@ bool MitmProxy::handle_cx_events(unsigned char side, baseHostCX* cx) {
 }
 
 int MitmProxy::handle_sockets_once(baseCom* xcom) {
+    attach_protocol_tracer();
     // Exclusive stream handlers bypass baseProxy's ordinary per-context I/O.
     if(stream_handler_) {
         observe_readiness('l', first_left());
@@ -1004,8 +1419,13 @@ int MitmProxy::handle_sockets_once(baseCom* xcom) {
 
     auto const handled = baseProxy::handle_sockets_once(xcom);
 
-    // Writes run after reads. Close completed streams here without waiting
-    // for the next periodic timer tick after their final output has drained.
+    // Snapshot negotiated TLS before shutdown/error handling can alter the
+    // live SSL objects.  The block is emitted once both legs reached READY.
+    observe_tls_ready();
+
+    // baseProxy drains writes after reads.  Re-check here so an origin EOF
+    // observed in this very cycle can close immediately after its response
+    // was written, without waiting for the next periodic timer tick.
     if(!state().dead()) {
         for(auto* upstream : rs()) {
             if(sx::mitmproxy::half_close_finished(upstream)) {
@@ -1612,7 +2032,8 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
         }
 
         if(tx) flow_ctx_->commit(*tx, outgoing);
-        write_traffic_log(side, from, replacement ? &*replacement : nullptr);
+        write_traffic_log(side, from, replacement ? &*replacement : nullptr,
+                          tx ? tx->capture_detection : std::string{});
         inject(reverse_output, side);
         to->to_write(outgoing, replacement.has_value() || consume_source);
         _dia("mitmproxy::proxy-%c: queued %dB", from_side(side), size);
@@ -1677,7 +2098,8 @@ void MitmProxy::inject(buffer& data, side_t side) {
     }
 }
 
-void MitmProxy::write_traffic_log(side_t side, baseHostCX* cx, buffer* custom_buffer) {
+void MitmProxy::write_traffic_log(side_t side, baseHostCX* cx, buffer* custom_buffer,
+                                  std::string const& detection) {
 
     if(not cx) return;
 
@@ -1701,7 +2123,7 @@ void MitmProxy::write_traffic_log(side_t side, baseHostCX* cx, buffer* custom_bu
             cx->comlog().clear();
         }
 
-        if(tlog()) tlog()->write(side, *buffer);
+        if(tlog()) tlog()->write_detected(side, *buffer, detection);
     }
 }
 

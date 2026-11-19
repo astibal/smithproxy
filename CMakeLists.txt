@@ -387,6 +387,8 @@ add_executable(smithproxy
         src/inspect/http_diagnostics.cpp
         src/inspect/protocol_views.cpp
         src/proxy/mitmproxy.cpp
+        src/proxy/capture_enrichment.cpp
+        src/proxy/capture_protocol_tracer.cpp
         src/proxy/proxy_hooks.cpp
         src/proxy/tls_observer.cpp
         src/proxy/mitmcom.hpp
@@ -710,6 +712,10 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/proxy/explicitproxy_dns_state_tests.cpp
                 tests/unit/proxy/proxymaker_utils_tests.cpp
                 tests/unit/proxy/proxystats_tests.cpp
+                tests/unit/proxy/capture_enrichment_tests.cpp
+                tests/unit/proxy/capture_protocol_tracer_tests.cpp
+                src/proxy/capture_enrichment.cpp
+                src/proxy/capture_protocol_tracer.cpp
                 src/proxy/filters/statistics/entropy.cpp
                 src/proxy/filters/statistics/flowanalysis.cpp
                 tests/unit/proxy/filters/statistics/statistics_tests.cpp
@@ -1060,6 +1066,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 src/proxy/quic/transport.cpp
                 src/proxy/quic/hooks.cpp
                 tests/unit/proxy/quic/openssl_tests.cpp
+                src/proxy/capture_protocol_tracer.cpp
                 src/service/quic/quicservice.cpp
                 src/service/quic/worker_dispatcher.cpp
                 tests/unit/service/quic/quicservice_tests.cpp
@@ -1081,6 +1088,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 src/proxy/quic/openssl.cpp
                 src/proxy/quic/transport.cpp
                 src/proxy/quic/hooks.cpp
+                src/proxy/capture_protocol_tracer.cpp
                 src/service/quic/quicservice.cpp
                 src/service/quic/worker_dispatcher.cpp
                 tests/quic/testbed/quic_test_node.cpp
@@ -1221,6 +1229,11 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                     set_tests_properties(integration.policy_revalidation
                             PROPERTIES LABELS "native;integration;network" TIMEOUT 240)
                 endif()
+                add_test(NAME unit.capture_metadata_gate
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/patch-runner/harness/test-capture-metadata.py)
+                set_tests_properties(unit.capture_metadata_gate PROPERTIES
+                        LABELS "native;capture" TIMEOUT 30)
                 if(USE_LIBSSH)
                     execute_process(
                             COMMAND ${Python3_EXECUTABLE} -c "import paramiko"
@@ -1333,6 +1346,13 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                         ${PROJECT_SOURCE_DIR}/tests/process/cftar_schema_upgrade.py
                         $<TARGET_FILE:smithproxy>
                         --native-archive ${SMITHPROXY_DEFAULT_CFTAR})
+                add_test(NAME integration.cftar_capture_schema_upgrade
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/process/cftar_schema_upgrade.py
+                        $<TARGET_FILE:smithproxy>
+                        --native-archive ${SMITHPROXY_DEFAULT_CFTAR} --from-schema 1051)
+                set_tests_properties(integration.cftar_capture_schema_upgrade
+                        PROPERTIES LABELS "native;integration;config;capture" TIMEOUT 120 RUN_SERIAL TRUE)
                 set_tests_properties(integration.cftar_schema_upgrade
                         PROPERTIES LABELS "native;integration;config" TIMEOUT 120 RUN_SERIAL TRUE)
                 add_test(NAME integration.redirect

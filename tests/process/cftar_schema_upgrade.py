@@ -28,7 +28,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('binary', type=Path)
     parser.add_argument('--native-archive', required=True, type=Path)
-    parser.add_argument('--schema', type=int, default=1050)
+    parser.add_argument('--schema', '--from-schema', dest='schema', type=int, default=1050)
     args = parser.parse_args()
     binary = args.binary.resolve()
     tool = binary.with_name('smithproxy-cftar')
@@ -55,6 +55,11 @@ def main():
         }.items():
             config = replace_or_add_setting(config, name, value)
         config = config.replace('/var/smithproxy/data', str(root / 'data'))
+        # Preserve an explicit opt-in, while migration supplies the absent flags.
+        capture_options = r'(captures\s*[:=]\s*\{.*?options\s*[:=]\s*\{)(.*?)(\})'
+        config, changed = re.subn(capture_options,
+            lambda m: m[1] + ' metadata = TRUE; ' + m[3], config, count=1, flags=re.S)
+        assert changed == 1, 'fixture has no captures.options group'
         (root / 'config').write_text(config)
         (root / 'startup').write_bytes(payload['smithproxy.startup.cfg'])
         command = [str(tool), 'create', '--config', str(root / 'config'),
@@ -112,7 +117,15 @@ def main():
 
         boot('upgrade')
         upgraded = contents(archive)
-        assert re.search(rb'schema\s*=\s*1053', upgraded['smithproxy.cfg'])
+        assert re.search(rb'schema\s*=\s*1054', upgraded['smithproxy.cfg'])
+        options = re.search(rb'captures\s*[:=]\s*\{.*?options\s*[:=]\s*\{([^}]*)',
+                            upgraded['smithproxy.cfg'], re.S)
+        assert options, 'capture options were not saved'
+        for name, value in [('metadata', 'true'), ('statistics', 'false'),
+                            ('transport', 'false'), ('protocol_events', 'false')]:
+            assert re.search(name.encode() + rb'\s*=\s*' + value.encode(),
+                             options[1], re.I), name
+
         assert str(root / 'external').encode() in upgraded['smithproxy.cfg']
         assert not any('external.test' in name for name in upgraded), 'fallback identity was imported'
         assert (external / 'cert.pem').exists(), 'external identity was retired'
@@ -189,7 +202,7 @@ def main():
         result = subprocess.run(check, cwd=root, env=env, capture_output=True, text=True, timeout=30)
         assert result.returncode != 0, 'current-schema corruption was silently repaired'
         assert archive.read_bytes() == damaged
-    print(f'PASS: {args.schema} -> 1053 resource upgrade and external custom certificate persistence, read-only check, custom templates, restart, maintenance CLI and strict current schema')
+    print(f'PASS: {args.schema} -> 1054 resource upgrade and external custom certificate persistence, read-only check, custom templates, restart, maintenance CLI and strict current schema')
 
 
 if __name__ == '__main__':
