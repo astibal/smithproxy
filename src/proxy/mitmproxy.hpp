@@ -204,6 +204,8 @@ public:
         size_t max_reads = 10;
 
         std::string ClientHello;
+        std::string ClientHelloStandard;
+        std::string ClientHelloNoSNI;
         std::string ServerHello;
         size_t clienthello_counter = 0;
 

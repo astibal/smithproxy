@@ -2615,7 +2615,8 @@ auto get_more_info(MitmProxy const* curr_proxy, MitmHostCX* lf, MitmHostCX* rg, 
             if(curr_proxy) {
                 bool pr = false;
                 if(! curr_proxy->ja4.ClientHello.empty()) {
-                    info_ss << "\n    JA4 : " << curr_proxy->ja4.ClientHello << "\n";
+                    info_ss << "\n    JA4 standard: " << curr_proxy->ja4.ClientHelloStandard << "\n";
+                    info_ss << "    JA4 no-SNI  : " << curr_proxy->ja4.ClientHelloNoSNI << "\n";
                     pr = true;
                 }
                 if(! curr_proxy->ja4.ServerHello.empty()) {

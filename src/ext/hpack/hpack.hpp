@@ -728,6 +728,9 @@ namespace HPACK
         using dec_vec_itr_t = std::vector< uint8_t >::iterator;
 
         header_map_type	m_headers;
+        // Own the wire sequence separately: m_headers is only a lookup view.
+        // Keeping strings owned also survives dynamic-table insertion/eviction.
+        std::vector<header_t> m_ordered_headers;
         ringtable_t		m_dynamic;
         uint64_t            m_maximum_table_size;
         uint64_t            m_required_minimum_table_size = 0;
@@ -864,6 +867,7 @@ namespace HPACK
         bool decode(std::vector< uint8_t >& data) {
 
             m_headers.clear();
+            m_ordered_headers.clear();
             m_failure = failure_t::none;
             if ( data.empty() )
                 return false;
@@ -871,6 +875,7 @@ namespace HPACK
             auto itr = data.begin();
             auto end = data.end();
             header_map_type decoded_headers;
+            std::vector<header_t> decoded_ordered_headers;
             ringtable_t decoded_dynamic = m_dynamic;
             bool allow_table_update = true;
             bool required_table_update_seen = !m_table_size_update_required;
@@ -951,8 +956,10 @@ namespace HPACK
                 if(!valid && m_failure == failure_t::none)
                     m_failure = failure_t::header_semantics;
 
-                if(valid && within_limit && m_failure == failure_t::none)
+                if(valid && within_limit && m_failure == failure_t::none) {
                     decoded_headers[name].emplace_back(value);
+                    decoded_ordered_headers.emplace_back(name, value);
+                }
             };
 
             while (itr != end) {
@@ -1060,9 +1067,11 @@ namespace HPACK
             m_table_size_update_required = false;
             if(m_failure != failure_t::none) {
                 m_headers.clear();
+                m_ordered_headers.clear();
                 return false;
             }
             m_headers = std::move(decoded_headers);
+            m_ordered_headers = std::move(decoded_ordered_headers);
             return true;
         }
 
@@ -1087,6 +1096,11 @@ namespace HPACK
             return m_maximum_table_size;
         }
 
+
+        // Header order is significant for JA4H, including duplicate names.
+        [[nodiscard]] std::vector<header_t> const& ordered_headers() const {
+            return m_ordered_headers;
+        }
 
         /*!
             \fn const std::map< std::string, std::string >& headers(void) const
