@@ -1134,7 +1134,20 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
             // yes, some copying :( - in c++20 is span, but we are still at c++17
             auto bufvec = std::vector(ch_buf.data() + 5, ch_buf.data() + ch_buf.size());
             if(ch.from_buffer(bufvec) == 0) {
-                ja4.ClientHello = ch.ja4();
+                // Parse once, then derive both variants. The cached strings
+                // depend on ignore_sni, so invalidate them between calculations.
+                ch.ignore_sni = false;
+                ch.results.clear();
+                ja4.ClientHelloStandard = ch.ja4();
+                ch.ignore_sni = true;
+                ch.results.clear();
+                ja4.ClientHelloNoSNI = ch.ja4();
+                // Preserve the configured legacy field; new consumers use the
+                // explicit standard/no-SNI fields and cannot confuse variants.
+                ja4.ClientHello = acct_opts.ja4_clienthello_ignore_sni
+                    ? ja4.ClientHelloNoSNI : ja4.ClientHelloStandard;
+                _dia("JA4 standard: %s; JA4 no-SNI: %s",
+                     ja4.ClientHelloStandard.c_str(), ja4.ClientHelloNoSNI.c_str());
                 _dia("JA4: %s (attempt %d)", ja4.ClientHello.c_str(), ja4.clienthello_counter);
             } else if(ja4.clienthello_counter >= ja4.max_reads) {
                 acct_opts.ja4_clienthello = false;

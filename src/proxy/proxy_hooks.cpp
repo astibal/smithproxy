@@ -395,6 +395,8 @@ nlohmann::json ProxyHooks::start_details(const MitmProxy& proxy, const StartDeta
     tls_leg(proxy.first_right(), "server");
 
     if (!proxy.ja4.ClientHello.empty()) info["ja4_ch"] = proxy.ja4.ClientHello;
+    if (!proxy.ja4.ClientHelloStandard.empty()) info["ja4_ch_standard"] = proxy.ja4.ClientHelloStandard;
+    if (!proxy.ja4.ClientHelloNoSNI.empty()) info["ja4_ch_no_sni"] = proxy.ja4.ClientHelloNoSNI;
     if (!proxy.ja4.ServerHello.empty()) info["ja4_sh"] = proxy.ja4.ServerHello;
 
     proxy.add_webhook_stream_details(info);
@@ -692,6 +694,8 @@ ProxyHooks::Epitaph ProxyHooks::prepare_stop(const MitmProxy& proxy, const StopA
                   { "bytes_up", uB },
                   { "bytes_down", dB },
                   { "ja4_ch", proxy.ja4.ClientHello },
+                  { "ja4_ch_standard", proxy.ja4.ClientHelloStandard },
+                  { "ja4_ch_no_sni", proxy.ja4.ClientHelloNoSNI },
                   { "ja4_ch_ignore_sni", proxy.acct_opts.ja4_clienthello_ignore_sni },
                   { "ja4_sh", proxy.ja4.ServerHello },
     };

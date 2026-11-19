@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 
 #include <inspect/fp/ja4.hpp>
+#include <ext/hpack/hpack.hpp>
 
 using namespace sx::ja4;
 
@@ -461,4 +462,104 @@ TEST(JA4_SH, sample1_fuzzing) {
         s.test_random_base<TLSServerHello>(util::hex_string_to_bytes(raw_sh_str_1), i, 8, 32);
         i += 8;
     }
+}
+
+
+TEST(JA4_Standard, GreaseAndCounts) {
+    EXPECT_TRUE(util::is_grease_value(0x1a1a));
+    EXPECT_FALSE(util::is_grease_value(0x1a2a));
+    EXPECT_EQ(util::to_dec_2B(3), "03");
+    EXPECT_EQ(util::to_dec_2B(100), "99");
+    auto hello = util::hex_string_to_bytes(raw_str_1);
+    // Replace a cipher with GREASE without changing the handshake framing.
+    size_t pos = 4 + 2 + 32;
+    pos += 1 + hello[pos];
+    pos += 2;
+    hello[pos] = hello[pos + 1] = 0x0a;
+    TLSClientHello parsed;
+    ASSERT_EQ(parsed.from_buffer(hello), 0);
+    EXPECT_EQ(parsed.cs(), "16");
+    EXPECT_EQ(parsed.ja4_raw().find("0a0a"), std::string::npos);
+    auto standard = parsed.ja4();
+    parsed.ignore_sni = true;
+    parsed.results.clear();
+    auto no_sni = parsed.ja4();
+    EXPECT_EQ(standard.substr(standard.find('_')), no_sni.substr(no_sni.find('_')));
+    EXPECT_NE(standard, no_sni);
+}
+
+TEST(JA4_Standard, EmptyListsAndNoSignatures) {
+    TLSClientHello parsed;
+    parsed.version = 0x303;
+    parsed.cipher_suites = {0x1301};
+    EXPECT_EQ(parsed.ja4(), "t12i010000_0f2cb44170f4_000000000000");
+    parsed.extensions = {0x17};
+    parsed.results.clear();
+    EXPECT_EQ(parsed.ja4(), "t12i010100_0f2cb44170f4_" + util::hash_sha256("0017")->substr(0,12));
+    TLSServerHello server;
+    server.version = 0x303;
+    server.cipher_suite = 0x1301;
+    EXPECT_EQ(server.ja4(), "t120000_1301_000000000000");
+}
+
+TEST(JA4_Standard, ServerAlpnAndExtensionOrder) {
+    std::vector<uint8_t> hello(38, 0);
+    hello[0] = 2; hello[4] = 3; hello[5] = 3;
+    hello.insert(hello.end(), {0, 0x13, 1, 0, 0, 14,
+        0, 0x17, 0, 0, 0, 0x10, 0, 6, 0, 4, 3, 'a', 'b', 'c'});
+    TLSServerHello parsed;
+    ASSERT_EQ(parsed.from_buffer(hello), 0);
+    EXPECT_EQ(parsed.ja4_raw(), "t1202ac_1301_0017,0010");
+    parsed.proto = 'q';
+    EXPECT_EQ(parsed.prefix(), "q1202ac_1301");
+}
+
+TEST(JA4H_Standard, LanguageVersionAndCookies) {
+    HTTP h;
+    h.from_buffer("GET / HTTP/1.0\r\nHost: example.test\r\nAccept-Language: abcdefgh;q=0.9,en\r\nCookie: z=abc==; a=2; a=1\r\nReferer: x\r\n\r\n");
+    EXPECT_EQ(h.ja4h_a(), "ge10cr02abcd");
+    EXPECT_EQ(h.ja4h_b_raw(), "Host,Accept-Language");
+    EXPECT_EQ(h.ja4h_c_raw(), "a,a,z");
+    EXPECT_EQ(h.ja4h_d_raw(), "a=2,a=1,z=abc==");
+    h.from_buffer("GET / HTTP/1.1\r\nAccept-Language: en;q=0.9\r\n\r\n");
+    EXPECT_EQ(h.ja4h_a(), "ge11nn01en00");
+    h.from_buffer("GET / HTTP/1.1\r\nAccept-Language: zh-Hant-TW\r\n\r\n");
+    EXPECT_EQ(h.ja4h_a(), "ge11nn01zhha");
+}
+
+TEST(JA4H_Standard, PseudoHeadersAndCacheInvalidation) {
+    HTTP h;
+    h.version = "20"; h.cmd = "ge";
+    h.process_header_pair({":authority", "example.test"});
+    h.process_header_pair({"accept", "*/*"});
+    auto first = h.ja4h();
+    h.process_header_pair({"user-agent", "test"});
+    EXPECT_NE(first, h.ja4h());
+    EXPECT_EQ(h.ja4h_b_raw(), "accept,user-agent");
+    EXPECT_EQ(h.ja4h_a(), "ge20nn020000");
+    for (int i=0;i<100;++i) h.process_header_pair({"x-test", "test"});
+    EXPECT_EQ(h.ja4h_a(), "ge20nn990000");
+}
+
+TEST(JA4H_Hpack, PreservesWireOrderAndResetsBetweenRequests) {
+    HPACK::encoder_t encoder;
+    encoder.add(":method", "GET");
+    encoder.add("z-last", "z");
+    encoder.add("accept", "*/*");
+    encoder.add("z-last", "again");
+    HPACK::decoder_t decoder;
+    ASSERT_TRUE(decoder.decode(encoder.data()));
+    auto const& fields = decoder.ordered_headers();
+    ASSERT_EQ(fields.size(), 4u);
+    EXPECT_EQ(fields[1].first, "z-last");
+    EXPECT_EQ(fields[2].first, "accept");
+    EXPECT_EQ(fields[3].second, "again");
+    sx::ja4::HTTP http;
+    http.version = "20"; http.cmd = "ge";
+    for (auto const& field : fields) http.process_header_pair(field);
+    EXPECT_EQ(http.ja4h_b_raw(), "z-last,accept,z-last");
+    std::vector<uint8_t> next{0x82}; // indexed :method GET
+    ASSERT_TRUE(decoder.decode(next));
+    EXPECT_EQ(decoder.ordered_headers().size(), 1u);
+    EXPECT_EQ(decoder.headers().size(), 1u);
 }

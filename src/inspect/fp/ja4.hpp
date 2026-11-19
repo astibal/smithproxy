@@ -61,7 +61,7 @@ namespace sx::ja4 {
 
         std::optional<std::string> hash_sha256(const std::string_view &input);
 
-        std::string to_dec_2B(size_t w);
+        std::string to_dec_2B(size_t count);
 
         std::string to_hex_string_2B(uint16_t value);
 
@@ -136,9 +136,11 @@ namespace sx::ja4 {
     };
 
     struct TLSServerHello {
-        int version;
+        int version = 0;
+        char proto = 't';
+        std::string alpn = "00";
         bool have_key_share = false;
-        uint16_t cipher_suite;
+        uint16_t cipher_suite = 0;
         std::vector<uint16_t> extensions;
 
         int from_buffer(std::vector<uint8_t> data);
@@ -165,18 +167,11 @@ namespace sx::ja4 {
         char proto = 't';
         bool have_key_share = false;
         bool sni = false;
-        // JA4 NO-SNI extension
-        // --------------------
-        // JA4 has a design flaw, which hampers its fingerprinting power
-        // TLS client program cannot be fingerprinted based on whether or not it sends SNI - it can do both!
-        // if ignore_sni is enabled, following happens:
-        //  1. SNI is not counted into number of extensions
-        //  2. we send 'i' even if it's present
-        //  3. no-op note: SNI extension is excluded in standard JA4_c, so we don't have to do anything with it
-        //
-        //  => this means if `ignore_sni` is set,
-        //  the signature IS NON-STANDARD and even though it's compatible with standard JA4 databases,
-        //  it would probably taint them, because of different approach.
+        bool have_alpn = false;
+        // Optional non-standard variant: ignore SNI presence and its extension
+        // count. All other normalization follows JA4. Never label it standard.
+        // Neither variant hashes the hostname itself. Invalidate results before
+        // recalculating after changing this option.
         bool ignore_sni = false;
         std::string alpn = "00";
         std::vector<uint16_t> cipher_suites;
@@ -206,8 +201,7 @@ namespace sx::ja4 {
 
         std::string const &ja4();
 
-        // load data from buffer with client hello.
-        // NOTE: it assumes ClientHello TLS record, not whole ClientHello packet!
+        // Complete ClientHello handshake (four-byte header included), without TLS record framing.
         int from_buffer(const std::vector<uint8_t> &buffer);
     };
 }

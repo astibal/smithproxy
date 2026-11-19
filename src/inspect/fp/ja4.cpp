@@ -4,6 +4,56 @@
 namespace sx::ja4 {
 
     namespace {
+        constexpr size_t fingerprint_hash_length = 12;
+        constexpr size_t maximum_fingerprint_count = 99;
+
+        namespace tls_extension {
+            constexpr uint16_t server_name = 0;
+            constexpr uint16_t supported_groups = 10;
+            constexpr uint16_t point_formats = 11;
+            constexpr uint16_t signature_algorithms = 13;
+            constexpr uint16_t alpn = 16;
+            constexpr uint16_t supported_versions = 43;
+            constexpr uint16_t signature_algorithms_cert = 50;
+            constexpr uint16_t key_share = 51;
+        }
+
+        // JA4 uses zeros for absent input, not SHA-256 of the empty string.
+        // A hashing failure remains distinguishable from a legitimately absent field.
+        std::string fingerprint_hash(std::string_view input) {
+            if (input.empty()) return std::string(fingerprint_hash_length, '0');
+            return util::hash_sha256(input).value_or("<error>")
+                .substr(0, fingerprint_hash_length);
+        }
+
+        std::string tls_version(uint16_t version) {
+            switch (version) {
+                case 0x0002: return "s2";
+                case 0x0300: return "s3";
+                case 0x0301: return "10";
+                case 0x0302: return "11";
+                case 0x0303: return "12";
+                case 0x0304: return "13";
+                default: return "00";
+            }
+        }
+
+        // Use ASCII rules regardless of process locale. Non-alphanumeric
+        // endpoints use the first/last hex digit of the original ALPN bytes.
+        std::string alpn_code(std::string_view value) {
+            if (value.empty()) return "00";
+            auto first = static_cast<unsigned char>(value.front());
+            auto last = static_cast<unsigned char>(value.back());
+            auto ascii_alnum = [](unsigned char c) {
+                return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z')
+                    || (c >= 'a' && c <= 'z');
+            };
+            if (ascii_alnum(first) && ascii_alnum(last))
+                return std::string{static_cast<char>(first), static_cast<char>(last)};
+            return std::string{util::to_hex_string_1B(first)[0],
+                               util::to_hex_string_1B(last)[1]};
+        }
+
         std::string_view trim_ows(std::string_view value) {
             while(!value.empty() && (value.front() == ' ' || value.front() == '\t'))
                 value.remove_prefix(1);
@@ -43,9 +93,9 @@ namespace sx::ja4 {
             return socle::ossl::sha256(input);
         }
 
-        std::string to_dec_2B(size_t w) {
+        std::string to_dec_2B(size_t count) {
             std::stringstream ss;
-            ss << std::setw(2) << std::setfill('0') << w;
+            ss << std::setw(2) << std::setfill('0') << std::min(count, maximum_fingerprint_count);
             return ss.str();
         }
 
@@ -62,38 +112,28 @@ namespace sx::ja4 {
         }
 
 
+        // GREASE repeats the same byte: 0x0a0a, 0x1a1a, ... 0xfafa.
+        // Matching low nibbles alone would also discard legitimate values.
         bool is_grease_value(uint16_t value) {
-            return ((value & 0x0F0F) == 0x0A0A);
+            return (value & 0x0F0F) == 0x0A0A && (value >> 8) == (value & 0xff);
         }
 
         static std::optional<std::string> make_ja4(std::string_view input) {
 
-            size_t u1 = input.find('_');
-            if(u1 == std::string::npos)
-                return std::nullopt;
+            // Raw layout: prefix_ciphers_extensions[_signature_algorithms].
+            // Only the first two separators delimit fields; the optional third
+            // belongs to the extension/signature hash input.
+            const auto cipher_separator = input.find('_');
+            if (cipher_separator == std::string_view::npos) return std::nullopt;
+            const auto extension_separator = input.find('_', cipher_separator + 1);
+            if (extension_separator == std::string_view::npos) return std::nullopt;
 
-            size_t u2 = input.find('_', u1 + 1);
-            if(u2 == std::string::npos)
-                return std::nullopt;
-
-            std::string_view pre = input.substr(0, u1);
-            std::string_view cs(input.data() + u1 + 1, u2 - u1 - 1);
-            std::string_view ex_sg(input.data() + u2 + 1, input.size() - u2 - 1);
-
-
-            std::string hash_result1 = util::hash_sha256(cs).value_or("");
-            std::string hash_result2 = util::hash_sha256(ex_sg).value_or("");
-
-            // truncate sha256 hashes to 12B
-            if(hash_result1.size() >= 12 && hash_result2.size() >= 12) {
-                std::stringstream ss;
-                std::string h1 = hash_result1.substr(0, 12);
-                std::string h2 = hash_result2.substr(0, 12);
-
-                ss << pre << "_" << h1 << "_" << h2;
-                return ss.str();
-            }
-            return std::nullopt;
+            const auto prefix = input.substr(0, cipher_separator);
+            const auto ciphers = input.substr(
+                cipher_separator + 1, extension_separator - cipher_separator - 1);
+            const auto extensions_and_signatures = input.substr(extension_separator + 1);
+            return std::string(prefix) + "_" + fingerprint_hash(ciphers)
+                + "_" + fingerprint_hash(extensions_and_signatures);
         }
 
         std::vector<std::string_view> split_string_view(std::string_view str, std::string_view delimiter,
@@ -134,22 +174,23 @@ namespace sx::ja4 {
 
     bool HTTP::process_header_pair(std::pair<std::string_view,std::string_view> header_pair) {
 
+        // Invalidate derived strings when streaming in another header.
+        clear();
+        // HTTP/2 pseudo-headers supply request context, not JA4H header counts/hashes.
+        if (header_pair.first.empty() || header_pair.first.front() == ':') return false;
         auto locase = util::to_lower(header_pair.first);
         if(locase == "cookie") {
             have_cookie = true;
             if(should_parse_cookies) {
                 auto ck = util::split_string_view(header_pair.second, ";", false, true);
-                for(auto const& cookie_pair: ck) {
-                    auto cs = util::split_string_view(trim_ows(cookie_pair),"=", true, true);
-                    if(cs.size() == 2) {
-                        const auto name = trim_ows(cs[0]);
-                        const auto value = trim_ows(cs[1]);
-                        if(name.empty()) continue;
-                        cookies.push_back(name);
-                        std::stringstream ss;
-                        ss << name << "=" << value;
-                        cookies_values.push_back(ss.str());
-                    }
+                for(auto cookie_pair: ck) {
+                    cookie_pair = trim_ows(cookie_pair);
+                    // Split on the first '=' only; values may contain more (e.g. base64).
+                    auto equals = cookie_pair.find('=');
+                    auto name = trim_ows(cookie_pair.substr(0, equals));
+                    if (name.empty()) continue;
+                    cookies.push_back(name);
+                    cookies_values.emplace_back(cookie_pair);
                 }
             }
 
@@ -160,25 +201,14 @@ namespace sx::ja4 {
             return true;
         }
         else if(locase == "accept-language") {
+            // Only the first language range contributes, without '-' or quality.
+            // Stop before padding: a long tag must never underflow the pad length.
             lang.clear();
-            for(auto c: header_pair.second) {
-                if(std::isalnum(static_cast<unsigned char>(c))) {
-                    lang += c;
-                }
-                else if (c == ',') {
-                    // don't continue into next part
-                    break;
-                }
-                else if(lang.size() >= 4)
-                    // we have enough
-                    break;
+            for (unsigned char c : header_pair.second) {
+                if (c == ',' || c == ';' || lang.size() == 4) break;
+                if (c != '-') lang += static_cast<char>(std::tolower(c));
             }
-            auto fill = 4 - lang.size();
-            for (size_t i = 0; i < fill ; ++i) {
-                lang += "0";
-            }
-
-            lang = util::to_lower(lang);
+            lang.append(4 - lang.size(), '0');
         }
         headers.emplace_back(header_pair);
         return true;
@@ -250,7 +280,12 @@ namespace sx::ja4 {
         std::stringstream suf;
 
         auto cookies_copy = cookies_values;
-        std::sort(cookies_copy.begin(), cookies_copy.end());
+        // JA4H sorts by cookie name. Equal names keep their original order;
+        // sorting entire name=value strings would make values affect this order.
+        std::stable_sort(cookies_copy.begin(), cookies_copy.end(),
+            [](std::string_view a, std::string_view b) {
+                return a.substr(0, a.find('=')) < b.substr(0, b.find('='));
+            });
 
         for (size_t i = 0; i < cookies_copy.size(); ++i) {
             suf << cookies_copy[i];
@@ -265,27 +300,21 @@ namespace sx::ja4 {
     std::string HTTP::ja4h_b() const {
         if(! result_b.empty()) return result_b;
 
-        auto r = ja4h_b_raw();
-
-        result_b  = r.empty() ? "000000000000" : util::hash_sha256(r)->substr(0,12);
+        result_b = fingerprint_hash(ja4h_b_raw());
         return result_b;
     }
 
     std::string HTTP::ja4h_c() const {
         if(! result_c.empty()) return result_c;
 
-        auto r = ja4h_c_raw();
-
-        result_c  = r.empty() ? "000000000000" : util::hash_sha256(r)->substr(0,12);
+        result_c = fingerprint_hash(ja4h_c_raw());
         return result_c;
     }
 
     std::string HTTP::ja4h_d() const {
         if(! result_d.empty()) return result_d;
 
-        auto r = ja4h_d_raw();
-
-        result_d  = r.empty() ? "000000000000" : util::hash_sha256(r)->substr(0,12);
+        result_d = fingerprint_hash(ja4h_d_raw());
         return result_d;
     }
 
@@ -330,6 +359,15 @@ namespace sx::ja4 {
     };
 
     void HTTP::from_buffer(std::string_view data) {
+        const auto line_end = data.find_first_of("\r\n");
+        const auto request_line = data.substr(0, line_end);
+        const auto version_pos = request_line.rfind(" HTTP/");
+        version = "00";
+        if (version_pos != std::string_view::npos) {
+            const auto token = request_line.substr(version_pos + 6);
+            if (token == "1.0") version = "10";
+            else if (token == "1.1") version = "11";
+        }
         cmd.clear();
         lang = "0000";
         have_cookie = false;
@@ -377,6 +415,7 @@ namespace sx::ja4 {
         version = 0;
         have_key_share = false;
         cipher_suite = 0;
+        alpn = "00";
         extensions.clear();
         result_r.clear();
         result.clear();
@@ -430,14 +469,25 @@ namespace sx::ja4 {
             seen_extensions.push_back(ext_type);
 
             auto const payload = ext_offset + 4;
-            if (ext_type == 0x2b) {
+            if (ext_type == tls_extension::supported_versions) {
                 if (ext_len != 2) return 11;
                 auto const selected = static_cast<uint16_t>(
                     (data[payload] << 8) | data[payload + 1]);
                 if (util::is_grease_value(selected)) return 11;
                 version = selected;
             }
-            if(ext_type == 0x33) {
+            // TLS 1.2 carries selected ALPN here. TLS 1.3 sends it in
+            // EncryptedExtensions, which is outside the JA4S input.
+            if (ext_type == tls_extension::alpn) {
+                if (ext_len < 4) return 11;
+                const size_t list_size = (data[payload] << 8) | data[payload + 1];
+                const size_t name_size = data[payload + 2];
+                if (list_size != static_cast<size_t>(ext_len) - 2 || name_size == 0 || name_size + 1 != list_size)
+                    return 11;
+                alpn = alpn_code(std::string_view(
+                    reinterpret_cast<const char*>(&data[payload + 3]), name_size));
+            }
+            if(ext_type == tls_extension::key_share) {
                 // key_share - tls 1.3
                 // HelloRetryRequest carries only selected_group; an ordinary
                 // ServerHello follows it with the length-prefixed key bytes.
@@ -458,28 +508,23 @@ namespace sx::ja4 {
     }
 
     std::string TLSServerHello::ver() const {
-        int v = (version - 0x300) + 9;
-        std::stringstream ss;
-        ss << v;
-        return ss.str();
+        return tls_version(version);
     }
 
     std::string TLSServerHello::exn() const {
-        std::stringstream ss;
-        auto base = extensions.size();
-        ss << std::setw(2) << std::setfill('0') << base;
-        return ss.str();
+        return util::to_dec_2B(extensions.size());
     }
 
     std::string TLSServerHello::prefix() const {
         std::stringstream fingerprint;
         // t - tcp / q - quic
 
-        fingerprint << "t" << ver() << exn() << "00" << "_" << util::to_hex_string_2B(cipher_suite);
+        fingerprint << proto << ver() << exn() << alpn << "_" << util::to_hex_string_2B(cipher_suite);
         return fingerprint.str();
     }
 
     std::string TLSServerHello::ext_string() const {
+        // JA4S keeps ServerHello extension order (unlike sorted ClientHello JA4).
 
         std::stringstream suf;
         for (size_t i = 0; i < extensions.size(); ++i) {
@@ -503,12 +548,7 @@ namespace sx::ja4 {
     std::string const& TLSServerHello::ja4() {
         if(! result.empty()) return result;
 
-        std::stringstream  ja4;
-        auto hashed = util::hash_sha256(ext_string()).value_or("<error>");
-        hashed = hashed.substr(0,12);
-
-        ja4 << prefix() << "_" << hashed;
-        result = ja4.str();
+        result = prefix() + "_" + fingerprint_hash(ext_string());
         return result;
     }
 
@@ -519,6 +559,7 @@ namespace sx::ja4 {
         have_key_share = false;
         sni = false;
         alpn = "00";
+        have_alpn = false;
         cipher_suites.clear();
         extensions.clear();
         sigalgs.clear();
@@ -527,30 +568,22 @@ namespace sx::ja4 {
     }
 
     std::string TLSClientHello::ver() const {
-        int v = (version - 0x300) + 9;
-        std::stringstream ss;
-        ss << v;
-        return ss.str();
+        return tls_version(version);
     }
 
     std::string TLSClientHello::di() const { return ( (sni && ! ignore_sni) ? "d" : "i"); }
 
     std::string TLSClientHello::cs() const {
-        std::stringstream ss;
-        ss << cipher_suites.size();
-        return ss.str();
+        return util::to_dec_2B(cipher_suites.size());
     }
 
     std::string TLSClientHello::ex() const {
-        std::stringstream ss;
-        auto base = extensions.size();
-
-        // add extensions which are skipped in the list, but present in prefix
-        if(alpn != "00") base++;
-        if(sni && ! ignore_sni) base++;
-
-        ss << base;
-        return ss.str();
+        auto count = extensions.size();
+        // SNI and ALPN are excluded from the extension hash, but still count
+        // in standard JA4. Only our no-SNI variant omits SNI from this count.
+        if (have_alpn) ++count;
+        if (sni && !ignore_sni) ++count;
+        return util::to_dec_2B(count);
     }
 
     std::string const& TLSClientHello::ja4_raw() {
@@ -582,9 +615,10 @@ namespace sx::ja4 {
                 fingerprint << ",";
             }
         }
-        fingerprint << "_";
+        // The separator is absent when no signature algorithms were sent.
+        if (!sigalgs.empty()) fingerprint << "_";
 
-        //Signature hash algos
+        // Preserve signature algorithm preference order; do not sort these.
         for (size_t i = 0; i < sigalgs.size(); ++i) {
             fingerprint << util::to_hex_string_2B(sigalgs[i]);
             if (i != sigalgs.size() - 1) {
@@ -604,8 +638,7 @@ namespace sx::ja4 {
         return results.ja4_final;
     }
 
-    // load data from buffer with client hello.
-    // NOTE: it assumes ClientHello TLS record, not whole ClientHello packet!
+    // Input starts with the four-byte TLS handshake header, not a TLS record header.
     int TLSClientHello::from_buffer(const std::vector<uint8_t> &buffer) {
         clear();
 
@@ -657,7 +690,7 @@ namespace sx::ja4 {
         }
         for (size_t i = 0; i < cipher_suite_length; i += 2) {
             uint16_t cipher_suite = (buffer[offset + i] << 8) | buffer[offset + i + 1];
-            cipher_suites.push_back(cipher_suite);
+            if (!util::is_grease_value(cipher_suite)) cipher_suites.push_back(cipher_suite);
         }
         offset += cipher_suite_length;
 
@@ -705,7 +738,7 @@ namespace sx::ja4 {
             seen_extensions.push_back(extension_type);
             const size_t payload = offset + i + 4;
 
-            if (extension_type == 0x0000) {
+            if (extension_type == tls_extension::server_name) {
                 if (extension_len < 5) return 14;
                 auto const names_size = static_cast<std::size_t>(
                     (buffer[payload] << 8) | buffer[payload + 1]);
@@ -721,8 +754,10 @@ namespace sx::ja4 {
                     cursor += 3 + name_size;
                 }
                 sni = true;
-            } else if (extension_type == 0x10) {
-                // ALPN
+            } else if (extension_type == tls_extension::alpn) {
+                // ALPN is counted even when its encoded value is "00".
+                have_alpn = true;
+                if (extension_len < 3) return 14;
                 if (extension_len >= 3) {
                     uint16_t alpn_len = (buffer[payload] << 8) | buffer[payload + 1];
                     if (alpn_len != extension_len - 2 || alpn_len < 2) return 14;
@@ -735,40 +770,9 @@ namespace sx::ja4 {
                     if (fst_alpn_len > alpn_len - 1) return 14;
 
                     std::string_view fst_alpn((const char*) &buffer[payload + 3], fst_alpn_len);
-                    //may be tested - i.e. `std::string fst_alpn = { 'x', 0x0a };`
-                    if(fst_alpn == "h2") {
-                        // explicit h2 support
-                        alpn = "h2";
-                    }
-                    else if(fst_alpn == "http/1.1") {
-                        // explicit http/1.1 support as h1
-                        alpn = "h1";
-                    }
-                    else {
-                        if(! fst_alpn.empty()) {
-
-                            const auto fst_val = static_cast<unsigned char>(fst_alpn.front());
-                            auto snd_val = fst_val;
-
-                            if(! fst_alpn.empty()) {
-                                snd_val = static_cast<unsigned char>(fst_alpn.back());
-                            }
-
-                            bool is_alnum_1 = isalnum(fst_val);
-                            bool is_alnum_2 = isalnum(snd_val);
-                            if( is_alnum_1 && is_alnum_2) {
-                                alpn = fst_val;
-                                alpn += snd_val;
-                            }
-                            else {
-                                // if any of these two are non-alpha, print first byte and last byte from their hex
-                                alpn = util::to_hex_string_1B(fst_val)[0];
-                                alpn += util::to_hex_string_1B(snd_val)[1];
-                            }
-                        }
-                    }
+                    alpn = alpn_code(fst_alpn);
                 }
-            } else if(extension_type == 0x33) {
+            } else if(extension_type == tls_extension::key_share) {
                 // key_share - tls 1.3
                 if (extension_len < 2) return 14;
                 auto const shares_size = static_cast<std::size_t>(
@@ -789,8 +793,8 @@ namespace sx::ja4 {
             else if (!util::is_grease_value(extension_type)) {
                 extensions.push_back(extension_type);
 
-                if (extension_type == 0x000a || extension_type == 0x002b) {
-                    auto const prefix_size = extension_type == 0x000a ? 2U : 1U;
+                if (extension_type == tls_extension::supported_groups || extension_type == tls_extension::supported_versions) {
+                    auto const prefix_size = extension_type == tls_extension::supported_groups ? 2U : 1U;
                     if (extension_len < prefix_size + 2) return 14;
                     auto const vector_size = prefix_size == 2
                         ? static_cast<std::size_t>((buffer[payload] << 8)
@@ -798,7 +802,7 @@ namespace sx::ja4 {
                         : static_cast<std::size_t>(buffer[payload]);
                     if ((vector_size & 1U) != 0
                         || vector_size != extension_len - prefix_size) return 14;
-                    if (extension_type == 0x002b) {
+                    if (extension_type == tls_extension::supported_versions) {
                         uint16_t selected = 0;
                         for (std::size_t cursor = 0; cursor < vector_size; cursor += 2) {
                             auto const candidate = static_cast<uint16_t>(
@@ -811,19 +815,20 @@ namespace sx::ja4 {
                         if (selected == 0) return 14;
                         version = selected;
                     }
-                } else if (extension_type == 0x000b) {
+                } else if (extension_type == tls_extension::point_formats) {
                     if (extension_len < 2 || buffer[payload] != extension_len - 1) return 14;
-                } else if (extension_type == 0x000d || extension_type == 0x0032) {
+                } else if (extension_type == tls_extension::signature_algorithms || extension_type == tls_extension::signature_algorithms_cert) {
                     if (extension_len < 2) return 14;
                     uint16_t hash_len = (buffer[payload] << 8) | buffer[payload + 1];
                     if (hash_len < 2 || (hash_len & 1U) != 0
                         || hash_len != extension_len - 2) {
                         return 14;
                     }
-                    if (extension_type == 0x000d) {
+                    if (extension_type == tls_extension::signature_algorithms) {
                         for (size_t j = 0; j < hash_len; j += 2) {
-                            sigalgs.push_back((buffer[payload + 2 + j] << 8) |
-                                              buffer[payload + 3 + j]);
+                            auto value = static_cast<uint16_t>((buffer[payload + 2 + j] << 8) |
+                                                               buffer[payload + 3 + j]);
+                            if (!util::is_grease_value(value)) sigalgs.push_back(value);
                         }
                     }
                 }

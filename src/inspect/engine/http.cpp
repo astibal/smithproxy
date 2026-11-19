@@ -845,7 +845,6 @@ namespace sx::engine::http {
 
                     if(ctx.options.http.ja4h) {
                         sx::ja4::HTTP h;
-                        h.version = "11";
                         h.from_buffer(data);
 
                         app_request->http_data.ja4h = h.ja4h();
@@ -2117,7 +2116,8 @@ namespace sx::engine::http {
             }
 
             std::optional<sx::ja4::HTTP> ja4h;
-            if(ctx.options.http.ja4h) {
+            // JA4H describes requests. Responses/trailers must not replace it.
+            if(ctx.options.http.ja4h && side == side_t::LEFT && my_app_data && !trailer) {
                 ja4h = sx::ja4::HTTP();
                 ja4h->version = "20";
             }
@@ -2144,12 +2144,6 @@ namespace sx::engine::http {
                 for(auto const& hdr_elem: vlist) {
                     process_header_entry(ctx, side, my_app_data,
                                          stream_id, flags, data, hdr, hdr_elem);
-                    if(ja4h.has_value()) {
-                        std::string_view view_to_hdr = hdr;
-                        std::string_view view_to_hdr_elem = hdr_elem;
-
-                        ja4h->process_header_pair(std::make_pair(view_to_hdr, view_to_hdr_elem));
-                    }
                 }
             }
             if(side == side_t::LEFT && !trailer) {
@@ -2178,6 +2172,10 @@ namespace sx::engine::http {
                 my_app_data->mark_populated();
             }
             if(ja4h.has_value() && my_app_data) {
+                // The lookup map sorts names and groups duplicates; JA4H needs
+                // the decoded wire sequence instead.
+                for (auto const& header : decoder->ordered_headers())
+                    ja4h->process_header_pair(header);
                 auto meth = my_app_data->http_data.method;
                 if(meth.size() >= 2)
                     ja4h->cmd = sx::ja4::util::to_lower(meth).substr(0,2);
