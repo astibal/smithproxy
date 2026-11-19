@@ -417,6 +417,7 @@ public:
         struct {
             std::string url;
             bool tls_verify = true;
+            bool connection_start_synchronous = false;
             expiring_int timeout = expiring_int(66,0);
         } override;
 
@@ -431,6 +432,10 @@ public:
                 return override.tls_verify;
             }
             return cfg_tls_verify;
+        };
+        [[nodiscard]] bool connection_start_synchronous() const {
+            return allow_api_override and not override.timeout.expired() and
+                   not override.url.empty() and override.connection_start_synchronous;
         };
 
         static inline int DEFAULT_PING_INTERVAL = 120;

@@ -64,7 +64,6 @@ public:
     virtual bool start(std::string const& host, std::string const& port) = 0;
 
     // Opt-in inspection gate. Unsupported setup implementations reject it.
-    virtual bool inspection_start(std::string const&, std::string const&) { return false; }
 };
 
 using SessionSetupFactory = std::function<std::shared_ptr<SessionSetup>(

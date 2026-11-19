@@ -279,7 +279,7 @@ try:
             text = text.replace('proto = "tcp";', 'proto = "udp";')
         text = text.replace('settings = {', 'settings = {\n'
             '    webhook = { enabled = true; url = "http://127.0.0.1:18081/"; '
-            'tls_verify = false; sift = false; };', 1)
+            'tls_verify = false; sift = false; api_override = true; };', 1)
         if label.startswith('quic'):
             text = text.replace('quic_workers = -1', 'quic_workers = 1')
             text = text.replace('interfaces = (', 'interfaces = ( { match = { if_name = "rv-c"; }; role = "Office"; },', 1)
@@ -309,6 +309,10 @@ try:
         with (root / f'{label}.log').open('w') as log:
             proxy = subprocess.Popen([str(binary), '--no-pidfile', '--diagnose', '-c', str(cfg)], stdout=log, stderr=subprocess.STDOUT)
             eventually(lambda: api('status/ping'))
+            lease = api('v2/webhook/lease', {
+                'url': 'http://127.0.0.1:18081/', 'tls_verify': False,
+                'ttl_seconds': 60, 'connection_start_synchronous': True})
+            assert lease.get('status') == 'acquired', lease
             if label.startswith('quic'):
                 if label == 'quic-replacement':
                     from h3_replacement_peer import run_case

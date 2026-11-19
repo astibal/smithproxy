@@ -33,6 +33,8 @@ static nlohmann::json wh_register(struct MHD_Connection * connection, std::strin
 
     std::string new_url = load_json_params<std::string>(req, "rande_url").value_or("");
     bool rande_tls_verify = load_json_params<bool>(req, "rande_tls_verify").value_or(true);
+    bool connection_start_synchronous =
+        load_json_params<bool>(req, "connection_start_synchronous").value_or(false);
 
     const char* response = "rejected";
     bool send_hostname_snapshot = false;
@@ -48,6 +50,8 @@ static nlohmann::json wh_register(struct MHD_Connection * connection, std::strin
             fac->settings_webhook.override.timeout.set_expiry(time(nullptr) + 60);  // extend by next 60s
             fac->settings_webhook.override.url = new_url;
             fac->settings_webhook.override.tls_verify = rande_tls_verify;
+            fac->settings_webhook.override.connection_start_synchronous =
+                connection_start_synchronous;
             response = "accepted";
             send_hostname_snapshot = true;
         }
@@ -74,6 +78,7 @@ static nlohmann::json wh_unregister(struct MHD_Connection * connection, std::str
            and not webhook_v2_lease().target(time(nullptr)).active) {
             fac->settings_webhook.override.url = "";
             fac->settings_webhook.override.tls_verify = true;
+            fac->settings_webhook.override.connection_start_synchronous = false;
             fac->settings_webhook.override.timeout.set_expiry(time(nullptr)-1); // set expired
 
             response = "unregistered";
@@ -94,6 +99,8 @@ static sx::webserver::Http_JsonResponseParams wh_lease_v2(
     const auto tls_verify = load_json_params<bool>(req, "tls_verify").value_or(true);
     const auto ttl = load_json_params<unsigned>(req, "ttl_seconds").value_or(60);
     const auto presented = load_json_params<std::string>(req, "lease_id").value_or("");
+    const auto connection_start_synchronous =
+        load_json_params<bool>(req, "connection_start_synchronous").value_or(false);
     const auto now = time(nullptr);
 
     bool send_hostname_snapshot = false;
@@ -122,6 +129,8 @@ static sx::webserver::Http_JsonResponseParams wh_lease_v2(
 
         fac->settings_webhook.override.url = url;
         fac->settings_webhook.override.tls_verify = tls_verify;
+        fac->settings_webhook.override.connection_start_synchronous =
+            connection_start_synchronous;
         fac->settings_webhook.override.timeout.set_expiry(result.expires_at);
 
         send_hostname_snapshot = result.outcome == Lease::Outcome::acquired;
@@ -158,6 +167,7 @@ static sx::webserver::Http_JsonResponseParams wh_lease_release_v2(
         auto fac = CfgFactory::get();
         fac->settings_webhook.override.url.clear();
         fac->settings_webhook.override.tls_verify = true;
+        fac->settings_webhook.override.connection_start_synchronous = false;
         fac->settings_webhook.override.timeout.set_expiry(now - 1);
     }
     response.response_code = MHD_HTTP_OK;

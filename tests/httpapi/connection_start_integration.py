@@ -3,6 +3,7 @@ import socket
 import ssl
 import threading
 import base64
+import time
 
 from need_more_integration import TLS_HOSTNAME, receive, silent
 
@@ -18,7 +19,8 @@ def closed(sock):
         pass
 
 
-def run(connection, send, set_reply, server, source, pending_connection, tls=False):
+def run(connection, send, set_reply, server, source, pending_connection,
+        switch_to_async_owner, tls=False):
     scenarios = 0
 
     def set_start(status=200, body=None):
@@ -249,6 +251,7 @@ def run(connection, send, set_reply, server, source, pending_connection, tls=Fal
     # Setup now precedes both TLS handshakes; negotiated metadata is absent.
     # Certificate trust is intentionally disabled in this private lab fixture.
     if not tls:
+        check_async_owner(connection, send, server, switch_to_async_owner)
         assert not server.errors, server.errors
         if server.binary_enabled:
             assert server.binary_count > 0, 'Binary content transport was not exercised'
@@ -275,5 +278,29 @@ def run(connection, send, set_reply, server, source, pending_connection, tls=Fal
         check_readiness(server.starts[-1]['id'])
     scenarios += 1
 
+    check_async_owner(connection, send, server, switch_to_async_owner)
     assert not server.errors, server.errors
     print(f'COMPLETED connection-start: {scenarios} scenarios', flush=True)
+
+
+def check_async_owner(connection, send, server, switch_to_async_owner):
+    """A new default-mode lease owner must not inherit synchronous setup."""
+    switch_to_async_owner()
+    entered, release = threading.Event(), threading.Event()
+
+    def delayed_drop(event):
+        assert event['details']['info']['synchronous'] is False, event
+        entered.set()
+        assert release.wait(5), 'Test did not release asynchronous setup gate'
+        return 200, {'action': 'drop'}
+
+    server.start_reply = delayed_drop
+    started = time.monotonic()
+    try:
+        with connection(warmup=False) as (client, origin):
+            assert time.monotonic() - started < 2, 'Default lease owner blocked on connection-start'
+            assert entered.wait(5), 'Missing asynchronous connection-start'
+            send(client, REQUEST)
+            assert receive(origin, len(REQUEST)) == REQUEST
+    finally:
+        release.set()

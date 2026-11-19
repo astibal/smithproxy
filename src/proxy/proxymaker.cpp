@@ -516,55 +516,43 @@ namespace sx::proxymaker {
                 const bool enabled = sx::http::webhooks::is_enabled();
                 notified_ = enabled || sx::http::webhooks::sift_enabled();
 
-                // Notification only: no reply may change the forwarding verdict.
                 if (enabled) {
-                    sx::http::webhooks::send_action("connection-start", id_, details_);
-                }
-                sx::http::webhooks::send_sift_action("connection-start", id_, details_);
-                return allowed_;
-            }
-
-            bool inspection_start(std::string const& host, std::string const& port) override {
-                if (!prepare_destination(host, port)) return false;
-                if (inspection_started_) return allowed_;
-                inspection_started_ = true;
-
-                // This explicit gate is deliberately absent from normal setup.
-                const bool enabled = sx::http::webhooks::is_enabled();
-                bool valid_reply = false;
-                bool denied = false;
-                if (enabled) {
-                    sx::http::webhooks::send_action_wait("inspection-start", id_, details_,
-                        [&](sx::http::expected_reply reply) {
+                    bool valid_reply = false;
+                    bool denied = false;
+                    const bool synchronous = sx::http::webhooks::send_connection_start(
+                        id_, details_, [&](sx::http::expected_reply reply) {
                             if (!reply) return;
-
                             auto result = sx::proxy::parse_setup_reply(
                                 reply->response.first, reply->response.second);
                             control_->apply(result.body);
-                            if (result.action == sx::proxy::setup_action::accept) {
+                            if (result.action == sx::proxy::setup_action::accept)
                                 rewrite_requested_ = result.rewrite;
-                            }
-                            const auto& control = result.body.value("control", nlohmann::json::object());
-                            if(result.action == sx::proxy::setup_action::accept &&
-                               control.value("quic_lifecycle", 0) == 1) {
+                            const auto& control = result.body.value(
+                                "control", nlohmann::json::object());
+                            if (result.action == sx::proxy::setup_action::accept &&
+                                control.value("quic_lifecycle", 0) == 1) {
                                 observer_ = std::make_unique<sx::proxy::QuicObserver>(
-                                    id_, control_->strict(), control.value("quic_start_server", 0) == 1,
+                                    id_, control_->strict(),
+                                    control.value("quic_start_server", 0) == 1,
                                     control.value("quic_schema", 0) == 2);
                             }
                             valid_reply = result.action != sx::proxy::setup_action::invalid;
                             denied = result.action == sx::proxy::setup_action::drop;
-                            if (result.action == sx::proxy::setup_action::not_interested
-                                && control_->strict()) valid_reply = false;
+                            if (result.action == sx::proxy::setup_action::not_interested &&
+                                control_->strict()) valid_reply = false;
                         });
+                    if (synchronous && !valid_reply) {
+                        log::connect().war(
+                            "synchronous QUIC connection-start: invalid setup reply (%s)",
+                            control_->strict() ? "fail-closed" : "fail-open");
+                    }
+                    if (synchronous)
+                        allowed_ = !denied && (valid_reply || !control_->strict());
                 }
-
-                if (enabled && !valid_reply) {
-                    log::connect().war("QUIC inspection-start: invalid setup reply (%s)",
-                                       control_->strict() ? "fail-closed" : "fail-open");
-                }
-
-                sx::http::webhooks::send_sift_action("inspection-start", id_, details_);
-                allowed_ = !denied && (!enabled || valid_reply || !control_->strict());
+                auto sift_details = details_;
+                sift_details["info"]["synchronous"] = false;
+                sx::http::webhooks::send_sift_action(
+                    "connection-start", id_, sift_details);
                 return allowed_;
             }
 
@@ -604,7 +592,6 @@ namespace sx::proxymaker {
             std::optional<QuicTlsPolicy> tls_policy_;
             bool destination_prepared_ = false;
             bool started_ = false;
-            bool inspection_started_ = false;
             bool notified_ = false;
             bool allowed_ = true;
             bool rewrite_requested_ = false;
