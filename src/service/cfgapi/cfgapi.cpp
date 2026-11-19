@@ -459,6 +459,11 @@ std::string CfgFactory::materialize_runtime_archive() {
     return runtime_tree_->root();
 }
 
+void CfgFactory::transfer_runtime_owner(uid_t uid, gid_t gid) {
+    std::scoped_lock<std::recursive_mutex> guard(CfgFactory::lock());
+    if(runtime_tree_) runtime_tree_->transfer_owner(uid, gid);
+}
+
 void CfgFactory::apply_runtime_resource_paths() {
     auto& ssl = SSLFactory::factory();
     ssl.certs_path() = configured_certs_path;

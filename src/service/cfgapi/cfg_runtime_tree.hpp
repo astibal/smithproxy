@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <sys/types.h>
 
 #include "cfg_io.hpp"
 #include "cfg_tar.hpp"
@@ -25,6 +26,10 @@ public:
     ~CfgRuntimeTree();
 
     const std::string& root() const noexcept { return root_; }
+
+    // Called while still privileged, before the core changes identity.
+    // Only this disposable view changes ownership; the source archive does not.
+    void transfer_owner(uid_t uid, gid_t gid);
 
 private:
     CfgRuntimeTree(std::string generation, std::string root);

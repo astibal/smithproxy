@@ -495,6 +495,7 @@ public:
 
     // Materialize the active archive resources into a protected runtime tree.
     std::string materialize_runtime_archive();
+    void transfer_runtime_owner(uid_t uid, gid_t gid);
 
     // Project native directory-backed resources into a private runtime tree;
     // legacy sources retain their configured filesystem paths unchanged.

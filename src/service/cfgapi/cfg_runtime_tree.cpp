@@ -2,6 +2,8 @@
 
 #include <filesystem>
 #include <utility>
+#include <vector>
+#include <unistd.h>
 
 namespace sx::cfg {
 
@@ -45,6 +47,29 @@ CfgRuntimeTree& CfgRuntimeTree::operator=(CfgRuntimeTree&& other) noexcept {
 
 CfgRuntimeTree::~CfgRuntimeTree() {
     cleanup();
+}
+
+void CfgRuntimeTree::transfer_owner(uid_t uid, gid_t gid) {
+    if(generation_.empty()) return;
+
+    // The enclosing 0700 generation stays root-owned until every descendant
+    // is ready. The receiving user cannot enter and replace paths midway.
+    std::vector<std::filesystem::path> paths;
+    for(const auto& entry : std::filesystem::recursive_directory_iterator(generation_)) {
+        const auto type = entry.symlink_status().type();
+        if(type != std::filesystem::file_type::regular &&
+           type != std::filesystem::file_type::directory) {
+            throw CfgTarError("unexpected file type in private CFtar runtime tree");
+        }
+        paths.push_back(entry.path());
+    }
+    paths.emplace_back(generation_);
+
+    for(const auto& path : paths) {
+        if(::lchown(path.c_str(), uid, gid) != 0) {
+            throw CfgTarError("cannot transfer private CFtar runtime tree ownership");
+        }
+    }
 }
 
 void CfgRuntimeTree::cleanup() noexcept {

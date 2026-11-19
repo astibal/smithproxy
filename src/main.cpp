@@ -130,6 +130,16 @@ int drop_process_identity(const std::string& run_as) {
         return -1;
     }
 
+    try {
+        CfgFactory::get()->transfer_runtime_owner(entry.pw_uid, entry.pw_gid);
+    }
+    catch(const std::exception& error) {
+        DaemonFactory::instance()->get_log().fat(
+            "cannot prepare CFtar resources for core identity: %s", error.what());
+        errno = EACCES;
+        return -1;
+    }
+
     if(initgroups(entry.pw_name, entry.pw_gid) != 0 ||
        setgid(entry.pw_gid) != 0 ||
        setuid(entry.pw_uid) != 0) {

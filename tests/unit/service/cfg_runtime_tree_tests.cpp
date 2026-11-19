@@ -4,6 +4,10 @@
 
 #include <filesystem>
 #include <fstream>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <cstdlib>
 
 namespace {
 
@@ -87,4 +91,51 @@ TEST(CfgRuntimeTree, ReportsTemporaryGenerationCreationFailure) {
     EXPECT_THROW(
         sx::cfg::CfgRuntimeTree::create(archive, nullptr),
         sx::cfg::CfgTarError);
+}
+
+TEST(CfgRuntimeTree, OwnershipTransferPreservesPrivateModesAndMovedFromIsHarmless) {
+    sx::cfg::CfgTar archive;
+    archive.add("pki/example/key.pem", "private fixture");
+    auto original = sx::cfg::CfgRuntimeTree::create(archive);
+    auto runtime = std::move(original);
+    EXPECT_NO_THROW(original.transfer_owner(getuid(), getgid()));
+    runtime.transfer_owner(getuid(), getgid());
+
+    const auto generation = std::filesystem::path(runtime.root()).parent_path();
+    for(const auto& entry : std::filesystem::recursive_directory_iterator(generation)) {
+        struct stat state {};
+        ASSERT_EQ(::lstat(entry.path().c_str(), &state), 0);
+        EXPECT_EQ(state.st_uid, getuid());
+        EXPECT_EQ(state.st_gid, getgid());
+        EXPECT_EQ(state.st_mode & 0077, 0);
+    }
+}
+
+TEST(CfgRuntimeTree, OwnershipTransferRejectsSymlinksBeforeChangingFiles) {
+    sx::cfg::CfgTar archive;
+    archive.add("payload", "fixture");
+    auto runtime = sx::cfg::CfgRuntimeTree::create(archive);
+    std::filesystem::create_symlink("/etc/passwd", runtime.root() + "/unexpected");
+    EXPECT_THROW(runtime.transfer_owner(getuid(), getgid()), sx::cfg::CfgTarError);
+}
+
+TEST(CfgRuntimeTree, OwnershipFailureIsReported) {
+    const auto child = fork();
+    ASSERT_GE(child, 0);
+    if(child == 0) {
+        if(geteuid() == 0 && (setgid(65534) != 0 || setuid(65534) != 0)) std::exit(2);
+        int result = 1;
+        {
+            sx::cfg::CfgTar archive;
+            archive.add("payload", "fixture");
+            auto runtime = sx::cfg::CfgRuntimeTree::create(archive);
+            try { runtime.transfer_owner(0, 0); }
+            catch(const sx::cfg::CfgTarError&) { result = 0; }
+        }
+        std::exit(result);
+    }
+    int status = 0;
+    ASSERT_EQ(waitpid(child, &status, 0), child);
+    ASSERT_TRUE(WIFEXITED(status));
+    EXPECT_EQ(WEXITSTATUS(status), 0);
 }
