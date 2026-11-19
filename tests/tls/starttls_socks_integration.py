@@ -8,6 +8,12 @@ execute StartStopTls::start(), spoof the upstream certificate, and proxy an
 HTTP request over the upgraded connection.
 """
 
+from pathlib import Path as _TemplatePath
+import sys as _template_sys
+_template_sys.path.insert(0, str(next(p for p in _TemplatePath(__file__).resolve().parents
+                                     if (p / 'template_resources.py').is_file())))
+from template_resources import template_directory
+
 import argparse
 import dataclasses
 import os
@@ -177,7 +183,7 @@ def make_config(source, destination, worktree, runtime, socks_port, cli_port):
     # native configuration no longer carries filesystem resource paths.
     config = config.replace('settings = {', 'settings = {\n'
         f'    certs_path = "{worktree / "etc/certs/default"}/";\n'
-        f'    messages_dir = "{worktree / "etc/msg/en"}/";\n', 1)
+        f'    messages_dir = "{template_directory(worktree)}/";\n', 1)
     replacements = {
         "accept_tproxy = TRUE;": "accept_tproxy = FALSE;",
         "accept_redirect = TRUE;": "accept_redirect = FALSE;",

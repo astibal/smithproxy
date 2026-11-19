@@ -5,6 +5,12 @@ The caller must provide an isolated outer network namespace.  The ordinary
 patch-runner lab then creates its named namespaces inside that disposable
 namespace, so parallel lifecycle jobs cannot share links, routes or names.
 """
+from pathlib import Path as _TemplatePath
+import sys as _template_sys
+_template_sys.path.insert(0, str(next(p for p in _TemplatePath(__file__).resolve().parents
+                                     if (p / 'template_resources.py').is_file())))
+from template_resources import template_directory
+
 import argparse
 import hashlib
 import json
@@ -47,7 +53,7 @@ def copy_lab(source, binary, work):
     shutil.copytree(source / "tests/patch-runner/corpus", work / "corpus", dirs_exist_ok=True)
     shutil.copy2(source / "tests/patch-runner/vendor/pplay.py", work)
     shutil.copy2(source / "etc/smithproxy.cfg", work / "src/etc")
-    shutil.copytree(source / "etc/msg/en", work / "src/etc/msg/en", dirs_exist_ok=True)
+    shutil.copytree(template_directory(source), work / "src/etc/msg/en", dirs_exist_ok=True)
     config = work / "src/etc/smithproxy.cfg"
     text = config.read_text()
     text = text.replace("allow_invalid_certs = FALSE", "allow_invalid_certs = TRUE")

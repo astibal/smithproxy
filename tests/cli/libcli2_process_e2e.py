@@ -3,6 +3,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path as _TemplatePath
+import sys as _template_sys
+_template_sys.path.insert(0, str(next(p for p in _TemplatePath(__file__).resolve().parents
+                                     if (p / 'template_resources.py').is_file())))
+from template_resources import template_directory
+
 import argparse
 import http.server
 import os
@@ -337,7 +343,7 @@ def main() -> None:
         text = replace_or_add_setting(
             text, "certs_path", f'"{source / "etc/certs/default"}/";')
         text = replace_or_add_setting(
-            text, "messages_dir", f'"{source / "etc/msg/en"}/";')
+            text, "messages_dir", f'"{template_directory(source)}/";')
         text = replace_setting(text, "socks_workers", "1;")
         text = text.replace("socks_workers = 1;",
                             f'socks_workers = 1;\n    socks_port = "{socks_port}";', 1)
@@ -796,7 +802,7 @@ script_profiles = {
                 upgraded_text, "certs_path",
                 f'"{source / "etc/certs/default"}/";')
             upgraded_text = replace_or_add_setting(
-                upgraded_text, "messages_dir", f'"{source / "etc/msg/en"}/";')
+                upgraded_text, "messages_dir", f'"{template_directory(source)}/";')
             upgraded_text, removed_options = re.subn(
                 r"options\s*=\s*\{[^}]*\bprotocol_events[^}]*\}\s*;?",
                 "", upgraded_text, count=1)

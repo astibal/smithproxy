@@ -60,6 +60,9 @@ public:
     // validate the result before returning it to a writer.
     static CfgTar build(const Input& input);
 
+    // Read a resource subtree through confined directory descriptors.
+    static CfgTar read_directory(const std::string& source, const std::string& prefix);
+
     // Create the first native archive without replacing any path that appeared
     // concurrently. Returning false means another valid archive already owns
     // the destination; all other failures remain explicit exceptions.

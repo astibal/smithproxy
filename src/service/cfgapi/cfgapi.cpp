@@ -1,3 +1,5 @@
+#include <service/cfgapi/custom_cert_directory.hpp>
+
 #include <proxy/master_policy.hpp>
 #include <service/interface_roles.hpp>
 #include <proxy/proxymaker.hpp>
@@ -55,7 +57,7 @@
 
 
 #include <service/cfgapi/cfgapi.hpp>
-#include <schema_resources.hpp>
+#include <resources/default_templates.hpp>
 #include <service/cfgapi/cfg_save.hpp>
 #include <service/cfgapi/cfg_numeric.hpp>
 #include <service/cfgapi/cfg_serialization.hpp>
@@ -101,6 +103,36 @@ sx::cfg::SaveResult CfgFactory::save_running(
         [factory] { return factory->save_config(); },
     });
     return saver.save(expected_revision, source);
+}
+
+std::size_t CfgFactory::import_templates(const std::string& directory) {
+    auto factory = get();
+    sx::cfg::CfgTemplateMaintainer maintainer({
+        *board(), *write_gate(), lock(), factory->archive_storage_,
+    });
+    const auto changed = maintainer.import_directory(directory);
+    factory->log.noti("template import completed: changed=%zu", changed);
+    return changed;
+}
+
+void CfgFactory::export_templates(const std::string& directory) {
+    auto factory = get();
+    sx::cfg::CfgTemplateMaintainer maintainer({
+        *board(), *write_gate(), lock(), factory->archive_storage_,
+    });
+    maintainer.export_directory(directory);
+}
+
+std::size_t CfgFactory::maintain_templates(sx::cfg::TemplateMaintenance mode) {
+    auto factory = get();
+    sx::cfg::CfgTemplateMaintainer maintainer({
+        *board(), *write_gate(), lock(), factory->archive_storage_,
+    });
+    const auto changed = maintainer.apply(mode);
+    factory->log.noti("template maintenance: mode=%s changed=%zu",
+                      mode == sx::cfg::TemplateMaintenance::rollback ? "rollback" : "fix-missing",
+                      changed);
+    return changed;
 }
 
 sx::cfg::ArchiveRestoreResult CfgFactory::restore_startup_archive(
@@ -1002,17 +1034,28 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         return true;
     }
     else if(upgrade_to_num == 1051) {
-        // Persist new TLS replacement fragments together with schema 1051.
+        // Supply offline templates even when the legacy directory is incomplete.
         // Existing resources are authoritative; this step only adds new names.
-        schema_resource_additions_ = sx::cfg::schema_1051_resources();
+        schema_resource_additions_ = sx::resources::default_templates::all();
         log.event(INF, "added TLS replacement template resources");
         return true;
     }
     else if(upgrade_to_num == 1052) {
-        // Repair archives written by the experimental capture branch, where
-        // schema 1051 shadowed the master's TLS resource migration.
+        log.event(INF, "added optional custom certificate fallback directory");
+        return true;
+    }
+    else if(upgrade_to_num == 1053) {
+        // Earlier native archives may lack base templates or theme variants.
+        // prepare_save inserts absent names without replacing custom content.
+        schema_resource_additions_ = sx::resources::default_templates::all();
+        log.event(INF, "completed built-in template resources");
+        return true;
+    }
+    else if(upgrade_to_num == 1054) {
+        // Schema 1052 was used independently by master and the capture branch.
+        // Run capture option migration at 1054 so both histories are covered.
         // Existing resources remain authoritative.
-        schema_resource_additions_ = sx::cfg::schema_1051_resources();
+        schema_resource_additions_ = sx::resources::default_templates::all();
         auto& root = cfgapi.getRoot();
         if(!root.exists("captures")) root.add("captures", Setting::TypeGroup);
         auto& captures = root["captures"];
@@ -1376,6 +1419,11 @@ bool CfgFactory::load_settings () {
     // failed first migration must remain bootable from its original files.
     // Native archives override the filesystem paths below with their private
     // materialized tree.
+    auto& fallback_dir = SSLFactory::factory().custom_cert_fallback_dir();
+    fallback_dir.clear();
+    load_if_exists(cfgapi.getRoot()["settings"], "custom_cert_fallback_dir", fallback_dir);
+    fallback_dir = cfgapi_detail::custom_cert_directory(fallback_dir);
+
     configured_certs_path = "/etc/smithproxy/certs/default/";
     configured_ca_bundle_path.clear();
     configured_ca_bundle_file.clear();
@@ -6407,6 +6455,9 @@ int save_settings(Config& ex) {
         objects.add("messages_dir", Setting::TypeString) =
             CfgFactory::get()->dir_msg_templates;
     }
+
+    objects.add("custom_cert_fallback_dir", Setting::TypeString) =
+        SSLFactory::factory().custom_cert_fallback_dir();
 
     objects.add("certs_ca_key_password", Setting::TypeString) = SSLFactory::factory().certs_password();
     objects.add("certs_ctlog", Setting::TypeString) = SSLFactory::factory().ctlogfile();

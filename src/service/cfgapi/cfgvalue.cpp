@@ -124,6 +124,11 @@ void CfgValueHelp::init() {
     add("settings.certs_ca_key_password", "TLS-resigning CA private key protection password")
             .help_quick("<string>: enter string value");
 
+    add("settings.custom_cert_fallback_dir", "optional external server custom certificate fallback")
+            .help_quick("<string>: directory containing ip/ and sni/; empty disables fallback")
+            .may_be_empty(true)
+            .value_filter(CfgValue::VALUE_DIR);
+
     add("settings.ca_bundle_path", "trusted CA store path (to verify server-side connections)")
             .help_quick("<string>: enter valid path")
             .may_be_empty(false)

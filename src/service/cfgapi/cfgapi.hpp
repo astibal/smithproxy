@@ -60,6 +60,7 @@
 #include "cfg_archive_monitor.hpp"
 #include "cfg_archive_restore.hpp"
 #include "cfg_resource_write.hpp"
+#include "cfg_template_maintenance.hpp"
 #include "cfg_runtime_tree.hpp"
 #include "cfg_write_gate.hpp"
 #include "cfg_tx_validate.hpp"
@@ -178,7 +179,7 @@ class CfgFactory : public CfgFactoryBase {
 public:
     // Each version bump implies a config upgrade - we start on 1000
     // see upgrade_schema() - control config upgrade
-    constexpr static inline const int SCHEMA_VERSION  = 1052;
+    constexpr static inline const int SCHEMA_VERSION  = 1054;
 
     static inline std::atomic_bool LOAD_ERRORS = false;
     static constexpr std::string_view CT_UNAVAILABLE_WARNING =
@@ -215,6 +216,11 @@ public:
         std::string const& expected_revision,
         std::string const& source);
     // Validate and atomically install an uploaded archive for the next restart.
+    // Restore embedded templates or fill missing entries in one CFtar write.
+    static std::size_t maintain_templates(sx::cfg::TemplateMaintenance mode);
+    static std::size_t import_templates(const std::string& directory);
+    static void export_templates(const std::string& directory);
+
     static sx::cfg::ArchiveRestoreResult restore_startup_archive(
         std::string const& expected_revision,
         std::string const& expected_hash,

@@ -3,6 +3,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path as _TemplatePath
+import sys as _template_sys
+_template_sys.path.insert(0, str(next(p for p in _TemplatePath(__file__).resolve().parents
+                                     if (p / 'template_resources.py').is_file())))
+from template_resources import template_directory
+
 import argparse
 import os
 from pathlib import Path
@@ -115,7 +121,7 @@ def main() -> None:
         for name, value in (
             ("accept_tproxy", "FALSE;"), ("accept_redirect", "FALSE;"), ("accept_socks", "FALSE;"),
             ("certs_path", f'"{source / "etc/certs/default"}/";'),
-            ("messages_dir", f'"{source / "etc/msg/en"}/";'),
+            ("messages_dir", f'"{template_directory(source)}/";'),
             ("log_file", '"";'), ("log_console", "TRUE;"),
             ("sslkeylog_file", f'"{tmp}/sslkeylog.%s.log";'),
             ("write_payload_dir", f'"{tmp}/payload";'),

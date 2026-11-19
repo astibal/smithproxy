@@ -111,7 +111,6 @@ include_directories ("${SOCLE_COMMON_DIR}")
 include_directories ("${PROJECT_SOURCE_DIR}")
 include_directories ("${PROJECT_SOURCE_DIR}/src/")
 include_directories ("${PROJECT_SOURCE_DIR}/src/ext")
-include(cmake/schema_resources.cmake)
 
 add_subdirectory(${SOCLE_DIR} socle_lib)
 add_subdirectory(${SOCLE_COMMON_DIR} socle_common_lib)
@@ -283,6 +282,7 @@ target_include_directories(smithproxy_libcli PUBLIC
 )
 
 add_executable(smithproxy-cftar
+        src/resources/default_templates.cpp
         src/utils/crypto.cpp
         src/service/cfgapi/cftar_main.cpp
         src/service/cfgapi/cftar_cli.cpp
@@ -311,7 +311,7 @@ add_custom_command(
                 ${CMAKE_CURRENT_BINARY_DIR}/defaults
         COMMAND ${CMAKE_COMMAND} -E rm -f
                 ${SMITHPROXY_DEFAULT_CFTAR}.new
-        COMMAND $<TARGET_FILE:smithproxy-cftar> create
+        COMMAND $<TARGET_FILE:smithproxy-cftar> create --default-templates
                 --config ${PROJECT_SOURCE_DIR}/etc/smithproxy.cfg
                 --startup ${PROJECT_SOURCE_DIR}/etc/smithproxy.startup.cfg
                 --output ${SMITHPROXY_DEFAULT_CFTAR}.new
@@ -325,21 +325,6 @@ add_custom_command(
                 --file pki/ca/default/portal-key.pem=${PROJECT_SOURCE_DIR}/etc/certs/default/portal-key.pem
                 --file pki/ca/default/portal-gen.info=${PROJECT_SOURCE_DIR}/etc/certs/default/portal-gen.info
                 --file pki/ca/default/sslca.json=${PROJECT_SOURCE_DIR}/etc/certs/default/sslca.json
-                --file templates/replacement/en/test.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/test.txt
-                --file templates/replacement/en/html_page.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/html_page.txt
-                --file templates/replacement/en/html_img_warning.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/html_img_warning.txt
-                --file templates/replacement/en/tls_replacement.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement.txt
-                --file templates/replacement/en/tls_override_form.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_override_form.txt
-                --file templates/replacement/en/tls_reason.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_reason.txt
-                --file templates/replacement/en/tls_certificate_field.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_certificate_field.txt
-                --file templates/replacement/en/tls_certificate_details.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_certificate_details.txt
-                --file templates/replacement/en/tls_replacement_error.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_error.txt
-                --file templates/replacement/en/tls_redirect.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_redirect.txt
-                --file templates/replacement/en/tls_redirect_top.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_redirect_top.txt
-                --file templates/replacement/en/tls_replacement_common.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_common.txt
-                --file templates/replacement/en/tls_replacement_light.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_light.txt
-                --file templates/replacement/en/tls_replacement_dark.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_dark.txt
-                --file templates/replacement/en/tls_replacement_branded.txt=${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_branded.txt
         COMMAND ${CMAKE_COMMAND} -E rename
                 ${SMITHPROXY_DEFAULT_CFTAR}.new
                 ${SMITHPROXY_DEFAULT_CFTAR}
@@ -356,21 +341,6 @@ add_custom_command(
                 ${PROJECT_SOURCE_DIR}/etc/certs/default/portal-key.pem
                 ${PROJECT_SOURCE_DIR}/etc/certs/default/portal-gen.info
                 ${PROJECT_SOURCE_DIR}/etc/certs/default/sslca.json
-                ${PROJECT_SOURCE_DIR}/etc/msg/en/test.txt
-                ${PROJECT_SOURCE_DIR}/etc/msg/en/html_page.txt
-                ${PROJECT_SOURCE_DIR}/etc/msg/en/html_img_warning.txt
-                ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement.txt
-                ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_override_form.txt
-                ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_reason.txt
-                ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_certificate_field.txt
-                ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_certificate_details.txt
-                ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_error.txt
-                ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_redirect.txt
-                ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_redirect_top.txt
-                ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_common.txt
-                ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_light.txt
-                ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_dark.txt
-                ${PROJECT_SOURCE_DIR}/etc/msg/en/tls_replacement_branded.txt
         COMMENT "Building default Smithproxy CfgTar"
         VERBATIM)
 add_custom_target(smithproxy-default-cftar ALL
@@ -381,6 +351,7 @@ add_executable(smithproxy
         src/main.cpp
         src/smithlog.cpp
         src/utils/crypto.cpp
+        src/resources/default_templates.cpp
         src/service/cfgapi/cfgapi.cpp
         src/service/cfgapi/cfg_lease.cpp
         src/service/cfgapi/cfg_write_gate.cpp
@@ -390,6 +361,8 @@ add_executable(smithproxy
         src/service/cfgapi/cfg_save.cpp
         src/service/cfgapi/cfg_archive_restore.cpp
         src/service/cfgapi/cfg_archive_monitor.cpp
+        src/service/cfgapi/cfg_template_files.cpp
+        src/service/cfgapi/cfg_template_maintenance.cpp
         src/service/cfgapi/cfg_resource_write.cpp
         src/service/cfgapi/cfg_io.cpp
         src/service/cfgapi/cfg_runtime_tree.cpp
@@ -665,6 +638,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
     find_package(GTest)
     if(GTEST_FOUND)
         add_executable(sx_gtests
+                src/service/cfgapi/cfg_pack.cpp
+                src/resources/default_templates.cpp
                 src/inspect/dns.cpp
                 src/inspect/protocol_fork.cpp
                 src/inspect/protocol_adapter.cpp
@@ -790,6 +765,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 src/service/cfgapi/cfg_archive.cpp
                 src/service/cfgapi/cfg_archive_restore.cpp
                 tests/unit/service/cfgapi/cfg_archive_restore_tests.cpp
+                src/service/cfgapi/cfg_template_files.cpp
+                src/service/cfgapi/cfg_template_maintenance.cpp
                 src/service/cfgapi/cfg_resource_write.cpp
                 tests/unit/service/cfgapi/cfg_resource_write_tests.cpp
                 src/service/httpd/cfg/save.cpp
@@ -959,6 +936,12 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
         target_link_options(sx_gtests_atomic_json PRIVATE
                 -Wl,--wrap=fsync -Wl,--wrap=fclose -Wl,--wrap=rename)
 
+        add_executable(custom_cert_fallback_tests tests/tls/custom_cert_fallback_tests.cpp)
+        target_link_libraries(custom_cert_fallback_tests gtest gtest_main socle_lib pthread crypto ssl)
+        add_test(NAME unit.custom_cert_fallback COMMAND custom_cert_fallback_tests)
+        set_tests_properties(unit.custom_cert_fallback PROPERTIES
+                WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}" LABELS "native;unit;tls")
+
         add_executable(tls_testbed
                 tests/tls/tls_testbed.cpp)
         add_executable(transfer_testbed
@@ -969,6 +952,16 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
         target_link_libraries(sx_gtests gtest gtest_main smithproxy_libcli smithproxy_qpack socle_lib pthread crypto ssl crypt
                 LibArchive::LibArchive nlohmann_json::nlohmann_json ${UNWIND_LIB})
         add_executable(sx_gtests_cfg_tar
+                src/ext/nltemplate/nltemplate.cpp
+                src/service/cfgapi/cfg_template_files.cpp
+                src/service/cfgapi/cfg_template_maintenance.cpp
+                src/service/cfgapi/cfg_update.cpp
+                src/service/cfgapi/cfg_revision.cpp
+                src/service/cfgapi/cfg_write_gate.cpp
+                src/service/cfgapi/cfg_lease.cpp
+                tests/unit/service/cfg_template_maintenance_tests.cpp
+                src/resources/default_templates.cpp
+                tests/unit/service/default_templates_tests.cpp
                 src/utils/crypto.cpp
                 src/service/cfgapi/cfg_tar.cpp
                 src/service/cfgapi/cfg_archive.cpp
@@ -986,6 +979,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
         target_link_libraries(sx_gtests_cfg_tar PRIVATE gtest gtest_main
                 pthread crypto LibArchive::LibArchive nlohmann_json::nlohmann_json
                 ${LIBCONFIGPP_LIBRARIES})
+        target_compile_definitions(sx_gtests_cfg_tar PRIVATE
+                SMITHPROXY_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
         add_test(NAME unit.cfg_tar COMMAND sx_gtests_cfg_tar)
 
         add_executable(sx_gtests_cfg_io_faults
