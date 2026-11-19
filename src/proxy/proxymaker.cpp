@@ -509,39 +509,32 @@ namespace sx::proxymaker {
             }
 
             bool start(std::string const& host, std::string const& port) override {
-                if (started_) {
-                    // Do not reuse a script's verdict for a different DNS result.
-                    return allowed_ && (!notified_ || (host == host_ && port == port_));
-                }
-
+                if (!prepare_destination(host, port)) return false;
+                if (started_) return allowed_;
                 started_ = true;
-                host_ = host;
-                port_ = port;
-                details_["info"]["destination"] = {{"host", host}, {"port", port}};
-
-                // Keep the display label compatible with existing session filters.
-                // The envelope id, not this label, identifies the physical session.
-                auto endpoint_label = [](std::string const& address, std::string const& service) {
-                    const auto bracketed = address.find(':') == std::string::npos
-                        ? address : "[" + address + "]";
-                    return "quic_" + bracketed + ":" + service;
-                };
-                const auto& source = details_["info"]["source"];
-                details_["info"]["session"] = endpoint_label(
-                    source["host"].get<std::string>(), source["port"].get<std::string>())
-                    + "+" + endpoint_label(host, port);
 
                 const bool enabled = sx::http::webhooks::is_enabled();
                 notified_ = enabled || sx::http::webhooks::sift_enabled();
-                if (!notified_) {
-                    allowed_ = true;
-                    return true;
-                }
 
+                // Notification only: no reply may change the forwarding verdict.
+                if (enabled) {
+                    sx::http::webhooks::send_action("connection-start", id_, details_);
+                }
+                sx::http::webhooks::send_sift_action("connection-start", id_, details_);
+                return allowed_;
+            }
+
+            bool inspection_start(std::string const& host, std::string const& port) override {
+                if (!prepare_destination(host, port)) return false;
+                if (inspection_started_) return allowed_;
+                inspection_started_ = true;
+
+                // This explicit gate is deliberately absent from normal setup.
+                const bool enabled = sx::http::webhooks::is_enabled();
                 bool valid_reply = false;
                 bool denied = false;
                 if (enabled) {
-                    sx::http::webhooks::send_action_wait("connection-start", id_, details_,
+                    sx::http::webhooks::send_action_wait("inspection-start", id_, details_,
                         [&](sx::http::expected_reply reply) {
                             if (!reply) return;
 
@@ -566,16 +559,40 @@ namespace sx::proxymaker {
                 }
 
                 if (enabled && !valid_reply) {
-                    log::connect().war("QUIC connection-start: invalid setup reply (%s)",
+                    log::connect().war("QUIC inspection-start: invalid setup reply (%s)",
                                        control_->strict() ? "fail-closed" : "fail-open");
                 }
 
-                sx::http::webhooks::send_sift_action("connection-start", id_, details_);
+                sx::http::webhooks::send_sift_action("inspection-start", id_, details_);
                 allowed_ = !denied && (!enabled || valid_reply || !control_->strict());
                 return allowed_;
             }
 
         private:
+            bool prepare_destination(std::string const& host, std::string const& port) {
+                // Both entry points describe one physical session. Never reuse
+                // an inspection verdict for a different resolved destination.
+                if (destination_prepared_) return host == host_ && port == port_;
+                destination_prepared_ = true;
+                host_ = host;
+                port_ = port;
+                details_["info"]["destination"] = {{"host", host}, {"port", port}};
+
+                // Keep the display label compatible with existing session filters.
+                // The envelope id, not this label, identifies the physical session.
+                auto endpoint_label = [](std::string const& address, std::string const& service) {
+                    const auto bracketed = address.find(':') == std::string::npos
+                        ? address : "[" + address + "]";
+                    return "quic_" + bracketed + ":" + service;
+                };
+                const auto& source = details_["info"]["source"];
+                details_["info"]["session"] = endpoint_label(
+                    source["host"].get<std::string>(), source["port"].get<std::string>())
+                    + "+" + endpoint_label(host, port);
+
+                return true;
+            }
+
             unsigned ingress_ifindex_ = 0;
             std::string id_;
             std::string host_;
@@ -585,9 +602,11 @@ namespace sx::proxymaker {
                 std::make_shared<sx::http::webhooks::webhook_control_t>();
             std::unique_ptr<sx::proxy::QuicObserver> observer_;
             std::optional<QuicTlsPolicy> tls_policy_;
+            bool destination_prepared_ = false;
             bool started_ = false;
+            bool inspection_started_ = false;
             bool notified_ = false;
-            bool allowed_ = false;
+            bool allowed_ = true;
             bool rewrite_requested_ = false;
         };
     }

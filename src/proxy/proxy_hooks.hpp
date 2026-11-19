@@ -21,6 +21,7 @@ public:
     // Hooks without additional inputs still use the same explicit call shape.
     struct StartDetailsArgs {};
     struct StartArgs {};
+    struct InspectionStartArgs {};
     struct QuicArgs {
         bool meta = false;
         std::string connection_id;
@@ -153,7 +154,11 @@ public:
     static HttpConnectDecision http_connect(MitmProxy& proxy, const HttpConnectArgs& args);
 
     static nlohmann::json start_details(const MitmProxy& proxy, const StartDetailsArgs& args);
+    // Non-blocking lifecycle notification; normal connection setup uses this.
     static bool start(MitmProxy& proxy, const StartArgs& args);
+
+    // Explicit synchronous inspection negotiation. Not called by normal setup.
+    static bool inspection_start(MitmProxy& proxy, const InspectionStartArgs& args);
     static Epitaph prepare_stop(const MitmProxy& proxy, const StopArgs& args);
     static void enrich_stop(Epitaph& epitaph, const MitmProxy& proxy);
     static void stop(const Epitaph& epitaph, const StopArgs& args);
@@ -164,7 +169,7 @@ private:
     // Internal arguments keep per-call state out of the proxy and out of
     // asynchronous callbacks. Their definitions belong to the implementation.
     struct HttpConnectReplyArgs;
-    struct StartReplyArgs;
+    struct InspectionStartReplyArgs;
     struct ContentExchangeArgs;
     struct ContentReplyArgs;
     struct ContentActionArgs;
@@ -173,7 +178,7 @@ private:
     static nlohmann::json http_connect_details(const MitmProxy& proxy, const HttpConnectArgs& args);
     static void http_connect_reply(MitmProxy& proxy, const HttpConnectReplyArgs& args);
 
-    static bool start_reply(MitmProxy& proxy, const StartReplyArgs& args);
+    static bool inspection_start_reply(MitmProxy& proxy, const InspectionStartReplyArgs& args);
     static nlohmann::json content_details(MitmProxy& proxy, const ContentExchangeArgs& args);
     static void content_reply(MitmProxy& proxy, const ContentReplyArgs& args);
     static void content_action(MitmProxy& proxy, const ContentActionArgs& args);
