@@ -526,6 +526,11 @@ void CfgValueHelp::init() {
             .may_be_empty(false)
             .value_filter(CfgValue::VALUE_BOOL);
 
+    add("settings.webhook.synchronous_mode", "wait for all controlling webhook replies")
+            .help_quick("<bool>: enable synchronous webhook operation (default: false)")
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_BOOL);
+
     add("settings.webhook.sift", "send content to the local Sift decision engine")
             .help_quick("<bool>: enable the secondary sx-siftd webhook (default: false)")
             .may_be_empty(false)

@@ -515,7 +515,7 @@ void MitmProxy::submit_flow_observation(
 
     if(!sx::http::webhooks::sift_enabled()) return;
 
-    sx::http::webhooks::send_sift_content_wait(
+    sx::http::webhooks::send_sift_content(
         to_connection_ID(), std::move(details), {},
         [this](sx::http::expected_reply reply) {
             if(!reply.has_value()) return;

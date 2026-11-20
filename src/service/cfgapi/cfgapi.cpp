@@ -1607,6 +1607,8 @@ bool CfgFactory::load_settings () {
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "enabled", settings_webhook.enabled);
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "url", settings_webhook.cfg_url);
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "tls_verify", settings_webhook.cfg_tls_verify);
+        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "synchronous_mode",
+                       settings_webhook.cfg_synchronous_mode);
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "sift", settings_webhook.sift);
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "sift_url", settings_webhook.sift_url);
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "sift_tenant_id", settings_webhook.sift_tenant_id);
@@ -6531,6 +6533,8 @@ int save_settings(Config& ex) {
     webhook_objects.add("enabled", Setting::TypeBoolean) = CfgFactory::get()->settings_webhook.enabled;
     webhook_objects.add("url", Setting::TypeString) = CfgFactory::get()->settings_webhook.cfg_url;
     webhook_objects.add("tls_verify", Setting::TypeBoolean) = CfgFactory::get()->settings_webhook.cfg_tls_verify;
+    webhook_objects.add("synchronous_mode", Setting::TypeBoolean) =
+        CfgFactory::get()->settings_webhook.cfg_synchronous_mode;
     webhook_objects.add("sift", Setting::TypeBoolean) = CfgFactory::get()->settings_webhook.sift;
     webhook_objects.add("sift_url", Setting::TypeString) = CfgFactory::get()->settings_webhook.sift_url;
     webhook_objects.add("sift_tenant_id", Setting::TypeString) = CfgFactory::get()->settings_webhook.sift_tenant_id;

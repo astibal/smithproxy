@@ -229,12 +229,6 @@ namespace sx::http::webhooks {
             webhook_request_started(payload.size(), action, false, content);
             auto trace = std::make_shared<webhook_request_trace>();
             auto tracked = webhook_tracked_hook(std::move(hook), std::move(trace));
-            if(action == "connection-stop") {
-                sx::http::AsyncRequest::emit_terminal(
-                    settings, payload, tracked);
-                webhook_request_accepted(true);
-                return true;
-            }
             const auto accepted = sx::http::AsyncRequest::enqueue(
                 std::move(settings), payload, tracked);
             webhook_request_accepted(accepted);
@@ -274,6 +268,14 @@ namespace sx::http::webhooks {
                                sx::http::AsyncRequest::reply_hook hook, bool content = false) {
             webhook_emit_wait(sx::http::AsyncRequest::settings_snapshot(),
                               payload, action, std::move(hook), content);
+        }
+
+        sx::http::AsyncRequest::reply_hook decision_reply(
+                sx::http::AsyncRequest::reply_hook hook) {
+            return [hook = std::move(hook)](sx::http::expected_reply const& reply) {
+                // -100 reports internal request setup, not a webhook response.
+                if(hook && (!reply || reply->response.first > 0)) hook(reply);
+            };
         }
 
         void sift_request_started(std::size_t bytes, bool content) {
@@ -587,9 +589,11 @@ namespace sx::http::webhooks {
                                    "reason=sift-disabled-or-url-empty");
             return false;
         }
+        auto annotated = details;
+        annotated["info"]["synchronous"] = true;
         nlohmann::json message = {{"action", action},       {"id", action_id},
                                   {"source", get_hostid()}, {"identity", sift_identity()},
-                                  {"type", "proxy"},        {"details", details}};
+                                  {"type", "proxy"},        {"details", std::move(annotated)}};
         if (auto requirements = sift_requirements(); !requirements.empty())
             message["requirements"] = std::move(requirements);
         sx::helper_debug::emit(settings.service, settings.exchange_id, "action",
@@ -600,16 +604,12 @@ namespace sx::http::webhooks {
                            : to_string(message);
         sift_request_started(encoded.size(), false);
         const auto started = std::chrono::steady_clock::now();
-        if (action == "connection-stop") {
-            sx::http::AsyncRequest::emit_terminal(
-                settings, encoded, sift_tracked_hook({}, started, settings.exchange_id));
-            sift_request_accepted(true);
-            return true;
-        }
-        const auto accepted = sx::http::AsyncRequest::enqueue(
-            settings, std::move(encoded), sift_tracked_hook({}, started, settings.exchange_id));
-        sift_request_accepted(accepted);
-        return accepted;
+        sift_request_accepted(true);
+        std::stringstream log;
+        sx::http::AsyncRequest::emit_url_wait_log(
+            settings, encoded, log,
+            sift_tracked_hook({}, started, settings.exchange_id));
+        return true;
     }
 
     static std::string encode_content(
@@ -639,14 +639,16 @@ namespace sx::http::webhooks {
         return message;
     }
 
-    bool send_sift_content_wait(std::string const &action_id, nlohmann::json details,
-                                std::string_view payload, sx::http::AsyncRequest::reply_hook hook) {
+    configured_send send_sift_content(std::string const &action_id, nlohmann::json details,
+                                      std::string_view payload,
+                                      sx::http::AsyncRequest::reply_hook hook) {
         auto settings = sift_settings();
-        if (not settings.enabled or settings.url.empty() or not hook) {
+        if (not settings.enabled or settings.url.empty()) {
             sx::helper_debug::emit(settings.service, settings.exchange_id, "skipped",
-                                   "reason=sift-disabled-url-empty-or-no-hook");
-            return false;
+                                   "reason=sift-disabled-or-url-empty");
+            return {};
         }
+        details["info"]["synchronous"] = true;
         sx::helper_debug::emit(settings.service, settings.exchange_id, "content",
                                "session=" + sx::helper_debug::field(action_id) +
                                    " bytes=" + std::to_string(payload.size()));
@@ -660,15 +662,16 @@ namespace sx::http::webhooks {
         }
         auto message = encode_content(action_id, std::move(details), payload);
         if (message.empty())
-            return false;
+            return {};
         sift_request_started(message.size(), true);
-        sift_request_accepted(true);
         const auto started = std::chrono::steady_clock::now();
+        auto tracked = sift_tracked_hook(
+            std::move(hook), started, settings.exchange_id);
+        sift_request_accepted(true);
         std::stringstream log;
         sx::http::AsyncRequest::emit_url_wait_log(
-            settings, message, log,
-            sift_tracked_hook(std::move(hook), started, settings.exchange_id));
-        return true;
+            settings, message, log, std::move(tracked));
+        return {true, true};
     }
 
     struct default_callback {
@@ -907,7 +910,7 @@ namespace sx::http::webhooks {
         return send_hostname_info_list(list);
     }
 
-    static void send_action_impl(std::string const& action,
+    static bool send_action_impl(std::string const& action,
                                  std::optional<std::string> const& action_id,
                                  nlohmann::json const& details,
                                  std::shared_ptr<webhook_control_t> control = {},
@@ -968,16 +971,17 @@ namespace sx::http::webhooks {
                     }
                 };
                 if(settings) {
-                    webhook_emit(std::move(*settings), std::move(msg_str), action,
-                                 action_hook(std::move(control)),
-                                 action == "connection-content");
+                    return webhook_emit(std::move(*settings), std::move(msg_str), action,
+                                        {}, action == "connection-content");
                 } else {
-                    webhook_emit(std::move(msg_str), action, action_hook(std::move(control)),
-                                 action == "connection-content");
+                    return webhook_emit(std::move(msg_str), action,
+                                        action_hook(std::move(control)),
+                                        action == "connection-content");
                 }
 
             }
         }
+        return false;
     }
 
     void send_action(std::string const& action, nlohmann::json const& details) {
@@ -989,29 +993,29 @@ namespace sx::http::webhooks {
         send_action_impl(action, action_id, details, std::move(control));
     }
 
-    bool send_connection_start(
-            std::string const& action_id, nlohmann::json details,
+    configured_send send_configured_action(
+            std::string const& action, std::string const& action_id, nlohmann::json details,
             sx::http::AsyncRequest::reply_hook hook) {
         // Keep the endpoint and delivery mode from the same lease-owner view.
         auto settings = sx::http::AsyncRequest::settings_snapshot();
-        if(!settings.enabled) return false;
-        const bool synchronous = settings.connection_start_synchronous;
+        if(!settings.enabled) return {};
+        const bool synchronous = settings.synchronous_mode;
         details["info"]["synchronous"] = synchronous;
+        if(action == "http-connect") settings.sensitive = true;
         if(!synchronous) {
-            send_action_impl("connection-start", action_id, details, {}, std::move(settings));
-            return false;
+            return {send_action_impl(action, action_id, details, {}, std::move(settings)), false};
         }
 
         nlohmann::json message = {
-            {"action", "connection-start"}, {"id", action_id},
+            {"action", action}, {"id", action_id},
             {"source", get_hostid()}, {"type", "proxy"},
             {"details", std::move(details)}};
+        const auto payload = action == "connection-stop"
+            ? message.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace)
+            : to_string(message);
         webhook_emit_wait(
-            std::move(settings), to_string(message), "connection-start",
-            [hook = std::move(hook)](sx::http::expected_reply const& reply) {
-                if(hook && (!reply || reply->response.first > 0)) hook(reply);
-            });
-        return true;
+            std::move(settings), payload, action, decision_reply(std::move(hook)));
+        return {true, true};
     }
 
     // Send an action synchronously and deliver its response to the caller.
@@ -1037,15 +1041,25 @@ namespace sx::http::webhooks {
         return false;
     }
 
-    bool send_content_wait(std::string const& action_id, nlohmann::json details,
-                           std::string_view payload, sx::http::AsyncRequest::reply_hook hook) {
-        if(!enabled or !hook or !binary_content_enabled()) return false;
+    configured_send send_configured_content(
+            std::string const& action_id, nlohmann::json details,
+            std::string_view payload, sx::http::AsyncRequest::reply_hook hook) {
+        auto settings = sx::http::AsyncRequest::settings_snapshot();
+        if(!settings.enabled || !binary_content_enabled()) return {};
+
+        details["info"]["synchronous"] = settings.synchronous_mode;
         auto message = encode_content(action_id, std::move(details), payload);
-        if(message.empty()) return false;
-        webhook_emit_wait(message, "connection-content",
-            [hook = std::move(hook)](sx::http::expected_reply const& reply) {
-                if(!reply || reply->response.first > 0) hook(reply);
-            }, true);
-        return true;
+        if(message.empty()) return {};
+
+        if(settings.synchronous_mode) {
+            webhook_emit_wait(
+                std::move(settings), message, "connection-content",
+                decision_reply(std::move(hook)), true);
+            return {true, true};
+        }
+
+        const auto sent = webhook_emit(
+            std::move(settings), std::move(message), "connection-content", {}, true);
+        return {sent, false};
     }
 }

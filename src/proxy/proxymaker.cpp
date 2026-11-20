@@ -504,7 +504,8 @@ namespace sx::proxymaker {
                 // Also retire setup when certificate verification fails before
                 // the listener can publish a normal forwarding session.
                 details_["info"].erase("phase");
-                sx::http::webhooks::send_action("connection-stop", id_, details_, control_);
+                sx::http::webhooks::send_configured_action(
+                    "connection-stop", id_, details_, {});
                 sx::http::webhooks::send_sift_action("connection-stop", id_, details_);
             }
 
@@ -519,8 +520,8 @@ namespace sx::proxymaker {
                 if (enabled) {
                     bool valid_reply = false;
                     bool denied = false;
-                    const bool synchronous = sx::http::webhooks::send_connection_start(
-                        id_, details_, [&](sx::http::expected_reply reply) {
+                    const auto delivery = sx::http::webhooks::send_configured_action(
+                        "connection-start", id_, details_, [&](sx::http::expected_reply reply) {
                             if (!reply) return;
                             auto result = sx::proxy::parse_setup_reply(
                                 reply->response.first, reply->response.second);
@@ -541,18 +542,16 @@ namespace sx::proxymaker {
                             if (result.action == sx::proxy::setup_action::not_interested &&
                                 control_->strict()) valid_reply = false;
                         });
-                    if (synchronous && !valid_reply) {
+                    if (delivery.synchronous && !valid_reply) {
                         log::connect().war(
                             "synchronous QUIC connection-start: invalid setup reply (%s)",
                             control_->strict() ? "fail-closed" : "fail-open");
                     }
-                    if (synchronous)
+                    if (delivery.synchronous)
                         allowed_ = !denied && (valid_reply || !control_->strict());
                 }
-                auto sift_details = details_;
-                sift_details["info"]["synchronous"] = false;
                 sx::http::webhooks::send_sift_action(
-                    "connection-start", id_, sift_details);
+                    "connection-start", id_, details_);
                 return allowed_;
             }
 

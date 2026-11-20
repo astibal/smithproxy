@@ -405,6 +405,7 @@ public:
         bool enabled = false;
         std::string cfg_url;
         bool cfg_tls_verify = true;
+        bool cfg_synchronous_mode = false;
         bool sift = false;
         std::string sift_url = "http://127.0.0.1:18081/webhook";
         std::string sift_tenant_id = "default";
@@ -417,7 +418,7 @@ public:
         struct {
             std::string url;
             bool tls_verify = true;
-            bool connection_start_synchronous = false;
+            bool synchronous_mode = false;
             expiring_int timeout = expiring_int(66,0);
         } override;
 
@@ -433,9 +434,10 @@ public:
             }
             return cfg_tls_verify;
         };
-        [[nodiscard]] bool connection_start_synchronous() const {
-            return allow_api_override and not override.timeout.expired() and
-                   not override.url.empty() and override.connection_start_synchronous;
+        [[nodiscard]] bool active_synchronous_mode() const {
+            if(allow_api_override and not override.timeout.expired() and
+               not override.url.empty()) return override.synchronous_mode;
+            return cfg_synchronous_mode;
         };
 
         static inline int DEFAULT_PING_INTERVAL = 120;
