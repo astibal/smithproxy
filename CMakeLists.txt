@@ -912,6 +912,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 src/service/cli/cli_broker.cpp
                 tests/unit/service/cli_broker_tests.cpp
         )
+        target_link_options(sx_gtests_cli_broker PRIVATE "-Wl,--wrap=poll")
         add_executable(sx_gtests_api_broker
                 src/service/cli/cli_broker.cpp
                 src/service/api/api_broker.cpp

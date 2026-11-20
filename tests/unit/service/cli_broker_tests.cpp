@@ -5,6 +5,11 @@
 #include <chrono>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <poll.h>
+#include <cerrno>
+#include <fcntl.h>
 #include <thread>
 
 #include <arpa/inet.h>
@@ -15,7 +20,160 @@
 
 #include <gtest/gtest.h>
 
+// Inject persistent terminal poll events without racing close() against a worker.
+thread_local short injected_poll_event = 0;
+extern "C" int __real_poll(pollfd*, nfds_t, int);
+extern "C" int __wrap_poll(pollfd* fds, nfds_t count, int timeout) {
+    if(injected_poll_event && count == 2) {
+        fds[0].revents = injected_poll_event;
+        fds[1].revents = 0;
+        return 1;
+    }
+    return __real_poll(fds, count, timeout);
+}
+
 namespace {
+
+class DuplexRelayTest : public ::testing::Test {
+protected:
+    int left[2]{-1, -1};
+    int right[2]{-1, -1};
+    std::atomic<bool> stop{false};
+    std::atomic<bool> done{false};
+    std::thread worker;
+    int result = 0;
+    int error = 0;
+
+    void SetUp() override {
+        ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, left), 0);
+        ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, right), 0);
+        timeval timeout{2, 0};
+        for(int fd: {left[0], right[1]}) {
+            ASSERT_EQ(::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)), 0);
+            ASSERT_EQ(::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)), 0);
+        }
+    }
+    void TearDown() override {
+        stop.store(true);
+        if(worker.joinable()) worker.join();
+        for(int fd: {left[0], left[1], right[0], right[1]})
+            if(fd >= 0) ::close(fd);
+    }
+    void start(short event = 0) {
+        worker = std::thread([this, event] {
+            injected_poll_event = event;
+            result = sx::comm::cli::DuplexRelay{}.run(left[1], right[0], stop);
+            error = errno;
+            done.store(true);
+        });
+    }
+    bool wait_done() {
+        for(unsigned i = 0; i < 100 && !done.load(); ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        return done.load();
+    }
+};
+
+TEST_F(DuplexRelayTest, PollErrorTerminatesWithoutReadiness) {
+    start(POLLERR);
+    ASSERT_TRUE(wait_done());
+    EXPECT_EQ(result, -1);
+    EXPECT_EQ(error, EIO);
+}
+
+TEST_F(DuplexRelayTest, PollInvalidTerminatesWithoutReadiness) {
+    start(POLLNVAL);
+    ASSERT_TRUE(wait_done());
+    EXPECT_EQ(result, -1);
+    EXPECT_EQ(error, EBADF);
+}
+
+TEST_F(DuplexRelayTest, FullClientHangupDoesNotWaitForCore) {
+    ::close(left[0]);
+    left[0] = -1;
+    start();
+    ASSERT_TRUE(wait_done());
+    EXPECT_EQ(result, 0);
+}
+
+TEST_F(DuplexRelayTest, FullCoreHangupDoesNotWaitForClient) {
+    ::close(right[1]);
+    right[1] = -1;
+    start();
+    ASSERT_TRUE(wait_done());
+    EXPECT_EQ(result, 0);
+}
+
+TEST_F(DuplexRelayTest, HangupDrainsMoreThanOneRelayBuffer) {
+    const std::string payload(128 * 1024, 'x');
+    ASSERT_EQ(::send(left[0], payload.data(), payload.size(), MSG_NOSIGNAL),
+              static_cast<ssize_t>(payload.size()));
+    ::close(left[0]);
+    left[0] = -1;
+    start();
+    std::string received;
+    std::array<char, 8192> buffer{};
+    ssize_t count;
+    while((count = ::read(right[1], buffer.data(), buffer.size())) > 0)
+        received.append(buffer.data(), static_cast<std::size_t>(count));
+    EXPECT_EQ(count, 0);
+    EXPECT_EQ(received, payload);
+    ASSERT_TRUE(wait_done());
+    EXPECT_EQ(result, 0);
+}
+
+TEST_F(DuplexRelayTest, HungUpSourceDoesNotSpinWhileDestinationIsBlocked) {
+    const int flags = ::fcntl(right[0], F_GETFL);
+    ASSERT_GE(flags, 0);
+    ASSERT_EQ(::fcntl(right[0], F_SETFL, flags | O_NONBLOCK), 0);
+    std::string expected;
+    const std::string filler(8192, 'f');
+    ssize_t count;
+    while((count = ::send(right[0], filler.data(), filler.size(), MSG_NOSIGNAL)) > 0)
+        expected.append(filler.data(), static_cast<std::size_t>(count));
+    ASSERT_TRUE(errno == EAGAIN || errno == EWOULDBLOCK);
+    ASSERT_EQ(::send(left[0], "tail", 4, MSG_NOSIGNAL), 4);
+    expected += "tail";
+    ::close(left[0]);
+    left[0] = -1;
+    start();
+    clockid_t worker_clock;
+    ASSERT_EQ(::pthread_getcpuclockid(worker.native_handle(), &worker_clock), 0);
+    timespec before{}, after{};
+    ASSERT_EQ(::clock_gettime(worker_clock, &before), 0);
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    ASSERT_EQ(::clock_gettime(worker_clock, &after), 0);
+    const auto cpu_ns = (after.tv_sec - before.tv_sec) * 1000000000LL
+                      + after.tv_nsec - before.tv_nsec;
+    EXPECT_LT(cpu_ns, 50000000LL);
+    std::string received;
+    std::array<char, 8192> buffer{};
+    while((count = ::read(right[1], buffer.data(), buffer.size())) > 0)
+        received.append(buffer.data(), static_cast<std::size_t>(count));
+    EXPECT_EQ(count, 0);
+    EXPECT_EQ(received, expected);
+    ASSERT_TRUE(wait_done());
+    EXPECT_EQ(result, 0);
+}
+
+TEST_F(DuplexRelayTest, HalfCloseStillAllowsReply) {
+    ASSERT_EQ(::send(left[0], "request", 7, MSG_NOSIGNAL), 7);
+    ASSERT_EQ(::shutdown(left[0], SHUT_WR), 0);
+    start();
+    std::array<char, 16> buffer{};
+    ASSERT_EQ(::recv(right[1], buffer.data(), 7, MSG_WAITALL), 7);
+    EXPECT_EQ(std::string_view(buffer.data(), 7), "request");
+    ASSERT_EQ(::read(right[1], buffer.data(), buffer.size()), 0);
+    EXPECT_FALSE(done.load());
+    ASSERT_EQ(::send(right[1], "reply", 5, MSG_NOSIGNAL), 5);
+    ASSERT_EQ(::shutdown(right[1], SHUT_WR), 0);
+    ASSERT_EQ(::recv(left[0], buffer.data(), 5, MSG_WAITALL), 5);
+    EXPECT_EQ(std::string_view(buffer.data(), 5), "reply");
+    EXPECT_EQ(::read(left[0], buffer.data(), buffer.size()), 0);
+    ASSERT_TRUE(wait_done());
+    EXPECT_EQ(result, 0);
+}
+
 
 std::uint16_t unused_loopback_port() {
     const int fd = ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
@@ -81,6 +239,73 @@ TEST(CliBrokerTest, InternalBrokerRelaysBothDirections) {
     ::close(listener);
     ::close(tcp);
     EXPECT_EQ(sx::comm::cli::stop_broker(), 0);
+}
+
+unsigned long long process_cpu_ticks(pid_t pid) {
+    std::ifstream input("/proc/" + std::to_string(pid) + "/stat");
+    std::string line;
+    std::getline(input, line);
+    if(line.empty()) return ~0ULL;
+    std::istringstream fields(line.substr(line.rfind(')') + 2));
+    std::string field;
+    for(unsigned i = 3; i < 14; ++i) fields >> field;
+    unsigned long long user = 0, system = 0;
+    fields >> user >> system;
+    return user + system;
+}
+
+void check_disconnected_broker(bool reset_client) {
+    const auto port = unused_loopback_port();
+    ASSERT_NE(port, 0);
+    ASSERT_EQ(sx::comm::cli::start_internal_broker(port), 0);
+    const int tcp = connect_loopback(port);
+    ASSERT_GE(tcp, 0);
+    const int listener = sx::comm::cli::ingress_fd();
+    const int core = ::accept4(listener, nullptr, nullptr, SOCK_CLOEXEC);
+    ASSERT_GE(core, 0);
+    ASSERT_TRUE(sx::comm::cli::receive_handshake(core));
+    if(reset_client) {
+        // Abort with TCP RST while the core side deliberately stays open.
+        linger reset{1, 0};
+        ASSERT_EQ(::setsockopt(tcp, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)), 0);
+        ::close(tcp);
+    } else {
+        // Core console closes while the detached TCP client remains connected.
+        ::close(core);
+    }
+    for(unsigned i = 0; i < 100 && sx::comm::cli::stats().completed == 0; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    EXPECT_EQ(sx::comm::cli::stats().active, 0);
+    EXPECT_EQ(sx::comm::cli::stats().completed, 1);
+    const auto pid = sx::comm::cli::internal_broker_pid();
+    const auto task_path = "/proc/" + std::to_string(pid) + "/task";
+    auto thread_count = [&] {
+        return std::distance(std::filesystem::directory_iterator(task_path),
+                             std::filesystem::directory_iterator{});
+    };
+    for(unsigned i = 0; i < 100 && thread_count() != 1; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    EXPECT_EQ(thread_count(), 1);
+    const auto before = process_cpu_ticks(pid);
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    const auto after = process_cpu_ticks(pid);
+    EXPECT_NE(before, ~0ULL);
+    EXPECT_NE(after, ~0ULL);
+    // Allow scheduler/accounting noise, but reject a spinning core (~50 ticks).
+    EXPECT_LE(after - before, static_cast<unsigned long long>(::sysconf(_SC_CLK_TCK) / 20));
+    ::testing::Test::RecordProperty("idle_cpu_ticks", std::to_string(after - before));
+    if(reset_client) ::close(core);
+    else ::close(tcp);
+    ::close(listener);
+    EXPECT_EQ(sx::comm::cli::stop_broker(), 0);
+}
+
+TEST(CliBrokerTest, AbruptClientDisconnectReapsWorkerAndReturnsToIdle) {
+    check_disconnected_broker(true);
+}
+
+TEST(CliBrokerTest, ClosedCoreConsoleReapsWorkerAndReturnsToIdle) {
+    check_disconnected_broker(false);
 }
 
 TEST(CliBrokerTest, InternalBrokerStopsWhenSigtermIsBlocked) {

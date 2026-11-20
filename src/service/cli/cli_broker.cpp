@@ -176,28 +176,67 @@ int DuplexRelay::run(int left, int right, const std::atomic<bool>& stop,
         if(flags < 0 || ::fcntl(fd, F_SETFL, flags | O_NONBLOCK) != 0) return -1;
     }
     while(!stop.load(std::memory_order_relaxed)) {
-        if(idle_timeout_ms > 0
-           && std::chrono::steady_clock::now() - last_activity
-               >= std::chrono::milliseconds(idle_timeout_ms)) {
+        const bool idle_timed_out = idle_timeout_ms > 0
+            && std::chrono::steady_clock::now() - last_activity
+                >= std::chrono::milliseconds(idle_timeout_ms);
+        if(idle_timed_out) {
             errno = ETIMEDOUT;
             return -1;
         }
-        if(directions[0].eof && directions[1].eof
-           && directions[0].size == directions[0].offset
-           && directions[1].size == directions[1].offset) return 0;
+        const bool input_finished = directions[0].eof && directions[1].eof;
+        const bool buffers_drained = directions[0].size == directions[0].offset
+            && directions[1].size == directions[1].offset;
+        if(input_finished && buffers_drained) return 0;
         pollfd descriptors[2]{{left, 0, 0}, {right, 0, 0}};
         for(unsigned i = 0; i < 2; ++i) {
             auto& direction = directions[i];
-            if(!direction.eof && direction.size == direction.offset) descriptors[i].events |= POLLIN;
-            if(direction.size > direction.offset) descriptors[1U - i].events |= POLLOUT;
+            const bool buffer_empty = direction.size == direction.offset;
+            const bool can_read = !direction.eof && buffer_empty;
+            if(can_read) descriptors[i].events |= POLLIN;
+            if(!buffer_empty) descriptors[1U - i].events |= POLLOUT;
+        }
+        // poll reports HUP/ERR even with events == 0. Ignore endpoints that
+        // cannot currently make progress (including while draining a buffer).
+        for(auto& descriptor: descriptors) {
+            if(descriptor.events == 0) descriptor.fd = -1;
         }
         int ready;
-        do { ready = ::poll(descriptors, 2, 250); } while(ready < 0 && errno == EINTR);
+        bool poll_interrupted;
+        do {
+            ready = ::poll(descriptors, 2, 250);
+            poll_interrupted = ready < 0 && errno == EINTR;
+        } while(poll_interrupted);
         if(ready < 0) return -1;
         for(unsigned i = 0; i < 2; ++i) {
+            const bool invalid_descriptor = descriptors[i].revents & POLLNVAL;
+            const bool poll_error = descriptors[i].revents & POLLERR;
+            const bool hung_up = descriptors[i].revents & POLLHUP;
+            if(invalid_descriptor) { errno = EBADF; return -1; }
+            if(poll_error) {
+                int error = 0;
+                socklen_t length = sizeof(error);
+                if(::getsockopt(descriptors[i].fd, SOL_SOCKET, SO_ERROR, &error, &length) != 0)
+                    return -1;
+                errno = error ? error : EIO;
+                return -1;
+            }
+            if(hung_up) {
+                // A full hangup cannot receive replies. Stop the reverse
+                // direction, but drain any remaining input before forwarding EOF.
+                // A read EOF alone remains a half-close and allows replies.
+                auto& reverse = directions[1U - i];
+                reverse.eof = true;
+                reverse.offset = reverse.size;
+            }
+        }
+        for(unsigned i = 0; i < 2; ++i) {
             auto& direction = directions[i];
-            if((descriptors[i].revents & (POLLIN | POLLHUP)) && !direction.eof
-               && direction.size == direction.offset) {
+            const bool hung_up = descriptors[i].revents & POLLHUP;
+            const bool read_ready = descriptors[i].revents & POLLIN;
+            const bool buffer_empty = direction.size == direction.offset;
+            const bool can_read = !direction.eof && buffer_empty;
+            const bool should_read = can_read && (read_ready || hung_up);
+            if(should_read) {
                 const auto count = ::read(direction.source, direction.data.data(), direction.data.size());
                 if(count > 0) {
                     direction.size = static_cast<std::size_t>(count);
@@ -205,9 +244,17 @@ int DuplexRelay::run(int left, int right, const std::atomic<bool>& stop,
                     last_activity = std::chrono::steady_clock::now();
                 }
                 else if(count == 0) { direction.eof = true; ::shutdown(direction.destination, SHUT_WR); }
-                else if(errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) return -1;
+                else {
+                    const bool would_block = errno == EAGAIN || errno == EWOULDBLOCK;
+                    const bool interrupted = errno == EINTR;
+                    const bool retryable = would_block || interrupted;
+                    if(!retryable) return -1;
+                    if(hung_up && would_block) { errno = ECONNRESET; return -1; }
+                }
             }
-            if((descriptors[1U - i].revents & POLLOUT) && direction.size > direction.offset) {
+            const bool write_ready = descriptors[1U - i].revents & POLLOUT;
+            const bool data_pending = direction.size > direction.offset;
+            if(write_ready && data_pending) {
                 const auto count = ::send(direction.destination, direction.data.data() + direction.offset,
                                           direction.size - direction.offset, MSG_NOSIGNAL);
                 if(count > 0) {
@@ -220,7 +267,13 @@ int DuplexRelay::run(int left, int right, const std::atomic<bool>& stop,
                     auto* direct_counter = i == 0 ? bytes_left_to_right : bytes_right_to_left;
                     if(direct_counter) direct_counter->fetch_add(static_cast<std::uint64_t>(count));
                 }
-                else if(count < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) return -1;
+                else if(count == 0) { errno = EPIPE; return -1; }
+                else {
+                    const bool would_block = errno == EAGAIN || errno == EWOULDBLOCK;
+                    const bool interrupted = errno == EINTR;
+                    const bool retryable = would_block || interrupted;
+                    if(!retryable) return -1;
+                }
             }
         }
     }
