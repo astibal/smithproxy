@@ -162,6 +162,12 @@ class PortBindRace(RuntimeError):
     """A selected ephemeral port was claimed before Smithproxy could bind it."""
 
 
+def listener_bind_failed(output: str) -> bool:
+    """Recognize both redirect listeners; TLS startup can race the first client."""
+    return any(f"error binding {listener} on port/path" in output
+               for listener in ("redir-tcp", "ssl-rdr"))
+
+
 def replace_setting(text: str, name: str, value: str) -> str:
     result, count = re.subn(
         rf"(?m)^(\s*{re.escape(name)}\s*=\s*).*$", rf"\g<1>{value}", text, count=1)
@@ -448,7 +454,7 @@ def _run_case(binary: Path, source: Path, runtime: Path, tls: bool,
         while time.monotonic() < deadline:
             if process.poll() is not None:
                 output, _ = process.communicate()
-                if "error binding redir-tcp on port/path" in output:
+                if listener_bind_failed(output):
                     raise PortBindRace(output)
                 raise AssertionError(f"smithproxy exited early:\n{output}")
             try:
@@ -587,11 +593,18 @@ def _run_case(binary: Path, source: Path, runtime: Path, tls: bool,
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=5)
-        if failed and process.stdout and not process.stdout.closed:
-            print(process.stdout.read()[-12000:], file=sys.stderr)
-        if failed and runtime_log.exists():
-            print(runtime_log.read_text(errors="replace")[-30000:], file=sys.stderr)
+        output = (process.stdout.read()
+                  if failed and process.stdout and not process.stdout.closed else "")
+        log_output = (runtime_log.read_text(errors="replace")
+                      if failed and runtime_log.exists() else "")
+        if failed:
+            print(output[-12000:], file=sys.stderr)
+            print(log_output[-30000:], file=sys.stderr)
         origin.close()
+        # A connect can succeed before startup reports a listener collision.
+        # Retry only with explicit bind-failure evidence, never on TLS timeout alone.
+        if failed and listener_bind_failed(output + log_output):
+            raise PortBindRace(output + log_output) from failure
         if process.returncode not in (0, -15) and not isinstance(failure, PortBindRace):
             output = (process.stdout.read()
                       if process.stdout and not process.stdout.closed else "")
