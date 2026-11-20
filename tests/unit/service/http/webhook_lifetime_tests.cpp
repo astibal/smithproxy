@@ -155,104 +155,6 @@ TEST(WebhookRetirement, FailingHookAndFailingDiagnosticDoNotSkipStop) {
     EXPECT_TRUE(stop_attempted);
 }
 
-namespace {
-
-// Exercise the real admission gate, libcurl request and receiver, not a mocked
-// enqueue result. Zero queue capacity deterministically forces the fallback.
-void terminal_delivery(bool saturated) {
-    using Request = sx::http::AsyncRequest;
-    const int listener = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
-    ASSERT_GE(listener, 0);
-    sockaddr_in address{};
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    ASSERT_EQ(bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
-    ASSERT_EQ(listen(listener, 4), 0);
-    socklen_t size = sizeof(address);
-    ASSERT_EQ(getsockname(listener, reinterpret_cast<sockaddr*>(&address), &size), 0);
-
-    const std::string payload = R"({"action":"connection-stop","id":"retired-session"})";
-    std::promise<std::string> received;
-    auto wire = received.get_future();
-    std::atomic_int requests{0};
-    std::thread receiver([&] {
-        std::string message;
-        pollfd ready{listener, POLLIN, 0};
-        while(poll(&ready, 1, requests == 0 ? 5000 : 200) > 0) {
-            const int client = accept(listener, nullptr, nullptr);
-            if(client < 0) break;
-            ++requests;
-            timeval timeout{2, 0};
-            setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-            char buffer[1024];
-            while(message.find(payload) == std::string::npos) {
-                const auto count = recv(client, buffer, sizeof(buffer), 0);
-                if(count <= 0) break;
-                message.append(buffer, count);
-            }
-            const std::string response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}";
-            send(client, response.data(), response.size(), MSG_NOSIGNAL);
-            close(client);
-        }
-        received.set_value(std::move(message));
-    });
-
-    const auto capacity = Request::config::max_pending;
-    if(saturated) Request::config::max_pending = 0;
-    Request::request_settings settings;
-    settings.enabled = true;
-    settings.url = "http://127.0.0.1:" + std::to_string(ntohs(address.sin_port)) + "/";
-    auto completed = std::make_shared<std::promise<long>>();
-    auto status = completed->get_future();
-    Request::emit_terminal(settings, payload, [completed](const Request::expected_reply& reply) {
-        if(reply && reply->response.first != -100) completed->set_value(reply->response.first);
-    });
-    receiver.join();
-    EXPECT_EQ(status.wait_for(std::chrono::seconds(2)), std::future_status::ready);
-    if(status.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
-        EXPECT_EQ(status.get(), 200);
-    }
-    EXPECT_NE(wire.get().find(payload), std::string::npos);
-    EXPECT_EQ(requests, 1); // accepted async jobs must never also take the fallback
-    Request::config::max_pending = capacity;
-    close(listener);
-}
-} // namespace
-
-TEST(WebhookRetirement, FullQueueFallsBackToDirectDelivery) { terminal_delivery(true); }
-TEST(WebhookRetirement, DaemonShutdownReportsTransportFailure) {
-    // Global daemon termination aborts libcurl by design. Unlike session
-    // retirement, it cannot promise delivery; it must still report failure.
-    if(!Log::instance()) Log::init();
-    using Request = sx::http::AsyncRequest;
-    const auto previous = SmithProxy::instance().terminate_flag.exchange(true);
-    Request::request_settings settings;
-    settings.enabled = true;
-    settings.url = "http://127.0.0.1:1/";
-    int failures = 0;
-    Request::emit_terminal(settings, "stop", [&](auto const& reply) {
-        if(reply && reply->response.first == -100) return;
-        ++failures;
-        EXPECT_TRUE(reply.has_value());
-        if(reply) { EXPECT_EQ(reply->response.first, 600); }
-    });
-    SmithProxy::instance().terminate_flag = previous;
-    EXPECT_EQ(failures, 1);
-}
-TEST(WebhookRetirement, AcceptedQueueJobIsNotSentTwice) { terminal_delivery(false); }
-
-TEST(WebhookRetirement, DisabledDestinationReportsFailureWithoutNetworkIO) {
-    sx::http::AsyncRequest::request_settings settings;
-    settings.url = "http://127.0.0.1:1/";
-    int callbacks = 0;
-    sx::http::AsyncRequest::emit_terminal(settings, "stop", [&](auto const& reply) {
-        ++callbacks;
-        ASSERT_TRUE(reply.has_value());
-        EXPECT_EQ(reply->response.first, 600);
-    });
-    EXPECT_EQ(callbacks, 1);
-}
-
 TEST(HelperHttpDebug, RejectedRequestHasReasonAndDoesNotLeakEndpointSecrets) {
     CaptureHelperHttp capture;
     sx::http::AsyncRequest::request_settings settings;
@@ -272,6 +174,7 @@ TEST(HelperHttpDebug, RejectedRequestHasReasonAndDoesNotLeakEndpointSecrets) {
 
 TEST(HelperLogging, CategoryAndTerminalLevelsWorkWithoutInternalDebug) {
     using namespace sx::helper_debug;
+    if(!Log::instance()) Log::init();
     const auto old_sink = sink.load();
     const auto old_filter = filter.load();
     install_logging();

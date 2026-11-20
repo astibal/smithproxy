@@ -195,13 +195,13 @@ if os.environ.get('POLICY_TEST') == '1':
     text, count = re.subn(r'(policy\s*=\s*\()', r'\1\n' + policy_cases, text, count=1)
     if address_count != 1 or port_count != 1 or count != 1: raise RuntimeError('cannot inject policy suite objects/rules')
 if quic_test:
-    # Content-profile switches do not disable transport/stream admission
-    # webhooks. Throughput must exclude those synchronous HTTP round trips too.
+    # The lifetime contract verifies setup/content/stop ordering, so opt into
+    # synchronous delivery explicitly. Throughput excludes those round trips.
     quic_throughput = os.environ.get('QUIC_THROUGHPUT_TEST') == '1'
     webhook_enabled = 'FALSE' if quic_throughput else 'TRUE'
     text = text.replace('settings = {', 'settings = {\n'
                         f'    webhook = {{ enabled = {webhook_enabled}; tls_verify = FALSE; '
-                        'url = "http://127.0.0.1:59090/"; };', 1)
+                        'synchronous_mode = TRUE; url = "http://127.0.0.1:59090/"; };', 1)
     if os.environ.get('QUIC_LAB') != '1':
         raise RuntimeError('QUIC_TEST requires QUIC_LAB=1')
     text, port_count = re.subn(

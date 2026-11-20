@@ -73,7 +73,7 @@ class AsyncRequest {
         std::string url;
         std::string dns_servers;
         bool verify_tls = true;
-        bool connection_start_synchronous = false;
+        bool synchronous_mode = false;
         std::string bind_interface;
         std::string unix_socket_path;
         helper_debug::Service service = helper_debug::Service::webhook;
@@ -169,8 +169,8 @@ class AsyncRequest {
         settings.enabled = factory->settings_webhook.enabled;
         settings.url = factory->settings_webhook.active_url();
         settings.verify_tls = factory->settings_webhook.active_tls_verify();
-        settings.connection_start_synchronous =
-            factory->settings_webhook.connection_start_synchronous();
+        settings.synchronous_mode =
+            factory->settings_webhook.active_synchronous_mode();
         settings.bind_interface = factory->settings_webhook.bind_interface;
         settings.unix_socket_path = sx::comm::webhook::transport_path();
         std::ostringstream dns;
@@ -380,23 +380,6 @@ class AsyncRequest {
                                " pending=" + std::to_string(pending_requests.load()));
         return ret > 0;
     };
-
-    // Retirement cannot retain the proxy until a later queue retry: its owner
-    // destroys it immediately after finalize(). If the bounded queue rejects
-    // a terminal notification, perform one direct, timeout-bounded request.
-    // Accepted jobs are never repeated here (enqueue is not HTTP delivery).
-    static void emit_terminal(request_settings const &settings, std::string const &pay,
-                              reply_hook const &hook) {
-        auto effective = settings;
-        if (!effective.exchange_id)
-            effective.exchange_id = helper_debug::next_id();
-        if (enqueue(effective, pay, hook))
-            return;
-        helper_debug::emit(effective.service, effective.exchange_id, "fallback",
-                           "mode=synchronous");
-        std::stringstream log;
-        emit_url_wait_log(effective, pay, log, hook);
-    }
 
     static bool emit_url(std::string const &url, std::string const &pay, reply_hook const &hook) {
         auto settings = settings_snapshot();

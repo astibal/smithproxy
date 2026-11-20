@@ -529,12 +529,14 @@ ProxyHooks::HttpConnectDecision ProxyHooks::http_connect(
         const auto details = http_connect_details(proxy, args);
         const auto& envelope = details.at("http_connect").at("envelope");
 
-        sx::http::webhooks::send_action_wait("http-connect", proxy.to_connection_ID(), details,
+        const auto delivery = sx::http::webhooks::send_configured_action(
+            "http-connect", proxy.to_connection_ID(), details,
             [&](sx::http::expected_reply reply) {
                 HttpConnectReplyArgs reply_args{args, reply, envelope, decision};
 
                 http_connect_reply(proxy, reply_args);
             });
+        if(!delivery.synchronous) return {};
     } catch(const nlohmann::json::exception&) {
         // A client-supplied hostname may not be valid UTF-8. An unencodable
         // observation follows the same policy as an unavailable callback.
@@ -628,23 +630,21 @@ bool ProxyHooks::start(MitmProxy& proxy, const StartArgs&) {
     if (enabled) {
         bool valid_reply = false;
         auto& log = proxy.log_content;
-        const bool synchronous = sx::http::webhooks::send_connection_start(
-            proxy.to_connection_ID(), details,
+        const auto delivery = sx::http::webhooks::send_configured_action(
+            "connection-start", proxy.to_connection_ID(), details,
             [&](sx::http::expected_reply reply) {
                 StartReplyArgs reply_args{reply};
                 reply_args.local_rewrite = local_rewrite;
                 valid_reply = start_reply(proxy, reply_args);
             });
-        if (synchronous && !valid_reply) {
+        if (delivery.synchronous && !valid_reply) {
             _war("synchronous connection-start: missing or invalid setup reply (%s)",
                  proxy.webhook_control_->strict() ? "fail-closed" : "fail-open");
             if (proxy.webhook_control_->strict()) proxy.state().dead(true);
         }
     }
-    auto sift_details = details;
-    sift_details["info"]["synchronous"] = false;
     sx::http::webhooks::send_sift_action(
-        "connection-start", proxy.to_connection_ID(), sift_details);
+        "connection-start", proxy.to_connection_ID(), details);
 
     if (proxy.state().dead()) proxy.shutdown();
     return !proxy.state().dead();
@@ -714,8 +714,8 @@ void ProxyHooks::stop(const Epitaph& epitaph, const StopArgs&) {
             });
         }
         attempt("webhook stop", [&] {
-            sx::http::webhooks::send_action(
-                "connection-stop", epitaph.connection_id, epitaph.details);
+            sx::http::webhooks::send_configured_action(
+                "connection-stop", epitaph.connection_id, epitaph.details, {});
         });
     }
     attempt("Sift stop", [&] {
@@ -824,7 +824,7 @@ bool ProxyHooks::server(MitmProxy& proxy, const ServerArgs& args) {
     // cannot overtake them. An unavailable observer does not authorize traffic.
     // Native policy remains in charge; ordinary observer failure is fail-open.
     bool proceed = !proxy.webhook_control_->strict();
-    sx::http::webhooks::send_action_wait(
+    const auto delivery = sx::http::webhooks::send_configured_action(
         "server-lifecycle", proxy.to_connection_ID(), {{"server", observation}},
         [&](const sx::http::expected_reply& reply) {
             if(!reply || reply->response.first != 200) {
@@ -845,6 +845,7 @@ bool ProxyHooks::server(MitmProxy& proxy, const ServerArgs& args) {
             }
         });
 
+    if(!delivery.synchronous) return true;
     return proceed;
 }
 
@@ -909,7 +910,7 @@ nlohmann::json ProxyHooks::quic(const QuicArgs& args) {
     const auto& envelope = args.observation.at("envelope");
     const auto wire = args.meta ? handshake_metadata(args.observation, true) : args.observation;
 
-    sx::http::webhooks::send_action_wait(
+    const auto delivery = sx::http::webhooks::send_configured_action(
         "quic-lifecycle", args.connection_id, {{"quic", wire}},
         [&](const sx::http::expected_reply& reply) {
             if(!reply || reply->response.first != 200) return;
@@ -928,6 +929,7 @@ nlohmann::json ProxyHooks::quic(const QuicArgs& args) {
             decision = std::move(body);
         });
 
+    if(!delivery.synchronous) decision["proceed"] = true;
     return decision;
 }
 
@@ -939,7 +941,7 @@ bool ProxyHooks::tls_exchange(MitmProxy& proxy, const nlohmann::json& observatio
     // Preserve callback order before application events. As with server hooks,
     // observer unavailability is fail-open unless strict control was negotiated.
     bool proceed = !proxy.webhook_control_->strict();
-    sx::http::webhooks::send_action_wait(
+    const auto delivery = sx::http::webhooks::send_configured_action(
         "tls-lifecycle", proxy.to_connection_ID(), {{"tls", wire}},
         [&](const sx::http::expected_reply& reply) {
             if(!reply || reply->response.first != 200) {
@@ -962,6 +964,7 @@ bool ProxyHooks::tls_exchange(MitmProxy& proxy, const nlohmann::json& observatio
             }
         });
 
+    if(!delivery.synchronous) return true;
     return proceed;
 }
 
@@ -1050,7 +1053,7 @@ ProxyHooks::TlsOfferDecision ProxyHooks::tls_offer(MitmProxy& proxy,
     TlsOfferDecision decision;
     decision.proceed = !proxy.webhook_control_->strict();
 
-    sx::http::webhooks::send_action_wait(
+    const auto delivery = sx::http::webhooks::send_configured_action(
         "tls-lifecycle", proxy.to_connection_ID(), {{"tls", wire}},
         [&](const sx::http::expected_reply& reply) {
             if(!reply || reply->response.first != 200) {
@@ -1132,6 +1135,8 @@ ProxyHooks::TlsOfferDecision ProxyHooks::tls_offer(MitmProxy& proxy,
 
             decision = std::move(candidate);
         });
+
+    if(!delivery.synchronous) decision.proceed = true;
 
     return decision;
 }
@@ -1345,7 +1350,7 @@ bool ProxyHooks::content(MitmProxy& proxy, const ContentArgs& args) {
 
         if(sent_bytes <= payload_limit) {
             sent_bytes += buffer.size();
-            sx::http::webhooks::send_sift_content_wait(
+            sx::http::webhooks::send_sift_content(
                 proxy.to_connection_ID(), j,
                 std::string_view(reinterpret_cast<const char *>(buffer.data()), buffer.size()),
                 response_hook);
@@ -1358,20 +1363,22 @@ bool ProxyHooks::content(MitmProxy& proxy, const ContentArgs& args) {
                                        " limit=" + std::to_string(payload_limit));
         }
     }
+    bool regular_synchronous = false;
     if (args.regular_webhook) {
-        const auto binary_sent = sx::http::webhooks::send_content_wait(
+        auto delivery = sx::http::webhooks::send_configured_content(
             proxy.to_connection_ID(), j,
             std::string_view(reinterpret_cast<const char*>(buffer.data()), buffer.size()), response_hook);
-        if(!binary_sent) {
+        if(!delivery.sent) {
             j["info"]["content"] = b64_encode(buffer);
-            sx::http::webhooks::send_action_wait(
+            delivery = sx::http::webhooks::send_configured_action(
                 "connection-content", proxy.to_connection_ID(), j, response_hook);
         }
+        regular_synchronous = delivery.synchronous;
     }
 
     // No response (including a skipped request), HTTP failure or invalid JSON:
     // strict connections must not forward the unprocessed content.
-    if(args.regular_webhook && !exchange.reply_received && proxy.webhook_control_->strict()) {
+    if(regular_synchronous && !exchange.reply_received && proxy.webhook_control_->strict()) {
         buffer.size(0);
         proxy.state().dead(true);
         return true;

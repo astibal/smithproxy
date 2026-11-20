@@ -311,7 +311,7 @@ try:
             eventually(lambda: api('status/ping'))
             lease = api('v2/webhook/lease', {
                 'url': 'http://127.0.0.1:18081/', 'tls_verify': False,
-                'ttl_seconds': 60, 'connection_start_synchronous': True})
+                'ttl_seconds': 60, 'synchronous_mode': True})
             assert lease.get('status') == 'acquired', lease
             if label.startswith('quic'):
                 if label == 'quic-replacement':

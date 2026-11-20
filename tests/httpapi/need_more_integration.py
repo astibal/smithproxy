@@ -161,6 +161,7 @@ def main():
         text = config.read_text().replace('settings = {',
             'settings = {\n webhook = { enabled = true; tls_verify = false; '
             f'url = "http://127.0.0.1:{server.server_port}/"; '
+            f'synchronous_mode = {"false" if args.setup_only else "true"}; '
             f'api_override = {"true" if args.setup_only else "false"}; }};', 1)
         text = text.replace('        write_payload = FALSE;',
                             '        write_payload = FALSE; webhook_enable = TRUE; webhook_lock_traffic = FALSE;', 1)
@@ -296,7 +297,7 @@ def main():
                     data=json.dumps({**tokens, 'params': {
                         'url': f'http://127.0.0.1:{server.server_port}/',
                         'tls_verify': False, 'ttl_seconds': 60,
-                        'connection_start_synchronous': True}}).encode(),
+                        'synchronous_mode': True}}).encode(),
                     headers={'Content-Type': 'application/json'})
                 with api_opener.open(register, timeout=5) as response:
                     lease = json.load(response)
@@ -316,7 +317,7 @@ def main():
                         data=json.dumps({**tokens, 'params': {
                             'url': f'http://127.0.0.1:{server.server_port}/',
                             'tls_verify': False, 'ttl_seconds': 60,
-                            'connection_start_synchronous': False}}).encode(),
+                            'synchronous_mode': False}}).encode(),
                         headers={'Content-Type': 'application/json'})
                     with api_opener.open(async_register, timeout=5) as response:
                         assert json.load(response)['status'] == 'acquired'

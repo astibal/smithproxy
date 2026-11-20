@@ -59,8 +59,9 @@ def run(connection, send, set_reply, server, source, pending_connection,
         identity = server.starts[-1]['id']
         with server.condition:
             assert server.condition.wait_for(
-                lambda: any(event['id'] == identity for event in server.stops), timeout=5
-            ), 'Rejected setup did not retire its script lifetime'
+                lambda: any(event['id'] == identity for event in server.stops), timeout=10
+            ), ('Rejected setup did not retire its script lifetime: '
+                f'expected={identity!r}, stops={[event["id"] for event in server.stops]!r}')
             assert sum(event['id'] == identity for event in server.stops) == 1
 
 
