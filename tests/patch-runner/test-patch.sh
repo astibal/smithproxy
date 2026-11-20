@@ -607,7 +607,10 @@ run_distributed_sections() {
 
     cp -a "$HERE" "$bundle_local/tests/patch-runner"
     cp "$ROOT/tests/template_resources.py" "$bundle_local/tests/"
-    mkdir -p "$bundle_local/src/resources"
+    # Section runners read these headers to version their generated fixtures.
+    mkdir -p "$bundle_local/src/resources" "$bundle_local/src/service/cfgapi"
+    cp "$ROOT/src/main.hpp" "$bundle_local/src/"
+    cp "$ROOT/src/service/cfgapi/cfgapi.hpp" "$bundle_local/src/service/cfgapi/"
     cp "$ROOT/src/resources/default_templates.cpp" "$bundle_local/src/resources/"
     cp "$ROOT/etc/smithproxy.cfg" "$bundle_local/etc/"
     python3 "$ROOT/tests/template_resources.py" --source "$ROOT" --output "$bundle_local/etc/msg/en"
