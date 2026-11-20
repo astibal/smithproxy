@@ -15,6 +15,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import signal
@@ -59,6 +60,18 @@ def copy_lab(source, binary, work):
     text = text.replace("allow_invalid_certs = FALSE", "allow_invalid_certs = TRUE")
     text = text.replace("allow_self_signed = FALSE", "allow_self_signed = TRUE")
     config.write_text(text)
+
+
+def configuration_environment(source):
+    """Version the fixture from the tested source, including coordinator bundles."""
+    schema = re.search(r"\bSCHEMA_VERSION\s*=\s*(\d+)\s*;",
+                       (source / "src/service/cfgapi/cfgapi.hpp").read_text())
+    version = re.search(r'#define\s+SMITH_VERSION\s+"([0-9A-Za-z.+_-]+)"',
+                        (source / "src/main.hpp").read_text())
+    if not schema or not version:
+        raise RuntimeError("cannot determine tested configuration schema and version")
+    return {"SMITHPROXY_CONFIG_SCHEMA": schema.group(1),
+            "SMITHPROXY_CONFIG_VERSION": version.group(1)}
 
 
 def wait_for_lab(lab, console, work):
@@ -172,6 +185,7 @@ def main():
     try:
         console = output / "lab-console.log"
         lab_env = os.environ.copy()
+        lab_env.update(configuration_environment(source))
         lab_env.update(CLIENT_NS="sxr-client", SERVER_NS="sxr-origin", DATA_NS="sxr-data",
                        LAB_IN_IF="sxrpi", LAB_OUT_IF="sxrpo",
                        LAB_API_PORT=str(free_port()), LAB_CLI_PORT=str(free_port()),
