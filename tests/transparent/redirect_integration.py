@@ -411,7 +411,7 @@ def _run_case(binary: Path, source: Path, runtime: Path, tls: bool,
     text = text.replace(
         "settings = {",
         "settings = {\n    accept_api = FALSE;\n"
-        "    webhook = { enabled = true; "
+        "    webhook = { enabled = true; synchronous_mode = true; "
         f'url = "http://127.0.0.1:{webhook_port}/events"; '
         "tls_verify = false; };",
         1)
