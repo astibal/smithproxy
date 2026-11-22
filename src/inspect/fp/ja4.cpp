@@ -639,45 +639,45 @@ namespace sx::ja4 {
     }
 
     // Input starts with the four-byte TLS handshake header, not a TLS record header.
-    int TLSClientHello::from_buffer(const std::vector<uint8_t> &buffer) {
+    int TLSClientHello::from_buffer(const uint8_t* buffer, size_t size) {
         clear();
 
         size_t offset = 0;
 
         // skip start
-        if (buffer.size() < 5) {
+        if (!buffer || size < 5) {
             return 1;
         }
 
         offset += 4;
 
         // TLS version
-        if (offset + 2 > buffer.size()) {
+        if (offset + 2 > size) {
             return 2;
         }
         version = (buffer[offset] << 8) | buffer[offset + 1];
         offset += 2;
 
         // random (32 bytes)
-        if (offset + 32 > buffer.size()) {
+        if (offset + 32 > size) {
             return 3;
         }
         offset += 32;
 
         // session ID length and session ID
-        if (offset + 1 > buffer.size()) {
+        if (offset + 1 > size) {
             return 4;
         }
         uint8_t session_id_length = buffer[offset];
 
         offset += 1;
-        if (offset + session_id_length > buffer.size()) {
+        if (offset + session_id_length > size) {
             return 5;
         }
         offset += session_id_length;
 
         // ciphers length
-        if (offset + 2 > buffer.size()) {
+        if (offset + 2 > size) {
             return 6;
         }
         size_t cipher_suite_length = (buffer[offset] << 8) | buffer[offset + 1];
@@ -685,7 +685,7 @@ namespace sx::ja4 {
 
         // extract ciphers
         if ((cipher_suite_length & 1U) != 0 ||
-            cipher_suite_length > buffer.size() - offset) {
+            cipher_suite_length > size - offset) {
             return 7;
         }
         for (size_t i = 0; i < cipher_suite_length; i += 2) {
@@ -695,35 +695,35 @@ namespace sx::ja4 {
         offset += cipher_suite_length;
 
         // skip compression len and compression
-        if (offset + 1 > buffer.size()) {
+        if (offset + 1 > size) {
             return 8;
         }
         uint8_t compression_methods_length = buffer[offset];
         if (compression_methods_length == 0) return 9;
         offset += 1;
-        if (offset + compression_methods_length > buffer.size()) {
+        if (offset + compression_methods_length > size) {
             return 9;
         }
         offset += compression_methods_length;
 
         // Extensions are optional in legacy ClientHello messages. Their
         // length field itself is absent when the message ends here.
-        if (offset == buffer.size()) return 0;
+        if (offset == size) return 0;
 
         // extension length
-        if (offset + 2 > buffer.size()) {
+        if (offset + 2 > size) {
             return 10;
         }
         size_t extensions_length = (buffer[offset] << 8) | buffer[offset + 1];
         offset += 2;
 
         // extract extensions
-        if (extensions_length != buffer.size() - offset) {
+        if (extensions_length != size - offset) {
             return 11;
         }
         std::vector<uint16_t> seen_extensions;
         for (size_t i = 0; i < extensions_length;) {
-            //if (offset + i + 4 > buffer.size()) {
+            //if (offset + i + 4 > size) {
             if (i > extensions_length || extensions_length - i < 4) {
                 return 12;
             }

@@ -3,6 +3,7 @@
 
 #include "proxy/multiflow/mfproxy.hpp"
 #include "proxy/trafficcapture.hpp"
+#include "proxy/proxymaker_connect.hpp"
 
 #include <functional>
 #include <string>
@@ -24,6 +25,7 @@ struct flow_proxy_context {
     std::string parent_connection_id = {}; ///< Physical transport webhook identity.
     bool rewrite_requested = false; ///< Reservation inherited from transport setup.
     std::string transport_name = "mf"; ///< CLI endpoint prefix for this transport.
+    proxymaker::ClientFingerprints client_fingerprints = {}; ///< Original downstream QUIC offer.
 };
 
 /**

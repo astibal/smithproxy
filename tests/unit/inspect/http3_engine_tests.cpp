@@ -944,3 +944,44 @@ TEST(Http3Engine, NormalizedSettingsRemainSeparateInEndpointHistory) {
     EXPECT_TRUE(views.fork_error().empty());
 }
 } // namespace
+
+TEST(Http3Fingerprint, RequestMetadataSurvivesResponseAndTrailers) {
+    auto views = make_views();
+    views.context(E::Client).options.http.ja4h = true;
+    pass(views, E::Client, 0, encode_fields({
+        {":method", "GET"}, {":scheme", "https"}, {":authority", "example.com"},
+        {":path", "/"}, {"accept", "*/*"}, {"accept-language", "en-US"}}));
+    auto const original = h3::metadata(views.context(E::Client), 0, E::Client);
+    ASSERT_TRUE(original.contains("flow.http3.ja4h"));
+    const auto fingerprint = original["flow.http3.ja4h"].get<std::string>();
+    EXPECT_EQ("ge30nn02enus", fingerprint.substr(0, 12));
+    pass(views, E::Server, 0, encode_fields({{":status", "200"}, {"server", "test"}}));
+    pass(views, E::Client, 0, encode_fields({{"x-trailer", "done"}}));
+    EXPECT_EQ(fingerprint, h3::metadata(views.context(E::Client), 0, E::Client)["flow.http3.ja4h"]);
+
+    pass(views, E::Client, 4, encode_fields({
+        {":method", "POST"}, {":scheme", "https"}, {":authority", "example.com"},
+        {":path", "/"}, {"accept", "*/*"}}));
+    auto second = h3::metadata(views.context(E::Client), 4, E::Client)["flow.http3.ja4h"].get<std::string>();
+    EXPECT_EQ("po30nn010000", second.substr(0, 12));
+    EXPECT_EQ(fingerprint, h3::metadata(views.context(E::Client), 0, E::Client)["flow.http3.ja4h"]);
+}
+
+TEST(Http3Fingerprint, DisabledAndWireHeaderOrder) {
+    const auto request = [](bool reverse) {
+        std::vector<std::pair<std::string, std::string>> fields {
+            {":method", "GET"}, {":scheme", "https"}, {":authority", "e.test"}, {":path", "/"},
+            {"accept", "*/*"}, {"user-agent", "test"}};
+        if (reverse) std::swap(fields[4], fields[5]);
+        return encode_fields(fields);
+    };
+    auto disabled = make_views();
+    pass(disabled, E::Client, 0, request(false));
+    EXPECT_FALSE(h3::metadata(disabled.context(E::Client), 0, E::Client).contains("flow.http3.ja4h"));
+    auto enabled = make_views();
+    enabled.context(E::Client).options.http.ja4h = true;
+    pass(enabled, E::Client, 0, request(false));
+    pass(enabled, E::Client, 4, request(true));
+    EXPECT_NE(h3::metadata(enabled.context(E::Client), 0, E::Client)["flow.http3.ja4h"],
+              h3::metadata(enabled.context(E::Client), 4, E::Client)["flow.http3.ja4h"]);
+}

@@ -5,6 +5,9 @@
 
 #include <openssl/sha.h>
 #include <openssl/rand.h>
+#include <openssl/ssl.h>
+#include <proxy/quic/client_hello.hpp>
+#include <memory>
 
 #include <gtest/gtest.h>
 
@@ -151,6 +154,19 @@ TEST(JA4_CH, NonAsciiAlpnBytesAreClassifiedAsUnsigned) {
     TLSClientHello parsed;
     ASSERT_EQ(parsed.from_buffer(hello), 0);
     EXPECT_NE(parsed.ja4_raw().find("81"), std::string::npos);
+
+    // The TCP path borrows a view past the record header; its result must
+    // match the same handshake supplied through the vector compatibility API.
+    buffer record(5, 5);
+    record.fill(0);
+    record.append(hello.data(), hello.size());
+    const auto handshake = record.view(5);
+    EXPECT_EQ(handshake.data(), record.data() + 5);
+    TLSClientHello borrowed;
+    ASSERT_EQ(borrowed.from_buffer(handshake), 0);
+    EXPECT_EQ(borrowed.ja4(), parsed.ja4());
+    EXPECT_NE(borrowed.from_buffer(nullptr, hello.size()), 0);
+
 }
 
 TEST(JA4_CH, RejectsMalformedTlsExtensionVectors) {
@@ -562,4 +578,206 @@ TEST(JA4H_Hpack, PreservesWireOrderAndResetsBetweenRequests) {
     ASSERT_TRUE(decoder.decode(next));
     EXPECT_EQ(decoder.ordered_headers().size(), 1u);
     EXPECT_EQ(decoder.headers().size(), 1u);
+}
+
+TEST(JA4_QUIC, CallbackMatchesOriginalClientHelloInBothModes) {
+    struct Evidence {
+        std::vector<uint8_t> wire;
+        TLSClientHello parsed;
+        int result = -1;
+        bool called = false;
+    } evidence;
+    std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> client_ctx(SSL_CTX_new(TLS_method()), SSL_CTX_free);
+    std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> server_ctx(SSL_CTX_new(TLS_method()), SSL_CTX_free);
+    ASSERT_TRUE(client_ctx);
+    ASSERT_TRUE(server_ctx);
+    // A private-use extension unknown to the server must survive capture.
+    ASSERT_EQ(1, SSL_CTX_add_client_custom_ext(client_ctx.get(), 0xffab,
+        [](SSL*, unsigned int, const unsigned char** out, size_t* size, int*, void*) {
+            static const unsigned char payload[] = {1, 2, 3};
+            *out = payload;
+            *size = sizeof(payload);
+            return 1;
+        }, nullptr, nullptr, nullptr, nullptr));
+    SSL_CTX_set_msg_callback(server_ctx.get(), sx::quic::ClientHelloCapture::observe);
+    SSL_CTX_set_client_hello_cb(server_ctx.get(), [](SSL* ssl, int*, void* arg) {
+        auto& value = *static_cast<Evidence*>(arg);
+        value.called = true;
+        value.parsed.proto = 'q';
+        value.result = value.parsed.from_buffer(sx::quic::ClientHelloCapture::take(ssl));
+        return SSL_CLIENT_HELLO_RETRY; // No certificate or full handshake needed.
+    }, &evidence);
+    std::unique_ptr<SSL, decltype(&SSL_free)> client(SSL_new(client_ctx.get()), SSL_free);
+    std::unique_ptr<SSL, decltype(&SSL_free)> server(SSL_new(server_ctx.get()), SSL_free);
+    ASSERT_TRUE(client);
+    ASSERT_TRUE(server);
+    ASSERT_EQ(1, SSL_set_tlsext_host_name(client.get(), "example.com"));
+    const unsigned char alpn[] = {2, 'h', '3'};
+    ASSERT_EQ(0, SSL_set_alpn_protos(client.get(), alpn, sizeof(alpn)));
+    SSL_set_msg_callback_arg(client.get(), &evidence);
+    SSL_set_msg_callback(client.get(), [](int writing, int, int type, const void* data,
+                                        size_t size, SSL*, void* arg) {
+        auto* bytes = static_cast<const uint8_t*>(data);
+        if (writing && type == SSL3_RT_HANDSHAKE && size && bytes[0] == SSL3_MT_CLIENT_HELLO)
+            static_cast<Evidence*>(arg)->wire.assign(bytes, bytes + size);
+    });
+    BIO* left = nullptr;
+    BIO* right = nullptr;
+    ASSERT_EQ(1, BIO_new_bio_pair(&left, 0, &right, 0));
+    SSL_set_bio(client.get(), left, left);
+    SSL_set_bio(server.get(), right, right);
+    SSL_set_connect_state(client.get());
+    SSL_set_accept_state(server.get());
+    SSL_do_handshake(client.get());
+    SSL_do_handshake(server.get());
+    ASSERT_TRUE(evidence.called);
+    ASSERT_EQ(0, evidence.result);
+    TLSClientHello expected;
+    expected.proto = 'q';
+    ASSERT_EQ(0, expected.from_buffer(evidence.wire));
+    EXPECT_NE(std::find(evidence.parsed.extensions.begin(), evidence.parsed.extensions.end(), 0xffab),
+              evidence.parsed.extensions.end());
+    EXPECT_EQ(expected.ja4(), evidence.parsed.ja4());
+    EXPECT_EQ('q', evidence.parsed.ja4().front());
+    const auto standard = evidence.parsed.ja4();
+    for (auto* hello : {&expected, &evidence.parsed}) {
+        hello->ignore_sni = true;
+        hello->results.clear();
+    }
+    EXPECT_EQ(expected.ja4(), evidence.parsed.ja4());
+    EXPECT_NE(standard, evidence.parsed.ja4());
+    EXPECT_EQ('i', evidence.parsed.ja4()[3]);
+    EXPECT_TRUE(sx::quic::ClientHelloCapture::take(server.get()).empty());
+}
+
+
+#include <service/core/ja4_groups.hpp>
+
+TEST(JA4_Groups, DirectOverlapRanksCombinedEvidenceFirst) {
+    using sx::diagnostics::ja4_client;
+    const std::vector<ja4_client> clients {
+        {"a", "tls", {"get", "get", ""}},
+        {"b", "tls", {"get", "post"}},
+        {"c", "tls", {"post"}},
+        {"d", "different", {"get"}},
+        {"empty", "", {""}},
+    };
+    auto groups = sx::diagnostics::group_ja4_clients(clients);
+    ASSERT_EQ(groups.size(), 5U);
+    EXPECT_EQ(groups[0].strength, 3);
+    EXPECT_EQ(groups[0].http, "get");
+    EXPECT_EQ(groups[0].members, (std::vector<std::size_t>{0, 1}));
+    EXPECT_EQ(groups[1].strength, 3);
+    EXPECT_EQ(groups[1].members, (std::vector<std::size_t>{1, 2}));
+    EXPECT_EQ(groups[2].strength, 2);
+    EXPECT_EQ(groups[2].members.size(), 3U);
+    EXPECT_EQ(groups[3].strength, 1);
+    EXPECT_EQ(groups[3].members, (std::vector<std::size_t>{0, 1, 3}));
+}
+
+TEST(JA4_Groups, MissingAndUniqueFingerprintsDoNotMatch) {
+    EXPECT_TRUE(sx::diagnostics::group_ja4_clients({
+        {"a", "", {}}, {"b", "", {""}}, {"c", "one", {"unique"}}
+    }).empty());
+}
+
+
+#include <service/core/fp_reports.hpp>
+
+TEST(JA4_Reports, ProfilesIncludeUnfingerprintedSessionsAndFilterSource) {
+    using namespace sx::diagnostics;
+    ja4_client a{"a", "tls", {"get", "get"}};
+    a.source = "10.0.0.1";
+    ja4_client b{"b", "", {}};
+    b.source = a.source;
+    ja4_client c{"c", "other", {"post"}};
+    c.source = "10.0.0.2";
+    auto report = fingerprint_report({c, b, a}, "client-profile", a.source);
+    ASSERT_EQ(report["groups"].size(), 1U);
+    EXPECT_EQ(report["sessions_considered"], 2);
+    EXPECT_EQ(report["groups"][0]["session_count"], 2);
+    EXPECT_EQ(report["groups"][0]["fingerprints"].size(), 2U);
+    for (auto const& fp : report["groups"][0]["fingerprints"]) EXPECT_EQ(fp["session_count"], 1);
+    EXPECT_EQ(report["groups"][0]["sessions"][0]["connection"], "a");
+    EXPECT_TRUE(fingerprint_report({a}, "client-profile", "missing")["groups"].empty());
+}
+
+TEST(JA4_Reports, RarityCountsSessionsNotRepeatedRequests) {
+    using namespace sx::diagnostics;
+    ja4_client a{"a", "tls", {"get", "get", "post", ""}};
+    ja4_client b{"b", "tls", {"get"}};
+    auto report = fingerprint_report({a, b}, "rare");
+    ASSERT_EQ(report["groups"].size(), 3U);
+    EXPECT_EQ(report["groups"][0]["value"], "post");
+    EXPECT_EQ(report["groups"][0]["session_count"], 1);
+    EXPECT_EQ(report["groups"][1]["session_count"], 2);
+    EXPECT_EQ(report["groups"][2]["session_count"], 2);
+    EXPECT_THROW(fingerprint_report({a}, "rare", "source"), std::invalid_argument);
+    EXPECT_THROW(fingerprint_report({a}, "unknown"), std::invalid_argument);
+}
+
+TEST(JA4_Reports, SignatureMatchesKeepGroupsSeparate) {
+    using namespace sx::diagnostics;
+    ja4_client a{"a", "", {}};
+    a.signature = "tool"; a.signature_group = "http";
+    auto b = a; b.connection = "b";
+    auto c = a; c.connection = "c"; c.signature_group = "tls";
+    auto report = fingerprint_report({a, b, c, {"none", "", {}}}, "signature-matches");
+    ASSERT_EQ(report["groups"].size(), 1U);
+    EXPECT_EQ(report["groups"][0]["kind"], "http");
+    EXPECT_EQ(report["groups"][0]["value"], "tool");
+    EXPECT_EQ(report["groups"][0]["session_count"], 2);
+}
+
+TEST(JA4_Reports, NeighborRarityUsesSessionCountsAndBoundsExamples) {
+    sx::diagnostics::neighbor_fingerprint_report report(true);
+    for (int i = 0; i < 105; ++i) {
+        FingerprintHistory history;
+        history.observe({{"JA4H", "common"}, {"JA4", "unique-" + std::to_string(i)}}, 100);
+        history.observe({{"JA4H", "common"}}, 101);
+        report.observe("192.0.2." + std::to_string(i), history);
+    }
+    const auto result = report.finish();
+    EXPECT_EQ(result.at("neighbors_scanned"), 105);
+    EXPECT_EQ(result.at("groups_total"), 106);
+    EXPECT_TRUE(result.at("truncated").get<bool>());
+    EXPECT_EQ(result.at("groups").size(), 100U);
+    EXPECT_EQ(result.at("groups")[0].at("completed_sessions"), 1);
+
+    sx::diagnostics::neighbor_fingerprint_report common(true);
+    FingerprintHistory history;
+    history.observe({{"JA4H", "common"}}, 100);
+    history.observe({{"JA4H", "common"}}, 101);
+    for (int i = 0; i < 20; ++i) common.observe(std::to_string(i), history);
+    auto group = common.finish().at("groups")[0];
+    EXPECT_EQ(group.at("completed_sessions"), 40);
+    EXPECT_EQ(group.at("source_count"), 20);
+    EXPECT_EQ(group.at("source_examples").size(), 10U);
+    EXPECT_TRUE(group.at("sources_truncated").get<bool>());
+}
+
+TEST(JA4_Reports, NeighborSignaturesRequireDistinctSourcesAndExactGroups) {
+    sx::diagnostics::neighbor_fingerprint_report report(false);
+    FingerprintHistory a, b;
+    a.observe({{"L7 signature [http]", "agent"}, {"JA4H", "get"}}, 100);
+    a.observe({{"L7 signature [http]", "agent"}}, 101);
+    b.observe({{"L7 signature [http]", "agent"}, {"L7 signature [tls]", "agent"}}, 100);
+    report.observe("192.0.2.1", a);
+    report.observe("192.0.2.2", b);
+    const auto result = report.finish();
+    ASSERT_EQ(result.at("groups").size(), 1U);
+    EXPECT_EQ(result.at("groups")[0].at("kind"), "L7 signature [http]");
+    EXPECT_EQ(result.at("groups")[0].at("completed_sessions"), 3);
+    EXPECT_EQ(result.at("groups")[0].at("source_count"), 2);
+}
+
+TEST(JA4_Reports, NeighborLargeCacheKeepsBoundedSourceSamples) {
+    sx::diagnostics::neighbor_fingerprint_report report(true);
+    FingerprintHistory history;
+    history.observe({{"JA4H", "common"}}, 100);
+    for (int i = 0; i < 100001; ++i) report.observe(std::to_string(i), history);
+    const auto result = report.finish();
+    EXPECT_EQ(result.at("neighbors_scanned"), 100001);
+    EXPECT_EQ(result.at("groups")[0].at("completed_sessions"), 100001);
+    EXPECT_EQ(result.at("groups")[0].at("source_examples").size(), 10U);
 }

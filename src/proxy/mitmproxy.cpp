@@ -963,6 +963,33 @@ void MitmProxy::prepare_capture_stop() noexcept {
     sx::proxy::retirement_step([&] { observe_tls_ready(); }, [&] {
         _err("capture: failed to collect final transport snapshot");
     });
+    // capture_stopped_ makes this once-per-session even on repeated shutdown.
+    // Record before endpoint/application state is retired, independently of hooks.
+    sx::proxy::retirement_step([&] {
+        auto* left = first_left();
+        if (!left || left->host().empty()) return;
+        std::set<FingerprintHistory::key> fingerprints;
+        auto add = [&](std::string const& type, std::string const& value) {
+            if (!value.empty()) fingerprints.emplace(type, value);
+        };
+        add("JA4", ja4.ClientHelloStandard);
+        add("JA4 no-SNI", ja4.ClientHelloNoSNI);
+        add("JA4S", ja4.ServerHello);
+        if (auto signature = std::dynamic_pointer_cast<MyDuplexFlowMatch>(left->engine().signature)) {
+            add("L7 signature [" + signature->sig_group + "]", signature->name());
+        }
+        auto const& app = left->engine().application_data;
+        if (app && app->custom_list_name() == "ja4h") {
+            for (auto const& value : app->custom_list()) add("JA4H", value);
+        }
+        if (fingerprints.empty()) return;
+        NbrHood::instance().apply(left->host(), [&](Neighbor& neighbor) {
+            neighbor.fingerprints.observe(fingerprints, std::time(nullptr));
+            return true;
+        });
+    }, [&] {
+        _err("neighbor: failed to retain session fingerprints");
+    });
     sx::proxy::retirement_step([&] { write_capture_enrichment(); }, [&] {
         _err("capture: failed to write final metadata");
     });
@@ -1551,9 +1578,8 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
             ch.ignore_sni = acct_opts.ja4_clienthello_ignore_sni;
             auto const &ch_buf = scom->client_hello_buffer();
 
-            // yes, some copying :( - in c++20 is span, but we are still at c++17
-            auto bufvec = std::vector(ch_buf.data() + 5, ch_buf.data() + ch_buf.size());
-            if(ch.from_buffer(bufvec) == 0) {
+            // Borrow the handshake bytes, skipping the five-byte TLS record header.
+            if(ch.from_buffer(ch_buf.view(5)) == 0) {
                 // Parse once, then derive both variants. The cached strings
                 // depend on ignore_sni, so invalidate them between calculations.
                 ch.ignore_sni = false;

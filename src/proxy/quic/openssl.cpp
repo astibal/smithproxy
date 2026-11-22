@@ -1,3 +1,5 @@
+#include <proxy/quic/client_hello.hpp>
+
 #include <ossl_util.hpp>
 #include "proxy/quic/error_stats.hpp"
 #include "proxy/quic/tls_log.hpp"
@@ -410,6 +412,7 @@ int connection_route_index() {
 /** Keep CID routing exact after either side rotates its connection ID. */
 void observe_connection_id(int write, int version, int content_type, void const* data,
                            std::size_t size, SSL* ssl, void* argument) noexcept {
+    ClientHelloCapture::observe(write, version, content_type, data, size, ssl, nullptr);
     try {
         if (*logging::message().level() >= DUM) {
             logging::message().dum("openssl ssl=%p %s version=0x%x type=%d bytes=%zu",

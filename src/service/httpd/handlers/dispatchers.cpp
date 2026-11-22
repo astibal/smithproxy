@@ -153,6 +153,27 @@ namespace sx::webserver::dispatchers {
         }
 
 
+        for (std::string const view : {"client-profile", "rare", "signature-matches"}) {
+            for (auto const& method : {"GET", "POST"}) {
+                auto* handler = new Http_Responder(method,
+                    "/api/diag/proxy/session/fp/" + view,
+                    authorized::token_protected<json>(
+                        [view](MHD_Connection* connection, std::string const&, std::string const& request) {
+                            return json_session_fp_report(connection, request, view);
+                        }));
+                handler->Content_Type = "application/json";
+                server.addController(std::shared_ptr<lmh::Controller>(handler));
+            }
+        }
+
+        for (auto const& method : {"GET", "POST"}) {
+            auto* handler = new Http_Responder(method,
+                "/api/diag/proxy/session/fp/ja4-clients",
+                authorized::token_protected<json>(json_proxy_session_ja4_clients));
+            handler->Content_Type = "application/json";
+            server.addController(std::shared_ptr<lmh::Controller>(handler));
+        }
+
         for(auto const& meth: {"GET", "POST"}) {
             auto* handler = new Http_Responder(
                     meth,

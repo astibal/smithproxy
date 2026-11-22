@@ -1,6 +1,8 @@
 #pragma once
 
 #include <functional>
+#include <cstdint>
+#include <buffer.hpp>
 #include <memory>
 #include <optional>
 #include <string>
@@ -42,6 +44,11 @@ struct TlsReplacement {
     std::string reason;
 };
 
+struct ClientFingerprints {
+    std::string standard;
+    std::string no_sni;
+};
+
 // A multiplexed session exists before its individual MitmProxy streams. Keep
 // its setup alive across certificate verification and the forwarding connect.
 class SessionSetup {
@@ -51,6 +58,9 @@ public:
     virtual proxy::QuicObserver* quic_observer() { return nullptr; }
     virtual std::string connection_id() const { return {}; }
     virtual bool rewrite_requested() const { return false; }
+    // Downstream handshake evidence, copied by value to logical flow workers.
+    virtual void client_hello(buffer const&) {}
+    virtual ClientFingerprints client_fingerprints() const { return {}; }
     virtual std::optional<QuicTlsPolicy> tls_policy(
         std::string const&, std::string const&) { return QuicTlsPolicy {}; }
 

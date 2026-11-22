@@ -288,7 +288,7 @@ try:
                                 'tls_profile = "default"; detection_profile = "detect"; content_profile = "default";')
             text = text.replace('sift = false;', 'sift = true; sift_url = "http://127.0.0.1:18081/sift";')
             text, count = re.subn(r'(content_profiles\s*=\s*\{\s*default\s*=\s*\{)',
-                                  r'\1 webhook_enable = TRUE;', text, count=1)
+                                  r'\1 webhook_enable = TRUE; ja4_tls_ch = TRUE; ja4_http = TRUE;', text, count=1)
             assert count == 1, 'missing content webhook setting'
         if label == 'quic-replacement':
             options = {'failed_certcheck_replacement': 'TRUE',

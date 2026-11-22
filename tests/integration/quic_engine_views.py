@@ -23,6 +23,13 @@ resumed_fragmented = os.environ.get('H3_VIEWS_CASE') == 'resumed-fragmented'
 artifact_root = None
 
 
+def metadata_payload(info):
+    # SIFT marks synchronous delivery; Spider may be asynchronous. Compare
+    # the complete protocol payload, excluding only this delivery-mode flag.
+    return json.dumps({key: value for key, value in info.items()
+                       if key != 'synchronous'}, sort_keys=True)
+
+
 def request_frame(stream, method=b'GET'):
     import pylsqpack
     from aioquic.buffer import encode_uint_var
@@ -163,7 +170,7 @@ def run_case(root, proxy, hooks, config, eventually, run, sessions, cli):
                            and e['details']['info'].get('side') == 'R'
                            for e in observed) for sink in ('spider', 'sift')):
                 return False
-            envelopes = [[json.dumps(e['details']['info'], sort_keys=True)
+            envelopes = [[metadata_payload(e['details']['info'])
                           for e in observed if e.get('action') == 'connection-info'
                           and e.get('_test_receiver') == sink
                           and e.get('details', {}).get('info', {}).get('payload_layer') == 'http3.metadata']
@@ -178,6 +185,18 @@ def run_case(root, proxy, hooks, config, eventually, run, sessions, cli):
                           if e.get('details', {}).get('info', {}).get('stream_id') == 4)
             events = [e for e in events
                       if e.get('details', {}).get('info', {}).get('parent_id') == parent]
+        # Transport JA4 must reach every logical stream before start is sent.
+        starts = [e['details']['info'] for e in events
+                  if e.get('action') == 'connection-start'
+                  and e.get('details', {}).get('info', {}).get('parent_id')]
+        assert starts, 'missing logical stream starts'
+        for info in starts:
+            standard = info.get('ja4_ch_standard', '')
+            no_sni = info.get('ja4_ch_no_sni', '')
+            assert standard.startswith('q13d'), info
+            assert no_sni.startswith('q13i'), info
+            assert standard.split('_')[1:] == no_sni.split('_')[1:], info
+
         metadata = [e['details']['info'] for e in events if e.get('action') == 'connection-info'
                     and e['details'].get('info', {}).get('payload_layer') == 'http3.metadata'
                     and e['_test_receiver'] == 'spider']
@@ -186,8 +205,8 @@ def run_case(root, proxy, hooks, config, eventually, run, sessions, cli):
                          and e['_test_receiver'] == 'sift']
         # Dispatch is asynchronous, so compare complete envelopes without
         # relying on cross-sink delivery order.
-        assert sorted(map(lambda x: json.dumps(x, sort_keys=True), metadata)) == sorted(
-            map(lambda x: json.dumps(x, sort_keys=True), sift_metadata))
+        assert sorted(map(metadata_payload, metadata)) == sorted(
+            map(metadata_payload, sift_metadata))
         metadata.sort(key=lambda i: i['protocol_sequence'])
         assert len({i['protocol_sequence'] for i in metadata}) == len(metadata)
         assert metadata and any(i['protocol_event'] == 'fin' for i in metadata)
@@ -198,6 +217,9 @@ def run_case(root, proxy, hooks, config, eventually, run, sessions, cli):
             assert 'content' not in info
             if info['protocol_event'] == 'headers':
                 assert info['flow.http3.headers']
+                if info['flow.http3.header_section'] == 'request':
+                    method = info['flow.http3.method'].lower()[:2]
+                    assert info.get('flow.http3.ja4h', '').startswith(method + '30'), info
                 assert info['flow.http3.header_section'] in ('request', 'interim', 'response', 'trailers')
         spider = [e['details']['info'] for e in events if e.get('action') == 'connection-content'
                   and e['_test_receiver'] == 'spider']
