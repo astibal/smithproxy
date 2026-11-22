@@ -38,6 +38,7 @@
 */
 
 #include <string>
+#include <proxy/fingerprint_history.hpp>
 #include <unordered_map>
 #include <memory>
 #include <ctime>
@@ -54,6 +55,7 @@ struct Neighbor {
 
     static inline logan_lite log = logan_lite("proxy.nbr");
     static inline size_t max_timetable_sz = 30;
+    FingerprintHistory fingerprints;
 
     explicit Neighbor(std::string_view hostname): hostname(hostname) {
         last_seen = time(nullptr);
@@ -185,7 +187,8 @@ struct Neighbor {
                 { "hostname",  hostname },
                 { "last_seen", last_seen },
                 { "tags", tags_to_string() },
-                { "stats", js }
+                { "stats", js },
+                { "fingerprints", fingerprints.to_json() }
         };
     }
 
@@ -210,6 +213,9 @@ struct Neighbor {
                 parsed_timetable.push_back(std::move(entry));
             }
 
+            FingerprintHistory parsed_fingerprints;
+            if (j.contains("fingerprints") && !parsed_fingerprints.from_json(j.at("fingerprints"))) return false;
+            fingerprints = std::move(parsed_fingerprints);
             hostname = std::move(parsed_hostname);
             last_seen = parsed_last_seen;
             tags = std::move(parsed_tags);
@@ -234,7 +240,8 @@ struct Neighbor {
                 { "hostname",  hostname },
                 { "tags", tags_to_string() },
                 { "last_seen", last_seen },
-                { "stats", js }
+                { "stats", js },
+                { "fingerprints", fingerprints.to_json() }
         };
     }
 
@@ -361,6 +368,28 @@ public:
             return mod(*ptr);
         }
 
+    }
+
+    // Pin entries briefly, then copy one bounded history under the cache lock.
+    // Aggregation and formatting never hold the global Neighbor lock. This is
+    // a live scan, not a point-in-time snapshot of all neighbors.
+    void for_each_fingerprint_history(std::function<void(std::string const&, FingerprintHistory const&)> visit) {
+        std::vector<std::shared_ptr<Neighbor>> neighbors;
+        {
+            auto guard = std::scoped_lock(cache().lock());
+            neighbors.reserve(cache().get_map_ul().size());
+            for (auto const& item : cache().get_map_ul()) neighbors.push_back(item.second.first);
+        }
+        for (auto const& neighbor : neighbors) {
+            std::string source;
+            FingerprintHistory history;
+            {
+                auto guard = std::scoped_lock(cache().lock());
+                source = neighbor->hostname;
+                history = neighbor->fingerprints;
+            }
+            visit(source, history);
+        }
     }
 
     void for_each(std::function<void(Neighbor&)> mod) {

@@ -1,4 +1,6 @@
 #include <service/core/ja4_groups.hpp>
+#include <service/core/fp_reports.hpp>
+#include <inspect/sxsignature.hpp>
 #include <proxy/quic/error_stats.hpp>
 #include <stdexcept>
 #include <service/core/session_interfaces.hpp>
@@ -253,25 +255,34 @@ nlohmann::json ObjAPI::neighbor_list(bool flag_raw, unsigned int last_n_days) {
     }
 }
 
-std::vector<sx::diagnostics::ja4_client> sx::diagnostics::collect_ja4_clients() {
+std::vector<sx::diagnostics::ja4_client> sx::diagnostics::collect_ja4_clients(bool include_unfingerprinted) {
     struct snapshot {
         std::mutex lock;
         std::vector<sx::diagnostics::ja4_client> clients;
     };
     auto state = std::make_shared<snapshot>();
-    auto collect = [state](MitmProxy* proxy) -> std::optional<std::string> {
+    auto collect = [state, include_unfingerprinted](MitmProxy* proxy) -> std::optional<std::string> {
         sx::diagnostics::ja4_client client;
         client.connection = proxy->to_connection_label(false);
         if (proxy->webhook_stream) {
             client.connection += " stream=" + std::to_string(proxy->webhook_stream->stream_id);
         }
         client.no_sni = proxy->ja4.ClientHelloNoSNI;
+        client.standard = proxy->ja4.ClientHelloStandard;
+        client.server = proxy->ja4.ServerHello;
         auto const* left = proxy->first_left();
+        if (left) {
+            client.source = left->host();
+            if (auto signature = std::dynamic_pointer_cast<MyDuplexFlowMatch>(left->engine().signature)) {
+                client.signature = signature->name();
+                client.signature_group = signature->sig_group;
+            }
+        }
         if (left && left->engine().application_data) {
             auto const& app = left->engine().application_data;
             if (app->custom_list_name() == "ja4h") client.http = app->custom_list();
         }
-        if (!client.no_sni.empty() || !client.http.empty()) {
+        if (include_unfingerprinted || !client.no_sni.empty() || !client.http.empty()) {
             std::lock_guard guard(state->lock);
             state->clients.push_back(std::move(client));
         }
@@ -302,4 +313,39 @@ std::vector<sx::diagnostics::ja4_client> sx::diagnostics::collect_ja4_clients() 
         return a.connection < b.connection;
     });
     return clients;
+}
+
+
+nlohmann::json sx::diagnostics::collect_fingerprint_report(std::string const& view,
+        std::string const& source, std::string const& scope) {
+    const bool active = scope == "active" || scope == "both";
+    const bool history = scope == "neighbor" || scope == "both";
+    if (!active && !history) {
+        throw std::invalid_argument("Scope must be active, neighbor or both");
+    }
+    auto result = fingerprint_report(active ? collect_ja4_clients(true) : std::vector<ja4_client>{}, view, source);
+    result["scope"] = scope;
+    result["neighbor_profiles"] = nlohmann::json::array();
+    if (history && view != "client-profile") {
+        neighbor_fingerprint_report report(view == "rare");
+        NbrHood::instance().for_each_fingerprint_history([&](auto const& ip, auto const& fingerprints) {
+            report.observe(ip, fingerprints);
+        });
+        result["neighbor_report"] = report.finish();
+        result["note"] = "Active sessions and completed-session history are separate. Historical rarity uses retained session counts; signature matches require at least two source IPs. Live scan, not an atomic snapshot.";
+    }
+    if (history && view == "client-profile") {
+        NbrHood::instance().for_each([&](Neighbor& neighbor) {
+            if (!source.empty() && neighbor.hostname != source) return;
+            if (neighbor.fingerprints.entries.empty()) return;
+            result["neighbor_profiles"].push_back({{"source", neighbor.hostname},
+                {"fingerprints", neighbor.fingerprints.to_json()}});
+        });
+        auto& profiles = result["neighbor_profiles"];
+        std::sort(profiles.begin(), profiles.end(), [](auto const& a, auto const& b) {
+            return a.at("source") < b.at("source");
+        });
+        result["note"] = "Live sessions and completed-session Neighbor history are separate. History follows Neighbor cache persistence and eviction.";
+    }
+    return result;
 }

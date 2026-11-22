@@ -11,9 +11,14 @@ struct ja4_client {
     std::string connection;
     std::string no_sni;
     std::vector<std::string> http;
+    std::string source {};
+    std::string standard {};
+    std::string server {};
+    std::string signature {};
+    std::string signature_group {};
 };
 // Snapshot retained state on owner workers; throws on incomplete collection.
-std::vector<ja4_client> collect_ja4_clients();
+std::vector<ja4_client> collect_ja4_clients(bool include_unfingerprinted = false);
 
 struct ja4_group {
     int strength;

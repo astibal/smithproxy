@@ -64,6 +64,7 @@
 #include <service/core/smithproxy.hpp>
 #include <service/core/sessionlist.hpp>
 #include <service/core/ja4_groups.hpp>
+#include <service/core/fp_reports.hpp>
 #include <service/network_context.hpp>
 #include <service/cmd/diag/diag_cmds.hpp>
 #include <service/httpd/httpd.hpp>
@@ -2653,14 +2654,87 @@ int cli_diag_proxy_session_ja4_clients(DiagCli* cli, const char*, char*[], int) 
         + " fingerprinted sessions; overlapping groups, not proof of client identity)");
     if (groups.empty()) cli->context.print("  No shared fingerprints among active sessions.");
     for (auto const& group : groups) {
-        const auto label = group.strength == 3 ? "ClientHello no-SNI + JA4H"
-                         : group.strength == 2 ? "ClientHello no-SNI match" : "JA4H match";
+        const auto label = group.strength == 3 ? "JA4 no-SNI + JA4H"
+                         : group.strength == 2 ? "JA4 no-SNI match" : "JA4H match";
         cli->context.print("+-- " + decor.heading(label) + " (" + std::to_string(group.members.size()) + " sessions)");
-        if (!group.no_sni.empty()) cli->context.print("|   ClientHello no-SNI: " + decor.success(group.no_sni));
+        if (!group.no_sni.empty()) cli->context.print("|   JA4 no-SNI: " + decor.success(group.no_sni));
         if (!group.http.empty()) cli->context.print("|   JA4H: " + decor.success(group.http));
         for (auto member : group.members) cli->context.print("|   +-- " + clients[member].connection);
     }
     return CLI_OK;
+}
+
+// Presentation only: selection, counting and ordering are shared with the API.
+static int cli_session_fp_report(DiagCli* cli, std::string const& view, char* argv[], int argc) {
+    const auto decor = cli->context.decor();
+    const bool accepts_source = view == "client-profile";
+    if (argc > (accepts_source ? 2 : 1)) {
+        cli->context.print(decor.error("Usage: diag proxy session fp " + view + (accepts_source ? " [source IP|all] [active|neighbor|both]" : " [active|neighbor|both]")));
+        return CLI_OK;
+    }
+    try {
+        const std::string source = accepts_source && argc && std::string(argv[0]) != "all" ? argv[0] : "";
+        const std::string scope = accepts_source ? (argc > 1 ? argv[1] : "active") : (argc ? argv[0] : "active");
+        const auto report = sx::diagnostics::collect_fingerprint_report(view, source, scope);
+        cli->context.print(decor.heading("Fingerprint " + view) + " (" +
+            (scope == "neighbor" ? "Neighbor history" : std::to_string(report.at("sessions_considered").get<std::size_t>()) + " active sessions") + ")");
+        cli->context.print(decor.muted(report.at("note").get<std::string>()));
+        if (report.at("groups").empty() && report.at("neighbor_profiles").empty() && !report.contains("neighbor_report")) cli->context.print("  No matching retained data.");
+        for (auto const& group : report.at("groups")) {
+            const auto label = group.at("kind").get<std::string>() + ": " + group.at("value").get<std::string>();
+            cli->context.print("+-- " + decor.heading(label) + " (" +
+                std::to_string(group.at("session_count").get<std::size_t>()) + " sessions)");
+            for (auto const& fp : group.at("fingerprints")) {
+                cli->context.print("|   " + decor.muted(fp.at("type").get<std::string>() + ": ") +
+                    decor.success(fp.at("value").get<std::string>()) + " (" +
+                    std::to_string(fp.at("session_count").get<std::size_t>()) + " sessions)");
+            }
+            for (auto const& session : group.at("sessions")) {
+                cli->context.print("|   +-- " + session.at("connection").get<std::string>());
+            }
+        }
+        if (report.contains("neighbor_report")) {
+            auto const& history = report.at("neighbor_report");
+            cli->context.print(decor.heading("Neighbor history") + " (" +
+                std::to_string(history.at("neighbors_scanned").get<std::size_t>()) + " neighbors scanned)");
+            for (auto const& group : history.at("groups")) {
+                cli->context.print("+-- " + decor.heading(group.at("kind").get<std::string>() + ": " + group.at("value").get<std::string>()) +
+                    " (" + std::to_string(group.at("completed_sessions").get<std::uint64_t>()) + " completed sessions; " +
+                    std::to_string(group.at("source_count").get<std::size_t>()) + " source IPs)");
+                for (auto const& ip : group.at("source_examples")) cli->context.print("|   +-- " + ip.get<std::string>());
+                if (group.at("sources_truncated").get<bool>()) cli->context.print("|   ... first 10 source IPs shown");
+            }
+            cli->context.print(decor.muted("Showing " + std::to_string(history.at("groups").size()) + " of " +
+                std::to_string(history.at("groups_total").get<std::size_t>()) + " groups; evicted observations: " +
+                std::to_string(history.at("evicted_observations").get<std::uint64_t>())));
+        }
+        for (auto const& profile : report.at("neighbor_profiles")) {
+            cli->context.print("+-- " + decor.heading(profile.at("source").get<std::string>() + " [Neighbor history]"));
+            auto const& history = profile.at("fingerprints");
+            for (auto const& fp : history.at("entries")) {
+                cli->context.print("|   " + decor.muted(fp.at("type").get<std::string>() + ": ") +
+                    decor.success(fp.at("value").get<std::string>()) + " (" +
+                    std::to_string(fp.at("sessions").get<std::uint64_t>()) + " completed sessions; first=" +
+                    std::to_string(fp.at("first_seen").get<std::time_t>()) + "; last=" +
+                    std::to_string(fp.at("last_seen").get<std::time_t>()) + ")");
+            }
+            const auto evicted = history.at("evicted_observations").get<std::uint64_t>();
+            if (evicted) cli->context.print("|   " + decor.muted("Evicted fingerprint observations: " + std::to_string(evicted)));
+        }
+    } catch (std::exception const& error) {
+        cli->context.print(decor.error(error.what()));
+    }
+    return CLI_OK;
+}
+
+static int cli_session_fp_profile(DiagCli* cli, const char*, char* argv[], int argc) {
+    return cli_session_fp_report(cli, "client-profile", argv, argc);
+}
+static int cli_session_fp_rare(DiagCli* cli, const char*, char* argv[], int argc) {
+    return cli_session_fp_report(cli, "rare", argv, argc);
+}
+static int cli_session_fp_signatures(DiagCli* cli, const char*, char* argv[], int argc) {
+    return cli_session_fp_report(cli, "signature-matches", argv, argc);
 }
 
 int cli_diag_proxy_session_list_extra (DiagCli *cli, const char *command, std::vector<std::string> const &args,
@@ -2774,12 +2848,12 @@ int cli_diag_proxy_session_list_extra (DiagCli *cli, const char *command, std::v
                                    << decor.success(value) << "\n";
                     }
                 };
-                print_fingerprint("ClientHello standard", fingerprints.ClientHelloStandard);
-                print_fingerprint("ClientHello no-SNI", fingerprints.ClientHelloNoSNI);
+                print_fingerprint("JA4", fingerprints.ClientHelloStandard);
+                print_fingerprint("JA4 no-SNI", fingerprints.ClientHelloNoSNI);
                 const bool legacy_client = fingerprints.ClientHelloStandard.empty()
                     && fingerprints.ClientHelloNoSNI.empty();
-                if (legacy_client) print_fingerprint("ClientHello", fingerprints.ClientHello);
-                print_fingerprint("ServerHello", fingerprints.ServerHello);
+                if (legacy_client) print_fingerprint("JA4 (legacy)", fingerprints.ClientHello);
+                print_fingerprint("JA4S", fingerprints.ServerHello);
                 for (auto const& fingerprint : http_fingerprints) {
                     print_fingerprint("JA4H", fingerprint);
                 }
@@ -3474,6 +3548,9 @@ void register_diags(libcli2::Cli& native) {
 
     auto diag_proxy_session = diag_register_command(cli,diag_proxy,"session",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session commands");
     auto diag_proxy_session_fp = diag_register_command(cli, diag_proxy_session, "fp", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "session fingerprint analysis");
+    diag_register_command(cli, diag_proxy_session_fp, "client-profile", cli_session_fp_profile, PRIVILEGE_PRIVILEGED, MODE_EXEC, "fingerprints by source IP; optional source filter");
+    diag_register_command(cli, diag_proxy_session_fp, "rare", cli_session_fp_rare, PRIVILEGE_PRIVILEGED, MODE_EXEC, "least frequent retained fingerprints first");
+    diag_register_command(cli, diag_proxy_session_fp, "signature-matches", cli_session_fp_signatures, PRIVILEGE_PRIVILEGED, MODE_EXEC, "sessions sharing an L7 signature");
     diag_register_command(cli, diag_proxy_session_fp,"ja4-clients", cli_diag_proxy_session_ja4_clients, PRIVILEGE_PRIVILEGED, MODE_EXEC,"group active sessions by shared JA4 client fingerprints");
     diag_register_command(cli, diag_proxy_session,"list", cli_diag_proxy_session_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session list");
     diag_register_command(cli, diag_proxy_session,"list-nonames", cli_diag_proxy_list_nonames, PRIVILEGE_PRIVILEGED, MODE_EXEC,"list sessions without resolved destination names");

@@ -39,6 +39,7 @@
 
 #include <nlohmann/json.hpp>
 #include <service/core/ja4_groups.hpp>
+#include <service/core/fp_reports.hpp>
 
 #include <ext/lmhpp/include/lmhttpd.hpp>
 #include <service/httpd/util.hpp>
@@ -101,6 +102,23 @@ static nlohmann::json json_proxy_session_ja4_clients(MHD_Connection*, std::strin
         return result;
     } catch (std::exception const& error) {
         // Never present a timed-out partial snapshot as a complete match set.
+        return {{"complete", false}, {"error", error.what()}};
+    }
+}
+
+
+static nlohmann::json json_session_fp_report(MHD_Connection* connection,
+                                            std::string const& request, std::string const& view) {
+    try {
+        std::string source;
+        if (view == "client-profile") {
+            const auto* query = MHD_lookup_connection_value(connection, MHD_GET_ARGUMENT_KIND, "source");
+            source = jsonize::load_json_params<std::string>(request, "source").value_or(query ? query : "");
+        }
+        const auto* query_scope = MHD_lookup_connection_value(connection, MHD_GET_ARGUMENT_KIND, "scope");
+        const auto scope = jsonize::load_json_params<std::string>(request, "scope").value_or(query_scope ? query_scope : "active");
+        return sx::diagnostics::collect_fingerprint_report(view, source, scope);
+    } catch (std::exception const& error) {
         return {{"complete", false}, {"error", error.what()}};
     }
 }

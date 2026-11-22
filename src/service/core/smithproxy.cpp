@@ -748,6 +748,7 @@ void SmithProxy::run() {
                                    ? webhook_ping_interval - 10 : 0; // speed-up first ping
     unsigned int wh_nbr_seconds = 0;
     bool wh_hostname_snapshot_sent = false;
+    auto next_state_save = std::chrono::steady_clock::now() + std::chrono::minutes(1);
 
 
 
@@ -756,6 +757,13 @@ void SmithProxy::run() {
             if(!cfg_daemonize)
                 std::cerr << "shutdown requested" << std::endl;
             break;
+        }
+
+        // Neighbor persistence is local state, independent of webhook delivery.
+        const auto state_now = std::chrono::steady_clock::now();
+        if (state_now >= next_state_save) {
+            state_save();
+            next_state_save = std::chrono::steady_clock::now() + std::chrono::minutes(1);
         }
 
         if(sx::http::webhooks::is_enabled()) {
@@ -778,7 +786,6 @@ void SmithProxy::run() {
                 }
                 sx::webserver::HttpSessions::cleanup();
 
-                state_save();
             }
             ++wh_ping_seconds;
 

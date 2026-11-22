@@ -123,3 +123,50 @@ TEST(NeighborPersistence, SavesDetachedSnapshotAndEmptyArray) {
     }
     std::filesystem::remove_all(directory);
 }
+
+TEST(NeighborFingerprints, PersistenceAndLegacyCompatibility) {
+    Neighbor source("10.0.0.1");
+    source.fingerprints.observe({{"JA4H", "get"}, {"JA4 no-SNI", "tls"}}, 100);
+    source.fingerprints.observe({{"JA4H", "get"}}, 200);
+    auto json = source.ser_json_out();
+    Neighbor restored("old");
+    ASSERT_TRUE(restored.ser_json_in(json));
+    EXPECT_EQ(restored.fingerprints.to_json(), source.fingerprints.to_json());
+    auto const& entry = restored.fingerprints.entries.at({"JA4H", "get"});
+    EXPECT_EQ(entry.sessions, 2U);
+    EXPECT_EQ(entry.first_seen, 100);
+    EXPECT_EQ(entry.last_seen, 200);
+    json.erase("fingerprints");
+    ASSERT_TRUE(restored.ser_json_in(json));
+    EXPECT_TRUE(restored.fingerprints.entries.empty());
+}
+
+TEST(NeighborFingerprints, BoundedEvictionAndTransactionalValidation) {
+    FingerprintHistory history;
+    for (std::size_t i = 0; i <= FingerprintHistory::limit; ++i) {
+        history.observe({{"JA4H", std::to_string(i)}}, 100 + i);
+    }
+    EXPECT_EQ(history.entries.size(), FingerprintHistory::limit);
+    EXPECT_EQ(history.evicted_observations, 1U);
+    EXPECT_EQ(history.entries.count({"JA4H", "0"}), 0U);
+    const auto before = history.to_json();
+    auto broken = before;
+    broken["entries"][0]["sessions"] = -1;
+    EXPECT_FALSE(history.from_json(broken));
+    EXPECT_EQ(history.to_json(), before);
+    broken = before;
+    broken["entries"].push_back(broken["entries"][0]);
+    EXPECT_FALSE(history.from_json(broken));
+}
+
+TEST(NeighborFingerprints, RejectsInvalidEvictionCountersWithoutMutation) {
+    FingerprintHistory history;
+    history.observe({{"JA4H", "get"}}, 100);
+    const auto before = history.to_json();
+    for (auto const& invalid : {nlohmann::json(-1), nlohmann::json(1.5), nlohmann::json("2")}) {
+        auto broken = before;
+        broken["evicted_observations"] = invalid;
+        EXPECT_FALSE(history.from_json(broken));
+        EXPECT_EQ(history.to_json(), before);
+    }
+}

@@ -680,3 +680,104 @@ TEST(JA4_Groups, MissingAndUniqueFingerprintsDoNotMatch) {
         {"a", "", {}}, {"b", "", {""}}, {"c", "one", {"unique"}}
     }).empty());
 }
+
+
+#include <service/core/fp_reports.hpp>
+
+TEST(JA4_Reports, ProfilesIncludeUnfingerprintedSessionsAndFilterSource) {
+    using namespace sx::diagnostics;
+    ja4_client a{"a", "tls", {"get", "get"}};
+    a.source = "10.0.0.1";
+    ja4_client b{"b", "", {}};
+    b.source = a.source;
+    ja4_client c{"c", "other", {"post"}};
+    c.source = "10.0.0.2";
+    auto report = fingerprint_report({c, b, a}, "client-profile", a.source);
+    ASSERT_EQ(report["groups"].size(), 1U);
+    EXPECT_EQ(report["sessions_considered"], 2);
+    EXPECT_EQ(report["groups"][0]["session_count"], 2);
+    EXPECT_EQ(report["groups"][0]["fingerprints"].size(), 2U);
+    for (auto const& fp : report["groups"][0]["fingerprints"]) EXPECT_EQ(fp["session_count"], 1);
+    EXPECT_EQ(report["groups"][0]["sessions"][0]["connection"], "a");
+    EXPECT_TRUE(fingerprint_report({a}, "client-profile", "missing")["groups"].empty());
+}
+
+TEST(JA4_Reports, RarityCountsSessionsNotRepeatedRequests) {
+    using namespace sx::diagnostics;
+    ja4_client a{"a", "tls", {"get", "get", "post", ""}};
+    ja4_client b{"b", "tls", {"get"}};
+    auto report = fingerprint_report({a, b}, "rare");
+    ASSERT_EQ(report["groups"].size(), 3U);
+    EXPECT_EQ(report["groups"][0]["value"], "post");
+    EXPECT_EQ(report["groups"][0]["session_count"], 1);
+    EXPECT_EQ(report["groups"][1]["session_count"], 2);
+    EXPECT_EQ(report["groups"][2]["session_count"], 2);
+    EXPECT_THROW(fingerprint_report({a}, "rare", "source"), std::invalid_argument);
+    EXPECT_THROW(fingerprint_report({a}, "unknown"), std::invalid_argument);
+}
+
+TEST(JA4_Reports, SignatureMatchesKeepGroupsSeparate) {
+    using namespace sx::diagnostics;
+    ja4_client a{"a", "", {}};
+    a.signature = "tool"; a.signature_group = "http";
+    auto b = a; b.connection = "b";
+    auto c = a; c.connection = "c"; c.signature_group = "tls";
+    auto report = fingerprint_report({a, b, c, {"none", "", {}}}, "signature-matches");
+    ASSERT_EQ(report["groups"].size(), 1U);
+    EXPECT_EQ(report["groups"][0]["kind"], "http");
+    EXPECT_EQ(report["groups"][0]["value"], "tool");
+    EXPECT_EQ(report["groups"][0]["session_count"], 2);
+}
+
+TEST(JA4_Reports, NeighborRarityUsesSessionCountsAndBoundsExamples) {
+    sx::diagnostics::neighbor_fingerprint_report report(true);
+    for (int i = 0; i < 105; ++i) {
+        FingerprintHistory history;
+        history.observe({{"JA4H", "common"}, {"JA4", "unique-" + std::to_string(i)}}, 100);
+        history.observe({{"JA4H", "common"}}, 101);
+        report.observe("192.0.2." + std::to_string(i), history);
+    }
+    const auto result = report.finish();
+    EXPECT_EQ(result.at("neighbors_scanned"), 105);
+    EXPECT_EQ(result.at("groups_total"), 106);
+    EXPECT_TRUE(result.at("truncated").get<bool>());
+    EXPECT_EQ(result.at("groups").size(), 100U);
+    EXPECT_EQ(result.at("groups")[0].at("completed_sessions"), 1);
+
+    sx::diagnostics::neighbor_fingerprint_report common(true);
+    FingerprintHistory history;
+    history.observe({{"JA4H", "common"}}, 100);
+    history.observe({{"JA4H", "common"}}, 101);
+    for (int i = 0; i < 20; ++i) common.observe(std::to_string(i), history);
+    auto group = common.finish().at("groups")[0];
+    EXPECT_EQ(group.at("completed_sessions"), 40);
+    EXPECT_EQ(group.at("source_count"), 20);
+    EXPECT_EQ(group.at("source_examples").size(), 10U);
+    EXPECT_TRUE(group.at("sources_truncated").get<bool>());
+}
+
+TEST(JA4_Reports, NeighborSignaturesRequireDistinctSourcesAndExactGroups) {
+    sx::diagnostics::neighbor_fingerprint_report report(false);
+    FingerprintHistory a, b;
+    a.observe({{"L7 signature [http]", "agent"}, {"JA4H", "get"}}, 100);
+    a.observe({{"L7 signature [http]", "agent"}}, 101);
+    b.observe({{"L7 signature [http]", "agent"}, {"L7 signature [tls]", "agent"}}, 100);
+    report.observe("192.0.2.1", a);
+    report.observe("192.0.2.2", b);
+    const auto result = report.finish();
+    ASSERT_EQ(result.at("groups").size(), 1U);
+    EXPECT_EQ(result.at("groups")[0].at("kind"), "L7 signature [http]");
+    EXPECT_EQ(result.at("groups")[0].at("completed_sessions"), 3);
+    EXPECT_EQ(result.at("groups")[0].at("source_count"), 2);
+}
+
+TEST(JA4_Reports, NeighborLargeCacheKeepsBoundedSourceSamples) {
+    sx::diagnostics::neighbor_fingerprint_report report(true);
+    FingerprintHistory history;
+    history.observe({{"JA4H", "common"}}, 100);
+    for (int i = 0; i < 100001; ++i) report.observe(std::to_string(i), history);
+    const auto result = report.finish();
+    EXPECT_EQ(result.at("neighbors_scanned"), 100001);
+    EXPECT_EQ(result.at("groups")[0].at("completed_sessions"), 100001);
+    EXPECT_EQ(result.at("groups")[0].at("source_examples").size(), 10U);
+}
