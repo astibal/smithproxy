@@ -414,3 +414,26 @@ TEST_F(PackTest, SchemaDefaultsCompleteLegacyResourcesWithoutReplacingCustomCont
     input_.resource_defaults.emplace("smithproxy.cfg", "not a resource");
     EXPECT_THROW(CfgPack::build(input_), CfgTarError);
 }
+
+TEST_F(PackTest, DefaultRetirementPreservesTenantRegistryAndSharedResources) {
+    write_native_archive();
+    write("smithproxy.tenants.cfg", "3;blue;192.0.2.0/24;2001:db8::/64\n");
+    const auto resource = write("shared-ca.pem", "still used by a legacy tenant");
+    const auto result = CfgPack::retire_legacy_tree(
+        directory_, "smithproxy.cftar", "smithproxy.pre-cftar.tar");
+    EXPECT_FALSE(result.backup_created);
+    EXPECT_EQ(result.files_removed, 0U);
+    EXPECT_TRUE(std::filesystem::exists(resource));
+    EXPECT_TRUE(std::filesystem::exists(directory_ + "/smithproxy.tenants.cfg"));
+}
+
+TEST_F(PackTest, DefaultRetirementCannotRemoveAnotherTenantArchive) {
+    write_native_archive();
+    const auto tenant = directory_ + "/smithproxy.blue.cftar";
+    CfgPack::build(input_).write_file(tenant);
+    const auto result = CfgPack::retire_legacy_tree(
+        directory_, "smithproxy.cftar", "smithproxy.pre-cftar.tar");
+    EXPECT_EQ(result.files_removed, 0U);
+    EXPECT_TRUE(std::filesystem::exists(tenant));
+    EXPECT_TRUE(std::filesystem::exists(input_.main_config));
+}

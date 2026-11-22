@@ -129,17 +129,25 @@ function network_watch_log {
 # archive is fail-closed: both files must come from one fully validated CfgTar.
 # The temporary directory is private and exists only for this script process.
 function prepare_config_source {
-    local archive="${SMITHPROXY_ETC_DIR}/smithproxy.cftar"
-
-    # Multi-tenant instances retain their explicit historical files. CfgTar v1
-    # currently represents only the standalone/default configuration.
-    if [[ "${tenant_id}" != "default" && "${tenant_id}" != "0" ]]; then
-        return
+    local legacy="${SMITHPROXY_ETC_DIR}/smithproxy.cfg"
+    local tenant_legacy="${SMITHPROXY_ETC_DIR}/smithproxy.${tenant_id}.cfg"
+    local tenant_archive="${SMITHPROXY_ETC_DIR}/smithproxy.${tenant_id}.cftar"
+    if [[ -e "${tenant_legacy}" || -L "${tenant_legacy}" ||
+          -e "${tenant_archive}" || -L "${tenant_archive}" ||
+          -e "${tenant_legacy}.old" || -L "${tenant_legacy}.old" ]]; then
+        legacy="${tenant_legacy}"
     fi
-    if [[ -f "${SMITHPROXY_ETC_DIR}/smithproxy.${tenant_id}.cfg" ]]; then
-        return
+    local archive="${legacy%.cfg}.cftar"
+    SX_CFG="${legacy}"
+    SX_STARTUP="${legacy%.cfg}.startup.cfg"
+    if [[ ! -e "${SX_STARTUP}" && ! -L "${SX_STARTUP}" ]]; then
+        SX_STARTUP="${SMITHPROXY_ETC_DIR}/smithproxy.startup.cfg"
     fi
     if [[ ! -e "${archive}" && ! -L "${archive}" ]]; then
+        if [[ ! -f "${legacy}" ]]; then
+            logit "ERROR: Missing selected configuration: ${legacy} or ${archive}"
+            exit 1
+        fi
         return
     fi
     if [[ ! -x "${SMITHPROXY_CFTAR_CMD}" ]]; then
@@ -164,6 +172,8 @@ function prepare_config_source {
     chmod 0600 "${SMITHPROXY_NATIVE_DIR}/smithproxy.cfg" \
                "${SMITHPROXY_NATIVE_DIR}/smithproxy.startup.cfg"
     SMITHPROXY_CONFIG_DIR="${SMITHPROXY_NATIVE_DIR}"
+    SX_CFG="${SMITHPROXY_NATIVE_DIR}/smithproxy.cfg"
+    SX_STARTUP="${SMITHPROXY_NATIVE_DIR}/smithproxy.startup.cfg"
 }
 
 # Remove only the mktemp directory created by prepare_config_source(). The
@@ -211,12 +221,6 @@ function tenant_apply {
     fi
 
     prepare_config_source
-    SX_CFG="${SMITHPROXY_CONFIG_DIR}/smithproxy.cfg"
-
-    if [ -f "${SMITHPROXY_ETC_DIR}/smithproxy.${tenant_id}.cfg" ]; then
-        SX_CFG="${SMITHPROXY_ETC_DIR}/smithproxy.${tenant_id}.cfg"
-    fi
-
     # QUIC interception is deliberately separate from the generic UDP proxy.
     # A configured QUIC listener gets the original service port via --on-port 0;
     # otherwise the same ports are dropped so HTTP/3 cannot bypass TLS policy.
@@ -873,8 +877,8 @@ tenant_apply $1 $2
 
 
 # source defaults - could be used to override variables above
-if [[ -f "${SMITHPROXY_CONFIG_DIR}/smithproxy.startup.cfg" ]]; then
- . "${SMITHPROXY_CONFIG_DIR}/smithproxy.startup.cfg" $1 "before"
+if [[ -f "${SX_STARTUP}" ]]; then
+ . "${SX_STARTUP}" $1 "before"
 fi
 
 case "$1" in
@@ -917,8 +921,8 @@ esac
 
 case "$1" in
     start|stop|bypass|unbypass)
-      if [[ -f "${SMITHPROXY_CONFIG_DIR}/smithproxy.startup.cfg" ]]; then
-       . "${SMITHPROXY_CONFIG_DIR}/smithproxy.startup.cfg" $1 "after"
+      if [[ -f "${SX_STARTUP}" ]]; then
+       . "${SX_STARTUP}" $1 "after"
       fi
       ;;
 esac

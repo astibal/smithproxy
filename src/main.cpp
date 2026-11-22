@@ -196,11 +196,11 @@ int prepare_privilege_separation(DaemonFactory& daemon, const std::string& confi
         return -1;
     }
 
+    // apply_tenant_config() has already validated and added the CLI port offset.
     const int cli_result = comm_cli
         ? sx::comm::cli::prepare_external_ingress(*comm_cli)
         : sx::comm::cli::start_internal_broker(
-            static_cast<std::uint16_t>(CfgFactory::get()->cli_port
-                                       + CfgFactory::get()->tenant_index));
+            static_cast<std::uint16_t>(CfgFactory::get()->cli_port));
     if(cli_result != 0) {
         _fat("cannot initialize CLI broker: %s", string_error().c_str());
         socle::privsep::stop_local_helper();
@@ -473,12 +473,6 @@ bool prepare_tenanting(bool is_custom_file) {
 
     auto const& log = DaemonFactory::instance()->get_log();
 
-    std::string config_file_tenant = "/etc/smithproxy/smithproxy.%s.cfg";
-    if(is_custom_file) {
-        // if user supplied config file, we will obey instructions (it's already set in factory)
-        config_file_tenant = CfgFactory::get()->config_file;
-    }
-
     auto revert = [] {
         CfgFactory::get()->tenant_name = "default";
         CfgFactory::get()->tenant_index = 0;
@@ -521,14 +515,27 @@ bool prepare_tenanting(bool is_custom_file) {
              CfgFactory::get()->tenant_index);
 
 
-        std::string tenant_cfg = string_format(config_file_tenant.c_str(), CfgFactory::get()->tenant_name.c_str());
-
-        struct stat s{};
-        if (stat(tenant_cfg.c_str(),&s) == 0) {
-            _war("Tenant config: %s",tenant_cfg.c_str());
-            CfgFactory::get()->config_file = tenant_cfg;
-        } else {
-            _war("Tenant config: using default",tenant_cfg.c_str());
+        // Explicit -c is authoritative, including names containing '%' and
+        // archives with no legacy sibling. Otherwise select the tenant before
+        // the common archive-first loader runs.
+        if(!is_custom_file) {
+            const auto tenant_cfg = "/etc/smithproxy/smithproxy." +
+                                    CfgFactory::get()->tenant_name + ".cfg";
+            const auto present = [](const std::string& path) {
+                struct stat state {};
+                // Dangling symlinks and inspection errors must not revive the
+                // default configuration instead of the selected tenant.
+                return ::lstat(path.c_str(), &state) == 0 || errno != ENOENT;
+            };
+            const bool tenant_source = present(tenant_cfg) ||
+                present(sx::cfg::CfgArchive::native_path_for(tenant_cfg));
+            const bool previously_migrated = present(tenant_cfg + ".old");
+            if(tenant_source || previously_migrated) {
+                CfgFactory::get()->config_file = tenant_cfg;
+                _war("Tenant config: %s", tenant_cfg.c_str());
+            } else {
+                _war("Tenant config: using shared default");
+            }
         }
 
         this_daemon->set_tenant("smithproxy", CfgFactory::get()->tenant_name);
@@ -886,11 +893,24 @@ int main(int argc, char *argv[]) {
         bool migrated_to_cftar = false;
         if(migrate_legacy && !CfgFactory::get()->config_file_check_only) {
             try {
+                auto migration_startup = sx::cfg::CfgArchive::startup_path_for(
+                    CfgFactory::get()->config_file);
+                const auto conventional_tenant_config = "/etc/smithproxy/smithproxy." +
+                    CfgFactory::get()->tenant_name + ".cfg";
+                if(CfgFactory::get()->config_file == conventional_tenant_config) {
+                    struct stat state {};
+                    const bool missing_tenant_startup =
+                        ::lstat(migration_startup.c_str(), &state) != 0 && errno == ENOENT;
+                    // Legacy sx_network used the shared startup script for
+                    // tenants. Carry it into their archive instead of an empty entry.
+                    if(missing_tenant_startup) {
+                        migration_startup = "/etc/smithproxy/smithproxy.startup.cfg";
+                    }
+                }
                 sx::cfg::CfgPack::Migration migration {
                     {
                         CfgFactory::get()->config_file,
-                        sx::cfg::CfgArchive::startup_path_for(
-                            CfgFactory::get()->config_file),
+                        migration_startup,
                         legacy_cftar_resources(CfgFactory::get()->dir_msg_templates),
                         {},
                         true,

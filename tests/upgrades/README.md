@@ -38,8 +38,8 @@ object and actual SOCKS forwarding through the running TLC process.
 - default `/etc/smithproxy` layout with legacy-tree retirement, under a private `/etc` mount;
 - custom `.cfg`, extensionless, and alternative-suffix configuration names;
 - existing backup, directory at backup name, and symlink at backup name;
-- read-only migration directory and successful retry;
-- actual ENOSPC on an isolated tmpfs and successful retry after freeing space;
+- read-only migration directory and successful retry (an older schema fails closed if its required save is impossible);
+- actual ENOSPC on an isolated tmpfs and successful retry after freeing space; an older schema may reject startup without modifying its original configuration;
 - read-only legacy retirement and successful retry without native config loss;
 - corrupt native archive with valid legacy config (no fallback);
 - missing native archive after successful retirement (no `.old` fallback);
@@ -70,3 +70,19 @@ This is not a power-loss or storage-controller durability test. SIGKILL tests
 process failure after completed activation, not every individual instruction in
 migration. It also does not exercise package-manager scripts or production
 traffic load. Keep the full P8 gate separate.
+
+## Tenant upgrade matrix
+
+`tenant_upgrade_matrix.py` compares a binary without the tenant hotfix against
+the candidate, then exercises default/tenant migration order, concurrent starts,
+shared certificates and templates, distinct tenant credentials, repeated starts,
+tenant-local saves, and staged installation of both legacy and native layouts.
+It uses private user/network/PID/mount namespaces. Firewall commands are recorded
+by stubs; real proxy processes forward SOCKS traffic. It does not run systemd or a
+distribution package manager.
+
+Pass `--build`, `--baseline` (directory containing the baseline `smithproxy` and
+`smithproxy.startup.sh`), and a fresh `--output` directory. Optional
+`--legacy-config` accepts a configuration saved by an older release; `--only`
+selects one named scenario. The baseline should differ only by the hotfix, and
+both binaries must use compatible dependencies.

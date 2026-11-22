@@ -291,10 +291,15 @@ class Gate:
         def readonly_migration(case, cfg):
             before = snapshot(cfg.parent)
             with self.readonly(cfg.parent):
-                with self.process(self.args.tlc, case, cfg) as cli:
-                    self.marker(cli)
+                with self.process(self.args.tlc, case, cfg, expect_running=None) as cli:
+                    if cli is not None:
+                        self.marker(cli)
+                        self.check_log(case, 'cannot create native configuration archive')
+                    else:
+                        # An older schema must be persisted before activation;
+                        # a read-only filesystem safely prevents that upgrade.
+                        self.check_log(case, 'Configuration upgrade failed: cannot save upgraded configuration')
                 assert snapshot(cfg.parent) == before
-            self.check_log(case, 'cannot create native configuration archive')
             self.native(case, cfg)
         self.case('readonly-migration-and-retry', readonly_migration)
 
@@ -430,12 +435,16 @@ class Gate:
                     except OSError as error:
                         assert error.errno == errno.ENOSPC, error
                 before = active.read_bytes()
-                with self.process(self.args.tlc, case, active) as cli:
-                    self.marker(cli)
+                with self.process(self.args.tlc, case, active, expect_running=None) as cli:
+                    if cli is not None:
+                        self.marker(cli)
+                        self.check_log(case, 'cannot create native configuration archive')
+                    else:
+                        # Schema upgrades fail closed if their save hits ENOSPC.
+                        self.check_log(case, 'Configuration upgrade failed: cannot save upgraded configuration')
                 assert active.read_bytes() == before, 'ENOSPC changed the only legacy config'
                 assert not native_path(active).exists(), 'ENOSPC published an incomplete archive'
                 assert not active.with_name(active.name + '.old').exists()
-                self.check_log(case, 'cannot create native configuration archive')
                 (case / 'enospc-state.json').write_text(json.dumps(snapshot(disk), indent=2))
                 filler.unlink()
                 self.native(case, active)

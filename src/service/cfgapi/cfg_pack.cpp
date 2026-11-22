@@ -445,6 +445,20 @@ CfgPack::LegacyRetireResult CfgPack::retire_legacy_tree(
     const auto native_path = (fs::path(root) / active_archive).string();
     CfgManifest::validate(CfgTar::read_file(native_path));
 
+    // A default archive does not own other tenants or their shared external
+    // resources. Keep the legacy tree while any tenant configuration/registry
+    // exists; individual successfully migrated .cfg files are retired separately.
+    for(const auto& entry : fs::directory_iterator(root)) {
+        const auto name = entry.path().filename().string();
+        const bool tenant_registry = name == "smithproxy.tenants.cfg";
+        const bool smithproxy_entry = name.rfind("smithproxy.", 0) == 0;
+        const bool other_config = smithproxy_entry && name != "smithproxy.cfg" &&
+            name != "smithproxy.startup.cfg" && name != active_archive &&
+            name.rfind(active_archive + ".", 0) != 0 &&
+            (entry.path().extension() == ".cfg" || entry.path().extension() == ".cftar");
+        if(tenant_registry || other_config) return {};
+    }
+
     const auto backup_path = (fs::path(root) / backup_name).string();
     const auto archive_prefix = fs::path("etc/smithproxy");
     CfgTar current;

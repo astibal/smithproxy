@@ -16,9 +16,9 @@ def executable(path: Path, content: str) -> None:
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 
-def run(action: str, environment: dict[str, str]) -> subprocess.CompletedProcess[str]:
+def run(action: str, environment: dict[str, str], tenant: str = "default") -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["bash", str(SX_NETWORK), action, "default"],
+        ["bash", str(SX_NETWORK), action, tenant],
         env=environment,
         text=True,
         stdout=subprocess.PIPE,
@@ -151,6 +151,29 @@ def main() -> int:
         assert "native-startup-before" in native.stdout
         assert "QUIC interception enabled" in native.stdout
         assert "legacy-startup" not in native.stdout
+
+        # A named tenant uses its native archive even after legacy retirement.
+        (etc / "smithproxy.tenants.cfg").write_text("3;blue;192.0.2.0/24;2001:db8::/64\n")
+        tenant_archive = etc / "smithproxy.blue.cftar"
+        tenant_archive.write_bytes(archive.read_bytes())
+        (etc / "smithproxy.blue.cfg.old").write_text("retired legacy policy")
+        environment["NETWORK_FORCE_LOG"] = "1"
+        tenant = run("check", environment, "blue")
+        assert tenant.returncode == 0, tenant.stdout
+        assert "native-startup-before" in tenant.stdout
+        assert "legacy-startup" not in tenant.stdout
+        # A stale .cfg must never override the selected archive.
+        (etc / "smithproxy.blue.cfg").write_text("stale and invalid")
+        assert run("check", environment, "blue").returncode == 0
+        (etc / "smithproxy.blue.cfg").unlink()
+        tenant_archive.write_text("broken tenant archive")
+        assert run("check", environment, "blue").returncode != 0
+        tenant_archive.unlink()
+        assert run("check", environment, "blue").returncode != 0
+        tenant_archive.symlink_to(etc / "missing.cftar")
+        assert run("check", environment, "blue").returncode != 0
+        tenant_archive.unlink()
+        environment.pop("NETWORK_FORCE_LOG")
 
         # Presence controls fallback. A broken native archive must stop the
         # network service instead of resurrecting the legacy files.
