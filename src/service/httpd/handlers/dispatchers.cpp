@@ -153,6 +153,14 @@ namespace sx::webserver::dispatchers {
         }
 
 
+        for (auto const& method : {"GET", "POST"}) {
+            auto* handler = new Http_Responder(method,
+                "/api/diag/proxy/session/fp/ja4-clients",
+                authorized::token_protected<json>(json_proxy_session_ja4_clients));
+            handler->Content_Type = "application/json";
+            server.addController(std::shared_ptr<lmh::Controller>(handler));
+        }
+
         for(auto const& meth: {"GET", "POST"}) {
             auto* handler = new Http_Responder(
                     meth,

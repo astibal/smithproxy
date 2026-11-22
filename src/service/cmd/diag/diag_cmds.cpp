@@ -63,6 +63,7 @@
 
 #include <service/core/smithproxy.hpp>
 #include <service/core/sessionlist.hpp>
+#include <service/core/ja4_groups.hpp>
 #include <service/network_context.hpp>
 #include <service/cmd/diag/diag_cmds.hpp>
 #include <service/httpd/httpd.hpp>
@@ -2637,6 +2638,31 @@ auto get_more_info(MitmProxy const* curr_proxy, MitmHostCX* lf, MitmHostCX* rg, 
 }
 
 
+// Collect on each session's owning worker. The shared state also survives a
+// timeout, so late workers cannot access a destroyed CLI command stack.
+int cli_diag_proxy_session_ja4_clients(DiagCli* cli, const char*, char*[], int) {
+    const auto decor = cli->context.decor();
+    std::vector<sx::diagnostics::ja4_client> clients;
+    try { clients = sx::diagnostics::collect_ja4_clients(); }
+    catch (std::exception const& error) {
+        cli->context.print(decor.error(error.what()));
+        return CLI_OK;
+    }
+    auto groups = sx::diagnostics::group_ja4_clients(clients);
+    cli->context.print(decor.heading("JA4 client matches") + " (" + std::to_string(clients.size())
+        + " fingerprinted sessions; overlapping groups, not proof of client identity)");
+    if (groups.empty()) cli->context.print("  No shared fingerprints among active sessions.");
+    for (auto const& group : groups) {
+        const auto label = group.strength == 3 ? "ClientHello no-SNI + JA4H"
+                         : group.strength == 2 ? "ClientHello no-SNI match" : "JA4H match";
+        cli->context.print("+-- " + decor.heading(label) + " (" + std::to_string(group.members.size()) + " sessions)");
+        if (!group.no_sni.empty()) cli->context.print("|   ClientHello no-SNI: " + decor.success(group.no_sni));
+        if (!group.http.empty()) cli->context.print("|   JA4H: " + decor.success(group.http));
+        for (auto member : group.members) cli->context.print("|   +-- " + clients[member].connection);
+    }
+    return CLI_OK;
+}
+
 int cli_diag_proxy_session_list_extra (DiagCli *cli, const char *command, std::vector<std::string> const &args,
                                        int sl_flags) {
 
@@ -3447,6 +3473,8 @@ void register_diags(libcli2::Cli& native) {
     diag_register_command(cli, diag_proxy_policy,"list",cli_diag_proxy_policy_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy policy list");
 
     auto diag_proxy_session = diag_register_command(cli,diag_proxy,"session",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session commands");
+    auto diag_proxy_session_fp = diag_register_command(cli, diag_proxy_session, "fp", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "session fingerprint analysis");
+    diag_register_command(cli, diag_proxy_session_fp,"ja4-clients", cli_diag_proxy_session_ja4_clients, PRIVILEGE_PRIVILEGED, MODE_EXEC,"group active sessions by shared JA4 client fingerprints");
     diag_register_command(cli, diag_proxy_session,"list", cli_diag_proxy_session_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session list");
     diag_register_command(cli, diag_proxy_session,"list-nonames", cli_diag_proxy_list_nonames, PRIVILEGE_PRIVILEGED, MODE_EXEC,"list sessions without resolved destination names");
     diag_register_command(cli, diag_proxy_session,"clear", cli_diag_proxy_session_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session clear");

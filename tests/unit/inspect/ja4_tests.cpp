@@ -649,3 +649,34 @@ TEST(JA4_QUIC, CallbackMatchesOriginalClientHelloInBothModes) {
     EXPECT_EQ('i', evidence.parsed.ja4()[3]);
     EXPECT_TRUE(sx::quic::ClientHelloCapture::take(server.get()).empty());
 }
+
+
+#include <service/core/ja4_groups.hpp>
+
+TEST(JA4_Groups, DirectOverlapRanksCombinedEvidenceFirst) {
+    using sx::diagnostics::ja4_client;
+    const std::vector<ja4_client> clients {
+        {"a", "tls", {"get", "get", ""}},
+        {"b", "tls", {"get", "post"}},
+        {"c", "tls", {"post"}},
+        {"d", "different", {"get"}},
+        {"empty", "", {""}},
+    };
+    auto groups = sx::diagnostics::group_ja4_clients(clients);
+    ASSERT_EQ(groups.size(), 5U);
+    EXPECT_EQ(groups[0].strength, 3);
+    EXPECT_EQ(groups[0].http, "get");
+    EXPECT_EQ(groups[0].members, (std::vector<std::size_t>{0, 1}));
+    EXPECT_EQ(groups[1].strength, 3);
+    EXPECT_EQ(groups[1].members, (std::vector<std::size_t>{1, 2}));
+    EXPECT_EQ(groups[2].strength, 2);
+    EXPECT_EQ(groups[2].members.size(), 3U);
+    EXPECT_EQ(groups[3].strength, 1);
+    EXPECT_EQ(groups[3].members, (std::vector<std::size_t>{0, 1, 3}));
+}
+
+TEST(JA4_Groups, MissingAndUniqueFingerprintsDoNotMatch) {
+    EXPECT_TRUE(sx::diagnostics::group_ja4_clients({
+        {"a", "", {}}, {"b", "", {""}}, {"c", "one", {"unique"}}
+    }).empty());
+}

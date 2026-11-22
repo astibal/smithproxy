@@ -1,3 +1,6 @@
+#include <service/core/ja4_groups.hpp>
+#include <proxy/quic/error_stats.hpp>
+#include <stdexcept>
 #include <service/core/session_interfaces.hpp>
 #include <optional>
 #include <thread>
@@ -248,4 +251,55 @@ nlohmann::json ObjAPI::neighbor_list(bool flag_raw, unsigned int last_n_days) {
     else {
         return NbrHood::instance().ser_json_out();
     }
+}
+
+std::vector<sx::diagnostics::ja4_client> sx::diagnostics::collect_ja4_clients() {
+    struct snapshot {
+        std::mutex lock;
+        std::vector<sx::diagnostics::ja4_client> clients;
+    };
+    auto state = std::make_shared<snapshot>();
+    auto collect = [state](MitmProxy* proxy) -> std::optional<std::string> {
+        sx::diagnostics::ja4_client client;
+        client.connection = proxy->to_connection_label(false);
+        if (proxy->webhook_stream) {
+            client.connection += " stream=" + std::to_string(proxy->webhook_stream->stream_id);
+        }
+        client.no_sni = proxy->ja4.ClientHelloNoSNI;
+        auto const* left = proxy->first_left();
+        if (left && left->engine().application_data) {
+            auto const& app = left->engine().application_data;
+            if (app->custom_list_name() == "ja4h") client.http = app->custom_list();
+        }
+        if (!client.no_sni.empty() || !client.http.empty()) {
+            std::lock_guard guard(state->lock);
+            state->clients.push_back(std::move(client));
+        }
+        return std::nullopt;
+    };
+    auto request = SessionList::text(session_list_worker_count(), collect);
+    dispatch_session_list(request);
+    if (!request->wait_for(std::chrono::seconds(5))) {
+        throw std::runtime_error("JA4 snapshot timed out; retry the command.");
+    }
+    for (auto const& service : SmithProxy::instance().quic_services) {
+        auto pending = service->request_session_details(collect);
+        if (pending.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+            throw std::runtime_error("QUIC JA4 snapshot timed out; retry the command.");
+        }
+        try { pending.get(); }
+        catch (std::exception const& error) {
+            ++sx::quic::stats.errors.cli_stream_details_exception;
+            throw;
+        }
+    }
+    std::vector<sx::diagnostics::ja4_client> clients;
+    {
+        std::lock_guard guard(state->lock);
+        clients = std::move(state->clients);
+    }
+    std::sort(clients.begin(), clients.end(), [](auto const& a, auto const& b) {
+        return a.connection < b.connection;
+    });
+    return clients;
 }

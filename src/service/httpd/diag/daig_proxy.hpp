@@ -38,6 +38,7 @@
 */
 
 #include <nlohmann/json.hpp>
+#include <service/core/ja4_groups.hpp>
 
 #include <ext/lmhpp/include/lmhttpd.hpp>
 #include <service/httpd/util.hpp>
@@ -75,4 +76,31 @@ static nlohmann::json json_proxy_neighbor_list(struct MHD_Connection * connectio
 
 static nlohmann::json json_proxy_neighbor_update(struct MHD_Connection * connection, std::string const& meth, std::string const& req) {
     return SmithProxy::api().neighbor_update(req);
+}
+
+
+static nlohmann::json json_proxy_session_ja4_clients(MHD_Connection*, std::string const&, std::string const&) {
+    try {
+        const auto clients = sx::diagnostics::collect_ja4_clients();
+        const auto groups = sx::diagnostics::group_ja4_clients(clients);
+        nlohmann::json result = {
+            {"complete", true}, {"fingerprinted_sessions", clients.size()},
+            {"overlapping_groups", true}, {"groups", nlohmann::json::array()}
+        };
+        for (auto const& group : groups) {
+            nlohmann::json members = nlohmann::json::array();
+            for (auto index : group.members) {
+                auto const& client = clients[index];
+                members.push_back({{"connection", client.connection},
+                    {"client_no_sni", client.no_sni}, {"ja4h", client.http}});
+            }
+            result["groups"].push_back({{"strength", group.strength},
+                {"client_no_sni", group.no_sni}, {"ja4h", group.http},
+                {"sessions", std::move(members)}});
+        }
+        return result;
+    } catch (std::exception const& error) {
+        // Never present a timed-out partial snapshot as a complete match set.
+        return {{"complete", false}, {"error", error.what()}};
+    }
 }
