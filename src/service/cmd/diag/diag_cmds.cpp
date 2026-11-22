@@ -2612,20 +2612,6 @@ auto get_more_info(MitmProxy const* curr_proxy, MitmHostCX* lf, MitmHostCX* rg, 
                 info_ss << "\n    L7_params: none\n";
             }
 
-            if(curr_proxy) {
-                bool pr = false;
-                if(! curr_proxy->ja4.ClientHello.empty()) {
-                    info_ss << "\n    JA4 standard: " << curr_proxy->ja4.ClientHelloStandard << "\n";
-                    info_ss << "    JA4 no-SNI  : " << curr_proxy->ja4.ClientHelloNoSNI << "\n";
-                    pr = true;
-                }
-                if(! curr_proxy->ja4.ServerHello.empty()) {
-                    info_ss << "    JA4S: " << curr_proxy->ja4.ServerHello << "\n";
-                    pr = true;
-                }
-                if(pr)
-                    info_ss << "\n";
-            }
 
 
             if (verbosity > INF) {
@@ -2738,9 +2724,40 @@ int cli_diag_proxy_session_list_extra (DiagCli *cli, const char *command, std::v
         cur_obj_ss << prefix << decor.command(get_proxy_title(curr_proxy, sl_flags, verbosity)) << suffix;
 
         if (verbosity >= iDIA) {
-            cur_obj_ss << "\r\n" << sx::net::session_interfaces_text(
+            cur_obj_ss << "\r\n    " << sx::net::session_interfaces_text(
                 lf && lf->com() ? lf->com()->ingress_ifindex() : 0,
                 rg && rg->com() ? rg->com()->egress_ifindex() : 0) << "\r\n";
+        }
+        if (verbosity >= iDIA) {
+            // Use retained application fingerprints for every transport, including
+            // HTTP/2 and HTTP/3 streams; never trigger parsing from diagnostics.
+            std::vector<std::string> http_fingerprints;
+            if (lf && lf->engine().application_data) {
+                auto const& app = lf->engine().application_data;
+                if (app->custom_list_name() == "ja4h") http_fingerprints = app->custom_list();
+            }
+            auto const& fingerprints = curr_proxy->ja4;
+            const bool has_fingerprints = !fingerprints.ClientHelloStandard.empty()
+                || !fingerprints.ClientHelloNoSNI.empty() || !fingerprints.ClientHello.empty()
+                || !fingerprints.ServerHello.empty() || !http_fingerprints.empty();
+            if (has_fingerprints) {
+                cur_obj_ss << "    " << decor.heading("JA4:") << "\n";
+                auto print_fingerprint = [&](std::string const& label, std::string const& value) {
+                    if (!value.empty()) {
+                        cur_obj_ss << "        " << decor.muted(label + ": ")
+                                   << decor.success(value) << "\n";
+                    }
+                };
+                print_fingerprint("ClientHello standard", fingerprints.ClientHelloStandard);
+                print_fingerprint("ClientHello no-SNI", fingerprints.ClientHelloNoSNI);
+                const bool legacy_client = fingerprints.ClientHelloStandard.empty()
+                    && fingerprints.ClientHelloNoSNI.empty();
+                if (legacy_client) print_fingerprint("ClientHello", fingerprints.ClientHello);
+                print_fingerprint("ServerHello", fingerprints.ServerHello);
+                for (auto const& fingerprint : http_fingerprints) {
+                    print_fingerprint("JA4H", fingerprint);
+                }
+            }
         }
         cur_obj_ss << get_more_info(curr_proxy, lf, rg, verbosity);
         return cur_obj_ss.str();
