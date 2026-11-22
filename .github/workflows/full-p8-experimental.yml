@@ -8,8 +8,19 @@ permissions:
 
 jobs:
   full-p8:
+    name: ${{ matrix.profile }}
     runs-on: ubuntu-26.04
-    timeout-minutes: 330
+    timeout-minutes: 29
+    strategy:
+      fail-fast: false
+      matrix:
+        profile:
+          - native
+          - sanity
+          - traffic
+          - lifecycle
+          - corpus
+          - fuzz
 
     steps:
       - name: Checkout code
@@ -31,7 +42,14 @@ jobs:
       - name: Enable test namespaces
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
+      - name: Prepare QUIC Python runtime
+        if: matrix.profile == 'native'
+        run: |
+          runtime_root="${RUNNER_TEMP}/smithproxy-p8-runtime"
+          tests/patch-runner/prepare-quic-runtime.sh "${runtime_root}/quic-python"
+
       - name: Prepare HTTP/3 runtimes
+        if: matrix.profile == 'traffic'
         env:
           NATIVE_H3_BUILD_JOBS: 4
           CURL_HTTP3_BUILD_JOBS: 4
@@ -42,31 +60,32 @@ jobs:
               "${runtime_root}/curl-http3" "${runtime_root}/native-h3"
           tests/patch-runner/prepare-quic-runtime.sh "${runtime_root}/quic-python"
 
-      - name: Run full P8
+      - name: Run P8 profile
         env:
+          P8_PROFILE: ${{ matrix.profile }}
           PATCH_TEST_JOBS: 4
           PATCH_TEST_CTEST_JOBS: 2
           PATCH_TEST_PARALLEL: 3
         run: |
           runtime_root="${RUNNER_TEMP}/smithproxy-p8-runtime"
-          work_root="${RUNNER_TEMP}/smithproxy-p8-work"
-          report_root="${RUNNER_TEMP}/smithproxy-p8-report"
+          work_root="${RUNNER_TEMP}/smithproxy-p8-${P8_PROFILE}-work"
+          report_root="${RUNNER_TEMP}/smithproxy-p8-${P8_PROFILE}-report"
           mkdir -p "${report_root}"
           env \
               CURL_HTTP3_PREFIX="${runtime_root}/curl-http3" \
               QUIC_PYTHON_PREFIX="${runtime_root}/quic-python" \
               NATIVE_H3_PREFIX="${runtime_root}/native-h3" \
               PATCH_TEST_RESULTS_DIR="${report_root}" \
-              tests/patch-runner/test-patch.sh full --local --quiet \
+              tests/patch-runner/test-patch.sh "${P8_PROFILE}" --local --quiet \
                   --parallel 3 --jobs 4 --dir "${work_root}"
 
-      - name: Upload full P8 report
+      - name: Upload P8 profile report
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: full-p8-report
+          name: full-p8-${{ matrix.profile }}-report
           path: |
-            ${{ runner.temp }}/smithproxy-p8-report
-            ${{ runner.temp }}/smithproxy-p8-work/results
+            ${{ runner.temp }}/smithproxy-p8-${{ matrix.profile }}-report
+            ${{ runner.temp }}/smithproxy-p8-${{ matrix.profile }}-work/results
           if-no-files-found: warn
           retention-days: 14
