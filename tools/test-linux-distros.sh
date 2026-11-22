@@ -93,6 +93,15 @@ for entry in "${DISTROS[@]}"; do
     }
     trap cleanup_container EXIT INT TERM
 
+    if [[ ${name} == opensuse-tumbleweed ]]; then
+        # Avoid geo-routed mirrors serving metadata before all referenced files
+        # have reached the same snapshot on fresh Tumbleweed publications.
+        docker exec "${container_id}" sh -c \
+            'sed -i "s|http://download.opensuse.org/|https://downloadcontent.opensuse.org/|g; s|https://download.opensuse.org/|https://downloadcontent.opensuse.org/|g" /etc/zypp/repos.d/*.repo'
+        docker exec "${container_id}" \
+            zypper --non-interactive dist-upgrade --no-recommends
+    fi
+
     if ! docker exec "${container_id}" /src/tools/linux-sanity-test.sh dependencies ||
        ! docker exec "${container_id}" /src/tools/linux-sanity-test.sh build; then
         failures+=("${name}")

@@ -47,6 +47,9 @@ jobs:
           sudo ./tools/linux-deps.sh
           sudo apt-get install -y --no-install-recommends libgtest-dev
 
+      - name: Enable test namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: Build and run native tests
         run: |
           report_dir="${RUNNER_TEMP}/smithproxy-native-report"

@@ -28,6 +28,9 @@ jobs:
       - name: Verify privileged lab support
         run: sudo -n tests/patch-runner/privilege-preflight.sh privileged
 
+      - name: Enable test namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: Prepare HTTP/3 runtimes
         env:
           NATIVE_H3_BUILD_JOBS: 4
