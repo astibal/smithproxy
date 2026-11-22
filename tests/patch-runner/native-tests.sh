@@ -65,6 +65,10 @@ fi
     exit 2
 }
 
+if [[ -n ${QUIC_PYTHON_PREFIX:-} ]]; then
+    export PYTHONPATH="${QUIC_PYTHON_PREFIX}${PYTHONPATH:+:${PYTHONPATH}}"
+fi
+
 mkdir -p "$BUILD_DIR" "$REPORT_DIR"
 cmake -S "$ROOT" -B "$BUILD_DIR" \
     -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \

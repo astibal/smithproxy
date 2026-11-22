@@ -55,7 +55,7 @@ jobs:
 
       - name: Build and run native tests
         env:
-          PYTHONPATH: ${{ runner.temp }}/smithproxy-quic-python
+          QUIC_PYTHON_PREFIX: ${{ runner.temp }}/smithproxy-quic-python
         run: |
           report_dir="${RUNNER_TEMP}/smithproxy-native-report"
           if ! tests/patch-runner/native-tests.sh \
