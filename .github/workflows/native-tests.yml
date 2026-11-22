@@ -50,7 +50,12 @@ jobs:
       - name: Enable test namespaces
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
+      - name: Prepare QUIC Python runtime
+        run: tests/patch-runner/prepare-quic-runtime.sh "${RUNNER_TEMP}/smithproxy-quic-python"
+
       - name: Build and run native tests
+        env:
+          PYTHONPATH: ${{ runner.temp }}/smithproxy-quic-python
         run: |
           report_dir="${RUNNER_TEMP}/smithproxy-native-report"
           if ! tests/patch-runner/native-tests.sh \

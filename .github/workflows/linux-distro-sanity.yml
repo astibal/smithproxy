@@ -11,6 +11,7 @@ on:
       - 'socle'
       - '.gitmodules'
       - 'tools/linux-*.sh'
+      - 'tools/test-linux-distros.sh'
 
   push:
     branches:
@@ -24,6 +25,7 @@ on:
       - 'socle'
       - '.gitmodules'
       - 'tools/linux-*.sh'
+      - 'tools/test-linux-distros.sh'
 
 permissions:
   contents: read
