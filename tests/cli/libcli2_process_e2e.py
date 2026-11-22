@@ -302,11 +302,12 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("binary", type=Path)
     parser.add_argument("--source", type=Path, default=Path(__file__).resolve().parents[2])
-    parser.add_argument("--port", type=int, default=59123)
+    parser.add_argument("--port", type=int)
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
     source = args.source.resolve()
     binary = args.binary.resolve()
+    cli_port = args.port or free_port()
     cftar = binary.with_name("smithproxy-cftar")
     if not cftar.is_file():
         raise AssertionError(f"CFtar companion tool not found: {cftar}")
@@ -386,7 +387,7 @@ script_profiles = {
             'tls_profile = "default";\n        script_profile = "libcli2_e2e_script";',
             1,
         )
-        text = re.sub(r"(?m)^(\s*port\s*=\s*)50000;", rf"\g<1>{args.port};", text, count=1)
+        text = re.sub(r"(?m)^(\s*port\s*=\s*)50000;", rf"\g<1>{cli_port};", text, count=1)
         config.write_text(text)
 
         env = os.environ.copy()
@@ -410,16 +411,16 @@ script_profiles = {
                                       source / "etc/certs/default/srv-key.pem")
         tls_client = None
         try:
-            wait_for_port(process, args.port)
+            wait_for_port(process, cli_port)
             wait_for_port(process, socks_port)
             assert not config.exists(), "startup left the legacy config active"
             # The schema upgrader may normalize legacy text before migration.
             # The backup must retain exactly the configuration that was packed.
             assert config.with_name(config.name + '.old').read_text() == read_archive_config(
                 cftar, config.with_suffix('.cftar'))
-            require_oversized_cli_line_disconnect(args.port)
-            require_oversized_cli_password_disconnect(args.port)
-            cli = Cli(args.port, args.verbose)
+            require_oversized_cli_line_disconnect(cli_port)
+            require_oversized_cli_password_disconnect(cli_port)
+            cli = Cli(cli_port, args.verbose)
             require(cli.tab("en"), "enable")
             require(cli.command("enable"), "Password:")
             require(cli.command("libcli2-test-password"), "#")
@@ -768,7 +769,7 @@ script_profiles = {
             cli.command_ok(f"test webhook http://127.0.0.1:{webhook_port}/stall")
             if not WebhookHandler.stall_started.wait(timeout=3):
                 raise AssertionError("stalled webhook request did not start")
-            partial_control = socket.create_connection(("127.0.0.1", args.port), timeout=5)
+            partial_control = socket.create_connection(("127.0.0.1", cli_port), timeout=5)
             partial_control.recv(65536)
             partial_control.sendall(b"\x1b")
             shutdown_started = time.monotonic()
@@ -821,8 +822,8 @@ script_profiles = {
                 stderr=subprocess.STDOUT,
                 text=True,
             )
-            wait_for_port(process, args.port)
-            cli = Cli(args.port, args.verbose)
+            wait_for_port(process, cli_port)
+            cli = Cli(cli_port, args.verbose)
             require(cli.command("enable"), "Password:")
             require(cli.command("libcli2-test-password"), "#")
             require(cli.command_ok("execute shutdown"), "terminating smithproxy")
@@ -961,7 +962,7 @@ script_profiles = {
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=5)
-            if process.stdout:
+            if process.stdout and not process.stdout.closed:
                 tail = process.stdout.read()
                 if tail:
                     print("--- smithproxy output ---")
