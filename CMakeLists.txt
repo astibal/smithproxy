@@ -1065,6 +1065,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/proxy/quic/spq1_tests.cpp
                 tests/unit/proxy/quic/qpack_vendor_tests.cpp
                 src/proxy/quic/openssl.cpp
+                src/inspect/fp/ja4.cpp
                 src/proxy/quic/transport.cpp
                 src/proxy/quic/hooks.cpp
                 tests/unit/proxy/quic/openssl_tests.cpp

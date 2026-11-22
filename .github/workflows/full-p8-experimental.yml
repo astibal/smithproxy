@@ -1,0 +1,69 @@
+name: Experimental full P8 (Ubuntu 26.04)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  full-p8:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 330
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: |
+          sudo ./tools/linux-deps.sh
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+              libgtest-dev libev-dev nftables tcpdump tshark socat netcat-openbsd
+
+      - name: Verify privileged lab support
+        run: sudo -n tests/patch-runner/privilege-preflight.sh privileged
+
+      - name: Prepare HTTP/3 runtimes
+        env:
+          NATIVE_H3_BUILD_JOBS: 4
+          CURL_HTTP3_BUILD_JOBS: 4
+        run: |
+          runtime_root="${RUNNER_TEMP}/smithproxy-p8-runtime"
+          tests/patch-runner/prepare-native-h3.sh "${runtime_root}/native-h3"
+          tests/patch-runner/prepare-curl-http3.sh \
+              "${runtime_root}/curl-http3" "${runtime_root}/native-h3"
+          tests/patch-runner/prepare-quic-runtime.sh "${runtime_root}/quic-python"
+
+      - name: Run full P8
+        env:
+          PATCH_TEST_JOBS: 4
+          PATCH_TEST_CTEST_JOBS: 2
+          PATCH_TEST_PARALLEL: 3
+        run: |
+          runtime_root="${RUNNER_TEMP}/smithproxy-p8-runtime"
+          work_root="${RUNNER_TEMP}/smithproxy-p8-work"
+          report_root="${RUNNER_TEMP}/smithproxy-p8-report"
+          mkdir -p "${report_root}"
+          env \
+              CURL_HTTP3_PREFIX="${runtime_root}/curl-http3" \
+              QUIC_PYTHON_PREFIX="${runtime_root}/quic-python" \
+              NATIVE_H3_PREFIX="${runtime_root}/native-h3" \
+              PATCH_TEST_RESULTS_DIR="${report_root}" \
+              tests/patch-runner/test-patch.sh full --local --quiet \
+                  --parallel 3 --jobs 4 --dir "${work_root}"
+
+      - name: Upload full P8 report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: full-p8-report
+          path: |
+            ${{ runner.temp }}/smithproxy-p8-report
+            ${{ runner.temp }}/smithproxy-p8-work/results
+          if-no-files-found: warn
+          retention-days: 14

@@ -46,10 +46,12 @@ cmake -S "$work/nghttp3-1.18.0" -B "$work/build-nghttp3" \
 cmake --build "$work/build-nghttp3" -j "$jobs"
 cmake --install "$work/build-nghttp3"
 cmake -S "$source_dir" -B "$work/build-ngtcp2" \
-    -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$destination" \
+    -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$destination" \
+    -DCMAKE_PREFIX_PATH="$destination" \
     -DENABLE_OPENSSL=ON -DENABLE_GNUTLS=OFF -DENABLE_LIB_ONLY=OFF \
     -DENABLE_SHARED_LIB=ON -DENABLE_STATIC_LIB=OFF "$@"
 cmake --build "$work/build-ngtcp2" --target osslserver osslclient -j "$jobs"
+cmake --install "$work/build-ngtcp2"
 
 mkdir -p "$destination/bin" "$destination/share/native-h3"
 cp "$work/build-ngtcp2/examples/osslserver" "$destination/bin/h3-server.bin"

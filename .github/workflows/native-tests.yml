@@ -1,0 +1,70 @@
+name: Native tests (Ubuntu 26.04)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/native-tests.yml'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'src/**'
+      - 'socle'
+      - '.gitmodules'
+      - 'tests/**'
+      - 'tools/linux-*.sh'
+  push:
+    branches:
+      - master
+      - 'release/**'
+    paths:
+      - '.github/workflows/native-tests.yml'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'src/**'
+      - 'socle'
+      - '.gitmodules'
+      - 'tests/**'
+      - 'tools/linux-*.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: |
+          sudo ./tools/linux-deps.sh
+          sudo apt-get install -y --no-install-recommends libgtest-dev
+
+      - name: Build and run native tests
+        run: |
+          report_dir="${RUNNER_TEMP}/smithproxy-native-report"
+          if ! tests/patch-runner/native-tests.sh \
+              --root "${GITHUB_WORKSPACE}" \
+              --build-dir "${RUNNER_TEMP}/smithproxy-native-build" \
+              --report-dir "${report_dir}" \
+              --jobs 2 --test-jobs 2; then
+              cat "${report_dir}/configure.log" || true
+              cat "${report_dir}/build.log" || true
+              exit 1
+          fi
+
+      - name: Upload native test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-test-report
+          path: ${{ runner.temp }}/smithproxy-native-report
+          if-no-files-found: error
+          retention-days: 14

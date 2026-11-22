@@ -8,18 +8,23 @@ on:
 
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-26.04
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         submodules: 'recursive'
+        fetch-depth: 0
+        persist-credentials: false
 
     - name: Install dependencies
       run: sudo ./tools/linux-deps.sh
 
     - name: Build project
-      run: sudo ./tools/linux-build.sh
+      run: DESTDIR="${RUNNER_TEMP}/smithproxy-install" ./tools/linux-build.sh

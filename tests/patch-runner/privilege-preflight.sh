@@ -19,6 +19,7 @@ done
 }
 
 probe_body='set -euo pipefail
+install -d -m 0755 /run/netns
 mount -t tmpfs -o mode=755 tmpfs /run/netns
 ip link set lo up
 name=spf$$

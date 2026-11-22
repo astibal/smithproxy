@@ -29,11 +29,25 @@ case "${1:-}" in
 esac
 
 mkdir -p "${WORK_DIR}"
-cp -a "${SOURCE_MOUNT}/." "${WORK_DIR}/"
+# Do not preserve the host runner's ownership. Git metadata is read while the
+# container runs as root and Git rejects copied repositories owned by another
+# uid as unsafe.
+cp -R "${SOURCE_MOUNT}/." "${WORK_DIR}/"
 
 BUILD_JOBS="${BUILD_JOBS}" "${WORK_DIR}/tools/linux-build.sh"
 
 /usr/bin/smithproxy --version
+
+# A Git checkout must retain its source identity through the root-owned
+# container copy. Source archives legitimately have no .git metadata.
+if [ -e "${WORK_DIR}/.git" ]; then
+    grep -Eq '^#define SX_GIT_COMMIT_HASH "[0-9a-f]+"$' \
+        "${WORK_DIR}/src/smithproxy_version.h"
+    if [ "${SMITHPROXY_ENABLE_NGTCP2:-ON}" = ON ]; then
+        grep -Eq '^inline constexpr auto ngtcp2_commit = "[0-9a-f]{40}";$' \
+            "${WORK_DIR}/build/generated/dependency_build_info.hpp"
+    fi
+fi
 
 if ldd /usr/bin/smithproxy 2>&1 | grep -q "not found"; then
     echo "error: smithproxy has unresolved shared-library dependencies" >&2
@@ -41,12 +55,12 @@ if ldd /usr/bin/smithproxy 2>&1 | grep -q "not found"; then
     exit 1
 fi
 
-# The transport and its TLS adapter are embedded in our binary. Check defined
-# symbols before packaging strips them, and reject direct shared ngtcp2 links.
-# An unrelated system dependency (for example curl) may itself use ngtcp2.
+# The transport and its TLS adapter are linked from required static CMake
+# targets. A successful executable link proves their referenced symbols were
+# resolved. The installed Release binary is stripped, so it has no symbol table
+# for nm to inspect. Reject direct shared ngtcp2 links instead; an unrelated
+# system dependency (for example curl) may itself use ngtcp2.
 if [ "${SMITHPROXY_ENABLE_NGTCP2:-ON}" = ON ]; then
-    nm /usr/bin/smithproxy | grep -E ' [Tt] ngtcp2_conn_client_new_versioned$'
-    nm /usr/bin/smithproxy | grep -E ' [Tt] ngtcp2_crypto_ossl_ctx_new$'
     if readelf -d /usr/bin/smithproxy | grep -E 'NEEDED.*libngtcp2'; then
         echo "error: Smithproxy directly depends on a system ngtcp2 library" >&2
         exit 1
