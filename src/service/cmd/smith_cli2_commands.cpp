@@ -127,7 +127,7 @@ std::string status_text(const libcli2::Decorator& decor) {
         ? sx::status_build::smithproxy_version : SMITH_VERSION;
     const auto socle_version = *sx::status_build::socle_version
         ? sx::status_build::socle_version : SOCLE_VERSION;
-    output << '\n' << decor.key("Version:") << ' ' << decor.value(smith_version) << (SMITH_DEVEL ? decor.warning(" (dev)") : "") << "\n\n";
+    output << '\n' << decor.key("Version:") << ' ' << decor.value(smith_version) << (SMITH_DEVEL ? decor.warning(" (dev)") : "") << "\n";
     output << decor.key("Socle:") << ' ' << decor.value(socle_version) << (SOCLE_DEVEL ? decor.warning(" (dev)") : "") << '\n';
 #if (SMITH_DEVEL > 0) || (SOCLE_DEVEL > 0)
     output << "Smithproxy source info: " << SX_GIT_VERSION << '\n';
@@ -135,6 +135,7 @@ std::string status_text(const libcli2::Decorator& decor) {
     output << " Socle lib source info: " << SOCLE_GIT_VERSION << '\n';
     output << "                branch: " << SOCLE_GIT_BRANCH << " commit: " << SOCLE_GIT_COMMIT_HASH << '\n';
 #endif
+    output << '\n';
     const auto libraries = sx::dependencies::status();
     const auto& openssl = libraries.at("openssl");
     output << decor.key("OpenSSL:") << ' ' << openssl.at("version").get<std::string>()

@@ -532,6 +532,7 @@ add_custom_target(smithproxy-status-version
         COMMAND ${CMAKE_COMMAND}
             "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
             "-DOUTPUT_FILE=${PROJECT_BINARY_DIR}/generated/status_build_info.hpp"
+            "-DBUILD_CONFIG=$<CONFIG>"
             -P "${PROJECT_SOURCE_DIR}/cmake/StatusVersion.cmake"
         BYPRODUCTS "${PROJECT_BINARY_DIR}/generated/status_build_info.hpp"
         VERBATIM)
