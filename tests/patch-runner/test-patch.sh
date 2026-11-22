@@ -85,6 +85,9 @@ Common environment variables:
   PATCH_TEST_CTEST_JOBS          Native test parallelism. Coverage defaults to
                                  1 to avoid gcov-induced resource contention.
   PATCH_TEST_PARALLEL            Default full-section concurrency (default: 3).
+  PATCH_TEST_LIFECYCLE_PRIVILEGED
+                                 Use the privileged backend for a standalone
+                                 lifecycle profile (default: 0/rootless).
   MATCH                           Comma-separated corpus case-name globs
                                   to include (default: *).
   EXCLUDE                         Comma-separated corpus case-name globs to skip.
@@ -298,7 +301,14 @@ profile_needs_lab_privileges() {
 }
 
 profile_is_rootless_lifecycle() {
-    [[ $PROFILE == lifecycle || $ONLY_SUITE == lifecycle || ( $PROFILE == native && $INCLUDE_EXTERNAL == 1 ) ]]
+    local lifecycle_requested=0
+    local privileged_requested=${PATCH_TEST_LIFECYCLE_PRIVILEGED:-0}
+    if [[ $PROFILE == lifecycle || $ONLY_SUITE == lifecycle ]]; then
+        lifecycle_requested=1
+    elif [[ $PROFILE == native && $INCLUDE_EXTERNAL == 1 ]]; then
+        lifecycle_requested=1
+    fi
+    [[ $lifecycle_requested == 1 && $privileged_requested != 1 ]]
 }
 
 preflight_target() {

@@ -63,6 +63,7 @@ jobs:
       - name: Run P8 profile
         env:
           P8_PROFILE: ${{ matrix.profile }}
+          PATCH_TEST_LIFECYCLE_PRIVILEGED: ${{ matrix.profile == 'lifecycle' && '1' || '0' }}
           PATCH_TEST_JOBS: 4
           PATCH_TEST_CTEST_JOBS: 2
           PATCH_TEST_PARALLEL: 3
