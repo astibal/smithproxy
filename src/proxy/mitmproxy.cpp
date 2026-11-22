@@ -1551,9 +1551,8 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
             ch.ignore_sni = acct_opts.ja4_clienthello_ignore_sni;
             auto const &ch_buf = scom->client_hello_buffer();
 
-            // yes, some copying :( - in c++20 is span, but we are still at c++17
-            auto bufvec = std::vector(ch_buf.data() + 5, ch_buf.data() + ch_buf.size());
-            if(ch.from_buffer(bufvec) == 0) {
+            // Borrow the handshake bytes, skipping the five-byte TLS record header.
+            if(ch.from_buffer(ch_buf.view(5)) == 0) {
                 // Parse once, then derive both variants. The cached strings
                 // depend on ignore_sni, so invalidate them between calculations.
                 ch.ignore_sni = false;

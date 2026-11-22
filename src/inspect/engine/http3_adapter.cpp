@@ -1,5 +1,6 @@
 #include <inspect/engine/http3_adapter.hpp>
 #include <inspect/engine/http3.hpp>
+#include <inspect/fp/ja4.hpp>
 #include <socle/common/base64.hpp>
 
 namespace sx::engine::http::v3 {
@@ -170,7 +171,8 @@ void remember(Http3Connection& state, ProtocolInput const& input) {
     state.history.push_back(std::move(saved));
 }
 
-void apply_headers(Http3Stream& stream, sx::quic::h3_headers_record const& record) {
+void apply_headers(Http3Stream& stream, sx::quic::h3_headers_record const& record,
+                   bool fingerprint_enabled) {
     auto& direction = stream.directions[record.side == socle::side_t::LEFT ? 0 : 1];
     // Keep ordered fields and duplicates. Interim responses and trailers are
     // distinct sections; bound retained metadata independently of the decoder.
@@ -205,6 +207,19 @@ void apply_headers(Http3Stream& stream, sx::quic::h3_headers_record const& recor
         else if (field.name == "content-type") app.http_data.content_type = field.value;
         else if (field.name == "accept") app.http_data.accept = field.value;
         else if (field.name == "referer") app.http_data.referer = field.value;
+    }
+    // Fingerprint the first request header section in its decoded wire order.
+    // Responses and trailers share this stream, but must never replace JA4H.
+    const bool fingerprint_request = fingerprint_enabled && initial
+        && record.side == socle::side_t::LEFT && !app.http_data.method.empty();
+    if (fingerprint_request) {
+        sx::ja4::HTTP fingerprint;
+        fingerprint.version = "30";
+        fingerprint.cmd = sx::ja4::util::to_lower(app.http_data.method).substr(0, 2);
+        for (auto const& field : record.fields) {
+            fingerprint.process_header_pair({field.name, field.value});
+        }
+        app.http_data.ja4h = fingerprint.ja4h();
     }
     if (!app.http_data.method.empty()) app.mark_populated();
 }
@@ -423,7 +438,7 @@ public:
                 for (auto const& field : record.fields) size += field.name.size() + field.value.size();
                 if (size <= Http3Connection::maximum_header_bytes - state.header_bytes) {
                     state.header_bytes += size;
-                    apply_headers(found->second, record);
+                    apply_headers(found->second, record, ctx.options.http.ja4h);
                 } else {
                     auto& target = found->second.directions[record.side == socle::side_t::LEFT ? 0 : 1];
                     target.metadata_limit = "header-bytes-limit";
@@ -541,6 +556,7 @@ nlohmann::json metadata(EngineCtx const& ctx, std::uint64_t stream_id, ProtocolE
             if (!value.empty()) info[key] = value;
         };
         put("flow.http3.method", http.method);
+        put("flow.http3.ja4h", http.ja4h);
         put("flow.http3.authority", http.host);
         put("flow.http3.path", http.uri);
         put("flow.http3.content_type", http.content_type);

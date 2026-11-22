@@ -1,3 +1,5 @@
+#include <proxy/quic/client_hello.hpp>
+
 #include <ossl_util.hpp>
 #include "proxy/quic/error_stats.hpp"
 #include <privileged_socket.hpp>
@@ -419,6 +421,7 @@ bool listener_service::prepare() {
         return false;
     }
     SSL_CTX_set_alpn_select_cb(context_.get(), select_h3, nullptr);
+    SSL_CTX_set_msg_callback(context_.get(), ClientHelloCapture::observe);
     SSL_CTX_set_client_hello_cb(context_.get(), client_hello_callback, this);
     if (verify_upstream_) {
         SSL_CTX_set_verify(client_context_.get(), SSL_VERIFY_PEER, nullptr);
@@ -1100,7 +1103,14 @@ void listener_service::progress_handshake(
         flow_context.ingress_ifindex = value.ingress_ifindex;
         flow_context.transport_name = "quic";
         flow_context.rewrite_requested = value.setup && value.setup->rewrite_requested();
-        if (value.setup) flow_context.parent_connection_id = value.setup->connection_id();
+        if (value.setup) {
+            // Direct listeners may create setup only after admission, whereas
+            // transparent listeners already consumed this in the TLS callback.
+            auto hello = ClientHelloCapture::take(value.downstream->handle_native());
+            if (!hello.empty()) value.setup->client_hello(hello);
+            flow_context.parent_connection_id = value.setup->connection_id();
+            flow_context.client_fingerprints = value.setup->client_fingerprints();
+        }
 
         value.proxy = proxy_factory_(
             value.downstream, value.upstream, proxy_limits,
@@ -1539,7 +1549,14 @@ bool detail::same_dispatcher_callback_association(
 int listener_service::client_hello_callback(SSL* ssl, int* alert, void* argument) {
     auto* service = static_cast<listener_service*>(argument);
     try {
-        if(service && service->prepare_tls_policy(ssl)) return SSL_CLIENT_HELLO_SUCCESS;
+        if(service && service->prepare_tls_policy(ssl)) {
+            auto binding = service->dispatcher_bindings_.find(ssl);
+            if (binding != service->dispatcher_bindings_.end() && binding->second.setup) {
+                auto hello = ClientHelloCapture::take(ssl);
+                if (!hello.empty()) binding->second.setup->client_hello(hello);
+            }
+            return SSL_CLIENT_HELLO_SUCCESS;
+        }
     } catch (...) {
         ++stats.errors.listener_client_hello_callback_exception;
         // No C++ exception may cross OpenSSL's callback boundary.

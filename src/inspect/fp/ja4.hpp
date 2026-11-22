@@ -41,6 +41,7 @@
 #define JA4_HPP
 
 #include <iostream>
+#include <buffer.hpp>
 #include <vector>
 #include <sstream>
 #include <iomanip>
@@ -202,7 +203,14 @@ namespace sx::ja4 {
         std::string const &ja4();
 
         // Complete ClientHello handshake (four-byte header included), without TLS record framing.
-        int from_buffer(const std::vector<uint8_t> &buffer);
+        // Parse borrowed bytes synchronously; neither overload copies or retains them.
+        int from_buffer(const ::buffer& bytes) {
+            return from_buffer(bytes.data(), bytes.size());
+        }
+        int from_buffer(const std::vector<uint8_t>& bytes) {
+            return from_buffer(bytes.data(), bytes.size());
+        }
+        int from_buffer(const uint8_t* bytes, size_t size);
     };
 }
 

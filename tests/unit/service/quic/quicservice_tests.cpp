@@ -16,6 +16,7 @@
 #include "proxy/multiflow/mfflowcom.hpp"
 #include <sslcertstore.hpp>
 #include <proxy/quic_observer.hpp>
+#include <inspect/fp/ja4.hpp>
 
 #include <chrono>
 #include <cstdlib>
@@ -321,6 +322,13 @@ public:
     std::atomic_uint calls {0};
     std::string host;
     std::string port;
+    std::string fingerprint;
+
+    void client_hello(buffer const& bytes) override {
+        sx::ja4::TLSClientHello hello;
+        hello.proto = 'q';
+        if (hello.from_buffer(bytes) == 0) fingerprint = hello.ja4();
+    }
 
     bool start(std::string const& target_host, std::string const& target_port) override {
         host = target_host;
@@ -397,6 +405,9 @@ TEST_F(QuicListenerService, DeniedSetupPreventsProbeAndForwardingDatagrams) {
         }
 
         ASSERT_EQ(setup->calls.load(), 1U);
+        // The real QUIC listener must deliver the original downstream hello
+        // before the first connection-start notification, even on rejection.
+        EXPECT_EQ(setup->fingerprint.substr(0, 4), "q13d");
         EXPECT_EQ(setup->host, "127.0.0.1");
         EXPECT_EQ(setup->port, std::to_string(ntohs(origin.sin_port)));
         char byte;

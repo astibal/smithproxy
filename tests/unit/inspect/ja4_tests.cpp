@@ -5,6 +5,9 @@
 
 #include <openssl/sha.h>
 #include <openssl/rand.h>
+#include <openssl/ssl.h>
+#include <proxy/quic/client_hello.hpp>
+#include <memory>
 
 #include <gtest/gtest.h>
 
@@ -151,6 +154,19 @@ TEST(JA4_CH, NonAsciiAlpnBytesAreClassifiedAsUnsigned) {
     TLSClientHello parsed;
     ASSERT_EQ(parsed.from_buffer(hello), 0);
     EXPECT_NE(parsed.ja4_raw().find("81"), std::string::npos);
+
+    // The TCP path borrows a view past the record header; its result must
+    // match the same handshake supplied through the vector compatibility API.
+    buffer record(5, 5);
+    record.fill(0);
+    record.append(hello.data(), hello.size());
+    const auto handshake = record.view(5);
+    EXPECT_EQ(handshake.data(), record.data() + 5);
+    TLSClientHello borrowed;
+    ASSERT_EQ(borrowed.from_buffer(handshake), 0);
+    EXPECT_EQ(borrowed.ja4(), parsed.ja4());
+    EXPECT_NE(borrowed.from_buffer(nullptr, hello.size()), 0);
+
 }
 
 TEST(JA4_CH, RejectsMalformedTlsExtensionVectors) {
@@ -562,4 +578,74 @@ TEST(JA4H_Hpack, PreservesWireOrderAndResetsBetweenRequests) {
     ASSERT_TRUE(decoder.decode(next));
     EXPECT_EQ(decoder.ordered_headers().size(), 1u);
     EXPECT_EQ(decoder.headers().size(), 1u);
+}
+
+TEST(JA4_QUIC, CallbackMatchesOriginalClientHelloInBothModes) {
+    struct Evidence {
+        std::vector<uint8_t> wire;
+        TLSClientHello parsed;
+        int result = -1;
+        bool called = false;
+    } evidence;
+    std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> client_ctx(SSL_CTX_new(TLS_method()), SSL_CTX_free);
+    std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> server_ctx(SSL_CTX_new(TLS_method()), SSL_CTX_free);
+    ASSERT_TRUE(client_ctx);
+    ASSERT_TRUE(server_ctx);
+    // A private-use extension unknown to the server must survive capture.
+    ASSERT_EQ(1, SSL_CTX_add_client_custom_ext(client_ctx.get(), 0xffab,
+        [](SSL*, unsigned int, const unsigned char** out, size_t* size, int*, void*) {
+            static const unsigned char payload[] = {1, 2, 3};
+            *out = payload;
+            *size = sizeof(payload);
+            return 1;
+        }, nullptr, nullptr, nullptr, nullptr));
+    SSL_CTX_set_msg_callback(server_ctx.get(), sx::quic::ClientHelloCapture::observe);
+    SSL_CTX_set_client_hello_cb(server_ctx.get(), [](SSL* ssl, int*, void* arg) {
+        auto& value = *static_cast<Evidence*>(arg);
+        value.called = true;
+        value.parsed.proto = 'q';
+        value.result = value.parsed.from_buffer(sx::quic::ClientHelloCapture::take(ssl));
+        return SSL_CLIENT_HELLO_RETRY; // No certificate or full handshake needed.
+    }, &evidence);
+    std::unique_ptr<SSL, decltype(&SSL_free)> client(SSL_new(client_ctx.get()), SSL_free);
+    std::unique_ptr<SSL, decltype(&SSL_free)> server(SSL_new(server_ctx.get()), SSL_free);
+    ASSERT_TRUE(client);
+    ASSERT_TRUE(server);
+    ASSERT_EQ(1, SSL_set_tlsext_host_name(client.get(), "example.com"));
+    const unsigned char alpn[] = {2, 'h', '3'};
+    ASSERT_EQ(0, SSL_set_alpn_protos(client.get(), alpn, sizeof(alpn)));
+    SSL_set_msg_callback_arg(client.get(), &evidence);
+    SSL_set_msg_callback(client.get(), [](int writing, int, int type, const void* data,
+                                        size_t size, SSL*, void* arg) {
+        auto* bytes = static_cast<const uint8_t*>(data);
+        if (writing && type == SSL3_RT_HANDSHAKE && size && bytes[0] == SSL3_MT_CLIENT_HELLO)
+            static_cast<Evidence*>(arg)->wire.assign(bytes, bytes + size);
+    });
+    BIO* left = nullptr;
+    BIO* right = nullptr;
+    ASSERT_EQ(1, BIO_new_bio_pair(&left, 0, &right, 0));
+    SSL_set_bio(client.get(), left, left);
+    SSL_set_bio(server.get(), right, right);
+    SSL_set_connect_state(client.get());
+    SSL_set_accept_state(server.get());
+    SSL_do_handshake(client.get());
+    SSL_do_handshake(server.get());
+    ASSERT_TRUE(evidence.called);
+    ASSERT_EQ(0, evidence.result);
+    TLSClientHello expected;
+    expected.proto = 'q';
+    ASSERT_EQ(0, expected.from_buffer(evidence.wire));
+    EXPECT_NE(std::find(evidence.parsed.extensions.begin(), evidence.parsed.extensions.end(), 0xffab),
+              evidence.parsed.extensions.end());
+    EXPECT_EQ(expected.ja4(), evidence.parsed.ja4());
+    EXPECT_EQ('q', evidence.parsed.ja4().front());
+    const auto standard = evidence.parsed.ja4();
+    for (auto* hello : {&expected, &evidence.parsed}) {
+        hello->ignore_sni = true;
+        hello->results.clear();
+    }
+    EXPECT_EQ(expected.ja4(), evidence.parsed.ja4());
+    EXPECT_NE(standard, evidence.parsed.ja4());
+    EXPECT_EQ('i', evidence.parsed.ja4()[3]);
+    EXPECT_TRUE(sx::quic::ClientHelloCapture::take(server.get()).empty());
 }

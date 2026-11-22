@@ -424,6 +424,15 @@ private:
             return;
         }
 
+        if (proxy->acct_opts.ja4_clienthello) {
+            // These streams have no SSLCom: inherit the original transport
+            // ClientHello, then reuse normal webhook and SXME export fields.
+            proxy->ja4.ClientHelloStandard = context_.client_fingerprints.standard;
+            proxy->ja4.ClientHelloNoSNI = context_.client_fingerprints.no_sni;
+            proxy->ja4.ClientHello = proxy->acct_opts.ja4_clienthello_ignore_sni
+                ? proxy->ja4.ClientHelloNoSNI : proxy->ja4.ClientHelloStandard;
+        }
+
         policies_.insert(proxy->matched_policy());
 
         if (!proxymaker::setup_snat(proxy, context_.source_host, context_.source_port)) {

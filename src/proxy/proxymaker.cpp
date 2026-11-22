@@ -37,6 +37,8 @@
     which carries forward this exception.
 */
 
+#include <inspect/fp/ja4.hpp>
+
 #include <service/cfgapi/cfgapi.hpp>
 #include <proxy/mitmproxy.hpp>
 
@@ -417,6 +419,23 @@ namespace sx::proxymaker {
             bool rewrite_requested() const override { return rewrite_requested_; }
             sx::proxy::QuicObserver* quic_observer() override { return observer_.get(); }
 
+            void client_hello(buffer const& bytes) override {
+                // Callback re-entry and HelloRetryRequest must not replace the
+                // fingerprint of the original client offer.
+                if (!client_fingerprints_.standard.empty()) return;
+                sx::ja4::TLSClientHello hello;
+                hello.proto = 'q';
+                if (hello.from_buffer(bytes) != 0) return;
+                client_fingerprints_.standard = hello.ja4();
+                hello.ignore_sni = true;
+                hello.results.clear();
+                client_fingerprints_.no_sni = hello.ja4();
+            }
+
+            ClientFingerprints client_fingerprints() const override {
+                return client_fingerprints_;
+            }
+
             bool tls_override_active(SSLCom& verification, std::string const& scope) override {
                 return MitmProxy::tls_override_active(scope, verification.opt.cert);
             }
@@ -589,6 +608,7 @@ namespace sx::proxymaker {
                 std::make_shared<sx::http::webhooks::webhook_control_t>();
             std::unique_ptr<sx::proxy::QuicObserver> observer_;
             std::optional<QuicTlsPolicy> tls_policy_;
+            ClientFingerprints client_fingerprints_;
             bool destination_prepared_ = false;
             bool started_ = false;
             bool notified_ = false;
