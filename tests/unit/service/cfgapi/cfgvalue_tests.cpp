@@ -110,6 +110,20 @@ TEST(CfgValue, ExtendedLocalDestinationProtectionIsBoolean) {
     EXPECT_FALSE(value->get().value_filter().back()("invalid").accepted());
 }
 
+TEST(CfgValue, CertificateStatusCacheTtlsAreAdministrativelyWritable) {
+    for(auto const* path : {
+            "settings.ssl_ocsp_status_ttl", "settings.ssl_crl_status_ttl"}) {
+        auto value = CfgValueHelp::get().find(path);
+        ASSERT_TRUE(value) << path;
+        auto const& validate = value->get().value_filter().back();
+        EXPECT_TRUE(validate("0").accepted()) << path;
+        EXPECT_TRUE(validate("86400").accepted()) << path;
+        EXPECT_TRUE(validate("2147483647").accepted()) << path;
+        EXPECT_FALSE(validate("-1").accepted()) << path;
+        EXPECT_FALSE(validate("2147483648").accepted()) << path;
+    }
+}
+
 TEST(CfgFactorySerialization, LargeConfigurationCannotBlockOnPipeCapacity) {
     libconfig::Config config;
     auto& entries = config.getRoot().add("entries", libconfig::Setting::TypeList);

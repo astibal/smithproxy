@@ -301,14 +301,16 @@ void CfgValueHelp::init() {
             .value_filter(CfgValue::VALUE_BOOL);
 
 
-    add("settings.ssl_ocsp_status_ttl", "obsoleted - hardcoded TTL for OCSP response validity")
+    add("settings.ssl_ocsp_status_ttl", "OCSP response validity cache TTL")
+            .help_quick("<seconds> between 0 and 2147483647")
             .may_be_empty(false)
-            .value_filter(CfgValue::VALUE_NONE);
+            .value_filter(VALUE_UINT_RANGE<0,2147483647>);
 
 
-    add("settings.ssl_crl_status_ttl", "obsoleted - hardcoded TTL for downloaded CRL files")
+    add("settings.ssl_crl_status_ttl", "downloaded CRL cache TTL")
+            .help_quick("<seconds> between 0 and 2147483647")
             .may_be_empty(false)
-            .value_filter(CfgValue::VALUE_NONE);
+            .value_filter(VALUE_UINT_RANGE<0,2147483647>);
 
 
     add("settings.log_level", "default file logging verbosity level")

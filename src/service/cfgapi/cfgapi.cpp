@@ -5435,6 +5435,20 @@ int CfgFactory::save_alg_dns_profiles(Config& ex) const {
     return n_saved;
 }
 
+// Seed a script profile with the types expected by the loader and saver.
+bool CfgFactory::new_script_profile(Setting& ex, const std::string& name) const {
+    try {
+        Setting& item = ex.add(name, Setting::TypeGroup);
+        item.add("type", Setting::TypeInt) = -1;
+        item.add("script-file", Setting::TypeString) = "";
+    }
+    catch(libconfig::SettingNameException const& e) {
+        _war("cannot add new section %s: %s", name.c_str(), e.what());
+        return false;
+    }
+    return true;
+}
+
 bool CfgFactory::new_auth_profile (Setting &ex, const std::string &name) const {
 
     try {
@@ -5619,6 +5633,17 @@ size_t CfgFactory::section_list_size(std::string const& section) const {
 bool CfgFactory::build_new_entry(Setting& collection,
                                  std::string const& section,
                                  std::string const& entry_name) const {
+    if(section == "settings.interfaces") {
+        // Interface-role rules are ordered and unnamed.  Seed their nested
+        // match group so later Set operations in the same transaction can
+        // populate a complete rule before candidate validation runs.
+        auto& rule = collection.add(Setting::TypeGroup);
+        auto& match = rule.add("match", Setting::TypeGroup);
+        match.add("if_name", Setting::TypeString) = "";
+        match.add("if_address", Setting::TypeString) = "";
+        rule.add("role", Setting::TypeString) = "";
+        return true;
+    }
     if(section == "proto_objects") {
         return new_proto_object(collection, entry_name);
     }
@@ -5646,6 +5671,9 @@ bool CfgFactory::build_new_entry(Setting& collection,
     else if(section == "alg_dns_profiles") {
         return new_alg_dns_profile(collection, entry_name);
     }
+    else if(section == "script_profiles") {
+        return new_script_profile(collection, entry_name);
+    }
     else if(section == "auth_profiles") {
         return new_auth_profile(collection, entry_name);
     }
@@ -5669,9 +5697,11 @@ bool CfgFactory::supports_new_entry(std::string const& section) const {
         "tls_profiles",
         "ssh_profiles",
         "alg_dns_profiles",
+        "script_profiles",
         "auth_profiles",
         "policy",
         "routing",
+        "settings.interfaces",
     };
     return sections.find(section) != sections.end();
 }
@@ -5691,6 +5721,7 @@ bool CfgFactory::_apply_new_entry(std::string const& section, std::string const&
     else if(section == "tls_profiles") CfgFactory::get()->load_db_prof_tls();
     else if(section == "ssh_profiles") CfgFactory::get()->load_db_prof_ssh();
     else if(section == "alg_dns_profiles") CfgFactory::get()->load_db_prof_alg_dns();
+    else if(section == "script_profiles") CfgFactory::get()->load_db_prof_script();
     else if(section == "auth_profiles") CfgFactory::get()->load_db_prof_auth();
     else if(section == "routing") CfgFactory::get()->load_db_routing();
     else if(section == "policy") {
@@ -6860,12 +6891,57 @@ bool CfgFactory::replace_config(std::string const& snapshot) {
     }
 }
 
+namespace {
+
+// Materialize only the containers which define Smithproxy's public
+// configuration shape. Values keep their loader defaults until an
+// administrator explicitly writes them. Keeping this skeleton in the live
+// snapshot lets atomic transactions create the first object or first nested
+// setting even when a legacy/minimal startup file omitted the whole section.
+void ensure_configuration_skeleton(Config& config) {
+    auto& root = config.getRoot();
+    const auto ensure = [](Setting& parent, char const* name, Setting::Type type) -> Setting& {
+        return parent.exists(name) ? parent[name] : parent.add(name, type);
+    };
+
+    auto& settings = ensure(root, "settings", Setting::TypeGroup);
+    for(auto const* group : {
+            "cli", "web_rating", "admin", "tuning", "socks",
+            "http_connect", "http_api", "webhook"}) {
+        ensure(settings, group, Setting::TypeGroup);
+    }
+    ensure(settings, "interfaces", Setting::TypeList);
+
+    auto& debug = ensure(root, "debug", Setting::TypeGroup);
+    ensure(debug, "log", Setting::TypeGroup);
+
+    auto& captures = ensure(root, "captures", Setting::TypeGroup);
+    for(auto const* group : {"local", "remote", "options"}) {
+        ensure(captures, group, Setting::TypeGroup);
+    }
+
+    for(auto const* collection : {
+            "address_objects", "port_objects", "proto_objects",
+            "detection_profiles", "content_profiles", "tls_ca",
+            "tls_profiles", "ssh_profiles", "alg_dns_profiles",
+            "script_profiles", "auth_profiles", "routing"}) {
+        ensure(root, collection, Setting::TypeGroup);
+    }
+    for(auto const* collection : {
+            "policy", "starttls_signatures", "detection_signatures"}) {
+        ensure(root, collection, Setting::TypeList);
+    }
+}
+
+} // namespace
+
 bool CfgFactory::apply_config(bool reload) {
     using namespace libconfig;
 
     std::scoped_lock<std::recursive_mutex> lock(lock_);
     try {
         if(reload) cleanup();
+        ensure_configuration_skeleton(cfgapi);
         const bool had_load_errors = LOAD_ERRORS.load();
 
         LOAD_ERRORS = false;

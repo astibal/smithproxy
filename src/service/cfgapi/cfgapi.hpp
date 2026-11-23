@@ -638,6 +638,9 @@ public:
     bool new_alg_dns_profile(libconfig::Setting& ex, std::string const& name) const;
     int save_alg_dns_profiles(libconfig::Config& ex) const;
 
+    // Add one script profile with canonical integer and string leaf types.
+    bool new_script_profile(libconfig::Setting& ex, std::string const& name) const;
+
     bool new_auth_profile(libconfig::Setting& ex, std::string const& name) const;
     int save_auth_profiles(libconfig::Config& ex) const;
 
