@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <service/cfgapi/cfg_archive.hpp>
+#include <utils/utf8.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -448,4 +449,92 @@ TEST_F(ArchiveTest, SchemaUpgradePublishesConfigAndMissingResourcesTogether) {
     EXPECT_EQ(source.prepare_save("schema = 1051;", additions).replacement, prepared.replacement);
     EXPECT_THROW(source.prepare_save("schema = 1052;", {{"smithproxy.cfg", "bad"}}), CfgTarError);
     EXPECT_EQ(source.archive_payload(), prepared.replacement);
+}
+
+TEST_F(ArchiveTest, RootConfigsAcceptUtf8AndSurviveMainSave) {
+    auto archive = valid_archive();
+    const std::string text = "\xef\xbb\xbf# Příliš žluťoučký 🦊\r\n\tcustom format\n";
+    archive.add("networking.cfg", text);
+    archive.add("future-daemon.cfg", "");
+    write_archive(archive);
+    auto source = CfgArchive::open(paths_);
+    for(int i = 0; i < 2; ++i) {
+        const auto saved = source.prepare_save("settings : { changed = true; };\n");
+        source = CfgArchive::read_archive(paths_.archive, saved.replacement);
+        EXPECT_EQ(source.archive().at("networking.cfg").data, text);
+        EXPECT_EQ(source.archive().at("future-daemon.cfg").data, "");
+    }
+}
+
+TEST_F(ArchiveTest, RootConfigsRejectBinaryAndMalformedUtf8) {
+    const std::vector<std::string> invalid = {
+        std::string("a\0b", 3), "\x01", "\x1b", "\x7f", "\xc2\x85",
+        "\x80", "\xc0\xaf", "\xe0\x80\xaf", "\xed\xa0\x80",
+        "\xf0\x80\x80\xaf", "\xf4\x90\x80\x80", "\xf5\x80\x80\x80",
+        "\xc2", "\xe2\x82", "\xf0\x9f\xa6", "\xc2x", "\xff"
+    };
+    for(const auto& data : invalid) {
+        auto archive = valid_archive();
+        archive.add("custom.cfg", data);
+        EXPECT_THROW(CfgManifest::validate(archive), CfgTarError);
+        EXPECT_THROW(CfgArchive::inspect_archive(archive.write()), CfgTarError);
+    }
+    for(const auto* name : {"smithproxy.cfg", "smithproxy.startup.cfg"}) {
+        auto archive = valid_archive();
+        archive.replace(name, std::string("x\0y", 3));
+        EXPECT_THROW(CfgManifest::validate(archive), CfgTarError);
+    }
+}
+
+TEST_F(ArchiveTest, RootConfigsEnforceSizeAndNamespaceBoundaries) {
+    auto archive = valid_archive();
+    archive.add("large.cfg", std::string(CfgManifest::max_config_size, 'a'));
+    EXPECT_NO_THROW(CfgManifest::validate(archive));
+    // Relax the container limit only in this fixture so manifest validation
+    // independently exercises its own upper bound.
+    CfgTar::Limits limits;
+    limits.max_file_size = CfgManifest::max_config_size + 1;
+    CfgTar oversized(limits);
+    const auto baseline = valid_archive();
+    for(const auto& [path, entry] : baseline.entries()) {
+        oversized.add(path, entry.data, entry.executable);
+    }
+    oversized.add("large.cfg", std::string(CfgManifest::max_config_size + 1, 'a'));
+    EXPECT_THROW(CfgManifest::validate(oversized), CfgTarError);
+    for(const auto* name : {"custom.txt", "custom.CFG", "custom.cfg.bak", "other/custom.cfg"}) {
+        auto invalid = valid_archive();
+        invalid.add(name, "text");
+        EXPECT_THROW(CfgManifest::validate(invalid), CfgTarError);
+    }
+    auto resources = valid_archive();
+    resources.add("pki/binary.cfg", std::string("\0\xff", 2));
+    EXPECT_NO_THROW(CfgManifest::validate(resources));
+}
+
+TEST_F(ArchiveTest, RootConfigsAcceptUtf8ScalarBoundaries) {
+    auto archive = valid_archive();
+    archive.add("unicode.cfg", "\xc2\xa0\xdf\xbf\xe0\xa0\x80\xed\x9f\xbf"
+                               "\xee\x80\x80\xef\xbf\xbf\xf0\x90\x80\x80\xf4\x8f\xbf\xbf");
+    EXPECT_NO_THROW(CfgManifest::validate(archive));
+    write_archive(archive);
+    const auto source = CfgArchive::open(paths_);
+    EXPECT_THROW(source.prepare_save(std::string("x\0y", 3)), CfgTarError);
+    EXPECT_EQ(source.main_config(), "settings : {};\n");
+}
+
+TEST(Utf8Validation, UnicodeAndPlainTextHaveDistinctControlPolicies) {
+    using sx::text::valid_utf8;
+    using sx::text::utf8_policy;
+    EXPECT_TRUE(valid_utf8(""));
+    for(const auto& control : {std::string(1, '\0'), std::string("\x1b"),
+                               std::string("\x7f"), std::string("\xc2\x85")}) {
+        EXPECT_TRUE(valid_utf8(control));
+        EXPECT_FALSE(valid_utf8(control, utf8_policy::plain_text));
+    }
+    EXPECT_TRUE(valid_utf8("\t\r\n", utf8_policy::plain_text));
+    for(const auto* malformed : {"\x80", "\xc0\xaf", "\xed\xa0\x80",
+                                 "\xf4\x90\x80\x80", "\xe2\x82"}) {
+        EXPECT_FALSE(valid_utf8(malformed));
+        EXPECT_FALSE(valid_utf8(malformed, utf8_policy::plain_text));
+    }
 }

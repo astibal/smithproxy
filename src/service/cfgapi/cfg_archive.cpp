@@ -2,6 +2,7 @@
 
 #include <nlohmann/json.hpp>
 #include <utils/crypto.hpp>
+#include <utils/utf8.hpp>
 
 #include <cerrno>
 #include <cstring>
@@ -44,16 +45,26 @@ bool safe_logical_path(std::string_view path) {
     return true;
 }
 
-// Define the complete v1 archive namespace in one place. Unknown roots fail
-// closed instead of becoming accidentally persistent product state.
-bool allowed_path(std::string_view path) {
-    if (path == CfgManifest::path || path == main_config_path || path == startup_config_path) {
-        return true;
-    }
+// Root-level .cfg files are shared configuration, independent of their consumer.
+// Nested resource paths continue to use the existing closed namespaces.
+bool root_config_path(std::string_view path) {
+    return safe_logical_path(path) && path.find('/') == std::string_view::npos &&
+           path.size() >= 4 && path.substr(path.size() - 4) == ".cfg";
+}
 
-    // These namespaces contain persistent configuration resources. Merely
-    // storing a file under commands/ never causes it to be executed.
-    return CfgManifest::is_resource_path(path);
+bool allowed_path(std::string_view path) {
+    return path == CfgManifest::path || root_config_path(path) ||
+           CfgManifest::is_resource_path(path);
+}
+
+// Apply archive-specific size and text policy; Unicode decoding is shared.
+void validate_config_text(std::string_view path, std::string_view data) {
+    if(data.size() > CfgManifest::max_config_size) {
+        fail("CfgTar configuration exceeds its size limit: " + std::string(path));
+    }
+    if(!sx::text::valid_utf8(data, sx::text::utf8_policy::plain_text)) {
+        fail("CfgTar configuration is not valid UTF-8 text: " + std::string(path));
+    }
 }
 
 // Distinguish an absent archive from every other inspection error. Only
@@ -125,9 +136,11 @@ void CfgManifest::validate(const CfgTar& archive) {
     // this process today. This makes the archive boundary predictable for
     // backup, restore, privilege separation, and later schema migrations.
     for (const auto& [entry_path, entry] : archive.entries()) {
-        (void)entry;
         if (!allowed_path(entry_path)) {
             fail("unsupported CfgTar path: " + entry_path);
+        }
+        if(root_config_path(entry_path)) {
+            validate_config_text(entry_path, entry.data);
         }
     }
 }

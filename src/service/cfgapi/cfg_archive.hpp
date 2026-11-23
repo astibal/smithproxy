@@ -22,12 +22,14 @@ public:
     static constexpr std::string_view path = "manifest.json";
     static constexpr std::string_view format = "smithproxy-cftar";
     static constexpr unsigned int version = 1;
+    static constexpr std::size_t max_config_size = 64ULL * 1024ULL * 1024ULL;
 
     // Return the canonical manifest stored in newly created archives.
     static std::string canonical();
 
     // Validate the manifest and the complete archive namespace. The main and
-    // startup configurations are mandatory; unknown top-level paths fail.
+    // startup configurations are mandatory. Root .cfg files must be bounded UTF-8
+    // text; other paths retain their existing namespace restrictions.
     static void validate(const CfgTar& archive);
 
     // Report whether a logical path belongs to a persistent resource
