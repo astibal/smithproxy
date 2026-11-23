@@ -2,12 +2,64 @@ name: Experimental full P8 (Ubuntu 26.04)
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '23 2 * * *'
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      run_p8: ${{ steps.plan.outputs.run_p8 }}
+      report_run_id: ${{ steps.plan.outputs.report_run_id }}
+      freshness: ${{ steps.plan.outputs.freshness }}
+    steps:
+      - name: Decide whether master needs a fresh Full P8
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          write_plan() {
+              {
+                  echo "run_p8=$1"
+                  echo "report_run_id=$2"
+                  echo "freshness=$3"
+              } >> "${GITHUB_OUTPUT}"
+          }
+
+          if [[ "${GITHUB_EVENT_NAME}" != schedule ]]; then
+              write_plan true "${GITHUB_RUN_ID}" fresh
+              exit 0
+          fi
+
+          previous_run=
+          previous_sha=
+          while IFS=$'\t' read -r candidate_run candidate_sha; do
+              artifact_count=$(gh api \
+                  "repos/${GITHUB_REPOSITORY}/actions/runs/${candidate_run}/artifacts?per_page=100" \
+                  --jq '[.artifacts[] | select(.expired == false and (.name | startswith("full-p8-")))] | length' \
+                  || echo 0)
+              if ((artifact_count >= 6)); then
+                  previous_run=${candidate_run}
+                  previous_sha=${candidate_sha}
+                  break
+              fi
+          done < <(gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/full-p8-experimental.yml/runs?status=success&per_page=20" \
+              --jq '.workflow_runs[] | select(.head_branch == "master") | [.id, .head_sha] | @tsv' \
+              || true)
+          if [[ -n "${previous_run}" && "${previous_sha}" == "${GITHUB_SHA}" ]]; then
+              write_plan false "${previous_run}" reused
+          else
+              write_plan true "${GITHUB_RUN_ID}" fresh
+          fi
+
   full-p8:
+    needs: plan
+    if: needs.plan.outputs.run_p8 == 'true'
     name: ${{ matrix.profile }}
     runs-on: ubuntu-26.04
     timeout-minutes: 29
@@ -89,4 +141,34 @@ jobs:
             ${{ runner.temp }}/smithproxy-p8-${{ matrix.profile }}-report
             ${{ runner.temp }}/smithproxy-p8-${{ matrix.profile }}-work/results
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 90
+
+  nightly-summary:
+    needs:
+      - plan
+      - full-p8
+    if: always() && github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout summary renderer
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Download Full P8 reports
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          pattern: full-p8-*-report
+          path: full-p8-reports
+          github-token: ${{ github.token }}
+          run-id: ${{ needs.plan.outputs.report_run_id }}
+
+      - name: Publish nightly Full P8 inventory
+        run: |
+          python3 tools/nightly-p8-summary.py \
+              --reports full-p8-reports \
+              --commit "${GITHUB_SHA}" \
+              --run-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${{ needs.plan.outputs.report_run_id }}" \
+              --freshness "${{ needs.plan.outputs.freshness }}" \
+              >> "${GITHUB_STEP_SUMMARY}"
