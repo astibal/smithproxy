@@ -3,6 +3,16 @@
  written in C++17.  
 It uses our C++17 socket proxying library called [*socle*](https://github.com/astibal/socle). 
 
+## Shared CLI and configuration libraries
+
+The CLI engine and CFtar implementation are statically linked from the pinned
+[`libsxcli2`](https://github.com/astibal/libsxcli2) and
+[`libsxcftar`](https://github.com/astibal/libsxcftar) submodules under `src/ext`.
+Run `git submodule update --init --recursive` after updating a checkout.
+Smithproxy explicitly supplies `sx::cfg::smithproxy_schema()`; existing CFtar
+archives retain their on-disk format. These libraries are built from source
+alongside the proxy and do not require separate runtime packages.
+
 ## QUIC build defaults
 
 QUIC uses **ngtcp2 by default**, built statically from the pinned

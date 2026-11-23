@@ -1,6 +1,6 @@
 #include "cfg_archive_monitor.hpp"
 
-#include "cfg_archive.hpp"
+#include <service/cfgapi/cfg_archive.hpp>
 #include "cfg_log.hpp"
 
 #include <service/privileged_file.hpp>
@@ -165,7 +165,7 @@ sx::reload::ReloadResult CfgArchiveMonitor::check(bool force) {
 
         // Validation is diagnostic only. Even an invalid external replacement
         // is a persistent-state change and must prevent ordinary saves.
-        CfgArchive::inspect_archive(payload);
+        CfgArchive::inspect_archive(sx::cfg::smithproxy_schema(), payload);
 
         const auto next_version = version_.fetch_add(1, std::memory_order_acq_rel) + 1;
         {

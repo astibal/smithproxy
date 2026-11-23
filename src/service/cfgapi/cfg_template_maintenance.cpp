@@ -65,7 +65,7 @@ std::size_t CfgTemplateMaintainer::publish_templates(const CfgTar& templates, bo
 
     // Avoid replacing the previous-generation backup on a no-op invocation.
     if(changed == 0) return 0;
-    CfgManifest::validate(updated);
+    CfgManifest::validate(sx::cfg::smithproxy_schema(), updated);
     if(!context_.archive.publish({updated.write(), previous})) {
         throw CfgTarError("cannot publish template changes; inspect archive storage status");
     }

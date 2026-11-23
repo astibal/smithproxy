@@ -1,8 +1,8 @@
 #include "cftar_cli.hpp"
 
-#include "cfg_archive.hpp"
-#include "cfg_archive_session.hpp"
-#include "cfg_exposure.hpp"
+#include <service/cfgapi/cfg_archive.hpp>
+#include <service/cfgapi/cfg_archive_session.hpp>
+#include <service/cfgapi/cfg_exposure.hpp>
 
 #include <service/libcli/cli.hpp>
 #include <service/libcli/line_editor.hpp>
@@ -132,7 +132,7 @@ class CfgTarShell {
 public:
     // Open one validated offline archive and initialize a clean working copy.
     explicit CfgTarShell(std::string path)
-        : session_(CfgArchiveSession::open(std::move(path))) {}
+        : session_(CfgArchiveSession::open(sx::cfg::smithproxy_schema(), std::move(path))) {}
 
     // Read commands until clean quit, forced quit, or end-of-input.
     int run() {
@@ -338,7 +338,7 @@ private:
             .help("Materialize a read-only path for this interactive session")
             .argument(path_argument("Entry or inferred directory path"))
             .handler(safe([this](libcli2::Context& context, const libcli2::Invocation& call) {
-                const auto exposure = exposures_.expose(session_.archive(), call.arguments[0]);
+                const auto exposure = exposures_.expose(sx::cfg::smithproxy_schema(), session_.archive(), call.arguments[0]);
                 context.print("exposure " + std::to_string(exposure.id) + ": " +
                               exposure.filesystem_path);
                 return 0;
@@ -405,7 +405,7 @@ private:
 
 // Keep resource commands out of the format-owned archive root.
 void require_resource_path(std::string_view path) {
-    if(!CfgManifest::is_resource_path(path)) {
+    if(!CfgManifest::is_resource_path(sx::cfg::smithproxy_schema(), path)) {
         throw CfgTarError("not a resource path: " + std::string(path));
     }
 }

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.16)
 
 ## To be set in the (near!) future
 # set(CMAKE_CXX_STANDARD 20)
@@ -116,10 +116,9 @@ add_subdirectory(${SOCLE_DIR} socle_lib)
 add_subdirectory(${SOCLE_COMMON_DIR} socle_common_lib)
 add_subdirectory(src/ext/ls-qpack)
 
-add_library(nlohmann_json INTERFACE)
-add_library(nlohmann_json::nlohmann_json ALIAS nlohmann_json)
-target_include_directories(nlohmann_json INTERFACE
-    "${PROJECT_SOURCE_DIR}/third_party/nlohmann/include")
+add_library(nlohmann_json::nlohmann_json INTERFACE IMPORTED GLOBAL)
+set_target_properties(nlohmann_json::nlohmann_json PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES "${PROJECT_SOURCE_DIR}/third_party/nlohmann/include")
 
 find_package (LibConfig REQUIRED)
 find_package (LibArchive REQUIRED)
@@ -271,33 +270,25 @@ configure_file(
 message(STATUS "compiler flags: ${CMAKE_CXX_FLAGS}")
 message(STATUS "compiler debug flags: ${CMAKE_CXX_FLAGS_DEBUG}")
 
-add_library(smithproxy_libcli STATIC
-        src/service/libcli/cli.cpp
-        src/service/libcli/fd_transport.cpp
-        src/service/libcli/line_editor.cpp
-)
-target_include_directories(smithproxy_libcli PUBLIC
-        ${PROJECT_SOURCE_DIR}/src
-        ${PROJECT_SOURCE_DIR}/src/service/libcli
-)
+# Shared configuration and CLI engines are pinned source dependencies.
+# Their install rules and standalone targets do not belong to Smithproxy packages.
+foreach(dependency IN ITEMS libsxcftar libsxcli2)
+    if(NOT EXISTS "${PROJECT_SOURCE_DIR}/src/ext/${dependency}/CMakeLists.txt")
+        message(FATAL_ERROR "Missing ${dependency}; run git submodule update --init --recursive")
+    endif()
+endforeach()
+add_subdirectory(src/ext/libsxcftar EXCLUDE_FROM_ALL)
+add_subdirectory(src/ext/libsxcli2 EXCLUDE_FROM_ALL)
 
 add_executable(smithproxy-cftar
         src/resources/default_templates.cpp
         src/utils/crypto.cpp
         src/service/cfgapi/cftar_main.cpp
         src/service/cfgapi/cftar_cli.cpp
-        src/service/cfgapi/cfg_pack.cpp
-        src/service/cfgapi/cfg_archive.cpp
-        src/service/cfgapi/cfg_archive_session.cpp
-        src/service/cfgapi/cfg_io.cpp
-        src/service/cfgapi/cfg_exposure.cpp
-        src/service/cfgapi/cfg_file_lock.cpp
-        src/service/cfgapi/cfg_runtime_tree.cpp
-        src/service/cfgapi/cfg_tar.cpp
 )
 target_include_directories(smithproxy-cftar PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(smithproxy-cftar PRIVATE
-        smithproxy_libcli pthread crypto LibArchive::LibArchive
+        sxcftar::sxcftar sxcli2::sxcli2 pthread crypto LibArchive::LibArchive
         nlohmann_json::nlohmann_json ${LIBCONFIGPP_LIBRARIES})
 
 # Ship a native configuration from the first installation. The historical
@@ -364,17 +355,12 @@ add_executable(smithproxy
         src/service/cfgapi/cfg_template_files.cpp
         src/service/cfgapi/cfg_template_maintenance.cpp
         src/service/cfgapi/cfg_resource_write.cpp
-        src/service/cfgapi/cfg_io.cpp
-        src/service/cfgapi/cfg_runtime_tree.cpp
         src/service/httpd/cfg/save.cpp
         src/service/httpd/cfg/archive.cpp
         src/service/httpd/cfg/transaction.cpp
         src/service/httpd/cfg/state.cpp
         src/service/cfgapi/cfg_update.cpp
         src/service/cfgapi/cfg_revision.cpp
-        src/service/cfgapi/cfg_tar.cpp
-        src/service/cfgapi/cfg_archive.cpp
-        src/service/cfgapi/cfg_pack.cpp
         src/staticcontent.cpp
         src/proxy/tls_replacement.cpp
 
@@ -639,7 +625,6 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
     find_package(GTest)
     if(GTEST_FOUND)
         add_executable(sx_gtests
-                src/service/cfgapi/cfg_pack.cpp
                 src/resources/default_templates.cpp
                 src/inspect/dns.cpp
                 src/inspect/protocol_fork.cpp
@@ -733,8 +718,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 src/ext/hpack/hpack.hpp
                 tests/unit/ext/hpack/hpack_tests.cpp
 
-                tests/unit/service/libcli/cli_tests.cpp
-                tests/unit/service/libcli/fd_transport_tests.cpp
+                src/ext/libsxcli2/tests/unit/service/libcli/cli_tests.cpp
+                src/ext/libsxcli2/tests/unit/service/libcli/fd_transport_tests.cpp
                 src/service/cmd/config_cli2.cpp
                 tests/unit/service/cmd/config_cli2_tests.cpp
                 src/service/cmd/config_cli2_schema.cpp
@@ -762,8 +747,6 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/service/cfgapi/cfg_tx_basket_tests.cpp
                 src/service/cfgapi/cfg_save.cpp
                 tests/unit/service/cfgapi/cfg_save_tests.cpp
-                src/service/cfgapi/cfg_tar.cpp
-                src/service/cfgapi/cfg_archive.cpp
                 src/service/cfgapi/cfg_archive_restore.cpp
                 tests/unit/service/cfgapi/cfg_archive_restore_tests.cpp
                 src/service/cfgapi/cfg_template_files.cpp
@@ -872,8 +855,6 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 src/service/comm.cpp
                 src/service/privileged_file.cpp
                 src/service/reload/file_reload_service.cpp
-                src/service/cfgapi/cfg_tar.cpp
-                src/service/cfgapi/cfg_archive.cpp
                 src/service/cfgapi/cfg_archive_monitor.cpp
                 tests/unit/service/cfg_archive_monitor_tests.cpp
         )
@@ -951,7 +932,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
         target_compile_definitions(tls_testbed PRIVATE
                 SMITHPROXY_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
-        target_link_libraries(sx_gtests gtest gtest_main smithproxy_libcli smithproxy_qpack socle_lib pthread crypto ssl crypt
+        target_link_libraries(sx_gtests sxcftar::sxcftar gtest gtest_main sxcli2::sxcli2 smithproxy_qpack socle_lib pthread crypto ssl crypt
                 LibArchive::LibArchive nlohmann_json::nlohmann_json ${UNWIND_LIB})
         add_executable(sx_gtests_cfg_tar
                 src/ext/nltemplate/nltemplate.cpp
@@ -965,20 +946,12 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 src/resources/default_templates.cpp
                 tests/unit/service/default_templates_tests.cpp
                 src/utils/crypto.cpp
-                src/service/cfgapi/cfg_tar.cpp
-                src/service/cfgapi/cfg_archive.cpp
-                src/service/cfgapi/cfg_archive_session.cpp
-                src/service/cfgapi/cfg_io.cpp
-                src/service/cfgapi/cfg_exposure.cpp
-                src/service/cfgapi/cfg_file_lock.cpp
-                src/service/cfgapi/cfg_pack.cpp
-                src/service/cfgapi/cfg_runtime_tree.cpp
-                tests/unit/service/cfg_tar_tests.cpp
-                tests/unit/service/cfg_archive_tests.cpp
-                tests/unit/service/cfg_archive_session_tests.cpp
-                tests/unit/service/cfg_pack_tests.cpp
-                tests/unit/service/cfg_runtime_tree_tests.cpp)
-        target_link_libraries(sx_gtests_cfg_tar PRIVATE gtest gtest_main
+                src/ext/libsxcftar/tests/unit/service/cfg_tar_tests.cpp
+                src/ext/libsxcftar/tests/unit/service/cfg_archive_tests.cpp
+                src/ext/libsxcftar/tests/unit/service/cfg_archive_session_tests.cpp
+                src/ext/libsxcftar/tests/unit/service/cfg_pack_tests.cpp
+                src/ext/libsxcftar/tests/unit/service/cfg_runtime_tree_tests.cpp)
+        target_link_libraries(sx_gtests_cfg_tar PRIVATE sxcftar::sxcftar gtest gtest_main
                 pthread crypto LibArchive::LibArchive nlohmann_json::nlohmann_json
                 ${LIBCONFIGPP_LIBRARIES})
         target_compile_definitions(sx_gtests_cfg_tar PRIVATE
@@ -987,11 +960,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
 
         add_executable(sx_gtests_cfg_io_faults
                 src/utils/crypto.cpp
-                src/service/cfgapi/cfg_tar.cpp
-                src/service/cfgapi/cfg_archive.cpp
-                src/service/cfgapi/cfg_pack.cpp
-                tests/unit/service/cfg_io_fault_tests.cpp)
-        target_link_libraries(sx_gtests_cfg_io_faults PRIVATE gtest gtest_main
+                src/ext/libsxcftar/tests/unit/service/cfg_io_fault_tests.cpp)
+        target_link_libraries(sx_gtests_cfg_io_faults PRIVATE sxcftar::sxcftar gtest gtest_main
                 pthread crypto LibArchive::LibArchive nlohmann_json::nlohmann_json)
         target_link_options(sx_gtests_cfg_io_faults PRIVATE
                 -Wl,--wrap=open -Wl,--wrap=openat
@@ -1031,7 +1001,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
         target_link_libraries(sx_gtests_privsep gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(sx_gtests_file_privsep gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(sx_gtests_cfg_archive_monitor PRIVATE
-                gtest gtest_main socle_lib pthread crypto ssl
+                sxcftar::sxcftar gtest gtest_main socle_lib pthread crypto ssl
                 LibArchive::LibArchive nlohmann_json::nlohmann_json)
         target_link_libraries(sx_gtests_gre_broker gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(sx_gtests_cli_broker gtest gtest_main pthread)
@@ -1096,7 +1066,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 src/service/quic/worker_dispatcher.cpp
                 tests/quic/testbed/quic_test_node.cpp
         )
-        target_link_libraries(quic_test_node smithproxy_qpack nlohmann_json socle_lib pthread crypto ssl)
+        target_link_libraries(quic_test_node smithproxy_qpack nlohmann_json::nlohmann_json socle_lib pthread crypto ssl)
 
         if(BUILD_TESTING)
             add_test(NAME unit.core COMMAND sx_gtests
@@ -1507,11 +1477,13 @@ if(SMITHPROXY_FUZZING)
             -Wno-error=missing-template-arg-list-after-template-kw)
     smithproxy_fuzzer(http2_content_framing_fuzzer)
 
+    # Compile the parser sources directly so libFuzzer instruments the library code.
     add_executable(cfg_tar_fuzzer
-            src/service/cfgapi/cfg_tar.cpp
-            src/service/cfgapi/cfg_archive.cpp
-            tests/fuzz/service/cfg_tar_fuzzer.cpp)
-    target_link_libraries(cfg_tar_fuzzer LibArchive::LibArchive nlohmann_json::nlohmann_json)
+            tests/fuzz/service/cfg_tar_fuzzer.cpp
+            src/ext/libsxcftar/src/service/cfgapi/cfg_schema.cpp
+            src/ext/libsxcftar/src/service/cfgapi/cfg_tar.cpp
+            src/ext/libsxcftar/src/service/cfgapi/cfg_archive.cpp)
+    target_link_libraries(cfg_tar_fuzzer sxcftar::sxcftar LibArchive::LibArchive nlohmann_json::nlohmann_json)
     smithproxy_fuzzer(cfg_tar_fuzzer)
 endif()
 
@@ -1583,7 +1555,7 @@ endif()
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}")
 
 if (LIBCONFIGPP_FOUND)
-    target_link_libraries (smithproxy ${LIBCONFIGPP_LIBRARIES})
+    target_link_libraries (smithproxy sxcftar::sxcftar ${LIBCONFIGPP_LIBRARIES})
 endif (LIBCONFIGPP_FOUND)
 
 target_link_libraries (smithproxy crypt)
@@ -1596,7 +1568,7 @@ if((CMAKE_SYSTEM_PROCESSOR MATCHES "arm") OR (CMAKE_SYSTEM_PROCESSOR STREQUAL "a
     target_link_libraries (smithproxy atomic)
 endif()
 
-target_link_libraries(smithproxy smithproxy_libcli smithproxy_qpack socle_lib pthread ssl crypto rt
+target_link_libraries(smithproxy sxcli2::sxcli2 smithproxy_qpack socle_lib pthread ssl crypto rt
         LibArchive::LibArchive ${UNWIND_LIB})
 
 if("${USE_LIBSSH}" STREQUAL "Y")

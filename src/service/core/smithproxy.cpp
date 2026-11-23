@@ -1184,7 +1184,7 @@ bool SmithProxy::init_syslog() {
 bool SmithProxy::load_config(std::string& config_f, bool reload) {
     sx::cfg::CfgArchive::Paths paths;
     paths.explicit_config = config_f;
-    return load_config(sx::cfg::CfgArchive::open(std::move(paths)), reload);
+    return load_config(sx::cfg::CfgArchive::open(sx::cfg::smithproxy_schema(), std::move(paths)), reload);
 }
 
 // Install one already selected source into CfgFactory, then apply the parsed

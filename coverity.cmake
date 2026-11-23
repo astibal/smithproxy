@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.16)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/helpers.cmake)
 
@@ -18,6 +18,8 @@ include_directories ("${PROJECT_SOURCE_DIR}/src/ext")
 
 add_subdirectory(${SOCLE_DIR} socle_lib)
 add_subdirectory(${SOCLE_COMMON_DIR} socle_common_lib)
+add_subdirectory(src/ext/libsxcli2 EXCLUDE_FROM_ALL)
+add_subdirectory(src/ext/libsxcftar EXCLUDE_FROM_ALL)
 
 if(UNIX)
     IF(NOT CMAKE_BUILD_TYPE)
@@ -115,9 +117,6 @@ add_executable(smithproxy
         src/ext/libcidr/cidr.cpp
         src/ext/cxxopts/cxxopts.hpp
         src/ext/nltemplate/nltemplate.cpp
-        src/service/libcli/cli.cpp
-        src/service/libcli/fd_transport.cpp
-        src/service/libcli/line_editor.cpp
 
         src/inspect/sxsignature.hpp
         src/inspect/pyinspector.hpp
@@ -154,6 +153,6 @@ if((CMAKE_SYSTEM_PROCESSOR MATCHES "arm") OR (CMAKE_SYSTEM_PROCESSOR STREQUAL "a
     target_link_libraries (smithproxy atomic)
 endif()
 
-target_link_libraries(smithproxy socle_lib pthread ssl crypto rt unwind ${PYTHON_LIBRARIES})
+target_link_libraries(smithproxy sxcli2::sxcli2 sxcftar::sxcftar socle_lib pthread ssl crypto rt unwind ${PYTHON_LIBRARIES})
 
 #include(${CMAKE_CURRENT_SOURCE_DIR}/install.cmake)

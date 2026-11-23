@@ -39,7 +39,7 @@ protected:
 
     CfgTar archive(std::string marker) const {
         CfgTar result;
-        result.add(std::string(CfgManifest::path), CfgManifest::canonical());
+        result.add(std::string(CfgManifest::path), CfgManifest::canonical(sx::cfg::smithproxy_schema()));
         result.add("smithproxy.cfg", "settings : { marker = \"" + marker + "\"; };\n");
         result.add("smithproxy.startup.cfg", "SMITH_RUN_TRANSPARENT=1\n");
         return result;

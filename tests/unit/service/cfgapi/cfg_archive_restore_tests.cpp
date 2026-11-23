@@ -56,7 +56,7 @@ protected:
 
         sx::cfg::CfgTar archive;
         archive.add(std::string(sx::cfg::CfgManifest::path),
-                    sx::cfg::CfgManifest::canonical());
+                    sx::cfg::CfgManifest::canonical(sx::cfg::smithproxy_schema()));
         archive.add("smithproxy.cfg", "settings : {};\n");
         archive.add("smithproxy.startup.cfg", "SMITH_RUN_TRANSPARENT=1\n");
         payload = archive.write();

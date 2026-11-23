@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cfg_tar.hpp"
+#include <service/cfgapi/cfg_tar.hpp>
 
 namespace sx::cfg {
 

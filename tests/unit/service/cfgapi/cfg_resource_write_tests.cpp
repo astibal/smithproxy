@@ -55,11 +55,11 @@ protected:
         board.init_revision("snapshot", "startup");
         sx::cfg::CfgTar tar;
         tar.add(std::string(sx::cfg::CfgManifest::path),
-                sx::cfg::CfgManifest::canonical());
+                sx::cfg::CfgManifest::canonical(sx::cfg::smithproxy_schema()));
         tar.add("smithproxy.cfg", "settings : {};\n");
         tar.add("smithproxy.startup.cfg", "START=1\n");
         archive.source = std::make_optional(
-            sx::cfg::CfgArchive::read_archive("smithproxy.cftar", tar.write()));
+            sx::cfg::CfgArchive::read_archive(sx::cfg::smithproxy_schema(), "smithproxy.cftar", tar.write()));
     }
 
     sx::cfg::ResourceWriteResult write(

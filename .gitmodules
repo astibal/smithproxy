@@ -9,3 +9,9 @@
 [submodule "src/ext/ngtcp2"]
 	path = src/ext/ngtcp2
 	url = https://github.com/ngtcp2/ngtcp2.git
+[submodule "src/ext/libsxcli2"]
+	path = src/ext/libsxcli2
+	url = https://github.com/astibal/libsxcli2.git
+[submodule "src/ext/libsxcftar"]
+	path = src/ext/libsxcftar
+	url = https://github.com/astibal/libsxcftar.git

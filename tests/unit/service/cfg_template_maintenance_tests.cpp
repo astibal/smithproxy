@@ -44,7 +44,7 @@ protected:
     void SetUp() override {
         board.init_revision("initial", "startup");
         CfgTar tar;
-        tar.add(std::string(CfgManifest::path), CfgManifest::canonical());
+        tar.add(std::string(CfgManifest::path), CfgManifest::canonical(sx::cfg::smithproxy_schema()));
         tar.add("smithproxy.cfg", "settings : {};\n");
         tar.add("smithproxy.startup.cfg", "START=1\n");
         tar.add("templates/replacement/en/html_page.txt", "custom page");

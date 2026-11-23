@@ -1,5 +1,5 @@
 #include "cfg_template_files.hpp"
-#include "cfg_pack.hpp"
+#include <service/cfgapi/cfg_pack.hpp>
 
 #include <ext/nltemplate/nltemplate.hpp>
 #include <resources/default_templates.hpp>

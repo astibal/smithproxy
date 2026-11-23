@@ -276,7 +276,7 @@ std::map<std::string, std::shared_ptr<CfgElement>>& CfgFactory::section_db(std::
 bool CfgFactory::cfgapi_init(const char* fnm) {
     sx::cfg::CfgArchive::Paths paths;
     paths.explicit_config = fnm;
-    return cfgapi_init(sx::cfg::CfgArchive::open(std::move(paths)));
+    return cfgapi_init(sx::cfg::CfgArchive::open(sx::cfg::smithproxy_schema(), std::move(paths)));
 }
 
 // Parse the main configuration exposed by a fully selected source. The source
@@ -343,10 +343,10 @@ sx::cfg::CfgArchive CfgFactory::reload_source() {
         if (sx::privsep::files::config_read(path, bytes) != 0) {
             throw sx::cfg::CfgTarError("cannot read native configuration source");
         }
-        return sx::cfg::CfgArchive::read_archive(std::move(path), bytes);
+        return sx::cfg::CfgArchive::read_archive(sx::cfg::smithproxy_schema(), std::move(path), bytes);
     }
     paths.explicit_config = std::move(path);
-    return sx::cfg::CfgArchive::open(std::move(paths));
+    return sx::cfg::CfgArchive::open(sx::cfg::smithproxy_schema(), std::move(paths));
 }
 
 sx::cfg::CfgResource CfgFactory::resolve_resource(std::string logical_path,
@@ -435,14 +435,14 @@ std::string CfgFactory::previous_archive_payload() {
             std::string(std::strerror(error)));
     }
     const auto archive = sx::cfg::CfgTar::read(payload);
-    sx::cfg::CfgManifest::validate(archive);
+    sx::cfg::CfgManifest::validate(sx::cfg::smithproxy_schema(), archive);
     return payload;
 }
 
 std::string CfgFactory::archive_resource(std::string const& path) {
     std::scoped_lock<std::recursive_mutex> guard(CfgFactory::lock());
     if(!config_archive_ || !config_archive_->is_cftar() ||
-       !sx::cfg::CfgManifest::is_resource_path(path)) {
+       !sx::cfg::CfgManifest::is_resource_path(sx::cfg::smithproxy_schema(), path)) {
         throw sx::cfg::CfgTarError("native configuration resource is unavailable");
     }
     return config_archive_->archive().at(path).data;
@@ -454,7 +454,7 @@ std::string CfgFactory::materialize_runtime_archive() {
     if(!runtime_tree_) {
         log.inf("creating runtime view of archived configuration resources");
         runtime_tree_.emplace(
-            sx::cfg::CfgRuntimeTree::create(config_archive_->archive()));
+            sx::cfg::CfgRuntimeTree::create(sx::cfg::smithproxy_schema(), config_archive_->archive()));
     }
     return runtime_tree_->root();
 }

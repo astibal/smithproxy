@@ -45,7 +45,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
                     std::string(reinterpret_cast<const char*>(data), size));
         archive.add("smithproxy.cfg", "settings : {};\n");
         archive.add("smithproxy.startup.cfg", "SMITH_RUN_TRANSPARENT=1\n");
-        sx::cfg::CfgManifest::validate(archive);
+        sx::cfg::CfgManifest::validate(sx::cfg::smithproxy_schema(), archive);
     }
     catch (const sx::cfg::CfgTarError&) {
         // Invalid manifests are expected and must remain contained here.

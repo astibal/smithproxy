@@ -58,7 +58,7 @@ protected:
 };
 
 TEST_F(DefaultTemplateMigration, MissingLegacyDirectoryUsesCompleteDefaults) {
-    const auto archive = CfgPack::build(input_);
+    const auto archive = CfgPack::build(sx::cfg::smithproxy_schema(), input_);
     for(const auto& [path, content] : all()) {
         EXPECT_EQ(archive.at(path).data, content) << path;
     }
@@ -67,7 +67,7 @@ TEST_F(DefaultTemplateMigration, MissingLegacyDirectoryUsesCompleteDefaults) {
 TEST_F(DefaultTemplateMigration, PreservesCustomAndEmptyLegacyTemplates) {
     write("html_page.txt", "custom page");
     write("tls_reason.txt", "");
-    const auto archive = CfgPack::build(input_);
+    const auto archive = CfgPack::build(sx::cfg::smithproxy_schema(), input_);
     EXPECT_EQ(archive.at("templates/replacement/en/html_page.txt").data, "custom page");
     EXPECT_EQ(archive.at("templates/replacement/en/tls_reason.txt").data, "");
     EXPECT_EQ(archive.at("templates/replacement/en/tls_replacement.txt").data,
@@ -76,10 +76,10 @@ TEST_F(DefaultTemplateMigration, PreservesCustomAndEmptyLegacyTemplates) {
 
 TEST_F(DefaultTemplateMigration, DoesNotHideUnsafeExistingLegacyTemplate) {
     fs::create_symlink(root_ / "missing-target", root_ / "html_page.txt");
-    EXPECT_THROW(CfgPack::build(input_), sx::cfg::CfgTarError);
+    EXPECT_THROW(CfgPack::build(sx::cfg::smithproxy_schema(), input_), sx::cfg::CfgTarError);
     fs::remove(root_ / "html_page.txt");
     fs::create_directory(root_ / "html_page.txt");
-    EXPECT_THROW(CfgPack::build(input_), sx::cfg::CfgTarError);
+    EXPECT_THROW(CfgPack::build(sx::cfg::smithproxy_schema(), input_), sx::cfg::CfgTarError);
 }
 
 TEST_F(DefaultTemplateMigration, NativeUpgradePreservesCustomAndEmptyResources) {
@@ -88,8 +88,8 @@ TEST_F(DefaultTemplateMigration, NativeUpgradePreservesCustomAndEmptyResources) 
     input_.files.push_back({"templates/replacement/en/html_page.txt", write("page", "custom page")});
     input_.files.push_back({"templates/replacement/en/tls_reason.txt", write("reason", "")});
     const auto path = (root_ / "native.cftar").string();
-    CfgPack::build(input_).write_file(path);
-    auto source = sx::cfg::CfgArchive::read_archive(path, read_file(path));
+    CfgPack::build(sx::cfg::smithproxy_schema(), input_).write_file(path);
+    auto source = sx::cfg::CfgArchive::read_archive(sx::cfg::smithproxy_schema(), path, read_file(path));
     const auto prepared = source.prepare_save("settings : {};\n", all());
     const auto upgraded = sx::cfg::CfgTar::read(prepared.replacement);
     for(const auto& [name, content] : all()) {

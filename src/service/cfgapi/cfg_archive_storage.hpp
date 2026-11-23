@@ -4,7 +4,7 @@
 #include <string>
 #include <string_view>
 
-#include "cfg_archive.hpp"
+#include <service/cfgapi/cfg_archive.hpp>
 
 namespace sx::cfg {
 

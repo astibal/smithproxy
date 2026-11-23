@@ -88,7 +88,7 @@ Http_JsonResponseParams cfg_archive_validate(
     std::string const& request) {
     Http_JsonResponseParams response;
     try {
-        const auto info = sx::cfg::CfgArchive::inspect_archive(request);
+        const auto info = sx::cfg::CfgArchive::inspect_archive(sx::cfg::smithproxy_schema(), request);
         const auto hash = sx::crypto::sha256(request);
         if (!hash) throw sx::cfg::CfgTarError("cannot hash configuration archive");
 
@@ -215,7 +215,7 @@ Http_JsonResponseParams cfg_archive_resources(
 
         nlohmann::json resources = nlohmann::json::array();
         for(const auto& entry : info.entries) {
-            if(!sx::cfg::CfgManifest::is_resource_path(entry.path)) continue;
+            if(!sx::cfg::CfgManifest::is_resource_path(sx::cfg::smithproxy_schema(), entry.path)) continue;
             resources.push_back({
                 {"path", entry.path}, {"size", entry.size},
                 {"executable", entry.executable},

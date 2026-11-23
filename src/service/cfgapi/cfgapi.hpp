@@ -55,13 +55,13 @@
 #include <traflog/pcaplog.hpp>
 
 #include "cfg_update.hpp"
-#include "cfg_archive.hpp"
+#include <service/cfgapi/cfg_archive.hpp>
 #include "cfg_log.hpp"
 #include "cfg_archive_monitor.hpp"
 #include "cfg_archive_restore.hpp"
 #include "cfg_resource_write.hpp"
 #include "cfg_template_maintenance.hpp"
-#include "cfg_runtime_tree.hpp"
+#include <service/cfgapi/cfg_runtime_tree.hpp>
 #include "cfg_write_gate.hpp"
 #include "cfg_tx_validate.hpp"
 #include <service/reload/file_reload_service.hpp>

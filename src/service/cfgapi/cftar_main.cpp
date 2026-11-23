@@ -85,8 +85,12 @@ int create(int argc, char** argv) {
     if (!output) {
         throw sx::cfg::CfgTarError("--output is required");
     }
+    const bool missing_config_input = input.main_config.empty() || input.startup_config.empty();
+    if (missing_config_input) {
+        throw sx::cfg::CfgTarError("CfgTar main and startup input paths are required");
+    }
 
-    CfgPack::build(input).write_file(*output);
+    CfgPack::build(sx::cfg::smithproxy_schema(), input).write_file(*output);
     std::cout << "Created " << *output << '\n';
     return 0;
 }
@@ -97,7 +101,7 @@ int verify(int argc, char** argv) {
         throw sx::cfg::CfgTarError("verify expects exactly one archive path");
     }
     const auto archive = CfgTar::read_file(argv[2]);
-    sx::cfg::CfgManifest::validate(archive);
+    sx::cfg::CfgManifest::validate(sx::cfg::smithproxy_schema(), archive);
     std::cout << argv[2] << ": valid Smithproxy CfgTar\n";
     return 0;
 }
@@ -109,7 +113,7 @@ int get(int argc, char** argv) {
         throw sx::cfg::CfgTarError("get expects an archive and one entry path");
     }
     const auto archive = CfgTar::read_file(argv[2]);
-    sx::cfg::CfgManifest::validate(archive);
+    sx::cfg::CfgManifest::validate(sx::cfg::smithproxy_schema(), archive);
     const auto& data = archive.at(argv[3]).data;
     std::cout.write(data.data(), static_cast<std::streamsize>(data.size()));
     if (!std::cout) {
@@ -123,7 +127,7 @@ int inspect(int argc, char** argv) {
     if(argc != 3) {
         throw sx::cfg::CfgTarError("inspect expects exactly one archive path");
     }
-    const auto session = sx::cfg::CfgArchiveSession::open(argv[2]);
+    const auto session = sx::cfg::CfgArchiveSession::open(sx::cfg::smithproxy_schema(), argv[2]);
     std::cout << "path: " << session.path() << '\n'
               << "hash: " << session.base_hash() << '\n'
               << "entries: " << session.archive().entries().size() << '\n';
@@ -135,7 +139,7 @@ int list(int argc, char** argv) {
     if(argc != 3 && argc != 4) {
         throw sx::cfg::CfgTarError("list expects an archive and optional prefix");
     }
-    const auto session = sx::cfg::CfgArchiveSession::open(argv[2]);
+    const auto session = sx::cfg::CfgArchiveSession::open(sx::cfg::smithproxy_schema(), argv[2]);
     const std::string_view prefix = argc == 4 ? argv[3] : "";
     for(const auto& [path, entry] : session.archive().entries()) {
         if(path.compare(0, prefix.size(), prefix) != 0) continue;
@@ -147,7 +151,7 @@ int list(int argc, char** argv) {
 }
 
 void require_resource_path(std::string_view path) {
-    if(!sx::cfg::CfgManifest::is_resource_path(path)) {
+    if(!sx::cfg::CfgManifest::is_resource_path(sx::cfg::smithproxy_schema(), path)) {
         throw sx::cfg::CfgTarError("not a resource path: " + std::string(path));
     }
 }
@@ -169,7 +173,7 @@ int resource(int argc, char** argv) {
             throw sx::cfg::CfgTarError("resource mode must be 'executable'");
         }
         require_resource_path(argv[4]);
-        auto session = sx::cfg::CfgArchiveSession::open(argv[3]);
+        auto session = sx::cfg::CfgArchiveSession::open(sx::cfg::smithproxy_schema(), argv[3]);
         session.put(argv[4], sx::cfg::read_import_file(argv[5]), executable);
         session.save();
         std::cout << "Imported " << argv[4] << " into " << argv[3] << '\n';
@@ -180,7 +184,7 @@ int resource(int argc, char** argv) {
             throw sx::cfg::CfgTarError(
                 "resource import-set expects FILE and one or more ARCHIVE_PATH=SOURCE mappings");
         }
-        auto session = sx::cfg::CfgArchiveSession::open(argv[3]);
+        auto session = sx::cfg::CfgArchiveSession::open(sx::cfg::smithproxy_schema(), argv[3]);
         std::set<std::string> paths;
         for(int index = 4; index < argc; ++index) {
             const auto file = mapped_file(argv[index], false);
@@ -201,7 +205,7 @@ int resource(int argc, char** argv) {
                 "resource export expects FILE ARCHIVE_PATH DESTINATION");
         }
         require_resource_path(argv[4]);
-        const auto session = sx::cfg::CfgArchiveSession::open(argv[3]);
+        const auto session = sx::cfg::CfgArchiveSession::open(sx::cfg::smithproxy_schema(), argv[3]);
         sx::cfg::write_export_file(argv[5], session.entry(argv[4]).data);
         std::cout << "Exported " << argv[4] << " to " << argv[5] << '\n';
         return 0;
@@ -211,7 +215,7 @@ int resource(int argc, char** argv) {
             throw sx::cfg::CfgTarError("resource remove expects FILE ARCHIVE_PATH");
         }
         require_resource_path(argv[4]);
-        auto session = sx::cfg::CfgArchiveSession::open(argv[3]);
+        auto session = sx::cfg::CfgArchiveSession::open(sx::cfg::smithproxy_schema(), argv[3]);
         session.remove(argv[4]);
         session.save();
         std::cout << "Removed " << argv[4] << " from " << argv[3] << '\n';

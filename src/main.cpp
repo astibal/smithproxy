@@ -865,7 +865,7 @@ int main(int argc, char *argv[]) {
         if(selected_archive) {
             archive_paths.explicit_archive = selected_config;
         }
-        auto source = sx::cfg::CfgArchive::open(std::move(archive_paths));
+        auto source = sx::cfg::CfgArchive::open(sx::cfg::smithproxy_schema(), std::move(archive_paths));
         migrate_legacy = !source.is_cftar();
         CONFIG_LOADED = SmithProxy::instance().load_config(std::move(source));
     }
@@ -959,7 +959,7 @@ int main(int argc, char *argv[]) {
                         "pki/trust/directory", trust_path, false});
                 }
 
-                const bool created = sx::cfg::CfgPack::migrate(migration);
+                const bool created = sx::cfg::CfgPack::migrate(sx::cfg::smithproxy_schema(), migration);
                 _not("native configuration archive %s",
                      created ? "created" : "accepted after concurrent creation");
 
@@ -969,7 +969,7 @@ int main(int argc, char *argv[]) {
                     std::nullopt,
                 };
                 CONFIG_LOADED = SmithProxy::instance().load_config(
-                    sx::cfg::CfgArchive::open(std::move(archive_paths)), true);
+                    sx::cfg::CfgArchive::open(sx::cfg::smithproxy_schema(), std::move(archive_paths)), true);
                 migrated_to_cftar = CONFIG_LOADED;
                 if(!CONFIG_LOADED) {
                     _cri("new native configuration archive FAILED to load");
@@ -1044,8 +1044,7 @@ int main(int argc, char *argv[]) {
        CfgFactory::get()->using_native_archive() &&
        CfgFactory::get()->config_file == "/etc/smithproxy/smithproxy.cftar") {
         try {
-            const auto retired = sx::cfg::CfgPack::retire_legacy_tree(
-                "/etc/smithproxy", "smithproxy.cftar",
+            const auto retired = sx::cfg::CfgPack::retire_smithproxy_legacy_tree(sx::cfg::smithproxy_schema(), "/etc/smithproxy", "smithproxy.cftar",
                 "smithproxy.pre-cftar.tar");
             if(retired.backup_created || retired.files_removed != 0) {
                 _not("legacy configuration retired: backup=%s files=%zu",
