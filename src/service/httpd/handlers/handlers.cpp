@@ -63,7 +63,7 @@ namespace sx::webserver {
 
     static void authorize_response(
         Http_JsonResponseParams& response, bool administrator_access = false,
-        bool archive_access = false) {
+        bool archive_access = false, std::string administrator = {}) {
 
         const auto auth_token = HttpSessions::generate_auth_token();
         const auto csrf_token = HttpSessions::generate_csrf_token();
@@ -89,6 +89,10 @@ namespace sx::webserver {
             std::string(administrator_access || archive_access ? "1" : "0"), ttl);
         HttpSessions::access_keys[auth_token]["archive_access"] = TimedOptional(
             std::string(archive_access ? "1" : "0"), ttl);
+        if(!administrator.empty()) {
+            HttpSessions::access_keys[auth_token][HttpSessions::ATT_ADMINISTRATOR_NAME] =
+                TimedOptional(std::move(administrator), ttl);
+        }
     }
 
     static Http_JsonResponseParams login_response(
@@ -117,7 +121,7 @@ namespace sx::webserver {
         const bool administrator_not_configured =
             administrator_status == sx::admin::AuthenticationStatus::not_configured;
         if(administrator_authenticated) {
-            authorize_response(response, true, false);
+            authorize_response(response, true, false, username);
             return response;
         }
 

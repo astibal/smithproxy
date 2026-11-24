@@ -142,6 +142,7 @@ struct HttpSessions {
 
     constexpr static const char* ATT_AUTH_TOKEN = "auth_token";
     constexpr static const char* ATT_CSRF_TOKEN = "csrf_token";
+    constexpr static const char* ATT_ADMINISTRATOR_NAME = "administrator_name";
 
     static std::string table_value(std::string const& key, std::string const& varname, bool create=false) {
         auto lc_ = std::scoped_lock(lock);
@@ -199,7 +200,14 @@ struct HttpSessions {
 
         auto db_csrf_token = table_value(auth_token, "csrf_token");
         if(db_csrf_token.empty() or db_csrf_token.size() != csrf_token.size()) return false;
-        return CRYPTO_memcmp(csrf_token.data(), db_csrf_token.data(), csrf_token.size()) == 0;
+        const bool csrf_matches =
+            CRYPTO_memcmp(csrf_token.data(), db_csrf_token.data(), csrf_token.size()) == 0;
+        if(csrf_matches) {
+            // Keep the revocation identity aligned with an actively extended
+            // session even while it only uses standard API endpoints.
+            table_value(auth_token, ATT_ADMINISTRATOR_NAME);
+        }
+        return csrf_matches;
     }
 
     // Validate the ordinary session pair before consulting the stronger
@@ -214,6 +222,30 @@ struct HttpSessions {
         std::string const& auth_token, std::string const& csrf_token) {
         return validate_tokens(auth_token, csrf_token) &&
                table_value(auth_token, "administrator_access") == "1";
+    }
+
+    // Persistent administrator sessions carry their identity so a password
+    // change, disable, or removal can revoke exactly that principal. PAM and
+    // boot-key sessions intentionally have no managed administrator identity.
+    static std::size_t revoke_administrator_sessions(std::string_view administrator) {
+        auto guard = std::scoped_lock(lock);
+        std::size_t revoked = 0;
+        for(auto session = access_keys.begin(); session != access_keys.end();) {
+            const auto identity = session->second.find(ATT_ADMINISTRATOR_NAME);
+            const auto stored_identity = identity == session->second.end()
+                ? std::optional<std::string>{}
+                : identity->second.stored_optional();
+            const bool belongs_to_administrator =
+                stored_identity && *stored_identity == administrator;
+            if(belongs_to_administrator) {
+                session = access_keys.erase(session);
+                ++revoked;
+            }
+            else {
+                ++session;
+            }
+        }
+        return revoked;
     }
 
     static bool has_api_key(std::string const& key) {

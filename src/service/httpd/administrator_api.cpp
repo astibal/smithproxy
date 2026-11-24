@@ -117,10 +117,10 @@ Http_JsonResponseParams mutation_response(
     return response;
 }
 
-template<class Request, class Parser, class Mutation>
+template<class Request, class Parser, class Mutation, class Success>
 Http_JsonResponseParams mutate_administrator(
     MHD_Connection* connection, const std::string& request, Parser parser,
-    Mutation mutation, std::string_view success_state) {
+    Mutation mutation, Success success, std::string_view success_state) {
     const auto expected = preconditions(connection);
     if(!expected) {
         return error_response(
@@ -136,6 +136,7 @@ Http_JsonResponseParams mutate_administrator(
         auto response = mutation_response(
             result, success_state, decoded.request->name);
         if(result.ok()) {
+            success(*decoded.request);
             const auto action = std::string(success_state);
             Log::get()->events().insert(
                 NOT, "administrator %s %s by %s", decoded.request->name.c_str(),
@@ -159,6 +160,7 @@ Http_JsonResponseParams administrator_collection(
                 return CfgFactory::create_administrator(
                     expected.revision, expected.archive_hash, decoded.name, decoded.password);
             },
+            [](const AdministratorCreateRequest&) {},
             "created");
     }
     if(method == "DELETE") {
@@ -167,6 +169,9 @@ Http_JsonResponseParams administrator_collection(
             [](const Preconditions& expected, const AdministratorRemoveRequest& decoded) {
                 return CfgFactory::remove_administrator(
                     expected.revision, expected.archive_hash, decoded.name);
+            },
+            [](const AdministratorRemoveRequest& decoded) {
+                HttpSessions::revoke_administrator_sessions(decoded.name);
             },
             "removed");
     }
@@ -208,6 +213,9 @@ Http_JsonResponseParams administrator_password(
             return CfgFactory::change_administrator_password(
                 expected.revision, expected.archive_hash, decoded.name, decoded.password);
         },
+        [](const AdministratorPasswordRequest& decoded) {
+            HttpSessions::revoke_administrator_sessions(decoded.name);
+        },
         "password_changed");
 }
 
@@ -218,6 +226,11 @@ Http_JsonResponseParams administrator_enabled(
         [](const Preconditions& expected, const AdministratorEnabledRequest& decoded) {
             return CfgFactory::set_administrator_enabled(
                 expected.revision, expected.archive_hash, decoded.name, decoded.enabled);
+        },
+        [](const AdministratorEnabledRequest& decoded) {
+            if(!decoded.enabled) {
+                HttpSessions::revoke_administrator_sessions(decoded.name);
+            }
         },
         "enabled_changed");
 }

@@ -214,6 +214,31 @@ TEST_F(HttpSessionsTest, AdministratorCapabilityIsIndependentFromOrdinaryAccess)
         "administrator", "administrator-csrf"));
 }
 
+TEST_F(HttpSessionsTest, RevokesOnlySessionsForSelectedManagedAdministrator) {
+    {
+        auto lock = std::scoped_lock(HttpSessions::lock);
+        HttpSessions::access_keys["alice-one"][HttpSessions::ATT_ADMINISTRATOR_NAME] =
+            TimedOptional<std::string>("alice", 60);
+        HttpSessions::access_keys["alice-two"][HttpSessions::ATT_ADMINISTRATOR_NAME] =
+            TimedOptional<std::string>("alice", 60);
+        HttpSessions::access_keys["bob"][HttpSessions::ATT_ADMINISTRATOR_NAME] =
+            TimedOptional<std::string>("bob", 60);
+        HttpSessions::access_keys["pam-or-boot"]["administrator_access"] =
+            TimedOptional<std::string>("1", 60);
+    }
+
+    EXPECT_EQ(HttpSessions::revoke_administrator_sessions("alice"), 2U);
+
+    auto lock = std::scoped_lock(HttpSessions::lock);
+    EXPECT_EQ(HttpSessions::access_keys.find("alice-one"),
+              HttpSessions::access_keys.end());
+    EXPECT_EQ(HttpSessions::access_keys.find("alice-two"),
+              HttpSessions::access_keys.end());
+    EXPECT_NE(HttpSessions::access_keys.find("bob"), HttpSessions::access_keys.end());
+    EXPECT_NE(HttpSessions::access_keys.find("pam-or-boot"),
+              HttpSessions::access_keys.end());
+}
+
 TEST_F(HttpSessionsTest, ArchiveKeyLoadsOnceFromEnvironmentAndIsRemoved) {
     const std::string secret(32, 'a');
     ASSERT_EQ(::setenv("SMITHPROXY_ARCHIVE_API_KEY", secret.c_str(), 1), 0);
