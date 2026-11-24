@@ -52,22 +52,20 @@ protected:
         return sx::admin::ConfigStore({board, gate, mutex, archive});
     }
 
-    void allow_another_write() { archive.restart_needed = false; }
-
     UpdateBoard board;
     sx::cfg::CfgWriteGate gate;
     std::recursive_mutex mutex;
     TestAdminArchive archive;
 };
 
-} // namespace
+}  // namespace
 
 TEST_F(AdminConfigStoreTest, CreatesFirstAdministratorWithoutPersistingPlaintext) {
     const auto result = store().create(
         board.revision_current(), hash(), "alice", "correct horse battery staple");
 
     ASSERT_TRUE(result.ok());
-    EXPECT_TRUE(archive.restart_needed);
+    EXPECT_FALSE(archive.restart_needed);
     EXPECT_EQ(archive.writes, 1);
     const auto config = store().read();
     ASSERT_NE(config.find("alice"), nullptr);
@@ -80,7 +78,6 @@ TEST_F(AdminConfigStoreTest, CreatesFirstAdministratorWithoutPersistingPlaintext
 
 TEST_F(AdminConfigStoreTest, RejectsDuplicateAdministratorWithoutPublishing) {
     ASSERT_TRUE(store().create(board.revision_current(), hash(), "alice", "first password").ok());
-    allow_another_write();
 
     const auto result = store().create(
         board.revision_current(), hash(), "alice", "second password");
@@ -95,7 +92,6 @@ TEST_F(AdminConfigStoreTest, RejectsDuplicateAdministratorWithoutPublishing) {
 
 TEST_F(AdminConfigStoreTest, ChangesPasswordThroughTypedResourceMutation) {
     ASSERT_TRUE(store().create(board.revision_current(), hash(), "alice", "first password").ok());
-    allow_another_write();
 
     const auto result = store().change_password(
         board.revision_current(), hash(), "alice", "second password");
@@ -110,7 +106,6 @@ TEST_F(AdminConfigStoreTest, ChangesPasswordThroughTypedResourceMutation) {
 
 TEST_F(AdminConfigStoreTest, IdenticalStateChangeDoesNotPublishOrRequireRestart) {
     ASSERT_TRUE(store().create(board.revision_current(), hash(), "alice", "password").ok());
-    allow_another_write();
 
     const auto result = store().set_enabled(
         board.revision_current(), hash(), "alice", true);
@@ -122,12 +117,9 @@ TEST_F(AdminConfigStoreTest, IdenticalStateChangeDoesNotPublishOrRequireRestart)
 
 TEST_F(AdminConfigStoreTest, PreservesAtLeastOneEnabledAdministrator) {
     ASSERT_TRUE(store().create(board.revision_current(), hash(), "alice", "alice password").ok());
-    allow_another_write();
     ASSERT_TRUE(store().create(board.revision_current(), hash(), "bob", "bob password").ok());
-    allow_another_write();
 
     EXPECT_TRUE(store().set_enabled(board.revision_current(), hash(), "alice", false).ok());
-    allow_another_write();
     const auto disable_last = store().set_enabled(
         board.revision_current(), hash(), "bob", false);
     const auto remove_last = store().remove(board.revision_current(), hash(), "bob");
@@ -142,11 +134,8 @@ TEST_F(AdminConfigStoreTest, PreservesAtLeastOneEnabledAdministrator) {
 
 TEST_F(AdminConfigStoreTest, RemovesDisabledAndNonFinalAdministrators) {
     ASSERT_TRUE(store().create(board.revision_current(), hash(), "alice", "alice password").ok());
-    allow_another_write();
     ASSERT_TRUE(store().create(board.revision_current(), hash(), "bob", "bob password").ok());
-    allow_another_write();
     ASSERT_TRUE(store().set_enabled(board.revision_current(), hash(), "bob", false).ok());
-    allow_another_write();
 
     const auto result = store().remove(board.revision_current(), hash(), "bob");
 

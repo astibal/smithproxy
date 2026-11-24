@@ -11,6 +11,13 @@
 
 namespace sx::cfg {
 
+enum class ResourceActivation {
+    // Resource consumers only reload during process startup.
+    deferred_until_restart,
+    // The Core reads the published resource for each new operation.
+    immediate,
+};
+
 enum class ResourceWriteStatus {
     written, invalid_resource, hash_mismatch, lease_busy, stale_revision,
     unsaved_running, native_unavailable, write_failed,
@@ -57,7 +64,8 @@ public:
         std::string expected_archive_hash,
         std::string path,
         std::function<ResourceTransformResult(std::optional<std::string>)> transformer,
-        bool executable);
+        bool executable,
+        ResourceActivation activation = ResourceActivation::deferred_until_restart);
 
 private:
     Context context_;

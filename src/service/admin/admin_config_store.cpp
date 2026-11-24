@@ -151,7 +151,8 @@ MutationResult ConfigStore::mutate(
                 return sx::cfg::ResourceTransformResult{false, {}, error.what()};
             }
         },
-        false);
+        false,
+        sx::cfg::ResourceActivation::immediate);
 
     if(!persistence.ok() && mutation_status == MutationStatus::written)
         mutation_status = MutationStatus::persistence_error;

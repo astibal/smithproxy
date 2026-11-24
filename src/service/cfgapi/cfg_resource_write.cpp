@@ -28,7 +28,8 @@ ResourceWriteResult CfgResourceWriter::transform(
     std::string expected_archive_hash,
     std::string path,
     std::function<ResourceTransformResult(std::optional<std::string>)> transformer,
-    bool executable) {
+    bool executable,
+    ResourceActivation activation) {
     const auto resource = path;
     config_log().inf("configuration resource transform requested: resource=%s",
                      resource.c_str());
@@ -50,7 +51,9 @@ ResourceWriteResult CfgResourceWriter::transform(
         config_log().war("configuration resource update rejected: running configuration is unsaved");
         return {ResourceWriteStatus::unsaved_running, revision, {}, {}};
     }
-    if(context_.archive.restart_required()) {
+    const bool deferred_activation =
+        activation == ResourceActivation::deferred_until_restart;
+    if(deferred_activation && context_.archive.restart_required()) {
         config_log().war("configuration resource update rejected: restart is pending");
         return {ResourceWriteStatus::write_failed, revision, {},
                 "startup archive changed and requires restart"};
@@ -100,7 +103,7 @@ ResourceWriteResult CfgResourceWriter::transform(
             config_log().err("configuration resource update failed during publication");
             return {ResourceWriteStatus::write_failed, revision, current_hash, {}};
         }
-        context_.archive.require_restart();
+        if(deferred_activation) context_.archive.require_restart();
 
         const auto replacement_hash = sx::crypto::sha256(prepared.replacement);
         config_log().noti("configuration resource update completed: resource=%s operation=%s",

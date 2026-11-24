@@ -158,6 +158,39 @@ TEST_F(ResourceWriteTest, UnchangedTransformSucceedsWithoutPublicationOrRestart)
     EXPECT_FALSE(archive.restart_needed);
 }
 
+TEST_F(ResourceWriteTest, ImmediateTransformPublishesWithoutRequiringRestart) {
+    sx::cfg::CfgResourceWriter writer({board, gate, mutex, archive});
+    const auto result = writer.transform(
+        board.revision_current(), hash(), "admin.cfg",
+        [](std::optional<std::string>) {
+            return sx::cfg::ResourceTransformResult{
+                true, "admin = { schema_version = 1; administrators = (); };\n", {}};
+        },
+        false,
+        sx::cfg::ResourceActivation::immediate);
+
+    EXPECT_TRUE(result.ok());
+    EXPECT_EQ(archive.installs, 1);
+    EXPECT_FALSE(archive.restart_needed);
+}
+
+TEST_F(ResourceWriteTest, ImmediateTransformCanComposeWithPendingStartupChange) {
+    archive.restart_needed = true;
+    sx::cfg::CfgResourceWriter writer({board, gate, mutex, archive});
+    const auto result = writer.transform(
+        board.revision_current(), hash(), "admin.cfg",
+        [](std::optional<std::string>) {
+            return sx::cfg::ResourceTransformResult{
+                true, "admin = { schema_version = 1; administrators = (); };\n", {}};
+        },
+        false,
+        sx::cfg::ResourceActivation::immediate);
+
+    EXPECT_TRUE(result.ok());
+    EXPECT_EQ(archive.installs, 1);
+    EXPECT_TRUE(archive.restart_needed);
+}
+
 TEST_F(ResourceWriteTest, RejectsAStaleArchiveHash) {
     const auto result = write(board.revision_current(), "sha256:stale",
                               "templates/replacement/en/page.html", std::string("page"));
