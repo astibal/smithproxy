@@ -2,6 +2,7 @@
 #define HANDLERS_HPP_
 
 #include <memory>
+#include <string_view>
 #include <type_traits>
 
 #include <service/core/smithproxy.hpp>
@@ -22,6 +23,15 @@ namespace sx::webserver {
         };
 
         std::string client_address(MHD_Connection* mc);
+
+        // Browser sessions must prove CSRF intent for every state-changing
+        // method. GET, HEAD and OPTIONS are the only safe methods here.
+        [[nodiscard]] inline bool request_requires_csrf_header(
+            std::string_view method) noexcept {
+            const bool reads_resource = method == "GET" || method == "HEAD";
+            const bool inspects_capabilities = method == "OPTIONS";
+            return !reads_resource && !inspects_capabilities;
+        }
 
         template<typename T>
         struct token_protected {
@@ -120,8 +130,8 @@ namespace sx::webserver::authorized {
             if(not auth_cookie.empty()) {
                 std::string token_header = char_to_str(MHD_lookup_connection_value(conn, MHD_HEADER_KIND, HttpSessions::HEADER_CSRF_TOKEN));
 
-                // POST is required to have CSRF header
-                if(meth == "POST" and token_header.empty()) {
+                const bool csrf_required = request_requires_csrf_header(meth);
+                if(csrf_required and token_header.empty()) {
                     return std::nullopt;
                 }
                 else if(not token_header.empty()) {

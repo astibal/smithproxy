@@ -2,6 +2,7 @@
 
 #include <service/httpd/httpd.hpp>
 #include <service/httpd/admin_enrollment.hpp>
+#include <service/httpd/handlers/handlers.hpp>
 #include <service/httpd/wh/webhook_lease.hpp>
 
 #include <algorithm>
@@ -142,6 +143,19 @@ TEST_F(HttpSessionsTest, InvalidCsrfDoesNotDestroyOtherwiseValidSession) {
 
     EXPECT_FALSE(HttpSessions::validate_tokens("auth", "wrong"));
     EXPECT_TRUE(HttpSessions::validate_tokens("auth", "token"));
+}
+
+TEST(HttpAuthorizationTest, EveryUnsafeMethodRequiresCsrfHeader) {
+    using sx::webserver::authorized::request_requires_csrf_header;
+
+    EXPECT_FALSE(request_requires_csrf_header("GET"));
+    EXPECT_FALSE(request_requires_csrf_header("HEAD"));
+    EXPECT_FALSE(request_requires_csrf_header("OPTIONS"));
+    EXPECT_TRUE(request_requires_csrf_header("POST"));
+    EXPECT_TRUE(request_requires_csrf_header("PUT"));
+    EXPECT_TRUE(request_requires_csrf_header("PATCH"));
+    EXPECT_TRUE(request_requires_csrf_header("DELETE"));
+    EXPECT_TRUE(request_requires_csrf_header("CONNECT"));
 }
 
 TEST_F(HttpSessionsTest, ArchiveKeysAreExplicitPrivilegedAccessKeys) {
