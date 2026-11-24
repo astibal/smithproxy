@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -14,6 +13,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace sx::webserver {
 
@@ -25,6 +25,64 @@ public:
     struct IssuedToken {
         std::string token;
         std::int64_t expires_at_unix_seconds {0};
+    };
+
+    // Exclusively reserves one capability while its administrator record is
+    // persisted. Destruction releases an uncommitted claim for a safe retry.
+    class Claim {
+    public:
+        Claim(const Claim&) = delete;
+        Claim& operator=(const Claim&) = delete;
+
+        Claim(Claim&& other) noexcept
+            : store_(std::exchange(other.store_, nullptr)),
+              verifier_(std::move(other.verifier_)),
+              claim_id_(std::exchange(other.claim_id_, 0)),
+              administrator_(std::move(other.administrator_)) {}
+
+        Claim& operator=(Claim&& other) noexcept {
+            if(this == &other) return *this;
+            release();
+            store_ = std::exchange(other.store_, nullptr);
+            verifier_ = std::move(other.verifier_);
+            claim_id_ = std::exchange(other.claim_id_, 0);
+            administrator_ = std::move(other.administrator_);
+            return *this;
+        }
+
+        ~Claim() { release(); }
+
+        [[nodiscard]] const std::string& administrator() const noexcept {
+            return administrator_;
+        }
+
+        // Permanently consumes the claimed capability after durable success.
+        [[nodiscard]] bool commit() {
+            if(!store_) return false;
+            const bool consumed = store_->finish_claim(verifier_, claim_id_, true);
+            store_ = nullptr;
+            claim_id_ = 0;
+            return consumed;
+        }
+
+    private:
+        friend class AdminEnrollmentStore;
+
+        Claim(AdminEnrollmentStore& store, std::string verifier,
+              std::uint64_t claim_id, std::string administrator)
+            : store_(&store), verifier_(std::move(verifier)), claim_id_(claim_id),
+              administrator_(std::move(administrator)) {}
+
+        void release() noexcept {
+            if(store_) store_->finish_claim(verifier_, claim_id_, false);
+            store_ = nullptr;
+            claim_id_ = 0;
+        }
+
+        AdminEnrollmentStore* store_ {nullptr};
+        std::string verifier_;
+        std::uint64_t claim_id_ {0};
+        std::string administrator_;
     };
 
     static constexpr std::int64_t default_ttl_seconds = 600;
@@ -67,14 +125,17 @@ public:
         return IssuedToken{std::move(*token), expires_at};
     }
 
-    // Atomically consumes a capability so parallel callers cannot reuse it.
-    std::optional<std::string> consume(
+    // Exclusively claims a capability so persistence can fail without losing
+    // it and parallel callers still cannot reuse it.
+    std::optional<Claim> claim(
         std::string_view token,
         std::int64_t now = unix_seconds()) {
         const bool valid_length = token.size() == 64U;
         const bool valid_characters = valid_length &&
             std::all_of(token.begin(), token.end(), [](const unsigned char byte) {
-                return std::isdigit(byte) || (byte >= 'a' && byte <= 'f');
+                const bool decimal = byte >= '0' && byte <= '9';
+                const bool lowercase_hex = byte >= 'a' && byte <= 'f';
+                return decimal || lowercase_hex;
             });
         if(!valid_characters) return std::nullopt;
 
@@ -84,10 +145,26 @@ public:
         auto guard = std::scoped_lock(lock_);
         const auto found = entries_.find(*verifier);
         if(found == entries_.end()) return std::nullopt;
-        auto entry = std::move(found->second);
-        entries_.erase(found);
-        if(entry.expires_at_unix_seconds <= now) return std::nullopt;
-        return entry.administrator;
+        if(found->second.expires_at_unix_seconds <= now) {
+            entries_.erase(found);
+            return std::nullopt;
+        }
+        if(found->second.claim_id != 0) return std::nullopt;
+
+        const auto claim_id = next_claim_id_locked();
+        found->second.claim_id = claim_id;
+        return Claim(*this, *verifier, claim_id, found->second.administrator);
+    }
+
+    // Compatibility helper for transports that complete no persistent work.
+    std::optional<std::string> consume(
+        std::string_view token,
+        std::int64_t now = unix_seconds()) {
+        auto claimed = claim(token, now);
+        if(!claimed) return std::nullopt;
+        auto administrator = claimed->administrator();
+        if(!claimed->commit()) return std::nullopt;
+        return administrator;
     }
 
     // Removes every outstanding capability, primarily for controlled shutdown
@@ -109,6 +186,7 @@ private:
     struct Entry {
         std::string administrator;
         std::int64_t expires_at_unix_seconds {0};
+        std::uint64_t claim_id {0};
     };
 
     // Produces wall-clock seconds used by externally visible expiry values.
@@ -127,8 +205,29 @@ private:
         }
     }
 
+    std::uint64_t next_claim_id_locked() noexcept {
+        ++last_claim_id_;
+        if(last_claim_id_ == 0) ++last_claim_id_;
+        return last_claim_id_;
+    }
+
+    bool finish_claim(
+        const std::string& verifier, std::uint64_t claim_id, bool consume) noexcept {
+        auto guard = std::scoped_lock(lock_);
+        const auto found = entries_.find(verifier);
+        const bool owns_claim = found != entries_.end() &&
+                                found->second.claim_id == claim_id;
+        if(!owns_claim) return false;
+        if(consume)
+            entries_.erase(found);
+        else
+            found->second.claim_id = 0;
+        return true;
+    }
+
     std::mutex lock_;
     std::map<std::string, Entry> entries_;
+    std::uint64_t last_claim_id_ {0};
 };
 
 }  // namespace sx::webserver

@@ -293,6 +293,37 @@ TEST_F(AdminEnrollmentStoreTest, IssuesAndConsumesOneCapabilityExactlyOnce) {
     EXPECT_EQ(store.size(1059), 0U);
 }
 
+TEST_F(AdminEnrollmentStoreTest, ClaimBlocksReuseAndRollsBackWithoutCommit) {
+    auto& store = sx::webserver::AdminEnrollmentStore::instance();
+    const auto issued = store.issue("security-admin", 1000, 60);
+    ASSERT_TRUE(issued);
+
+    {
+        auto claim = store.claim(issued->token, 1001);
+        ASSERT_TRUE(claim);
+        EXPECT_EQ(claim->administrator(), "security-admin");
+        EXPECT_FALSE(store.claim(issued->token, 1001));
+    }
+
+    auto retry = store.claim(issued->token, 1002);
+    ASSERT_TRUE(retry);
+    EXPECT_TRUE(retry->commit());
+    EXPECT_FALSE(store.claim(issued->token, 1002));
+}
+
+TEST_F(AdminEnrollmentStoreTest, ClearInvalidatesOutstandingClaim) {
+    auto& store = sx::webserver::AdminEnrollmentStore::instance();
+    const auto issued = store.issue("security-admin", 1000, 60);
+    ASSERT_TRUE(issued);
+    auto claim = store.claim(issued->token, 1001);
+    ASSERT_TRUE(claim);
+
+    store.clear();
+
+    EXPECT_FALSE(claim->commit());
+    EXPECT_EQ(store.size(1001), 0U);
+}
+
 TEST_F(AdminEnrollmentStoreTest, RejectsInvalidNamesMalformedTokensAndExpiry) {
     auto& store = sx::webserver::AdminEnrollmentStore::instance();
     EXPECT_FALSE(store.issue("", 1000, 60));
