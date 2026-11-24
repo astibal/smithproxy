@@ -1,10 +1,14 @@
 #include "login_request.hpp"
 
+#include <algorithm>
 #include <map>
 #include <utility>
 
 namespace sx::webserver {
 namespace {
+
+constexpr std::size_t maximum_username_bytes = 256U;
+constexpr std::size_t maximum_password_bytes = 1024U;
 
 std::optional<unsigned char> hex_nibble(char character) {
     if(character >= '0' && character <= '9')
@@ -42,6 +46,20 @@ std::optional<std::string> decode_component(std::string_view encoded) {
     return decoded;
 }
 
+bool safe_username(std::string_view username) {
+    const bool valid_size = !username.empty() &&
+        username.size() <= maximum_username_bytes;
+    const bool printable = valid_size &&
+        std::all_of(username.begin(), username.end(), [](const unsigned char byte) {
+            return byte >= 0x20U && byte != 0x7fU;
+        });
+    return printable;
+}
+
+bool safe_password(std::string_view password) {
+    return !password.empty() && password.size() <= maximum_password_bytes;
+}
+
 }  // namespace
 
 LoginRequestResult parse_login_request(std::string_view body) {
@@ -73,6 +91,10 @@ LoginRequestResult parse_login_request(std::string_view body) {
     const auto password = fields.find("password");
     const bool complete = username != fields.end() && password != fields.end();
     if(!complete) return {std::nullopt, "login requires username and password"};
+    if(!safe_username(username->second))
+        return {std::nullopt, "login username is invalid"};
+    if(!safe_password(password->second))
+        return {std::nullopt, "login password is invalid"};
     return {LoginRequest{username->second, password->second}, {}};
 }
 

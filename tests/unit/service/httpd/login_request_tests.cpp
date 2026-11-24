@@ -31,3 +31,21 @@ TEST(LoginRequestTest, RejectsMalformedDuplicateAndUnknownFields) {
     EXPECT_FALSE(sx::webserver::parse_login_request(
         "username=alice&password=%00secret").request);
 }
+
+TEST(LoginRequestTest, RejectsUnsafeOrUnboundedCredentials) {
+    EXPECT_FALSE(sx::webserver::parse_login_request(
+        "username=&password=secret").request);
+    EXPECT_FALSE(sx::webserver::parse_login_request(
+        "username=alice%0Aforged&password=secret").request);
+    EXPECT_FALSE(sx::webserver::parse_login_request(
+        "username=alice%1B%5B31m&password=secret").request);
+    EXPECT_FALSE(sx::webserver::parse_login_request(
+        "username=alice&password=").request);
+
+    const auto long_username = std::string(257U, 'a');
+    EXPECT_FALSE(sx::webserver::parse_login_request(
+        "username=" + long_username + "&password=secret").request);
+    const auto long_password = std::string(1025U, 'p');
+    EXPECT_FALSE(sx::webserver::parse_login_request(
+        "username=alice&password=" + long_password).request);
+}
