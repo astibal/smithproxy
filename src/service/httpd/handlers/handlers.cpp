@@ -324,9 +324,7 @@ namespace sx::webserver {
         auto* admin_enrollment = new Http_Responder(
             "POST",
             "/api/admin/enrollment/consume",
-            authorized::token_protected<Http_JsonResponseParams>(
-                administrator_enrollment,
-                authorized::Access::administrator));
+            administrator_enrollment);
         admin_enrollment->Content_Type = "application/json";
         admin_enrollment->Max_Request_Body_Size = administrator_request_limit;
         server.addController(std::shared_ptr<lmh::Controller>(admin_enrollment));

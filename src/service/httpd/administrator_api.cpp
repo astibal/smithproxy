@@ -237,6 +237,11 @@ Http_JsonResponseParams administrator_enabled(
 
 Http_JsonResponseParams administrator_enrollment(
     MHD_Connection* connection, const std::string&, const std::string& request) {
+    // The high-entropy, short-lived, single-use enrollment token is the
+    // authorization capability for this endpoint. Requiring an existing
+    // administrator session here would make first-administrator bootstrap
+    // impossible. Every other administrator mutation remains session
+    // protected at controller registration.
     const auto expected = preconditions(connection);
     if(!expected) {
         return error_response(

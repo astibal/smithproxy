@@ -411,6 +411,29 @@ def run(args):
                        for name, value in headers)
             assert "use POST" in json.loads(payload)["error"]
 
+            enrollment_request = json.dumps({
+                "enrollment_token": "0" * 64,
+                "password": "not-a-real-administrator-password",
+            })
+            status, _, payload = api_request(
+                api_port, "POST", "/api/admin/enrollment/consume",
+                body=enrollment_request,
+                headers={"Content-Type": "application/json"})
+            assert status == 400, (status, payload)
+            assert (json.loads(payload)["error"]["code"] ==
+                    "missing_administrator_precondition")
+
+            status, _, payload = api_request(
+                api_port, "POST", "/api/admin/enrollment/consume",
+                body=enrollment_request,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Smithproxy-Expected-Revision": "not-a-revision",
+                    "X-Smithproxy-Archive-SHA256": "0" * 64,
+                })
+            assert status == 403, (status, payload)
+            assert json.loads(payload)["error"]["code"] == "invalid_enrollment_token"
+
             for body in ("", "not-json", json.dumps({"access_key": "wrong"})):
                 status, _, payload = api_request(
                     api_port, "POST", "/api/authorize", body=body,
