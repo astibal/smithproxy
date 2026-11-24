@@ -215,7 +215,8 @@ Http_JsonResponseParams cfg_archive_resources(
 
         nlohmann::json resources = nlohmann::json::array();
         for(const auto& entry : info.entries) {
-            if(!sx::cfg::CfgManifest::is_resource_path(sx::cfg::smithproxy_schema(), entry.path)) continue;
+            if(!sx::cfg::CfgManifest::is_managed_path(
+                   sx::cfg::smithproxy_schema(), entry.path)) continue;
             resources.push_back({
                 {"path", entry.path}, {"size", entry.size},
                 {"executable", entry.executable},

@@ -442,7 +442,7 @@ std::string CfgFactory::previous_archive_payload() {
 std::string CfgFactory::archive_resource(std::string const& path) {
     std::scoped_lock<std::recursive_mutex> guard(CfgFactory::lock());
     if(!config_archive_ || !config_archive_->is_cftar() ||
-       !sx::cfg::CfgManifest::is_resource_path(sx::cfg::smithproxy_schema(), path)) {
+       !sx::cfg::CfgManifest::is_managed_path(sx::cfg::smithproxy_schema(), path)) {
         throw sx::cfg::CfgTarError("native configuration resource is unavailable");
     }
     return config_archive_->archive().at(path).data;

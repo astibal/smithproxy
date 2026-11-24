@@ -90,6 +90,17 @@ TEST_F(ResourceWriteTest, WritesAndAdoptsAResource) {
     EXPECT_EQ(archive.source->resolve("templates/replacement/en/page.html", "legacy").content(), "page");
 }
 
+TEST_F(ResourceWriteTest, WritesAndAdoptsAnAuxiliaryConfiguration) {
+    const auto result = write(board.revision_current(), hash(),
+                              "gui.cfg", std::string("gui = { schema_version = 1; };\n"));
+    EXPECT_TRUE(result.ok());
+    EXPECT_TRUE(archive.restart_needed);
+    EXPECT_EQ(archive.installs, 1);
+    ASSERT_TRUE(archive.source->archive().contains("gui.cfg"));
+    EXPECT_EQ(archive.source->archive().at("gui.cfg").data,
+              "gui = { schema_version = 1; };\n");
+}
+
 TEST_F(ResourceWriteTest, RejectsAStaleArchiveHash) {
     const auto result = write(board.revision_current(), "sha256:stale",
                               "templates/replacement/en/page.html", std::string("page"));
