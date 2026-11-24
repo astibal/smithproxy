@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <service/httpd/httpd.hpp>
+#include <service/httpd/gui_enrollment.hpp>
 #include <service/httpd/wh/webhook_lease.hpp>
 
 #include <algorithm>
@@ -255,6 +256,50 @@ TEST_F(HttpSessionsTest, GeneratedTokensAreNonEmptyAndIndependent) {
     EXPECT_EQ(auth.size(), 32U);
     EXPECT_EQ(csrf.size(), 32U);
     EXPECT_NE(auth, csrf);
+}
+
+class GuiEnrollmentStoreTest : public testing::Test {
+protected:
+    void SetUp() override { sx::webserver::GuiEnrollmentStore::instance().clear(); }
+    void TearDown() override { sx::webserver::GuiEnrollmentStore::instance().clear(); }
+};
+
+TEST_F(GuiEnrollmentStoreTest, IssuesAndConsumesOneCapabilityExactlyOnce) {
+    auto& store = sx::webserver::GuiEnrollmentStore::instance();
+    const auto issued = store.issue("security-admin", 1000, 60);
+    ASSERT_TRUE(issued);
+    EXPECT_EQ(issued->token.size(), 64U);
+    EXPECT_EQ(issued->expires_at_unix_seconds, 1060);
+    EXPECT_EQ(store.size(1000), 1U);
+
+    EXPECT_EQ(store.consume(issued->token, 1059), "security-admin");
+    EXPECT_FALSE(store.consume(issued->token, 1059));
+    EXPECT_EQ(store.size(1059), 0U);
+}
+
+TEST_F(GuiEnrollmentStoreTest, RejectsInvalidNamesMalformedTokensAndExpiry) {
+    auto& store = sx::webserver::GuiEnrollmentStore::instance();
+    EXPECT_FALSE(store.issue("", 1000, 60));
+    EXPECT_FALSE(store.issue("administrator with spaces", 1000, 60));
+    EXPECT_FALSE(store.issue("admin", 1000, 601));
+
+    const auto issued = store.issue("admin@example.test", 1000, 60);
+    ASSERT_TRUE(issued);
+    EXPECT_FALSE(store.consume(std::string(64, 'G'), 1001));
+    EXPECT_FALSE(store.consume("short", 1001));
+    EXPECT_FALSE(store.consume(issued->token, 1060));
+    EXPECT_EQ(store.size(1060), 0U);
+}
+
+TEST_F(GuiEnrollmentStoreTest, BoundsOutstandingCapabilitiesAndPrunesExpiredOnIssue) {
+    auto& store = sx::webserver::GuiEnrollmentStore::instance();
+    for(std::size_t index = 0; index < sx::webserver::GuiEnrollmentStore::capacity; ++index) {
+        EXPECT_TRUE(store.issue("admin-" + std::to_string(index), 1000, 60));
+    }
+    EXPECT_FALSE(store.issue("overflow", 1000, 60));
+    EXPECT_EQ(store.size(1000), sx::webserver::GuiEnrollmentStore::capacity);
+    EXPECT_TRUE(store.issue("after-expiry", 1060, 60));
+    EXPECT_EQ(store.size(1060), 1U);
 }
 
 TEST(WebhookOverrideLeaseTest, OwnerCanRenewAndAnotherOwnerCannotReplace) {
