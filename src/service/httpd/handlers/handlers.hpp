@@ -2,8 +2,10 @@
 #define HANDLERS_HPP_
 
 #include <memory>
+#include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 
 #include <service/core/smithproxy.hpp>
 #include <service/httpd/httpd.hpp>
@@ -17,6 +19,34 @@ namespace sx::webserver {
 
     namespace authorized {
 
+        struct Actor {
+            std::string principal;
+            std::string authentication_method;
+        };
+
+        namespace detail {
+            inline Actor& active_actor() {
+                static thread_local Actor actor {"<unknown>", "unknown"};
+                return actor;
+            }
+        }
+
+        // Carries already authenticated audit identity through one synchronous
+        // responder call without exposing credentials to business handlers.
+        class ActorScope {
+        public:
+            explicit ActorScope(Actor actor)
+                : previous_(std::move(detail::active_actor())) {
+                detail::active_actor() = std::move(actor);
+            }
+            ActorScope(const ActorScope&) = delete;
+            ActorScope& operator=(const ActorScope&) = delete;
+            ~ActorScope() { detail::active_actor() = std::move(previous_); }
+
+        private:
+            Actor previous_;
+        };
+
         enum class Access {
             standard,
             administrator,
@@ -24,6 +54,24 @@ namespace sx::webserver {
         };
 
         std::string client_address(MHD_Connection* mc);
+        inline Actor session_actor(std::string_view auth_token) {
+            const auto token = std::string(auth_token);
+            auto principal = HttpSessions::table_value(
+                token, HttpSessions::ATT_PRINCIPAL);
+            auto authentication_method = HttpSessions::table_value(
+                token, HttpSessions::ATT_AUTHENTICATION_METHOD);
+            if(principal.empty()) principal = "authenticated-session";
+            if(authentication_method.empty()) authentication_method = "session";
+            return {std::move(principal), std::move(authentication_method)};
+        }
+
+        inline Actor api_key_actor() {
+            return {"api-key", "api_key"};
+        }
+
+        inline const Actor& current_actor() {
+            return detail::active_actor();
+        }
 
         // Browser sessions must prove CSRF intent for every state-changing
         // method. GET, HEAD and OPTIONS are the only safe methods here.
@@ -89,6 +137,7 @@ namespace sx::webserver::authorized {
                     break;
             }
             if (allowed) {
+                const ActorScope actor_scope(session_actor(key));
                 if constexpr (std::is_same_v<T, Http_JsonResponseParams>) {
                     ret = Func(conn, meth, req);
                 } else {
@@ -119,6 +168,7 @@ namespace sx::webserver::authorized {
                     break;
             }
             if (allowed) {
+                const ActorScope actor_scope(api_key_actor());
                 if constexpr (std::is_same_v<T, Http_JsonResponseParams>) {
                     ret = Func(conn, meth, req);
                 } else {

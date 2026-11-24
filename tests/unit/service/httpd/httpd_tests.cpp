@@ -291,6 +291,49 @@ TEST_F(HttpSessionsTest, RejectsManagedSessionPublishedAfterCredentialChange) {
               HttpSessions::access_keys.end());
 }
 
+TEST_F(HttpSessionsTest, CarriesAuthenticatedActorOnlyInsideResponderScope) {
+    {
+        auto lock = std::scoped_lock(HttpSessions::lock);
+        auto& session = HttpSessions::access_keys["managed-session"];
+        session[HttpSessions::ATT_PRINCIPAL] =
+            TimedOptional<std::string>("alice", 60);
+        session[HttpSessions::ATT_AUTHENTICATION_METHOD] =
+            TimedOptional<std::string>("password", 60);
+    }
+
+    const auto actor = sx::webserver::authorized::session_actor("managed-session");
+    EXPECT_EQ(actor.principal, "alice");
+    EXPECT_EQ(actor.authentication_method, "password");
+    EXPECT_EQ(sx::webserver::authorized::current_actor().principal, "<unknown>");
+
+    {
+        const sx::webserver::authorized::ActorScope scope(actor);
+        EXPECT_EQ(sx::webserver::authorized::current_actor().principal, "alice");
+        EXPECT_EQ(
+            sx::webserver::authorized::current_actor().authentication_method,
+            "password");
+        {
+            const sx::webserver::authorized::ActorScope nested(
+                sx::webserver::authorized::api_key_actor());
+            EXPECT_EQ(
+                sx::webserver::authorized::current_actor().principal,
+                "api-key");
+        }
+        EXPECT_EQ(sx::webserver::authorized::current_actor().principal, "alice");
+    }
+    EXPECT_EQ(sx::webserver::authorized::current_actor().principal, "<unknown>");
+}
+
+TEST_F(HttpSessionsTest, DescribesCredentialSessionsWithoutLoggingTheirSecret) {
+    const auto session = sx::webserver::authorized::session_actor("missing-secret");
+    EXPECT_EQ(session.principal, "authenticated-session");
+    EXPECT_EQ(session.authentication_method, "session");
+
+    const auto api_key = sx::webserver::authorized::api_key_actor();
+    EXPECT_EQ(api_key.principal, "api-key");
+    EXPECT_EQ(api_key.authentication_method, "api_key");
+}
+
 TEST_F(HttpSessionsTest, RevokesOneExplicitSessionWithoutTouchingOthers) {
     {
         auto lock = std::scoped_lock(HttpSessions::lock);

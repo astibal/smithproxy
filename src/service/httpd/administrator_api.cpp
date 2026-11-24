@@ -136,11 +136,14 @@ Http_JsonResponseParams mutate_administrator(
         auto response = mutation_response(
             result, success_state, decoded.request->name);
         if(result.ok()) {
+            const auto actor = authorized::current_actor();
             success(*decoded.request);
             const auto action = std::string(success_state);
             Log::get()->events().insert(
-                NOT, "administrator %s %s by %s", decoded.request->name.c_str(),
-                action.c_str(), authorized::client_address(connection).c_str());
+                NOT, "administrator %s %s by %s via %s from %s",
+                decoded.request->name.c_str(), action.c_str(),
+                actor.principal.c_str(), actor.authentication_method.c_str(),
+                authorized::client_address(connection).c_str());
         }
         return response;
     }
@@ -282,7 +285,8 @@ Http_JsonResponseParams administrator_enrollment(
                 administrator.c_str());
         }
         Log::get()->events().insert(
-            NOT, "administrator %s enrolled by %s", administrator.c_str(),
+            NOT, "administrator %s enrolled via enrollment-token from %s",
+            administrator.c_str(),
             authorized::client_address(connection).c_str());
         return response;
     }
