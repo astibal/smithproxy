@@ -801,7 +801,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
         target_compile_options(sx_gtests_webhook_lifetime PRIVATE
                 -include ${PROJECT_SOURCE_DIR}/tests/unit/service/http/webhook_runtime_stub.hpp)
         target_link_libraries(sx_gtests_webhook_lifetime PRIVATE
-                gtest gtest_main "$<LINK_GROUP:RESCAN,socle_lib,socle_common_lib>"
+                sxcftar::sxcftar gtest gtest_main "$<LINK_GROUP:RESCAN,socle_lib,socle_common_lib>"
                 nlohmann_json::nlohmann_json pthread curl crypto ssl)
         add_test(NAME unit.webhook_lifetime COMMAND sx_gtests_webhook_lifetime)
 
