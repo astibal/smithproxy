@@ -239,6 +239,21 @@ TEST_F(HttpSessionsTest, RevokesOnlySessionsForSelectedManagedAdministrator) {
               HttpSessions::access_keys.end());
 }
 
+TEST_F(HttpSessionsTest, RevokesOneExplicitSessionWithoutTouchingOthers) {
+    {
+        auto lock = std::scoped_lock(HttpSessions::lock);
+        HttpSessions::access_keys["current"]["csrf_token"] =
+            TimedOptional<std::string>("current-csrf", 60);
+        HttpSessions::access_keys["other"]["csrf_token"] =
+            TimedOptional<std::string>("other-csrf", 60);
+    }
+
+    EXPECT_TRUE(HttpSessions::revoke_session("current"));
+    EXPECT_FALSE(HttpSessions::revoke_session("current"));
+    EXPECT_FALSE(HttpSessions::revoke_session(""));
+    EXPECT_TRUE(HttpSessions::validate_tokens("other", "other-csrf"));
+}
+
 TEST_F(HttpSessionsTest, ArchiveKeyLoadsOnceFromEnvironmentAndIsRemoved) {
     const std::string secret(32, 'a');
     ASSERT_EQ(::setenv("SMITHPROXY_ARCHIVE_API_KEY", secret.c_str(), 1), 0);

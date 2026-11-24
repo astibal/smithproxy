@@ -248,6 +248,12 @@ struct HttpSessions {
         return revoked;
     }
 
+    static bool revoke_session(std::string_view auth_token) {
+        if(auth_token.empty()) return false;
+        auto guard = std::scoped_lock(lock);
+        return access_keys.erase(std::string(auth_token)) != 0;
+    }
+
     static bool has_api_key(std::string const& key) {
         auto lc_ = std::scoped_lock(lock);
         return api_keys.find(key) != api_keys.end();

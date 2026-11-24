@@ -153,6 +153,37 @@ namespace sx::webserver {
         return response;
     }
 
+    static std::string request_auth_token(
+        MHD_Connection* connection, const std::string& request) {
+        const auto* cookie = MHD_lookup_connection_value(
+            connection, MHD_COOKIE_KIND, HttpSessions::COOKIE_AUTH_TOKEN);
+        if(cookie && *cookie) return cookie;
+
+        try {
+            const auto document = json::parse(request);
+            const auto token = document.find(HttpSessions::ATT_AUTH_TOKEN);
+            const bool valid_token = token != document.end() && token->is_string();
+            return valid_token ? token->get<std::string>() : std::string{};
+        }
+        catch(const json::exception&) {
+            return {};
+        }
+    }
+
+    static Http_JsonResponseParams logout_response(
+        MHD_Connection* connection, const std::string&, const std::string& request) {
+        const auto token = request_auth_token(connection, request);
+        HttpSessions::revoke_session(token);
+
+        Http_JsonResponseParams response;
+        response.response_code = MHD_HTTP_OK;
+        response.content_type = "application/json";
+        response.response = {{"state", "logged_out"}};
+        response.headers.emplace_back("Set-Cookie", create_auth_cookie_val({}, 0));
+        response.headers.emplace_back("Set-Cookie", create_token_cookie_val({}, 0));
+        return response;
+    }
+
     namespace dispatchers {
 
     using json = nlohmann::json;
@@ -283,6 +314,13 @@ namespace sx::webserver {
         login->Content_Type = "application/json";
         login->Max_Request_Body_Size = administrator_request_limit;
         server.addController(std::shared_ptr<lmh::Controller>(login));
+
+        auto* logout = new Http_Responder(
+            "POST", "/api/logout",
+            authorized::token_protected<Http_JsonResponseParams>(logout_response));
+        logout->Content_Type = "application/json";
+        logout->Max_Request_Body_Size = administrator_request_limit;
+        server.addController(std::shared_ptr<lmh::Controller>(logout));
     }
 }
 }
