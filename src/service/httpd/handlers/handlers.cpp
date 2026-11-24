@@ -2,7 +2,7 @@
 #include <memory>
 
 #include <service/httpd/httpd.hpp>
-#include <service/httpd/admin_enrollment.hpp>
+#include <service/httpd/administrator_api.hpp>
 #include <service/core/smithproxy.hpp>
 
 #include <service/httpd/handlers/handlers.hpp>
@@ -89,49 +89,9 @@ namespace sx::webserver {
 
     using json = nlohmann::json;
 
-    // Validates and consumes one administrator enrollment capability. The
-    // capability store, rather than the transport, enforces one-time use.
-    static Http_JsonResponseParams consume_admin_enrollment(
-        MHD_Connection* connection, const std::string&, const std::string& request) {
-        Http_JsonResponseParams response;
-
-        try {
-            const auto document = json::parse(request);
-            const bool valid_document = document.is_object() && document.size() == 1U;
-            const bool has_token = valid_document && document.contains("enrollment_token");
-            const bool valid_token = has_token && document["enrollment_token"].is_string();
-            if(!valid_token) {
-                response.response = {{"error", "invalid enrollment request"}};
-                response.response_code = MHD_HTTP_BAD_REQUEST;
-                return response;
-            }
-
-            const auto administrator = AdminEnrollmentStore::instance().consume(
-                document["enrollment_token"].get<std::string>());
-            if(!administrator) {
-                Log::get()->events().insert(
-                    WAR, "invalid or expired administrator enrollment attempt from %s",
-                    authorized::client_address(connection).c_str());
-                response.response = {{"error", "invalid or expired enrollment token"}};
-                response.response_code = MHD_HTTP_FORBIDDEN;
-                return response;
-            }
-
-            response.response = {{"administrator", *administrator}};
-            response.response_code = MHD_HTTP_OK;
-            Log::get()->events().insert(
-                NOT, "administrator enrollment capability consumed for %s",
-                administrator->c_str());
-            return response;
-        }
-        catch(const json::exception&) {
-            response.response = {{"error", "invalid enrollment request"}};
-            response.response_code = MHD_HTTP_BAD_REQUEST;
-            return response;
-        }
-    }
-
     void controller_add_authorization(lmh::WebServer &server) {
+
+        constexpr std::size_t administrator_request_limit = 16U * 1024U;
 
 
         auto* authorize_get = new Http_Responder(
@@ -204,10 +164,47 @@ namespace sx::webserver {
             "POST",
             "/api/admin/enrollment/consume",
             authorized::token_protected<Http_JsonResponseParams>(
-                consume_admin_enrollment,
+                administrator_enrollment,
                 authorized::Access::standard));
         admin_enrollment->Content_Type = "application/json";
+        admin_enrollment->Max_Request_Body_Size = administrator_request_limit;
         server.addController(std::shared_ptr<lmh::Controller>(admin_enrollment));
+
+        for(const auto* method : {"GET", "POST", "DELETE"}) {
+            auto* administrators = new Http_Responder(
+                method,
+                "/api/admin/administrators",
+                authorized::token_protected<Http_JsonResponseParams>(
+                    administrator_collection,
+                    authorized::Access::standard));
+            administrators->Content_Type = "application/json";
+            administrators->Max_Request_Body_Size = administrator_request_limit;
+            server.addController(std::shared_ptr<lmh::Controller>(administrators));
+        }
+
+        auto* administrator_password_handler = new Http_Responder(
+            "PUT",
+            "/api/admin/administrators/password",
+            authorized::token_protected<Http_JsonResponseParams>(
+                administrator_password,
+                authorized::Access::standard));
+        administrator_password_handler->Content_Type = "application/json";
+        administrator_password_handler->Max_Request_Body_Size =
+            administrator_request_limit;
+        server.addController(
+            std::shared_ptr<lmh::Controller>(administrator_password_handler));
+
+        auto* administrator_enabled_handler = new Http_Responder(
+            "PATCH",
+            "/api/admin/administrators/enabled",
+            authorized::token_protected<Http_JsonResponseParams>(
+                administrator_enabled,
+                authorized::Access::standard));
+        administrator_enabled_handler->Content_Type = "application/json";
+        administrator_enabled_handler->Max_Request_Body_Size =
+            administrator_request_limit;
+        server.addController(
+            std::shared_ptr<lmh::Controller>(administrator_enabled_handler));
 
 
 
