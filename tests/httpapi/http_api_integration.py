@@ -106,6 +106,10 @@ def run(args):
                     socks_port, cli_port)
 
         api_key = "smithproxy-integration-api-key"
+        administrator_api_key = "smithproxy-integration-administrator-key"
+        administrator_key_file = runtime / "administrator-api.key"
+        administrator_key_file.write_text(administrator_api_key)
+        administrator_key_file.chmod(0o600)
         api_settings = f'''accept_api = TRUE;
     http_api = {{
         keys = [ "{api_key}" ];
@@ -142,7 +146,8 @@ def run(args):
             [str(executable), "--config-file", str(config), "--diagnose"],
             cwd=source,
             env={**os.environ,
-                 "SMITHPROXY_PID_FILE": str(runtime / "smithproxy.pid")},
+                 "SMITHPROXY_PID_FILE": str(runtime / "smithproxy.pid"),
+                 "SMITHPROXY_ADMIN_API_KEY_FILE": str(administrator_key_file)},
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -410,6 +415,16 @@ def run(args):
             assert any(name.lower() == "allow" and value == "POST"
                        for name, value in headers)
             assert "use POST" in json.loads(payload)["error"]
+
+            status, _, payload = api_request(
+                api_port, "GET", "/api/admin/administrators",
+                headers={"X-API-Key": administrator_api_key})
+            assert status == 200, (status, payload)
+            administrator_state = json.loads(payload)
+            assert administrator_state["state"] == "ready"
+            assert administrator_state["administrators"] == []
+            assert administrator_state["revision"]
+            assert administrator_state["content_hash"]
 
             enrollment_request = json.dumps({
                 "enrollment_token": "0" * 64,

@@ -189,6 +189,7 @@ Http_JsonResponseParams administrator_collection(
         }
 
         Http_JsonResponseParams response;
+        response.response_code = MHD_HTTP_OK;
         response.content_type = "application/json";
         response.response = {
             {"state", "ready"},
