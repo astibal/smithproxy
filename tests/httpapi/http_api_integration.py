@@ -7,6 +7,7 @@ import http.client
 import json
 import os
 import pathlib
+import re
 import socket
 import ssl
 import subprocess
@@ -19,6 +20,10 @@ import time
 TLS_HELPERS = pathlib.Path(__file__).resolve().parents[1] / "tls"
 sys.path.insert(0, str(TLS_HELPERS))
 from starttls_socks_integration import Address, free_port, make_config, socks_connect
+
+CLI_HELPERS = pathlib.Path(__file__).resolve().parents[1] / "cli"
+sys.path.insert(0, str(CLI_HELPERS))
+from libcli2_process_e2e import Cli, wait_for_port
 
 
 class HoldingTlsOrigin:
@@ -59,7 +64,8 @@ class HoldingTlsOrigin:
     def close(self):
         self.release.set()
         self.listener.close()
-        self.thread.join(timeout=5)
+        if self.thread.ident is not None:
+            self.thread.join(timeout=5)
 
 
 def api_request(port, method, path, body=None, headers=None):
@@ -155,11 +161,14 @@ def run(args):
         output = ""
         proxied = None
         origin_peer = None
+        cli = None
         tls_origin = HoldingTlsOrigin(source / "etc/certs/default/srv-cert.pem",
                                       source / "etc/certs/default/srv-key.pem")
         tls_client = None
         try:
             wait_for_api(process, api_port)
+            wait_for_port(process, cli_port)
+            cli = Cli(cli_port)
 
             status, _, payload = api_request(api_port, "GET", "/api/status/ping")
             assert status == 200
@@ -416,6 +425,16 @@ def run(args):
                        for name, value in headers)
             assert "use POST" in json.loads(payload)["error"]
 
+            unavailable = cli.command_failed(
+                "execute admin enrollment issue integration-admin")
+            assert "save config" in unavailable
+            cli.command_ok("save config")
+            enrollment_output = cli.command_ok(
+                "execute admin enrollment issue integration-admin")
+            enrollment_tokens = re.findall(r"\b[0-9a-f]{64}\b", enrollment_output)
+            assert len(enrollment_tokens) == 1, enrollment_output
+            enrollment_token = enrollment_tokens[0]
+
             status, _, payload = api_request(
                 api_port, "GET", "/api/admin/administrators",
                 headers={"X-API-Key": administrator_api_key})
@@ -426,13 +445,49 @@ def run(args):
             assert administrator_state["revision"]
             assert administrator_state["content_hash"]
 
+            administrator_password = "integration-administrator-password"
             enrollment_request = json.dumps({
+                "enrollment_token": enrollment_token,
+                "password": administrator_password,
+            })
+            status, _, payload = api_request(
+                api_port, "POST", "/api/admin/enrollment/consume",
+                body=enrollment_request,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Smithproxy-Expected-Revision": administrator_state["revision"],
+                    "X-Smithproxy-Archive-SHA256": administrator_state["content_hash"],
+                })
+            assert status == 200, (status, payload)
+            enrollment = json.loads(payload)
+            assert enrollment["state"] == "enrolled"
+            assert enrollment["administrator"] == "integration-admin"
+
+            status, _, payload = api_request(
+                api_port, "POST", "/api/login",
+                body=("username=integration-admin&password=" + administrator_password),
+                headers={"Content-Type": "application/x-www-form-urlencoded"})
+            assert status == 200, (status, payload)
+            assert json.loads(payload)["csrf_token"]
+
+            status, _, payload = api_request(
+                api_port, "POST", "/api/admin/enrollment/consume",
+                body=enrollment_request,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Smithproxy-Expected-Revision": enrollment["revision"],
+                    "X-Smithproxy-Archive-SHA256": enrollment["content_hash"],
+                })
+            assert status == 403, (status, payload)
+            assert json.loads(payload)["error"]["code"] == "invalid_enrollment_token"
+
+            invalid_enrollment_request = json.dumps({
                 "enrollment_token": "0" * 64,
                 "password": "not-a-real-administrator-password",
             })
             status, _, payload = api_request(
                 api_port, "POST", "/api/admin/enrollment/consume",
-                body=enrollment_request,
+                body=invalid_enrollment_request,
                 headers={"Content-Type": "application/json"})
             assert status == 400, (status, payload)
             assert (json.loads(payload)["error"]["code"] ==
@@ -440,7 +495,7 @@ def run(args):
 
             status, _, payload = api_request(
                 api_port, "POST", "/api/admin/enrollment/consume",
-                body=enrollment_request,
+                body=invalid_enrollment_request,
                 headers={
                     "Content-Type": "application/json",
                     "X-Smithproxy-Expected-Revision": "not-a-revision",
@@ -463,6 +518,8 @@ def run(args):
             assert json.loads(payload) == {"error": "access denied"}
             print("HTTP API control plane: PASS")
         finally:
+            if cli is not None:
+                cli.sock.close()
             if proxied is not None:
                 proxied.close()
             if origin_peer is not None:

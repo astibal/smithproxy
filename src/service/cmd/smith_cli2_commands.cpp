@@ -552,6 +552,19 @@ void register_smithproxy_cli2_commands(libcli2::Cli& cli, std::string subscriber
                    }})
         .handler([](libcli2::Context& context, const libcli2::Invocation& invocation) {
             if(invocation.arguments.size() != 1U) return -1;
+            const auto revision = CfgFactory::board()->revision_state();
+            const bool running_config_unsaved = revision.unsaved;
+            const bool restart_required = CfgFactory::get()->startup_archive_pending();
+            if(running_config_unsaved || restart_required) {
+                const auto d = context.decor();
+                const auto recovery = restart_required
+                    ? "restart Smithproxy before issuing an enrollment token"
+                    : "execute " + d.command("save config") + " first";
+                context.print(
+                    libcli2::Style::error,
+                    "Administrator enrollment is unavailable; " + recovery + ".");
+                return -1;
+            }
             auto issued = sx::webserver::AdminEnrollmentStore::instance().issue(
                 invocation.arguments.front());
             if(!issued) {
