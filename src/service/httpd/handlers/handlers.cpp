@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <exception>
 #include <memory>
 #include <thread>
@@ -67,6 +68,7 @@ namespace sx::webserver {
         std::string authentication_method {"api_key"};
         bool managed_administrator {false};
         bool expose_auth_token {true};
+        std::uint64_t administrator_generation {0};
     };
 
     static void authorize_response(
@@ -103,7 +105,9 @@ namespace sx::webserver {
         }
         if(grant.managed_administrator) {
             HttpSessions::access_keys[auth_token][HttpSessions::ATT_ADMINISTRATOR_NAME] =
-                TimedOptional(std::move(grant.principal), ttl);
+                TimedOptional(grant.principal, ttl);
+            HttpSessions::access_keys[auth_token][HttpSessions::ATT_ADMINISTRATOR_GENERATION] =
+                TimedOptional(std::to_string(grant.administrator_generation), ttl);
         }
     }
 
@@ -118,6 +122,8 @@ namespace sx::webserver {
 
         const auto& username = login.request->username;
         const auto& password = login.request->password;
+        const auto administrator_generation =
+            HttpSessions::administrator_generation(username);
         const auto source = authorized::client_address(connection);
         const auto throttle = LoginThrottle::instance().permit(source, username);
         if(!throttle.allowed) {
@@ -148,7 +154,8 @@ namespace sx::webserver {
         if(administrator_authenticated) {
             LoginThrottle::instance().record_success(username);
             authorize_response(
-                response, {true, false, username, "password", true, false});
+                response, {true, false, username, "password", true, false,
+                           administrator_generation});
             return response;
         }
 

@@ -94,6 +94,7 @@ protected:
         HttpSessions::api_keys.clear();
         HttpSessions::admin_api_keys.clear();
         HttpSessions::archive_keys.clear();
+        HttpSessions::administrator_generations.clear();
         HttpSessions::extend_on_access = false;
     }
 
@@ -103,6 +104,7 @@ protected:
         HttpSessions::api_keys.clear();
         HttpSessions::admin_api_keys.clear();
         HttpSessions::archive_keys.clear();
+        HttpSessions::administrator_generations.clear();
         HttpSessions::extend_on_access = true;
     }
 };
@@ -251,6 +253,41 @@ TEST_F(HttpSessionsTest, RevokesOnlySessionsForSelectedManagedAdministrator) {
               HttpSessions::access_keys.end());
     EXPECT_NE(HttpSessions::access_keys.find("bob"), HttpSessions::access_keys.end());
     EXPECT_NE(HttpSessions::access_keys.find("pam-or-boot"),
+              HttpSessions::access_keys.end());
+}
+
+TEST_F(HttpSessionsTest, RejectsManagedSessionPublishedAfterCredentialChange) {
+    const auto authenticated_generation =
+        HttpSessions::administrator_generation("alice");
+    EXPECT_EQ(authenticated_generation, 0U);
+    EXPECT_EQ(HttpSessions::administrator_changed("alice"), 1U);
+
+    {
+        auto lock = std::scoped_lock(HttpSessions::lock);
+        auto& stale = HttpSessions::access_keys["late-alice"];
+        stale["csrf_token"] = TimedOptional<std::string>("alice-csrf", 60);
+        stale[HttpSessions::ATT_ADMINISTRATOR_NAME] =
+            TimedOptional<std::string>("alice", 60);
+        stale[HttpSessions::ATT_ADMINISTRATOR_GENERATION] =
+            TimedOptional<std::string>(std::to_string(authenticated_generation), 60);
+
+        auto& current = HttpSessions::access_keys["current-alice"];
+        current["csrf_token"] = TimedOptional<std::string>("current-csrf", 60);
+        current[HttpSessions::ATT_ADMINISTRATOR_NAME] =
+            TimedOptional<std::string>("alice", 60);
+        current[HttpSessions::ATT_ADMINISTRATOR_GENERATION] =
+            TimedOptional<std::string>("1", 60);
+
+        HttpSessions::access_keys["boot-key"]["csrf_token"] =
+            TimedOptional<std::string>("boot-csrf", 60);
+    }
+
+    EXPECT_FALSE(HttpSessions::validate_tokens("late-alice", "alice-csrf"));
+    EXPECT_TRUE(HttpSessions::validate_tokens("current-alice", "current-csrf"));
+    EXPECT_TRUE(HttpSessions::validate_tokens("boot-key", "boot-csrf"));
+
+    auto lock = std::scoped_lock(HttpSessions::lock);
+    EXPECT_EQ(HttpSessions::access_keys.find("late-alice"),
               HttpSessions::access_keys.end());
 }
 

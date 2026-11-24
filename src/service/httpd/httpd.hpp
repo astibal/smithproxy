@@ -42,6 +42,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cstdint>
 #include <cstdlib>
 #include <fcntl.h>
 #include <memory>
@@ -51,6 +52,7 @@
 #include <string>
 #include <sys/stat.h>
 #include <thread>
+#include <unordered_map>
 #include <unistd.h>
 #include <vector>
 
@@ -119,6 +121,8 @@ struct HttpSessions {
     // keys: a complete backup contains private keys and startup shell input.
     static inline std::set<std::string> archive_keys;
     static inline sessions_t access_keys;
+    static inline std::unordered_map<std::string, std::uint64_t>
+        administrator_generations;
     static inline uint32_t session_ttl = 3600;
     static inline bool extend_on_access = true;
     static inline bool loopback_only = true;
@@ -145,6 +149,7 @@ struct HttpSessions {
     constexpr static const char* ATT_PRINCIPAL = "principal";
     constexpr static const char* ATT_AUTHENTICATION_METHOD = "authentication_method";
     constexpr static const char* ATT_ADMINISTRATOR_NAME = "administrator_name";
+    constexpr static const char* ATT_ADMINISTRATOR_GENERATION = "administrator_generation";
 
     static std::string table_value(std::string const& key, std::string const& varname, bool create=false) {
         auto lc_ = std::scoped_lock(lock);
@@ -195,6 +200,74 @@ struct HttpSessions {
         return hex_print(rand_pool, 16);
     }
 
+    static std::uint64_t administrator_generation(std::string_view administrator) {
+        auto guard = std::scoped_lock(lock);
+        const auto found = administrator_generations.find(std::string(administrator));
+        return found == administrator_generations.end() ? 0U : found->second;
+    }
+
+private:
+    static std::size_t revoke_administrator_sessions_locked(
+        std::string_view administrator) {
+        std::size_t revoked = 0;
+        for(auto session = access_keys.begin(); session != access_keys.end();) {
+            const auto identity = session->second.find(ATT_ADMINISTRATOR_NAME);
+            const auto stored_identity = identity == session->second.end()
+                ? std::optional<std::string>{}
+                : identity->second.stored_optional();
+            const bool belongs_to_administrator =
+                stored_identity && *stored_identity == administrator;
+            if(belongs_to_administrator) {
+                session = access_keys.erase(session);
+                ++revoked;
+            }
+            else {
+                ++session;
+            }
+        }
+        return revoked;
+    }
+
+public:
+    // Advance the principal generation and revoke sessions already visible.
+    // A login that authenticated before this change but publishes its session
+    // afterwards still carries the prior generation and is rejected below.
+    static std::uint64_t administrator_changed(std::string_view administrator) {
+        auto guard = std::scoped_lock(lock);
+        auto& generation = administrator_generations[std::string(administrator)];
+        ++generation;
+        if(generation == 0U) ++generation;
+        revoke_administrator_sessions_locked(administrator);
+        return generation;
+    }
+
+    static bool managed_session_is_current(std::string const& auth_token) {
+        auto guard = std::scoped_lock(lock);
+        const auto session = access_keys.find(auth_token);
+        if(session == access_keys.end()) return false;
+
+        const auto identity = session->second.find(ATT_ADMINISTRATOR_NAME);
+        if(identity == session->second.end()) return true;
+        const auto administrator = identity->second.optional();
+        const auto generation = session->second.find(ATT_ADMINISTRATOR_GENERATION);
+        const auto stored_generation = generation == session->second.end()
+            ? std::optional<std::string>{}
+            : generation->second.optional();
+        if(!administrator || !stored_generation) {
+            access_keys.erase(session);
+            return false;
+        }
+
+        const auto current = administrator_generations.find(*administrator);
+        const auto current_generation = current == administrator_generations.end()
+            ? 0U
+            : current->second;
+        const bool generation_matches =
+            *stored_generation == std::to_string(current_generation);
+        if(!generation_matches) access_keys.erase(session);
+        return generation_matches;
+    }
+
     static bool validate_tokens(std::string const& auth_token, std::string const& csrf_token) {
 
         // don't report valid access if tokens are empty and there are none also in the database
@@ -204,14 +277,17 @@ struct HttpSessions {
         if(db_csrf_token.empty() or db_csrf_token.size() != csrf_token.size()) return false;
         const bool csrf_matches =
             CRYPTO_memcmp(csrf_token.data(), db_csrf_token.data(), csrf_token.size()) == 0;
-        if(csrf_matches) {
+        const bool managed_session_current =
+            csrf_matches && managed_session_is_current(auth_token);
+        if(managed_session_current) {
             // Keep identity metadata aligned with an actively extended session
             // even while it only uses standard API endpoints.
             table_value(auth_token, ATT_PRINCIPAL);
             table_value(auth_token, ATT_AUTHENTICATION_METHOD);
             table_value(auth_token, ATT_ADMINISTRATOR_NAME);
+            table_value(auth_token, ATT_ADMINISTRATOR_GENERATION);
         }
-        return csrf_matches;
+        return managed_session_current;
     }
 
     // Validate the ordinary session pair before consulting the stronger
@@ -233,23 +309,7 @@ struct HttpSessions {
     // boot-key sessions intentionally have no managed administrator identity.
     static std::size_t revoke_administrator_sessions(std::string_view administrator) {
         auto guard = std::scoped_lock(lock);
-        std::size_t revoked = 0;
-        for(auto session = access_keys.begin(); session != access_keys.end();) {
-            const auto identity = session->second.find(ATT_ADMINISTRATOR_NAME);
-            const auto stored_identity = identity == session->second.end()
-                ? std::optional<std::string>{}
-                : identity->second.stored_optional();
-            const bool belongs_to_administrator =
-                stored_identity && *stored_identity == administrator;
-            if(belongs_to_administrator) {
-                session = access_keys.erase(session);
-                ++revoked;
-            }
-            else {
-                ++session;
-            }
-        }
-        return revoked;
+        return revoke_administrator_sessions_locked(administrator);
     }
 
     static bool revoke_session(std::string_view auth_token) {

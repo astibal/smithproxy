@@ -160,7 +160,9 @@ Http_JsonResponseParams administrator_collection(
                 return CfgFactory::create_administrator(
                     expected.revision, expected.archive_hash, decoded.name, decoded.password);
             },
-            [](const AdministratorCreateRequest&) {},
+            [](const AdministratorCreateRequest& decoded) {
+                HttpSessions::administrator_changed(decoded.name);
+            },
             "created");
     }
     if(method == "DELETE") {
@@ -171,7 +173,7 @@ Http_JsonResponseParams administrator_collection(
                     expected.revision, expected.archive_hash, decoded.name);
             },
             [](const AdministratorRemoveRequest& decoded) {
-                HttpSessions::revoke_administrator_sessions(decoded.name);
+                HttpSessions::administrator_changed(decoded.name);
             },
             "removed");
     }
@@ -215,7 +217,7 @@ Http_JsonResponseParams administrator_password(
                 expected.revision, expected.archive_hash, decoded.name, decoded.password);
         },
         [](const AdministratorPasswordRequest& decoded) {
-            HttpSessions::revoke_administrator_sessions(decoded.name);
+            HttpSessions::administrator_changed(decoded.name);
         },
         "password_changed");
 }
@@ -229,9 +231,7 @@ Http_JsonResponseParams administrator_enabled(
                 expected.revision, expected.archive_hash, decoded.name, decoded.enabled);
         },
         [](const AdministratorEnabledRequest& decoded) {
-            if(!decoded.enabled) {
-                HttpSessions::revoke_administrator_sessions(decoded.name);
-            }
+            HttpSessions::administrator_changed(decoded.name);
         },
         "enabled_changed");
 }
@@ -274,6 +274,7 @@ Http_JsonResponseParams administrator_enrollment(
         if(!result.ok()) return response;
 
         const auto administrator = claim->administrator();
+        HttpSessions::administrator_changed(administrator);
         const bool consumed = claim->commit();
         if(!consumed) {
             Log::get()->events().insert(
