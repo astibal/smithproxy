@@ -80,8 +80,9 @@
 
 #include <libconfig.h++>
 
-#include <service/cfgapi/cfgapi.hpp>
+#include <service/auth/runtime_credentials.hpp>
 #include <service/cfgapi/cfg_pack.hpp>
+#include <service/cfgapi/cfgapi.hpp>
 #include <utils/tenants.hpp>
 #include <service/daemon.hpp>
 #include <service/privileged_file.hpp>
@@ -208,7 +209,10 @@ int prepare_privilege_separation(DaemonFactory& daemon, const std::string& confi
         return -1;
     }
 
-    if(CfgFactory::get()->accept_api && sx::webserver::HttpSessions::has_api_keys()) {
+    // The broker must remain available for a credential that Core creates or
+    // rotates after startup. Until a key is published every request still
+    // fails authentication in HttpSessions.
+    if(CfgFactory::get()->accept_api) {
         const std::string api_address = sx::webserver::HttpSessions::loopback_only
             ? "127.0.0.1"
             : (sx::webserver::HttpSessions::bind_address.empty()
@@ -635,10 +639,6 @@ int main(int argc, char *argv[]) {
         std::getenv("SMITHPROXY_ARCHIVE_API_KEY") != nullptr;
     const bool archive_api_enabled =
         sx::webserver::HttpSessions::load_archive_key_from_environment();
-    const bool admin_api_requested =
-        std::getenv("SMITHPROXY_ADMIN_API_KEY_FILE") != nullptr;
-    const bool admin_api_enabled =
-        sx::webserver::HttpSessions::load_admin_api_key_file_from_environment();
 
 #ifdef MEMPOOL_ALL
     if( CRYPTO_set_mem_functions(mempool_alloc, mempool_realloc, mempool_free) == 0) {
@@ -1005,15 +1005,6 @@ int main(int argc, char *argv[]) {
         log.event(ERR,
             "Privileged configuration archive API key rejected: expected 32-256 bytes");
     }
-    if(admin_api_enabled) {
-        log.event(INF, "Boot-scoped administrator API access enabled");
-    }
-    else if(admin_api_requested) {
-        log.event(ERR,
-            "Boot-scoped administrator API key rejected: expected an owned 0600 regular file "
-            "with 32-256 safe bytes");
-    }
-
     // Prove that required native runtime resources load before retiring any
     // legacy input. Check-only mode performs the same validation without writes.
     if(CONFIG_LOADED && CfgFactory::get()->using_native_archive()) {
@@ -1228,6 +1219,48 @@ int main(int argc, char *argv[]) {
     // available. Detection marks restart pending; it never mutates runtime.
     CfgFactory::get()->start_archive_monitor();
 
+    auto credential_policy = sx::auth::default_gui_runtime_credentials();
+    if(CfgFactory::get()->using_native_archive()) {
+        try {
+            const auto resource = CfgFactory::get()->resolve_resource("gui.cfg", {});
+            credential_policy = sx::auth::parse_gui_runtime_credentials(resource.content());
+        }
+        catch(const std::exception& error) {
+            log.event(WAR,
+                "GUI runtime credential policy is invalid; using secure defaults: %s",
+                error.what());
+        }
+    }
+    if(const char* override_path = std::getenv("SMITHPROXY_ADMIN_API_KEY_FILE")) {
+        credential_policy.management_api.enabled = true;
+        credential_policy.management_api.current_path = override_path;
+        credential_policy.management_api.previous_path =
+            std::string(override_path) + ".previous";
+        ::unsetenv("SMITHPROXY_ADMIN_API_KEY_FILE");
+    }
+
+    const auto credential_log = [&log](const bool warning, const std::string_view message) {
+        log.event(warning ? WAR : INF, "GUI runtime credential: %.*s",
+                  static_cast<int>(message.size()), message.data());
+    };
+    sx::auth::RuntimeCredentialPair management_api_credential(
+        credential_policy.management_api,
+        [](const sx::auth::RuntimeCredentialSnapshot& snapshot) {
+            std::set<std::string> accepted;
+            if(snapshot.current) accepted.emplace(*snapshot.current);
+            if(snapshot.previous) accepted.emplace(*snapshot.previous);
+            sx::webserver::HttpSessions::replace_admin_api_keys(std::move(accepted));
+        },
+        credential_log);
+    sx::auth::RuntimeCredentialPair gateway_credential(
+        credential_policy.gateway,
+        [](const sx::auth::RuntimeCredentialSnapshot&) {},
+        credential_log);
+    management_api_credential.reconcile();
+    gateway_credential.reconcile();
+    management_api_credential.start();
+    gateway_credential.start();
+
     // openssl mem debugs
     prepare_mem_debugs();
 
@@ -1275,12 +1308,10 @@ int main(int argc, char *argv[]) {
 
     auto start_api = [&]() {
         if (CfgFactory::get()->accept_api) {
-
-            if (sx::webserver::HttpSessions::has_api_keys()) {
-                SmithProxy::instance().create_api_thread();
-            } else {
-                Log::get()->events().insert(ERR, "cannot start API server: key not set");
-            }
+            // The listener may safely precede its runtime credential. Until
+            // Core publishes one, every authenticated endpoint rejects the
+            // request; a later credential file therefore needs no restart.
+            SmithProxy::instance().create_api_thread();
         }
     };
 
@@ -1303,6 +1334,8 @@ int main(int argc, char *argv[]) {
         SmithProxy::instance().join_all();
     }
 
+    management_api_credential.stop();
+    gateway_credential.stop();
     do_cleanup();
     this_daemon->unlink_pidfile();
     // The socket helper is forked after the file helper and therefore inherits

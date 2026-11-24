@@ -10,7 +10,6 @@
 #include <cerrno>
 #include <filesystem>
 #include <fcntl.h>
-#include <fstream>
 #include <set>
 #include <sys/socket.h>
 
@@ -365,63 +364,6 @@ TEST_F(HttpSessionsTest, ShortArchiveEnvironmentKeyIsRejectedAndRemoved) {
     EXPECT_FALSE(HttpSessions::load_archive_key_from_environment());
     EXPECT_EQ(::getenv("SMITHPROXY_ARCHIVE_API_KEY"), nullptr);
     EXPECT_TRUE(HttpSessions::archive_keys_snapshot().empty());
-}
-
-TEST_F(HttpSessionsTest, AdminBootKeyLoadsFromProtectedRuntimeFile) {
-    const auto directory = std::filesystem::temp_directory_path() / "smithproxy-admin-api-key-test";
-    const auto path = directory / "api-token";
-    std::filesystem::remove_all(directory);
-    std::filesystem::create_directories(directory);
-    const std::string secret(48, 'g');
-    {
-        std::ofstream output(path);
-        output << secret << '\n';
-    }
-    std::filesystem::permissions(
-        path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
-        std::filesystem::perm_options::replace);
-    HttpSessions::replace_archive_keys({"operator-archive-key"});
-    ASSERT_EQ(::setenv("SMITHPROXY_ADMIN_API_KEY_FILE", path.c_str(), 1), 0);
-
-    EXPECT_TRUE(HttpSessions::load_admin_api_key_file_from_environment());
-    EXPECT_EQ(::getenv("SMITHPROXY_ADMIN_API_KEY_FILE"), nullptr);
-    EXPECT_FALSE(HttpSessions::has_archive_key(secret));
-    EXPECT_TRUE(HttpSessions::has_admin_key(secret));
-    EXPECT_TRUE(HttpSessions::has_access_key(secret));
-    EXPECT_TRUE(HttpSessions::has_archive_key("operator-archive-key"));
-    // Boot keys are runtime capabilities and must never enter persisted API-key snapshots.
-    EXPECT_TRUE(HttpSessions::api_keys_snapshot().empty());
-    std::filesystem::remove_all(directory);
-}
-
-TEST_F(HttpSessionsTest, AdminBootKeyRejectsUnsafeRuntimeFile) {
-    const auto directory = std::filesystem::temp_directory_path() / "smithproxy-admin-api-key-unsafe-test";
-    const auto path = directory / "api-token";
-    std::filesystem::remove_all(directory);
-    std::filesystem::create_directories(directory);
-    {
-        std::ofstream output(path);
-        output << std::string(48, 'g');
-    }
-    std::filesystem::permissions(
-        path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write |
-            std::filesystem::perms::group_read,
-        std::filesystem::perm_options::replace);
-    ASSERT_EQ(::setenv("SMITHPROXY_ADMIN_API_KEY_FILE", path.c_str(), 1), 0);
-
-    EXPECT_FALSE(HttpSessions::load_admin_api_key_file_from_environment());
-    EXPECT_EQ(::getenv("SMITHPROXY_ADMIN_API_KEY_FILE"), nullptr);
-    EXPECT_TRUE(HttpSessions::archive_keys_snapshot().empty());
-
-    const auto symlink = directory / "api-token-link";
-    std::filesystem::permissions(
-        path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
-        std::filesystem::perm_options::replace);
-    std::filesystem::create_symlink(path, symlink);
-    ASSERT_EQ(::setenv("SMITHPROXY_ADMIN_API_KEY_FILE", symlink.c_str(), 1), 0);
-    EXPECT_FALSE(HttpSessions::load_admin_api_key_file_from_environment());
-    EXPECT_TRUE(HttpSessions::archive_keys_snapshot().empty());
-    std::filesystem::remove_all(directory);
 }
 
 TEST_F(HttpSessionsTest, GeneratedTokensAreNonEmptyAndIndependent) {

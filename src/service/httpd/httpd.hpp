@@ -40,20 +40,15 @@
 #ifndef HTTPD_HPP_
 #define HTTPD_HPP_
 
-#include <algorithm>
-#include <cerrno>
 #include <cstdint>
 #include <cstdlib>
-#include <fcntl.h>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <set>
 #include <string>
-#include <sys/stat.h>
 #include <thread>
 #include <unordered_map>
-#include <unistd.h>
 #include <vector>
 
 #include <ext/lmhpp/include/lmhttpd.hpp>
@@ -389,6 +384,13 @@ public:
         admin_api_keys.emplace(std::move(key));
     }
 
+    // Replaces the complete Core-owned GUI credential generation. Existing
+    // authenticated sessions remain bounded by their normal session lifetime.
+    static void replace_admin_api_keys(std::set<std::string> keys) {
+        auto lc_ = std::scoped_lock(lock);
+        admin_api_keys = std::move(keys);
+    }
+
     // Load the high-impact backup capability outside the archive it protects.
     // Removing the environment value avoids passing it to tools or child
     // processes started later in the daemon lifetime.
@@ -401,50 +403,6 @@ public:
         // short deployment values before they become a root-adjacent secret.
         if(key.size() < 32 || key.size() > 256) return false;
         add_archive_key(key);
-        return true;
-    }
-
-    // Loads a boot-scoped management API credential from a protected file.
-    // The capability grants standard typed API access, never raw archive writes.
-    static bool load_admin_api_key_file_from_environment() {
-        const char* value = std::getenv("SMITHPROXY_ADMIN_API_KEY_FILE");
-        if(!value) return false;
-        const std::string path(value);
-        ::unsetenv("SMITHPROXY_ADMIN_API_KEY_FILE");
-        if(path.empty()) return false;
-
-        const int descriptor = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
-        if(descriptor < 0) return false;
-        struct stat metadata {};
-        const bool metadata_ok = ::fstat(descriptor, &metadata) == 0;
-        const bool trusted_owner = metadata_ok && metadata.st_uid == ::geteuid();
-        const bool safe_mode = metadata_ok && (metadata.st_mode & 0077) == 0;
-        const bool safe_size = metadata_ok && metadata.st_size >= 32 && metadata.st_size <= 258;
-        if(!metadata_ok || !S_ISREG(metadata.st_mode) || !trusted_owner || !safe_mode || !safe_size) {
-            ::close(descriptor);
-            return false;
-        }
-
-        std::string key(static_cast<std::size_t>(metadata.st_size), '\0');
-        std::size_t offset = 0;
-        while(offset < key.size()) {
-            const auto count = ::read(descriptor, key.data() + offset, key.size() - offset);
-            const bool interrupted = count < 0 && errno == EINTR;
-            if(interrupted) continue;
-            const bool incomplete_read = count <= 0;
-            if(incomplete_read) {
-                ::close(descriptor);
-                return false;
-            }
-            offset += static_cast<std::size_t>(count);
-        }
-        ::close(descriptor);
-        while(!key.empty() && (key.back() == '\n' || key.back() == '\r')) key.pop_back();
-        const bool safe_characters = std::all_of(key.begin(), key.end(), [](const unsigned char byte) {
-            return byte >= 0x20U && byte != 0x7fU;
-        });
-        if(key.size() < 32U || key.size() > 256U || !safe_characters) return false;
-        add_admin_api_key(std::move(key));
         return true;
     }
 
