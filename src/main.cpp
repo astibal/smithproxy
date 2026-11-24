@@ -635,10 +635,10 @@ int main(int argc, char *argv[]) {
         std::getenv("SMITHPROXY_ARCHIVE_API_KEY") != nullptr;
     const bool archive_api_enabled =
         sx::webserver::HttpSessions::load_archive_key_from_environment();
-    const bool gui_api_requested =
-        std::getenv("SMITHPROXY_GUI_API_KEY_FILE") != nullptr;
-    const bool gui_api_enabled =
-        sx::webserver::HttpSessions::load_gui_api_key_file_from_environment();
+    const bool admin_api_requested =
+        std::getenv("SMITHPROXY_ADMIN_API_KEY_FILE") != nullptr;
+    const bool admin_api_enabled =
+        sx::webserver::HttpSessions::load_admin_api_key_file_from_environment();
 
 #ifdef MEMPOOL_ALL
     if( CRYPTO_set_mem_functions(mempool_alloc, mempool_realloc, mempool_free) == 0) {
@@ -1005,12 +1005,13 @@ int main(int argc, char *argv[]) {
         log.event(ERR,
             "Privileged configuration archive API key rejected: expected 32-256 bytes");
     }
-    if(gui_api_enabled) {
-        log.event(INF, "Boot-scoped GUI API access enabled");
+    if(admin_api_enabled) {
+        log.event(INF, "Boot-scoped administrator API access enabled");
     }
-    else if(gui_api_requested) {
+    else if(admin_api_requested) {
         log.event(ERR,
-            "Boot-scoped GUI API key rejected: expected an owned 0600 regular file with 32-256 safe bytes");
+            "Boot-scoped administrator API key rejected: expected an owned 0600 regular file "
+            "with 32-256 safe bytes");
     }
 
     // Prove that required native runtime resources load before retiring any

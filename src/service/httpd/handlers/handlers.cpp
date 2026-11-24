@@ -2,7 +2,7 @@
 #include <memory>
 
 #include <service/httpd/httpd.hpp>
-#include <service/httpd/gui_enrollment.hpp>
+#include <service/httpd/admin_enrollment.hpp>
 #include <service/core/smithproxy.hpp>
 
 #include <service/httpd/handlers/handlers.hpp>
@@ -89,6 +89,48 @@ namespace sx::webserver {
 
     using json = nlohmann::json;
 
+    // Validates and consumes one administrator enrollment capability. The
+    // capability store, rather than the transport, enforces one-time use.
+    static Http_JsonResponseParams consume_admin_enrollment(
+        MHD_Connection* connection, const std::string&, const std::string& request) {
+        Http_JsonResponseParams response;
+
+        try {
+            const auto document = json::parse(request);
+            const bool valid_document = document.is_object() && document.size() == 1U;
+            const bool has_token = valid_document && document.contains("enrollment_token");
+            const bool valid_token = has_token && document["enrollment_token"].is_string();
+            if(!valid_token) {
+                response.response = {{"error", "invalid enrollment request"}};
+                response.response_code = MHD_HTTP_BAD_REQUEST;
+                return response;
+            }
+
+            const auto administrator = AdminEnrollmentStore::instance().consume(
+                document["enrollment_token"].get<std::string>());
+            if(!administrator) {
+                Log::get()->events().insert(
+                    WAR, "invalid or expired administrator enrollment attempt from %s",
+                    authorized::client_address(connection).c_str());
+                response.response = {{"error", "invalid or expired enrollment token"}};
+                response.response_code = MHD_HTTP_FORBIDDEN;
+                return response;
+            }
+
+            response.response = {{"administrator", *administrator}};
+            response.response_code = MHD_HTTP_OK;
+            Log::get()->events().insert(
+                NOT, "administrator enrollment capability consumed for %s",
+                administrator->c_str());
+            return response;
+        }
+        catch(const json::exception&) {
+            response.response = {{"error", "invalid enrollment request"}};
+            response.response_code = MHD_HTTP_BAD_REQUEST;
+            return response;
+        }
+    }
+
     void controller_add_authorization(lmh::WebServer &server) {
 
 
@@ -158,47 +200,14 @@ namespace sx::webserver {
         authorize->Content_Type = "application/json";
         server.addController(std::shared_ptr<lmh::Controller>(authorize));
 
-        auto* gui_enrollment = new Http_Responder(
+        auto* admin_enrollment = new Http_Responder(
             "POST",
-            "/api/gui/enrollment/consume",
+            "/api/admin/enrollment/consume",
             authorized::token_protected<Http_JsonResponseParams>(
-                [](MHD_Connection* conn, const std::string&, const std::string& request) {
-                    Http_JsonResponseParams response;
-                    try {
-                        const auto document = json::parse(request);
-                        if(!document.is_object() || document.size() != 1U ||
-                           !document.contains("enrollment_token") ||
-                           !document["enrollment_token"].is_string()) {
-                            response.response = {{"error", "invalid enrollment request"}};
-                            response.response_code = MHD_HTTP_BAD_REQUEST;
-                            return response;
-                        }
-                        const auto administrator = GuiEnrollmentStore::instance().consume(
-                            document["enrollment_token"].get<std::string>());
-                        if(!administrator) {
-                            Log::get()->events().insert(
-                                WAR, "invalid or expired GUI enrollment attempt from %s",
-                                authorized::client_address(conn).c_str());
-                            response.response = {{"error", "invalid or expired enrollment token"}};
-                            response.response_code = MHD_HTTP_FORBIDDEN;
-                            return response;
-                        }
-                        response.response = {{"administrator", *administrator}};
-                        response.response_code = MHD_HTTP_OK;
-                        Log::get()->events().insert(
-                            NOT, "GUI enrollment capability consumed for administrator %s",
-                            administrator->c_str());
-                        return response;
-                    }
-                    catch(const json::exception&) {
-                        response.response = {{"error", "invalid enrollment request"}};
-                        response.response_code = MHD_HTTP_BAD_REQUEST;
-                        return response;
-                    }
-                },
-                authorized::Access::archive));
-        gui_enrollment->Content_Type = "application/json";
-        server.addController(std::shared_ptr<lmh::Controller>(gui_enrollment));
+                consume_admin_enrollment,
+                authorized::Access::standard));
+        admin_enrollment->Content_Type = "application/json";
+        server.addController(std::shared_ptr<lmh::Controller>(admin_enrollment));
 
 
 

@@ -112,6 +112,9 @@ struct HttpSessions {
 
     static inline std::mutex lock;
     static inline std::set<std::string> api_keys;
+    // Boot-scoped administrator capabilities are never serialized into the
+    // persistent API-key configuration.
+    static inline std::set<std::string> admin_api_keys;
     // Archive keys are deliberately separate from ordinary configuration
     // keys: a complete backup contains private keys and startup shell input.
     static inline std::set<std::string> archive_keys;
@@ -221,12 +224,13 @@ struct HttpSessions {
     static bool has_access_key(std::string const& key) {
         auto lc_ = std::scoped_lock(lock);
         return api_keys.find(key) != api_keys.end() ||
+               admin_api_keys.find(key) != admin_api_keys.end() ||
                archive_keys.find(key) != archive_keys.end();
     }
 
     static bool has_api_keys() {
         auto lc_ = std::scoped_lock(lock);
-        return !api_keys.empty() || !archive_keys.empty();
+        return !api_keys.empty() || !admin_api_keys.empty() || !archive_keys.empty();
     }
 
     static bool api_header_allowed() {
@@ -259,9 +263,16 @@ struct HttpSessions {
         archive_keys = std::move(keys);
     }
 
+    // Adds one process-lifetime archive capability without persisting it.
     static void add_archive_key(std::string key) {
         auto lc_ = std::scoped_lock(lock);
         archive_keys.emplace(std::move(key));
+    }
+
+    // Adds one process-lifetime administrator capability without persisting it.
+    static void add_admin_api_key(std::string key) {
+        auto lc_ = std::scoped_lock(lock);
+        admin_api_keys.emplace(std::move(key));
     }
 
     // Load the high-impact backup capability outside the archive it protects.
@@ -279,15 +290,13 @@ struct HttpSessions {
         return true;
     }
 
-    // A service launcher can provision the same per-boot secret into separately
-    // owned 0600 credential files for Smithproxy and smithproxy-gui. Rotating
-    // those runtime files before the next start invalidates the old key. The key
-    // is archive-capable because the GUI owns gui.cfg publication.
-    static bool load_gui_api_key_file_from_environment() {
-        const char* value = std::getenv("SMITHPROXY_GUI_API_KEY_FILE");
+    // Loads a boot-scoped management API credential from a protected file.
+    // The capability grants standard typed API access, never raw archive writes.
+    static bool load_admin_api_key_file_from_environment() {
+        const char* value = std::getenv("SMITHPROXY_ADMIN_API_KEY_FILE");
         if(!value) return false;
         const std::string path(value);
-        ::unsetenv("SMITHPROXY_GUI_API_KEY_FILE");
+        ::unsetenv("SMITHPROXY_ADMIN_API_KEY_FILE");
         if(path.empty()) return false;
 
         const int descriptor = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
@@ -321,7 +330,7 @@ struct HttpSessions {
             return byte >= 0x20U && byte != 0x7fU;
         });
         if(key.size() < 32U || key.size() > 256U || !safe_characters) return false;
-        add_archive_key(std::move(key));
+        add_admin_api_key(std::move(key));
         return true;
     }
 

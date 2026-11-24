@@ -6,7 +6,7 @@
 
 #include <service/cfgapi/cfgapi.hpp>
 #include <service/dependency_info.hpp>
-#include <service/httpd/gui_enrollment.hpp>
+#include <service/httpd/admin_enrollment.hpp>
 #include <status_build_info.hpp>
 
 #include <inspect/kb/kb.hpp>
@@ -542,29 +542,30 @@ void register_smithproxy_cli2_commands(libcli2::Cli& cli, std::string subscriber
             return 0;
         });
 
-    cli.command("execute gui enrollment issue")
+    cli.command("execute admin enrollment issue")
         .reset_definition()
-        .help("Issue a single-use ten-minute GUI administrator enrollment token")
+        .help("Issue a single-use ten-minute administrator enrollment token")
         .available_if(privileged_exec)
-        .argument({"administrator", "GUI administrator name", true, false, {},
+        .argument({"administrator", "Administrator name", true, false, {},
                    [](std::string_view value) {
-                       return sx::webserver::GuiEnrollmentStore::valid_administrator(value);
+                       return sx::webserver::AdminEnrollmentStore::valid_administrator(value);
                    }})
         .handler([](libcli2::Context& context, const libcli2::Invocation& invocation) {
             if(invocation.arguments.size() != 1U) return -1;
-            auto issued = sx::webserver::GuiEnrollmentStore::instance().issue(
+            auto issued = sx::webserver::AdminEnrollmentStore::instance().issue(
                 invocation.arguments.front());
             if(!issued) {
                 context.print(libcli2::Style::error,
-                              "Cannot issue GUI enrollment token; retry after existing tokens expire");
+                              "Cannot issue administrator enrollment token; "
+                              "retry after existing tokens expire");
                 return -1;
             }
             const auto d = context.decor();
-            context.print(d.heading("Single-use GUI enrollment token:"));
+            context.print(d.heading("Single-use administrator enrollment token:"));
             context.print(d.value(issued->token));
             context.print(d.warning("Expires in 10 minutes and will not be shown again."));
             Log::get()->events().insert(
-                NOT, "GUI enrollment capability issued for administrator %s",
+                NOT, "administrator enrollment capability issued for %s",
                 invocation.arguments.front().c_str());
             return 0;
         });

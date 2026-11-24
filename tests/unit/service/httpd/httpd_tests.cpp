@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <service/httpd/httpd.hpp>
-#include <service/httpd/gui_enrollment.hpp>
+#include <service/httpd/admin_enrollment.hpp>
 #include <service/httpd/wh/webhook_lease.hpp>
 
 #include <algorithm>
@@ -89,6 +89,7 @@ protected:
         auto lock = std::scoped_lock(HttpSessions::lock);
         HttpSessions::access_keys.clear();
         HttpSessions::api_keys.clear();
+        HttpSessions::admin_api_keys.clear();
         HttpSessions::archive_keys.clear();
         HttpSessions::extend_on_access = false;
     }
@@ -97,6 +98,7 @@ protected:
         auto lock = std::scoped_lock(HttpSessions::lock);
         HttpSessions::access_keys.clear();
         HttpSessions::api_keys.clear();
+        HttpSessions::admin_api_keys.clear();
         HttpSessions::archive_keys.clear();
         HttpSessions::extend_on_access = true;
     }
@@ -193,8 +195,8 @@ TEST_F(HttpSessionsTest, ShortArchiveEnvironmentKeyIsRejectedAndRemoved) {
     EXPECT_TRUE(HttpSessions::archive_keys_snapshot().empty());
 }
 
-TEST_F(HttpSessionsTest, GuiBootKeyLoadsFromProtectedRuntimeFile) {
-    const auto directory = std::filesystem::temp_directory_path() / "smithproxy-gui-api-key-test";
+TEST_F(HttpSessionsTest, AdminBootKeyLoadsFromProtectedRuntimeFile) {
+    const auto directory = std::filesystem::temp_directory_path() / "smithproxy-admin-api-key-test";
     const auto path = directory / "api-token";
     std::filesystem::remove_all(directory);
     std::filesystem::create_directories(directory);
@@ -207,11 +209,11 @@ TEST_F(HttpSessionsTest, GuiBootKeyLoadsFromProtectedRuntimeFile) {
         path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
         std::filesystem::perm_options::replace);
     HttpSessions::replace_archive_keys({"operator-archive-key"});
-    ASSERT_EQ(::setenv("SMITHPROXY_GUI_API_KEY_FILE", path.c_str(), 1), 0);
+    ASSERT_EQ(::setenv("SMITHPROXY_ADMIN_API_KEY_FILE", path.c_str(), 1), 0);
 
-    EXPECT_TRUE(HttpSessions::load_gui_api_key_file_from_environment());
-    EXPECT_EQ(::getenv("SMITHPROXY_GUI_API_KEY_FILE"), nullptr);
-    EXPECT_TRUE(HttpSessions::has_archive_key(secret));
+    EXPECT_TRUE(HttpSessions::load_admin_api_key_file_from_environment());
+    EXPECT_EQ(::getenv("SMITHPROXY_ADMIN_API_KEY_FILE"), nullptr);
+    EXPECT_FALSE(HttpSessions::has_archive_key(secret));
     EXPECT_TRUE(HttpSessions::has_access_key(secret));
     EXPECT_TRUE(HttpSessions::has_archive_key("operator-archive-key"));
     // Boot keys are runtime capabilities and must never enter persisted API-key snapshots.
@@ -219,8 +221,8 @@ TEST_F(HttpSessionsTest, GuiBootKeyLoadsFromProtectedRuntimeFile) {
     std::filesystem::remove_all(directory);
 }
 
-TEST_F(HttpSessionsTest, GuiBootKeyRejectsUnsafeRuntimeFile) {
-    const auto directory = std::filesystem::temp_directory_path() / "smithproxy-gui-api-key-unsafe-test";
+TEST_F(HttpSessionsTest, AdminBootKeyRejectsUnsafeRuntimeFile) {
+    const auto directory = std::filesystem::temp_directory_path() / "smithproxy-admin-api-key-unsafe-test";
     const auto path = directory / "api-token";
     std::filesystem::remove_all(directory);
     std::filesystem::create_directories(directory);
@@ -232,10 +234,10 @@ TEST_F(HttpSessionsTest, GuiBootKeyRejectsUnsafeRuntimeFile) {
         path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write |
             std::filesystem::perms::group_read,
         std::filesystem::perm_options::replace);
-    ASSERT_EQ(::setenv("SMITHPROXY_GUI_API_KEY_FILE", path.c_str(), 1), 0);
+    ASSERT_EQ(::setenv("SMITHPROXY_ADMIN_API_KEY_FILE", path.c_str(), 1), 0);
 
-    EXPECT_FALSE(HttpSessions::load_gui_api_key_file_from_environment());
-    EXPECT_EQ(::getenv("SMITHPROXY_GUI_API_KEY_FILE"), nullptr);
+    EXPECT_FALSE(HttpSessions::load_admin_api_key_file_from_environment());
+    EXPECT_EQ(::getenv("SMITHPROXY_ADMIN_API_KEY_FILE"), nullptr);
     EXPECT_TRUE(HttpSessions::archive_keys_snapshot().empty());
 
     const auto symlink = directory / "api-token-link";
@@ -243,8 +245,8 @@ TEST_F(HttpSessionsTest, GuiBootKeyRejectsUnsafeRuntimeFile) {
         path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
         std::filesystem::perm_options::replace);
     std::filesystem::create_symlink(path, symlink);
-    ASSERT_EQ(::setenv("SMITHPROXY_GUI_API_KEY_FILE", symlink.c_str(), 1), 0);
-    EXPECT_FALSE(HttpSessions::load_gui_api_key_file_from_environment());
+    ASSERT_EQ(::setenv("SMITHPROXY_ADMIN_API_KEY_FILE", symlink.c_str(), 1), 0);
+    EXPECT_FALSE(HttpSessions::load_admin_api_key_file_from_environment());
     EXPECT_TRUE(HttpSessions::archive_keys_snapshot().empty());
     std::filesystem::remove_all(directory);
 }
@@ -258,14 +260,14 @@ TEST_F(HttpSessionsTest, GeneratedTokensAreNonEmptyAndIndependent) {
     EXPECT_NE(auth, csrf);
 }
 
-class GuiEnrollmentStoreTest : public testing::Test {
+class AdminEnrollmentStoreTest : public testing::Test {
 protected:
-    void SetUp() override { sx::webserver::GuiEnrollmentStore::instance().clear(); }
-    void TearDown() override { sx::webserver::GuiEnrollmentStore::instance().clear(); }
+    void SetUp() override { sx::webserver::AdminEnrollmentStore::instance().clear(); }
+    void TearDown() override { sx::webserver::AdminEnrollmentStore::instance().clear(); }
 };
 
-TEST_F(GuiEnrollmentStoreTest, IssuesAndConsumesOneCapabilityExactlyOnce) {
-    auto& store = sx::webserver::GuiEnrollmentStore::instance();
+TEST_F(AdminEnrollmentStoreTest, IssuesAndConsumesOneCapabilityExactlyOnce) {
+    auto& store = sx::webserver::AdminEnrollmentStore::instance();
     const auto issued = store.issue("security-admin", 1000, 60);
     ASSERT_TRUE(issued);
     EXPECT_EQ(issued->token.size(), 64U);
@@ -277,8 +279,8 @@ TEST_F(GuiEnrollmentStoreTest, IssuesAndConsumesOneCapabilityExactlyOnce) {
     EXPECT_EQ(store.size(1059), 0U);
 }
 
-TEST_F(GuiEnrollmentStoreTest, RejectsInvalidNamesMalformedTokensAndExpiry) {
-    auto& store = sx::webserver::GuiEnrollmentStore::instance();
+TEST_F(AdminEnrollmentStoreTest, RejectsInvalidNamesMalformedTokensAndExpiry) {
+    auto& store = sx::webserver::AdminEnrollmentStore::instance();
     EXPECT_FALSE(store.issue("", 1000, 60));
     EXPECT_FALSE(store.issue("administrator with spaces", 1000, 60));
     EXPECT_FALSE(store.issue("admin", 1000, 601));
@@ -291,13 +293,13 @@ TEST_F(GuiEnrollmentStoreTest, RejectsInvalidNamesMalformedTokensAndExpiry) {
     EXPECT_EQ(store.size(1060), 0U);
 }
 
-TEST_F(GuiEnrollmentStoreTest, BoundsOutstandingCapabilitiesAndPrunesExpiredOnIssue) {
-    auto& store = sx::webserver::GuiEnrollmentStore::instance();
-    for(std::size_t index = 0; index < sx::webserver::GuiEnrollmentStore::capacity; ++index) {
+TEST_F(AdminEnrollmentStoreTest, BoundsOutstandingCapabilitiesAndPrunesExpiredOnIssue) {
+    auto& store = sx::webserver::AdminEnrollmentStore::instance();
+    for(std::size_t index = 0; index < sx::webserver::AdminEnrollmentStore::capacity; ++index) {
         EXPECT_TRUE(store.issue("admin-" + std::to_string(index), 1000, 60));
     }
     EXPECT_FALSE(store.issue("overflow", 1000, 60));
-    EXPECT_EQ(store.size(1000), sx::webserver::GuiEnrollmentStore::capacity);
+    EXPECT_EQ(store.size(1000), sx::webserver::AdminEnrollmentStore::capacity);
     EXPECT_TRUE(store.issue("after-expiry", 1060, 60));
     EXPECT_EQ(store.size(1060), 1U);
 }
