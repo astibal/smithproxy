@@ -142,6 +142,8 @@ struct HttpSessions {
 
     constexpr static const char* ATT_AUTH_TOKEN = "auth_token";
     constexpr static const char* ATT_CSRF_TOKEN = "csrf_token";
+    constexpr static const char* ATT_PRINCIPAL = "principal";
+    constexpr static const char* ATT_AUTHENTICATION_METHOD = "authentication_method";
     constexpr static const char* ATT_ADMINISTRATOR_NAME = "administrator_name";
 
     static std::string table_value(std::string const& key, std::string const& varname, bool create=false) {
@@ -203,8 +205,10 @@ struct HttpSessions {
         const bool csrf_matches =
             CRYPTO_memcmp(csrf_token.data(), db_csrf_token.data(), csrf_token.size()) == 0;
         if(csrf_matches) {
-            // Keep the revocation identity aligned with an actively extended
-            // session even while it only uses standard API endpoints.
+            // Keep identity metadata aligned with an actively extended session
+            // even while it only uses standard API endpoints.
+            table_value(auth_token, ATT_PRINCIPAL);
+            table_value(auth_token, ATT_AUTHENTICATION_METHOD);
             table_value(auth_token, ATT_ADMINISTRATOR_NAME);
         }
         return csrf_matches;

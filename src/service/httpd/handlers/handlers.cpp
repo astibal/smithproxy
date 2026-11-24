@@ -29,7 +29,7 @@ namespace sx::webserver {
         }
     }
 
-    std::string create_auth_cookie_val(std::string const& token, uint32_t ttl){
+    std::string create_auth_cookie_val(std::string const& token, uint32_t ttl) {
         using samesite_t = HttpSessions::cookie_samesite;
 
         std::stringstream ss;
@@ -45,7 +45,7 @@ namespace sx::webserver {
         return ss.str();
     }
 
-    std::string create_token_cookie_val(std::string const& token, uint32_t ttl){
+    std::string create_token_cookie_val(std::string const& token, uint32_t ttl) {
         std::stringstream ss;
         ss << string_format("__Host-%s=%s; Max-Age=%u; Secure; Path=/",
                             HttpSessions::HEADER_CSRF_TOKEN,
@@ -56,14 +56,19 @@ namespace sx::webserver {
             ss << (HttpSessions::COOKIE_SAMESITE == HttpSessions::cookie_samesite::Lax
                    ? "Lax" : "Strict");
         }
-
-
         return ss.str();
+    }
+
+    struct SessionGrant {
+        bool administrator_access {false};
+        bool archive_access {false};
+        std::string principal;
+        std::string authentication_method {"api_key"};
+        bool managed_administrator {false};
     };
 
     static void authorize_response(
-        Http_JsonResponseParams& response, bool administrator_access = false,
-        bool archive_access = false, std::string administrator = {}) {
+        Http_JsonResponseParams& response, SessionGrant grant = {}) {
 
         const auto auth_token = HttpSessions::generate_auth_token();
         const auto csrf_token = HttpSessions::generate_csrf_token();
@@ -86,12 +91,19 @@ namespace sx::webserver {
         HttpSessions::access_keys[auth_token]["csrf_token"] = TimedOptional(csrf_token,
                                                                             ttl);
         HttpSessions::access_keys[auth_token]["administrator_access"] = TimedOptional(
-            std::string(administrator_access || archive_access ? "1" : "0"), ttl);
+            std::string(grant.administrator_access || grant.archive_access ? "1" : "0"),
+            ttl);
         HttpSessions::access_keys[auth_token]["archive_access"] = TimedOptional(
-            std::string(archive_access ? "1" : "0"), ttl);
-        if(!administrator.empty()) {
+            std::string(grant.archive_access ? "1" : "0"), ttl);
+        HttpSessions::access_keys[auth_token][HttpSessions::ATT_AUTHENTICATION_METHOD] =
+            TimedOptional(std::move(grant.authentication_method), ttl);
+        if(!grant.principal.empty()) {
+            HttpSessions::access_keys[auth_token][HttpSessions::ATT_PRINCIPAL] =
+                TimedOptional(grant.principal, ttl);
+        }
+        if(grant.managed_administrator) {
             HttpSessions::access_keys[auth_token][HttpSessions::ATT_ADMINISTRATOR_NAME] =
-                TimedOptional(std::move(administrator), ttl);
+                TimedOptional(std::move(grant.principal), ttl);
         }
     }
 
@@ -121,7 +133,7 @@ namespace sx::webserver {
         const bool administrator_not_configured =
             administrator_status == sx::admin::AuthenticationStatus::not_configured;
         if(administrator_authenticated) {
-            authorize_response(response, true, false, username);
+            authorize_response(response, {true, false, username, "password", true});
             return response;
         }
 
@@ -143,7 +155,7 @@ namespace sx::webserver {
         if(pam_authenticated) {
             // Membership in the configured administrative group grants both
             // administrator management and explicit backup/restore access.
-            authorize_response(response, true, true);
+            authorize_response(response, {true, true, username, "pam", false});
             return response;
         }
 
@@ -184,15 +196,54 @@ namespace sx::webserver {
         return response;
     }
 
+    static Http_JsonResponseParams session_response(
+        MHD_Connection* connection, const std::string&, const std::string& request) {
+        const auto token = request_auth_token(connection, request);
+        const auto* api_key = MHD_lookup_connection_value(
+            connection, MHD_HEADER_KIND, "X-API-Key");
+        const bool header_authenticated = token.empty() && api_key && *api_key;
+
+        std::string principal;
+        std::string authentication_method;
+        bool administrator_access = false;
+        bool archive_access = false;
+        if(header_authenticated) {
+            authentication_method = "api_key";
+            administrator_access = HttpSessions::has_admin_key(api_key);
+            archive_access = HttpSessions::has_archive_key(api_key);
+        }
+        else {
+            principal = HttpSessions::table_value(token, HttpSessions::ATT_PRINCIPAL);
+            authentication_method = HttpSessions::table_value(
+                token, HttpSessions::ATT_AUTHENTICATION_METHOD);
+            administrator_access =
+                HttpSessions::table_value(token, "administrator_access") == "1";
+            archive_access = HttpSessions::table_value(token, "archive_access") == "1";
+        }
+
+        Http_JsonResponseParams response;
+        response.response_code = MHD_HTTP_OK;
+        response.content_type = "application/json";
+        response.response = {
+            {"state", "ready"},
+            {"authenticated", true},
+            {"authentication_method", authentication_method},
+            {"capabilities", {
+                {"standard", true},
+                {"administrator", administrator_access},
+                {"archive", archive_access},
+            }},
+        };
+        if(!principal.empty()) response.response["principal"] = std::move(principal);
+        return response;
+    }
+
     namespace dispatchers {
 
     using json = nlohmann::json;
 
     void controller_add_authorization(lmh::WebServer &server) {
-
         constexpr std::size_t administrator_request_limit = 16U * 1024U;
-
-
         auto* authorize_get = new Http_Responder(
                 "GET",
                 "/api/authorize",
@@ -240,9 +291,13 @@ namespace sx::webserver {
                             found = HttpSessions::has_access_key(access_key);
                             if (found) {
                                 authorize_response(
-                                    ret,
-                                    HttpSessions::has_admin_key(access_key),
-                                    HttpSessions::has_archive_key(access_key));
+                                    ret, {
+                                        HttpSessions::has_admin_key(access_key),
+                                        HttpSessions::has_archive_key(access_key),
+                                        {},
+                                        "api_key",
+                                        false,
+                                    });
                             } else {
                                 Log::get()->events().insert(ERR, "unauthorized API access attempt from %s",
                                                             authorized::client_address(conn).c_str());
@@ -308,8 +363,6 @@ namespace sx::webserver {
         server.addController(
             std::shared_ptr<lmh::Controller>(administrator_enabled_handler));
 
-
-
         auto* login = new Http_Responder("POST", "/api/login", login_response);
         login->Content_Type = "application/json";
         login->Max_Request_Body_Size = administrator_request_limit;
@@ -321,6 +374,12 @@ namespace sx::webserver {
         logout->Content_Type = "application/json";
         logout->Max_Request_Body_Size = administrator_request_limit;
         server.addController(std::shared_ptr<lmh::Controller>(logout));
+
+        auto* session = new Http_Responder(
+            "GET", "/api/session",
+            authorized::token_protected<Http_JsonResponseParams>(session_response));
+        session->Content_Type = "application/json";
+        server.addController(std::shared_ptr<lmh::Controller>(session));
     }
 }
 }
