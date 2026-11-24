@@ -221,6 +221,66 @@ sx::cfg::ResourceWriteResult CfgFactory::write_archive_resource(
                         std::move(path), std::move(content), executable);
 }
 
+sx::admin::Config CfgFactory::administrator_config() {
+    auto factory = get();
+    sx::admin::ConfigStore store({
+        *board(), *write_gate(), lock(), factory->archive_storage_,
+    });
+    return store.read();
+}
+
+sx::admin::MutationResult CfgFactory::create_administrator(
+    std::string expected_revision,
+    std::string expected_archive_hash,
+    std::string name,
+    std::string_view password) {
+    auto factory = get();
+    sx::admin::ConfigStore store({
+        *board(), *write_gate(), lock(), factory->archive_storage_,
+    });
+    return store.create(
+        std::move(expected_revision), std::move(expected_archive_hash),
+        std::move(name), password);
+}
+
+sx::admin::MutationResult CfgFactory::change_administrator_password(
+    std::string expected_revision,
+    std::string expected_archive_hash,
+    std::string_view name,
+    std::string_view password) {
+    auto factory = get();
+    sx::admin::ConfigStore store({
+        *board(), *write_gate(), lock(), factory->archive_storage_,
+    });
+    return store.change_password(
+        std::move(expected_revision), std::move(expected_archive_hash), name, password);
+}
+
+sx::admin::MutationResult CfgFactory::set_administrator_enabled(
+    std::string expected_revision,
+    std::string expected_archive_hash,
+    std::string_view name,
+    bool enabled) {
+    auto factory = get();
+    sx::admin::ConfigStore store({
+        *board(), *write_gate(), lock(), factory->archive_storage_,
+    });
+    return store.set_enabled(
+        std::move(expected_revision), std::move(expected_archive_hash), name, enabled);
+}
+
+sx::admin::MutationResult CfgFactory::remove_administrator(
+    std::string expected_revision,
+    std::string expected_archive_hash,
+    std::string_view name) {
+    auto factory = get();
+    sx::admin::ConfigStore store({
+        *board(), *write_gate(), lock(), factory->archive_storage_,
+    });
+    return store.remove(
+        std::move(expected_revision), std::move(expected_archive_hash), name);
+}
+
 bool CfgFactory::ct_requested() const {
     return std::any_of(db_prof_tls.begin(), db_prof_tls.end(),
         [](const auto& entry) {

@@ -64,6 +64,7 @@
 #include <service/cfgapi/cfg_runtime_tree.hpp>
 #include "cfg_write_gate.hpp"
 #include "cfg_tx_validate.hpp"
+#include <service/admin/admin_config_store.hpp>
 #include <service/reload/file_reload_service.hpp>
 
 namespace sx::cfg {
@@ -232,6 +233,28 @@ public:
         std::string path,
         std::optional<std::string> content,
         bool executable = false);
+    // Expose typed administrator operations without granting callers raw
+    // archive or filesystem write capabilities.
+    static sx::admin::Config administrator_config();
+    static sx::admin::MutationResult create_administrator(
+        std::string expected_revision,
+        std::string expected_archive_hash,
+        std::string name,
+        std::string_view password);
+    static sx::admin::MutationResult change_administrator_password(
+        std::string expected_revision,
+        std::string expected_archive_hash,
+        std::string_view name,
+        std::string_view password);
+    static sx::admin::MutationResult set_administrator_enabled(
+        std::string expected_revision,
+        std::string expected_archive_hash,
+        std::string_view name,
+        bool enabled);
+    static sx::admin::MutationResult remove_administrator(
+        std::string expected_revision,
+        std::string expected_archive_hash,
+        std::string_view name);
     static sx::cfg::tx::Transaction::CreateResult make_transaction(std::string owner) {
         auto factory = get();
         return sx::cfg::tx::Transaction::create(
