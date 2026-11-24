@@ -1,5 +1,6 @@
 #pragma once
 
+#include <service/admin/admin_config.hpp>
 #include <utils/crypto.hpp>
 
 #include <algorithm>
@@ -37,11 +38,7 @@ public:
 
     // Restricts names to the portable administrator identifier grammar.
     static bool valid_administrator(std::string_view value) {
-        return !value.empty() && value.size() <= 64U &&
-               std::all_of(value.begin(), value.end(), [](const unsigned char byte) {
-                   return std::isalnum(byte) || byte == '.' || byte == '_' ||
-                          byte == '-' || byte == '@';
-               });
+        return sx::admin::valid_name(value);
     }
 
     // Issues one short-lived capability without retaining its plaintext value.

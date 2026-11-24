@@ -38,3 +38,43 @@ TEST(CryptoUtils, GeneratesRequestedRandomHexLength) {
 TEST(CryptoUtils, RejectsEmptyRandomRequest) {
     EXPECT_FALSE(sx::crypto::random_hex(0));
 }
+
+TEST(CryptoUtils, CreatesAndVerifiesManagementPasswordVerifier) {
+    const auto verifier = sx::crypto::password_verifier("correct horse battery staple");
+
+    ASSERT_TRUE(verifier);
+    EXPECT_EQ(verifier->find("$pbkdf2-sha256$600000$"), 0U);
+    EXPECT_TRUE(sx::crypto::password_matches("correct horse battery staple", *verifier));
+    EXPECT_FALSE(sx::crypto::password_matches("incorrect", *verifier));
+}
+
+TEST(CryptoUtils, UsesIndependentSaltForEachPasswordVerifier) {
+    const auto first = sx::crypto::password_verifier("same password");
+    const auto second = sx::crypto::password_verifier("same password");
+
+    ASSERT_TRUE(first);
+    ASSERT_TRUE(second);
+    EXPECT_NE(*first, *second);
+    EXPECT_TRUE(sx::crypto::password_matches("same password", *first));
+    EXPECT_TRUE(sx::crypto::password_matches("same password", *second));
+}
+
+TEST(CryptoUtils, RejectsMalformedAndUnsupportedPasswordVerifiers) {
+    EXPECT_FALSE(sx::crypto::password_matches("password", ""));
+    EXPECT_FALSE(sx::crypto::password_matches(
+        "password", "$sha256$600000$00112233445566778899aabbccddeeff$00"));
+    EXPECT_FALSE(sx::crypto::password_matches(
+        "password", "$pbkdf2-sha256$0$00112233445566778899aabbccddeeff$"
+                    "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"));
+    EXPECT_FALSE(sx::crypto::password_matches(
+        "password", "$pbkdf2-sha256$599999$00112233445566778899aabbccddeeff$"
+                    "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"));
+    EXPECT_FALSE(sx::crypto::password_matches(
+        "password", "$pbkdf2-sha256$600000$not-hex$"
+                    "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"));
+}
+
+TEST(CryptoUtils, RejectsEmptyAndUnreasonablyLargeManagementPasswords) {
+    EXPECT_FALSE(sx::crypto::password_verifier(""));
+    EXPECT_FALSE(sx::crypto::password_verifier(std::string(1025, 'x')));
+}
