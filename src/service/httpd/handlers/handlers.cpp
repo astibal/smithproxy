@@ -263,26 +263,13 @@ namespace sx::webserver {
         auto* authorize_get = new Http_Responder(
                 "GET",
                 "/api/authorize",
-                [](MHD_Connection *conn, std::string const &meth, std::string const &req) -> Http_JsonResponseParams {
+                [](MHD_Connection *, std::string const &, std::string const &) -> Http_JsonResponseParams {
                     Http_JsonResponseParams ret;
-                    ret.response_code = MHD_YES;
-
-                    auto key = MHD_lookup_connection_value(conn, MHD_GET_ARGUMENT_KIND, "key");
-                    bool found = false;
-                    if (key) {
-                        // Query strings are routinely logged by proxies and
-                        // browsers. Never accept an archive key through this
-                        // legacy convenience endpoint.
-                        found = HttpSessions::has_api_key(key);
-                    }
-
-                    if (found) {
-                        authorize_response(ret);
-                        return ret;
-                    }
-
-                    ret.response = {{"error", "access denied"}};
-                    ret.response_code = MHD_HTTP_FORBIDDEN;
+                    ret.response = {
+                            {"error", "query-string authorization is disabled; use POST"}
+                    };
+                    ret.response_code = MHD_HTTP_METHOD_NOT_ALLOWED;
+                    ret.headers.emplace_back(MHD_HTTP_HEADER_ALLOW, "POST");
                     return ret;
                 });
         authorize_get->Content_Type = "application/json";

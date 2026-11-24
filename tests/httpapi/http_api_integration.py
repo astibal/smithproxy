@@ -176,7 +176,9 @@ def run(args):
                 assert ngtcp2["linkage"] == "disabled"
 
             status, headers, payload = api_request(
-                api_port, "GET", f"/api/authorize?key={api_key}")
+                api_port, "POST", "/api/authorize",
+                body=json.dumps({"access_key": api_key}),
+                headers={"Content-Type": "application/json"})
             assert status == 200
             authorization = json.loads(payload)
             assert authorization["auth_token"] and authorization["csrf_token"]
@@ -402,9 +404,12 @@ def run(args):
             assert status == 200
             assert json.loads(payload)["error"] == "unknown parameters"
 
-            status, _, payload = api_request(api_port, "GET", "/api/authorize?key=wrong")
-            assert status == 403, (status, payload)
-            assert json.loads(payload) == {"error": "access denied"}
+            status, headers, payload = api_request(
+                api_port, "GET", "/api/authorize?key=must-not-be-consumed")
+            assert status == 405, (status, payload)
+            assert any(name.lower() == "allow" and value == "POST"
+                       for name, value in headers)
+            assert "use POST" in json.loads(payload)["error"]
 
             for body in ("", "not-json", json.dumps({"access_key": "wrong"})):
                 status, _, payload = api_request(
