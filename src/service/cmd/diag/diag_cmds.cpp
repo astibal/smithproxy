@@ -3259,19 +3259,39 @@ int cli_diag_api_info(DiagCli *cli, const char *command, char *argv[], int argc)
         using namespace sx::webserver;
         auto lc_ = std::scoped_lock(HttpSessions::lock);
 
-        ss << "API keys (local API):\r\n";
-        for (auto const& ak: HttpSessions::access_keys) {
-            for(auto const& to: ak.second) {
-                ss << "    access_token: " << ak.first << " csrf_token: ";
+        const auto now = time(nullptr);
+        ss << "Local API credentials:\r\n";
+        ss << "    standard boot keys: " << HttpSessions::api_keys.size() << "\r\n";
+        ss << "    administrator boot keys: " << HttpSessions::admin_api_keys.size()
+           << "\r\n";
+        ss << "    archive keys: " << HttpSessions::archive_keys.size() << "\r\n";
+        ss << "Active API sessions: " << HttpSessions::access_keys.size() << "\r\n";
+        std::size_t session_index = 0;
+        for(const auto& session : HttpSessions::access_keys) {
+            const auto& attributes = session.second;
+            const auto attribute = [&attributes](std::string_view name) {
+                const auto found = attributes.find(std::string(name));
+                return found == attributes.end()
+                    ? std::optional<std::string>{}
+                    : found->second.stored_optional();
+            };
+            const auto csrf = attributes.find("csrf_token");
+            const auto expires_in = csrf == attributes.end()
+                ? 0
+                : csrf->second.expired_at() - now;
+            const auto principal = attribute(HttpSessions::ATT_PRINCIPAL);
+            const auto method = attribute(HttpSessions::ATT_AUTHENTICATION_METHOD);
+            const bool administrator =
+                attribute("administrator_access").value_or("") == "1";
+            const bool archive = attribute("archive_access").value_or("") == "1";
 
-                auto const& csrf = to.second.stored_optional();
-                if(csrf.has_value()) {
-                    auto exp = to.second.expired_at() - time(nullptr);
-                    ss << csrf.value() << "     expiring: " << exp << ( exp < 0 ? " *expired*" : "" );
-                }
-                ss << "\r\n";
-            }
-
+            ss << "    #" << ++session_index
+               << " principal: " << principal.value_or("<service>")
+               << " method: " << method.value_or("unknown")
+               << " administrator: " << (administrator ? "yes" : "no")
+               << " archive: " << (archive ? "yes" : "no")
+               << " expires in: " << expires_in << "s"
+               << (expires_in < 0 ? " *expired*" : "") << "\r\n";
         }
         ss << "\r\n";
     }

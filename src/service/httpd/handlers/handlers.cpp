@@ -66,6 +66,7 @@ namespace sx::webserver {
         std::string principal;
         std::string authentication_method {"api_key"};
         bool managed_administrator {false};
+        bool expose_auth_token {true};
     };
 
     static void authorize_response(
@@ -82,10 +83,8 @@ namespace sx::webserver {
 
         const auto session_guard = std::scoped_lock(HttpSessions::lock);
         const auto ttl = HttpSessions::session_ttl;
-        response.response = {
-            {"auth_token", auth_token},
-            {"csrf_token", csrf_token},
-        };
+        response.response = {{"csrf_token", csrf_token}};
+        if(grant.expose_auth_token) response.response["auth_token"] = auth_token;
         response.response_code = MHD_HTTP_OK;
         response.headers.emplace_back("Set-Cookie", create_auth_cookie_val(auth_token, ttl));
         response.headers.emplace_back("Set-Cookie", create_token_cookie_val(csrf_token, ttl));
@@ -148,7 +147,8 @@ namespace sx::webserver {
             administrator_status == sx::admin::AuthenticationStatus::not_configured;
         if(administrator_authenticated) {
             LoginThrottle::instance().record_success(username);
-            authorize_response(response, {true, false, username, "password", true});
+            authorize_response(
+                response, {true, false, username, "password", true, false});
             return response;
         }
 
@@ -171,7 +171,7 @@ namespace sx::webserver {
             LoginThrottle::instance().record_success(username);
             // Membership in the configured administrative group grants both
             // administrator management and explicit backup/restore access.
-            authorize_response(response, {true, true, username, "pam", false});
+            authorize_response(response, {true, true, username, "pam", false, false});
             return response;
         }
 
@@ -313,6 +313,7 @@ namespace sx::webserver {
                                         {},
                                         "api_key",
                                         false,
+                                        true,
                                     });
                             } else {
                                 Log::get()->events().insert(ERR, "unauthorized API access attempt from %s",
