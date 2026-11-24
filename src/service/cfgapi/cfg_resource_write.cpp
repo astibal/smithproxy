@@ -15,10 +15,23 @@ ResourceWriteResult CfgResourceWriter::write(
     std::string path,
     std::optional<std::string> content,
     bool executable) {
-    const auto operation = content ? "upsert" : "remove";
+    return transform(
+        std::move(expected_revision), std::move(expected_archive_hash), std::move(path),
+        [content = std::move(content)](std::optional<std::string>) mutable {
+            return ResourceTransformResult{true, std::move(content), {}};
+        },
+        executable);
+}
+
+ResourceWriteResult CfgResourceWriter::transform(
+    std::string expected_revision,
+    std::string expected_archive_hash,
+    std::string path,
+    std::function<ResourceTransformResult(std::optional<std::string>)> transformer,
+    bool executable) {
     const auto resource = path;
-    config_log().inf("configuration resource update requested: resource=%s operation=%s",
-                     resource.c_str(), operation);
+    config_log().inf("configuration resource transform requested: resource=%s",
+                     resource.c_str());
     // The gate protects both the runtime revision and the cached archive. This
     // is essential after restore, when startup storage intentionally differs
     // from the still-running configuration.
@@ -60,10 +73,29 @@ ResourceWriteResult CfgResourceWriter::write(
     }
 
     try {
+        const auto archive = CfgArchive::read_archive(
+            smithproxy_schema(), "active.cftar", current);
+        std::optional<std::string> current_content;
+        if(archive.archive().contains(path)) current_content = archive.archive().at(path).data;
+
+        auto transformed = transformer(current_content);
+        if(!transformed.apply) {
+            config_log().war("configuration resource transform rejected: resource=%s detail=%s",
+                             resource.c_str(), transformed.detail.c_str());
+            return {ResourceWriteStatus::invalid_resource, revision, current_hash,
+                    std::move(transformed.detail)};
+        }
+        if(transformed.content == current_content) {
+            config_log().inf("configuration resource transform is unchanged: resource=%s",
+                             resource.c_str());
+            return {ResourceWriteStatus::written, revision, current_hash, {}};
+        }
+        const auto operation_name = transformed.content ? "upsert" : "remove";
+
         // prepare() edits a copy. The in-memory archive advances only after the
         // recovery copy and atomic active-file replacement both succeed.
         auto prepared = context_.archive.prepare_resource(
-            std::move(path), std::move(content), executable);
+            std::move(path), std::move(transformed.content), executable);
         if(!context_.archive.publish(prepared)) {
             config_log().err("configuration resource update failed during publication");
             return {ResourceWriteStatus::write_failed, revision, current_hash, {}};
@@ -72,7 +104,7 @@ ResourceWriteResult CfgResourceWriter::write(
 
         const auto replacement_hash = sx::crypto::sha256(prepared.replacement);
         config_log().noti("configuration resource update completed: resource=%s operation=%s",
-                          resource.c_str(), operation);
+                          resource.c_str(), operation_name);
         return {ResourceWriteStatus::written, revision,
                 replacement_hash ? "sha256:" + *replacement_hash : std::string {}, {}};
     }

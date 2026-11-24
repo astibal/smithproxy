@@ -101,6 +101,63 @@ TEST_F(ResourceWriteTest, WritesAndAdoptsAnAuxiliaryConfiguration) {
               "gui = { schema_version = 1; };\n");
 }
 
+TEST_F(ResourceWriteTest, TransformsTheCurrentResourceUnderTheWriteGate) {
+    ASSERT_TRUE(write(board.revision_current(), hash(), "gui.cfg", std::string("generation=1"))
+                    .ok());
+    archive.restart_needed = false;
+
+    sx::cfg::CfgResourceWriter writer({board, gate, mutex, archive});
+    const auto result = writer.transform(
+        board.revision_current(), hash(), "gui.cfg",
+        [](std::optional<std::string> current) {
+            EXPECT_EQ(current, "generation=1");
+            return sx::cfg::ResourceTransformResult{true, "generation=2", {}};
+        },
+        false);
+
+    EXPECT_TRUE(result.ok());
+    EXPECT_EQ(archive.source->archive().at("gui.cfg").data, "generation=2");
+    EXPECT_EQ(archive.installs, 2);
+}
+
+TEST_F(ResourceWriteTest, RejectedTransformDoesNotPublishOrChangeTheArchive) {
+    ASSERT_TRUE(write(board.revision_current(), hash(), "gui.cfg", std::string("unchanged"))
+                    .ok());
+    archive.restart_needed = false;
+    const auto before = archive.source->archive_payload();
+
+    sx::cfg::CfgResourceWriter writer({board, gate, mutex, archive});
+    const auto result = writer.transform(
+        board.revision_current(), hash(), "gui.cfg",
+        [](std::optional<std::string>) {
+            return sx::cfg::ResourceTransformResult{false, {}, "invalid typed content"};
+        },
+        false);
+
+    EXPECT_EQ(result.status, sx::cfg::ResourceWriteStatus::invalid_resource);
+    EXPECT_EQ(result.detail, "invalid typed content");
+    EXPECT_EQ(archive.source->archive_payload(), before);
+    EXPECT_EQ(archive.installs, 1);
+}
+
+TEST_F(ResourceWriteTest, UnchangedTransformSucceedsWithoutPublicationOrRestart) {
+    ASSERT_TRUE(write(board.revision_current(), hash(), "gui.cfg", std::string("unchanged"))
+                    .ok());
+    archive.restart_needed = false;
+
+    sx::cfg::CfgResourceWriter writer({board, gate, mutex, archive});
+    const auto result = writer.transform(
+        board.revision_current(), hash(), "gui.cfg",
+        [](std::optional<std::string> current) {
+            return sx::cfg::ResourceTransformResult{true, std::move(current), {}};
+        },
+        false);
+
+    EXPECT_TRUE(result.ok());
+    EXPECT_EQ(archive.installs, 1);
+    EXPECT_FALSE(archive.restart_needed);
+}
+
 TEST_F(ResourceWriteTest, RejectsAStaleArchiveHash) {
     const auto result = write(board.revision_current(), "sha256:stale",
                               "templates/replacement/en/page.html", std::string("page"));

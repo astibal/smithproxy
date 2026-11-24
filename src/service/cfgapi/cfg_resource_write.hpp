@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -23,6 +24,12 @@ struct ResourceWriteResult {
     [[nodiscard]] bool ok() const noexcept { return status == ResourceWriteStatus::written; }
 };
 
+struct ResourceTransformResult {
+    bool apply = false;
+    std::optional<std::string> content;
+    std::string detail;
+};
+
 // Serializes one resource edit with every other configuration writer. Runtime
 // objects remain unchanged; the resulting CFtar becomes active after restart.
 class CfgResourceWriter {
@@ -41,6 +48,16 @@ public:
                               std::string path,
                               std::optional<std::string> content,
                               bool executable);
+
+    // Atomically derive one managed resource from its current value while the
+    // shared configuration write gate is held. A rejected transform never
+    // publishes or mutates the cached archive.
+    ResourceWriteResult transform(
+        std::string expected_revision,
+        std::string expected_archive_hash,
+        std::string path,
+        std::function<ResourceTransformResult(std::optional<std::string>)> transformer,
+        bool executable);
 
 private:
     Context context_;
