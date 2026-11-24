@@ -26,6 +26,7 @@ struct MutationResult {
     MutationStatus status {MutationStatus::persistence_error};
     sx::cfg::ResourceWriteResult persistence;
     std::string detail;
+    bool changed {false};
 
     [[nodiscard]] bool ok() const noexcept { return status == MutationStatus::written; }
 };

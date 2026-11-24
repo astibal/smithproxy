@@ -59,6 +59,7 @@ Http_JsonResponseParams mutation_response(
             {"administrator", administrator},
             {"revision", result.persistence.revision.current_id},
             {"content_hash", result.persistence.archive_hash},
+            {"changed", result.changed},
             {"restart_required", CfgFactory::get()->startup_archive_pending()},
         };
         return response;
@@ -137,13 +138,14 @@ Http_JsonResponseParams mutate_administrator(
             result, success_state, decoded.request->name);
         if(result.ok()) {
             const auto actor = authorized::current_actor();
-            success(*decoded.request);
+            if(result.changed) success(*decoded.request);
             const auto action = std::string(success_state);
             Log::get()->events().insert(
-                NOT, "administrator %s %s by %s via %s from %s",
+                NOT, "administrator %s %s by %s via %s from %s changed=%s",
                 decoded.request->name.c_str(), action.c_str(),
                 actor.principal.c_str(), actor.authentication_method.c_str(),
-                authorized::client_address(connection).c_str());
+                authorized::client_address(connection).c_str(),
+                result.changed ? "true" : "false");
         }
         return response;
     }

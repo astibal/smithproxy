@@ -133,6 +133,7 @@ MutationResult ConfigStore::mutate(
     std::string expected_revision,
     std::string expected_archive_hash,
     Mutation mutation) {
+    const auto previous_archive_hash = expected_archive_hash;
     MutationStatus mutation_status = MutationStatus::persistence_error;
     sx::cfg::CfgResourceWriter writer({
         context_.board, context_.gate, context_.config_mutex, context_.archive,
@@ -164,7 +165,9 @@ MutationResult ConfigStore::mutate(
     const auto detail = persistence.detail.empty()
         ? detail_for(mutation_status)
         : persistence.detail;
-    return {mutation_status, std::move(persistence), detail};
+    const bool changed = persistence.ok() &&
+        persistence.archive_hash != previous_archive_hash;
+    return {mutation_status, std::move(persistence), detail, changed};
 }
 
 Config ConfigStore::parse(std::optional<std::string> content) {

@@ -462,6 +462,7 @@ def run(args):
             enrollment = json.loads(payload)
             assert enrollment["state"] == "enrolled"
             assert enrollment["administrator"] == "integration-admin"
+            assert enrollment["changed"] is True
 
             status, login_headers, payload = api_request(
                 api_port, "POST", "/api/login",
@@ -504,6 +505,7 @@ def run(args):
             assert status == 200, (status, payload)
             peer_state = json.loads(payload)
             assert peer_state["state"] == "created"
+            assert peer_state["changed"] is True
 
             disable_headers = {
                 **managed_headers,
@@ -517,6 +519,7 @@ def run(args):
             assert status == 200, (status, payload)
             peer_state = json.loads(payload)
             assert peer_state["state"] == "enabled_changed"
+            assert peer_state["changed"] is True
 
             status, _, payload = api_request(
                 api_port, "POST", "/api/login",
@@ -535,6 +538,7 @@ def run(args):
                 headers=enable_headers)
             assert status == 200, (status, payload)
             peer_state = json.loads(payload)
+            assert peer_state["changed"] is True
 
             peer_password = "integration-peer-replacement-password"
             password_headers = {
@@ -549,12 +553,50 @@ def run(args):
             assert status == 200, (status, payload)
             peer_state = json.loads(payload)
             assert peer_state["state"] == "password_changed"
+            assert peer_state["changed"] is True
 
-            status, _, payload = api_request(
+            status, peer_login_headers, payload = api_request(
                 api_port, "POST", "/api/login",
                 body=("username=integration-peer&password=" + peer_password),
                 headers={"Content-Type": "application/x-www-form-urlencoded"})
             assert status == 200, (status, payload)
+            peer_login = json.loads(payload)
+            peer_cookies = [
+                value for name, value in peer_login_headers
+                if name.lower() == "set-cookie"
+            ]
+            assert len(peer_cookies) == 2
+            peer_headers = {
+                "Content-Type": "application/json",
+                "Cookie": "; ".join(
+                    value.split(";", 1)[0] for value in peer_cookies),
+                "csrf_token": peer_login["csrf_token"],
+            }
+
+            status, _, payload = api_request(
+                api_port, "GET", "/api/admin/administrators",
+                headers=peer_headers)
+            assert status == 200, (status, payload)
+            unchanged_inventory = json.loads(payload)
+            unchanged_headers = {
+                **peer_headers,
+                "X-Smithproxy-Expected-Revision": unchanged_inventory["revision"],
+                "X-Smithproxy-Archive-SHA256": unchanged_inventory["content_hash"],
+            }
+            status, _, payload = api_request(
+                api_port, "PATCH", "/api/admin/administrators/enabled",
+                body=json.dumps({"name": "integration-peer", "enabled": True}),
+                headers=unchanged_headers)
+            assert status == 200, (status, payload)
+            unchanged = json.loads(payload)
+            assert unchanged["state"] == "enabled_changed"
+            assert unchanged["changed"] is False
+            assert unchanged["content_hash"] == unchanged_inventory["content_hash"]
+
+            status, _, payload = api_request(
+                api_port, "GET", "/api/session", headers=peer_headers)
+            assert status == 200, (status, payload)
+            assert json.loads(payload)["principal"] == "integration-peer"
 
             remove_headers = {
                 **managed_headers,
@@ -566,7 +608,9 @@ def run(args):
                 body=json.dumps({"name": "integration-peer"}),
                 headers=remove_headers)
             assert status == 200, (status, payload)
-            assert json.loads(payload)["state"] == "removed"
+            removed = json.loads(payload)
+            assert removed["state"] == "removed"
+            assert removed["changed"] is True
 
             status, _, payload = api_request(
                 api_port, "POST", "/api/login",

@@ -65,6 +65,7 @@ TEST_F(AdminConfigStoreTest, CreatesFirstAdministratorWithoutPersistingPlaintext
         board.revision_current(), hash(), "alice", "correct horse battery staple");
 
     ASSERT_TRUE(result.ok());
+    EXPECT_TRUE(result.changed);
     EXPECT_FALSE(archive.restart_needed);
     EXPECT_EQ(archive.writes, 1);
     const auto config = store().read();
@@ -97,6 +98,7 @@ TEST_F(AdminConfigStoreTest, ChangesPasswordThroughTypedResourceMutation) {
         board.revision_current(), hash(), "alice", "second password");
 
     ASSERT_TRUE(result.ok());
+    EXPECT_TRUE(result.changed);
     const auto config = store().read();
     const auto* administrator = config.find("alice");
     ASSERT_NE(administrator, nullptr);
@@ -111,6 +113,7 @@ TEST_F(AdminConfigStoreTest, IdenticalStateChangeDoesNotPublishOrRequireRestart)
         board.revision_current(), hash(), "alice", true);
 
     EXPECT_TRUE(result.ok());
+    EXPECT_FALSE(result.changed);
     EXPECT_EQ(archive.writes, 1);
     EXPECT_FALSE(archive.restart_needed);
 }
