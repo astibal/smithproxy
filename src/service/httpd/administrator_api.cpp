@@ -5,6 +5,7 @@
 #include <service/httpd/handlers/handlers.hpp>
 
 #include <exception>
+#include <functional>
 #include <mutex>
 #include <string_view>
 #include <utility>
@@ -45,6 +46,21 @@ std::optional<Preconditions> preconditions(MHD_Connection* connection) {
 Http_JsonResponseParams invalid_json_request(std::string detail) {
     return error_response("invalid_administrator_request", std::move(detail),
                           MHD_HTTP_BAD_REQUEST);
+}
+
+Http_JsonResponseParams active_administrator_lockout() {
+    return error_response(
+        "active_administrator",
+        "the active administrator cannot be disabled or removed; "
+        "use a different administrator session",
+        MHD_HTTP_CONFLICT);
+}
+
+bool is_active_managed_administrator(std::string_view administrator) {
+    const auto& actor = authorized::current_actor();
+    const bool password_session = actor.authentication_method == "password";
+    const bool same_administrator = actor.principal == administrator;
+    return password_session && same_administrator;
 }
 
 Http_JsonResponseParams mutation_response(
@@ -118,10 +134,15 @@ Http_JsonResponseParams mutation_response(
     return response;
 }
 
+template<class Request>
+using MutationGuard =
+    std::function<std::optional<Http_JsonResponseParams>(const Request&)>;
+
 template<class Request, class Parser, class Mutation, class Success>
 Http_JsonResponseParams mutate_administrator(
     MHD_Connection* connection, const std::string& request, Parser parser,
-    Mutation mutation, Success success, std::string_view success_state) {
+    Mutation mutation, Success success, std::string_view success_state,
+    MutationGuard<Request> guard = {}) {
     const auto expected = preconditions(connection);
     if(!expected) {
         return error_response(
@@ -133,6 +154,10 @@ Http_JsonResponseParams mutate_administrator(
     try {
         auto decoded = parser(nlohmann::json::parse(request));
         if(!decoded.request) return invalid_json_request(std::move(decoded.error));
+        if(guard) {
+            const auto rejection = guard(*decoded.request);
+            if(rejection) return *rejection;
+        }
         const auto result = mutation(*expected, *decoded.request);
         auto response = mutation_response(
             result, success_state, decoded.request->name);
@@ -180,7 +205,13 @@ Http_JsonResponseParams administrator_collection(
             [](const AdministratorRemoveRequest& decoded) {
                 HttpSessions::administrator_changed(decoded.name);
             },
-            "removed");
+            "removed",
+            [](const AdministratorRemoveRequest& decoded)
+                -> std::optional<Http_JsonResponseParams> {
+                if(is_active_managed_administrator(decoded.name))
+                    return active_administrator_lockout();
+                return std::nullopt;
+            });
     }
 
     try {
@@ -238,7 +269,14 @@ Http_JsonResponseParams administrator_enabled(
         [](const AdministratorEnabledRequest& decoded) {
             HttpSessions::administrator_changed(decoded.name);
         },
-        "enabled_changed");
+        "enabled_changed",
+        [](const AdministratorEnabledRequest& decoded)
+            -> std::optional<Http_JsonResponseParams> {
+            const bool disables_administrator = !decoded.enabled;
+            if(disables_administrator && is_active_managed_administrator(decoded.name))
+                return active_administrator_lockout();
+            return std::nullopt;
+        });
 }
 
 Http_JsonResponseParams administrator_enrollment(

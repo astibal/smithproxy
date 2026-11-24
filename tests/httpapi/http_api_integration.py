@@ -507,6 +507,25 @@ def run(args):
             assert peer_state["state"] == "created"
             assert peer_state["changed"] is True
 
+            self_lockout_headers = {
+                **managed_headers,
+                "X-Smithproxy-Expected-Revision": peer_state["revision"],
+                "X-Smithproxy-Archive-SHA256": peer_state["content_hash"],
+            }
+            status, _, payload = api_request(
+                api_port, "PATCH", "/api/admin/administrators/enabled",
+                body=json.dumps({"name": "integration-admin", "enabled": False}),
+                headers=self_lockout_headers)
+            assert status == 409, (status, payload)
+            assert json.loads(payload)["error"]["code"] == "active_administrator"
+
+            status, _, payload = api_request(
+                api_port, "DELETE", "/api/admin/administrators",
+                body=json.dumps({"name": "integration-admin"}),
+                headers=self_lockout_headers)
+            assert status == 409, (status, payload)
+            assert json.loads(payload)["error"]["code"] == "active_administrator"
+
             disable_headers = {
                 **managed_headers,
                 "X-Smithproxy-Expected-Revision": peer_state["revision"],
