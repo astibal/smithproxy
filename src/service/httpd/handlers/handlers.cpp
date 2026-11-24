@@ -4,6 +4,7 @@
 
 #include <service/httpd/httpd.hpp>
 #include <service/httpd/administrator_api.hpp>
+#include <service/httpd/login_throttle.hpp>
 #include <service/httpd/login_request.hpp>
 #include <service/core/smithproxy.hpp>
 
@@ -118,6 +119,19 @@ namespace sx::webserver {
 
         const auto& username = login.request->username;
         const auto& password = login.request->password;
+        const auto source = authorized::client_address(connection);
+        const auto throttle = LoginThrottle::instance().permit(source, username);
+        if(!throttle.allowed) {
+            response.response_code = MHD_HTTP_TOO_MANY_REQUESTS;
+            response.headers.emplace_back(
+                MHD_HTTP_HEADER_RETRY_AFTER,
+                std::to_string(throttle.retry_after_seconds));
+            Log::get()->events().insert(
+                WAR, "administrator login throttled from %s as user %s",
+                source.c_str(), username.c_str());
+            return response;
+        }
+
         auto administrator_status = sx::admin::AuthenticationStatus::denied;
         try {
             administrator_status = CfgFactory::authenticate_administrator(
@@ -133,6 +147,7 @@ namespace sx::webserver {
         const bool administrator_not_configured =
             administrator_status == sx::admin::AuthenticationStatus::not_configured;
         if(administrator_authenticated) {
+            LoginThrottle::instance().record_success(username);
             authorize_response(response, {true, false, username, "password", true});
             return response;
         }
@@ -153,6 +168,7 @@ namespace sx::webserver {
         const bool pam_authenticated = false;
 #endif
         if(pam_authenticated) {
+            LoginThrottle::instance().record_success(username);
             // Membership in the configured administrative group grants both
             // administrator management and explicit backup/restore access.
             authorize_response(response, {true, true, username, "pam", false});
@@ -161,7 +177,7 @@ namespace sx::webserver {
 
         Log::get()->events().insert(
             ERR, "unauthorized access attempt from %s as user %s",
-            authorized::client_address(connection).c_str(), username.c_str());
+            source.c_str(), username.c_str());
         return response;
     }
 

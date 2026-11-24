@@ -3,6 +3,7 @@
 #include <service/httpd/httpd.hpp>
 #include <service/httpd/admin_enrollment.hpp>
 #include <service/httpd/handlers/handlers.hpp>
+#include <service/httpd/login_throttle.hpp>
 #include <service/httpd/wh/webhook_lease.hpp>
 
 #include <algorithm>
@@ -16,6 +17,7 @@
 namespace {
 
 using sx::webserver::HttpSessions;
+using sx::webserver::LoginThrottle;
 using sx::webserver::TimedOptional;
 using sx::webserver::WebhookOverrideLease;
 
@@ -336,6 +338,65 @@ TEST_F(HttpSessionsTest, GeneratedTokensAreNonEmptyAndIndependent) {
     EXPECT_EQ(auth.size(), 32U);
     EXPECT_EQ(csrf.size(), 32U);
     EXPECT_NE(auth, csrf);
+}
+
+class LoginThrottleTest : public testing::Test {
+protected:
+    void SetUp() override { LoginThrottle::instance().clear(); }
+    void TearDown() override { LoginThrottle::instance().clear(); }
+};
+
+TEST_F(LoginThrottleTest, LimitsOnePrincipalAndResetsAfterTheWindow) {
+    auto& throttle = LoginThrottle::instance();
+    for(std::size_t attempt = 0; attempt < LoginThrottle::principal_attempt_limit;
+        ++attempt) {
+        EXPECT_TRUE(throttle.permit("192.0.2.1", "alice", 1000).allowed);
+    }
+
+    const auto denied = throttle.permit("192.0.2.1", "alice", 1000);
+    EXPECT_FALSE(denied.allowed);
+    EXPECT_EQ(denied.retry_after_seconds, LoginThrottle::window_seconds);
+    EXPECT_TRUE(throttle.permit("192.0.2.1", "alice", 1060).allowed);
+}
+
+TEST_F(LoginThrottleTest, LimitsRotatingPrincipalsFromOneSource) {
+    auto& throttle = LoginThrottle::instance();
+    for(std::size_t attempt = 0; attempt < LoginThrottle::source_attempt_limit;
+        ++attempt) {
+        EXPECT_TRUE(throttle.permit(
+            "192.0.2.2", "user-" + std::to_string(attempt), 2000).allowed);
+    }
+
+    const auto denied = throttle.permit("192.0.2.2", "another-user", 2000);
+    EXPECT_FALSE(denied.allowed);
+    EXPECT_EQ(denied.retry_after_seconds, LoginThrottle::window_seconds);
+}
+
+TEST_F(LoginThrottleTest, SuccessfulPrincipalDoesNotResetSourceCpuBudget) {
+    auto& throttle = LoginThrottle::instance();
+    for(std::size_t attempt = 0; attempt < LoginThrottle::principal_attempt_limit;
+        ++attempt) {
+        EXPECT_TRUE(throttle.permit("192.0.2.3", "alice", 3000).allowed);
+    }
+    throttle.record_success("alice");
+
+    EXPECT_TRUE(throttle.permit("192.0.2.3", "alice", 3000).allowed);
+    const auto counts = throttle.entry_counts(3000);
+    EXPECT_EQ(counts.first, 1U);
+    EXPECT_EQ(counts.second, 1U);
+}
+
+TEST_F(LoginThrottleTest, BoundsRuntimeStateUnderHostileIdentifiers) {
+    auto& throttle = LoginThrottle::instance();
+    for(std::size_t index = 0; index < LoginThrottle::capacity + 50U; ++index) {
+        throttle.permit(
+            "source-" + std::to_string(index),
+            "principal-" + std::to_string(index), 4000);
+    }
+
+    const auto counts = throttle.entry_counts(4000);
+    EXPECT_EQ(counts.first, LoginThrottle::capacity);
+    EXPECT_EQ(counts.second, LoginThrottle::capacity);
 }
 
 class AdminEnrollmentStoreTest : public testing::Test {
