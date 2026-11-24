@@ -160,6 +160,19 @@ TEST(HttpAuthorizationTest, EveryUnsafeMethodRequiresCsrfHeader) {
     EXPECT_TRUE(request_requires_csrf_header("CONNECT"));
 }
 
+TEST(HttpResponderTest, RecognizesEverySupportedBodyBearingMethod) {
+    using lmh::request_method_accepts_body;
+
+    EXPECT_FALSE(request_method_accepts_body("GET"));
+    EXPECT_FALSE(request_method_accepts_body("HEAD"));
+    EXPECT_FALSE(request_method_accepts_body("OPTIONS"));
+    EXPECT_TRUE(request_method_accepts_body("POST"));
+    EXPECT_TRUE(request_method_accepts_body("PUT"));
+    EXPECT_TRUE(request_method_accepts_body("PATCH"));
+    EXPECT_TRUE(request_method_accepts_body("DELETE"));
+    EXPECT_FALSE(request_method_accepts_body("CONNECT"));
+}
+
 TEST_F(HttpSessionsTest, ArchiveKeysAreExplicitPrivilegedAccessKeys) {
     HttpSessions::replace_api_keys({"ordinary"});
     HttpSessions::replace_archive_keys({"backup-admin"});

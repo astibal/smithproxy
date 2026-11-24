@@ -464,8 +464,9 @@ public:
 
         auto* body = static_cast<lmh::ConnectionState*>(*ptr);
 
-        if (not body) {
-            if(meth_str == "POST") {
+        if(not body) {
+            const bool accepts_request_body = lmh::request_method_accepts_body(meth_str);
+            if(accepts_request_body) {
                 lmh::ResponseParams ret;
                 ret.response_code = MHD_YES;
                 if(not *ptr) *ptr = new lmh::ConnectionState(*this);

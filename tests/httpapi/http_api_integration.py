@@ -463,12 +463,116 @@ def run(args):
             assert enrollment["state"] == "enrolled"
             assert enrollment["administrator"] == "integration-admin"
 
-            status, _, payload = api_request(
+            status, login_headers, payload = api_request(
                 api_port, "POST", "/api/login",
                 body=("username=integration-admin&password=" + administrator_password),
                 headers={"Content-Type": "application/x-www-form-urlencoded"})
             assert status == 200, (status, payload)
-            assert json.loads(payload)["csrf_token"]
+            login = json.loads(payload)
+            assert login["csrf_token"]
+            administrator_cookies = [
+                value for name, value in login_headers
+                if name.lower() == "set-cookie"
+            ]
+            assert len(administrator_cookies) == 2
+            managed_headers = {
+                "Content-Type": "application/json",
+                "Cookie": "; ".join(
+                    value.split(";", 1)[0] for value in administrator_cookies),
+                "csrf_token": login["csrf_token"],
+            }
+
+            status, _, payload = api_request(
+                api_port, "GET", "/api/admin/administrators",
+                headers=managed_headers)
+            assert status == 200, (status, payload)
+            inventory = json.loads(payload)
+            assert inventory["administrators"] == [
+                {"name": "integration-admin", "enabled": True},
+            ]
+
+            peer_password = "integration-peer-original-password"
+            create_headers = {
+                **managed_headers,
+                "X-Smithproxy-Expected-Revision": inventory["revision"],
+                "X-Smithproxy-Archive-SHA256": inventory["content_hash"],
+            }
+            status, _, payload = api_request(
+                api_port, "POST", "/api/admin/administrators",
+                body=json.dumps({"name": "integration-peer", "password": peer_password}),
+                headers=create_headers)
+            assert status == 200, (status, payload)
+            peer_state = json.loads(payload)
+            assert peer_state["state"] == "created"
+
+            disable_headers = {
+                **managed_headers,
+                "X-Smithproxy-Expected-Revision": peer_state["revision"],
+                "X-Smithproxy-Archive-SHA256": peer_state["content_hash"],
+            }
+            status, _, payload = api_request(
+                api_port, "PATCH", "/api/admin/administrators/enabled",
+                body=json.dumps({"name": "integration-peer", "enabled": False}),
+                headers=disable_headers)
+            assert status == 200, (status, payload)
+            peer_state = json.loads(payload)
+            assert peer_state["state"] == "enabled_changed"
+
+            status, _, payload = api_request(
+                api_port, "POST", "/api/login",
+                body=("username=integration-peer&password=" + peer_password),
+                headers={"Content-Type": "application/x-www-form-urlencoded"})
+            assert status == 401, (status, payload)
+
+            enable_headers = {
+                **managed_headers,
+                "X-Smithproxy-Expected-Revision": peer_state["revision"],
+                "X-Smithproxy-Archive-SHA256": peer_state["content_hash"],
+            }
+            status, _, payload = api_request(
+                api_port, "PATCH", "/api/admin/administrators/enabled",
+                body=json.dumps({"name": "integration-peer", "enabled": True}),
+                headers=enable_headers)
+            assert status == 200, (status, payload)
+            peer_state = json.loads(payload)
+
+            peer_password = "integration-peer-replacement-password"
+            password_headers = {
+                **managed_headers,
+                "X-Smithproxy-Expected-Revision": peer_state["revision"],
+                "X-Smithproxy-Archive-SHA256": peer_state["content_hash"],
+            }
+            status, _, payload = api_request(
+                api_port, "PUT", "/api/admin/administrators/password",
+                body=json.dumps({"name": "integration-peer", "password": peer_password}),
+                headers=password_headers)
+            assert status == 200, (status, payload)
+            peer_state = json.loads(payload)
+            assert peer_state["state"] == "password_changed"
+
+            status, _, payload = api_request(
+                api_port, "POST", "/api/login",
+                body=("username=integration-peer&password=" + peer_password),
+                headers={"Content-Type": "application/x-www-form-urlencoded"})
+            assert status == 200, (status, payload)
+
+            remove_headers = {
+                **managed_headers,
+                "X-Smithproxy-Expected-Revision": peer_state["revision"],
+                "X-Smithproxy-Archive-SHA256": peer_state["content_hash"],
+            }
+            status, _, payload = api_request(
+                api_port, "DELETE", "/api/admin/administrators",
+                body=json.dumps({"name": "integration-peer"}),
+                headers=remove_headers)
+            assert status == 200, (status, payload)
+            assert json.loads(payload)["state"] == "removed"
+
+            status, _, payload = api_request(
+                api_port, "POST", "/api/login",
+                body=("username=integration-peer&password=" + peer_password),
+                headers={"Content-Type": "application/x-www-form-urlencoded"})
+            assert status == 401, (status, payload)
 
             status, _, payload = api_request(
                 api_port, "POST", "/api/admin/enrollment/consume",
