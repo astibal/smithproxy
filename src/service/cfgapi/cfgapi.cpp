@@ -229,6 +229,15 @@ sx::admin::Config CfgFactory::administrator_config() {
     return store.read();
 }
 
+sx::admin::AuthenticationStatus CfgFactory::authenticate_administrator(
+    std::string_view name, std::string_view password) {
+    auto factory = get();
+    sx::admin::ConfigStore store({
+        *board(), *write_gate(), lock(), factory->archive_storage_,
+    });
+    return store.authenticate(name, password);
+}
+
 sx::admin::MutationResult CfgFactory::create_administrator(
     std::string expected_revision,
     std::string expected_archive_hash,

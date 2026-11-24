@@ -19,6 +19,7 @@ namespace sx::webserver {
 
         enum class Access {
             standard,
+            administrator,
             archive,
         };
 
@@ -75,10 +76,19 @@ namespace sx::webserver::authorized {
         auto validate_and_call = [&](auto const& key, auto const& token) {
             // Validate CSRF first. An invalid request must not extend the
             // lifetime of a privileged archive capability as a side effect.
-            const bool archive_allowed = required_access_ == Access::archive
-                ? HttpSessions::validate_archive_tokens(key, token)
-                : HttpSessions::validate_tokens(key, token);
-            if (archive_allowed) {
+            bool allowed = false;
+            switch(required_access_) {
+                case Access::standard:
+                    allowed = HttpSessions::validate_tokens(key, token);
+                    break;
+                case Access::administrator:
+                    allowed = HttpSessions::validate_admin_tokens(key, token);
+                    break;
+                case Access::archive:
+                    allowed = HttpSessions::validate_archive_tokens(key, token);
+                    break;
+            }
+            if (allowed) {
                 if constexpr (std::is_same_v<T, Http_JsonResponseParams>) {
                     ret = Func(conn, meth, req);
                 } else {
@@ -96,9 +106,18 @@ namespace sx::webserver::authorized {
         };
 
         auto validate_api_key_and_call = [&](auto const& key) {
-            const bool allowed = required_access_ == Access::archive
-                ? HttpSessions::has_archive_key(key)
-                : HttpSessions::has_access_key(key);
+            bool allowed = false;
+            switch(required_access_) {
+                case Access::standard:
+                    allowed = HttpSessions::has_access_key(key);
+                    break;
+                case Access::administrator:
+                    allowed = HttpSessions::has_admin_key(key);
+                    break;
+                case Access::archive:
+                    allowed = HttpSessions::has_archive_key(key);
+                    break;
+            }
             if (allowed) {
                 if constexpr (std::is_same_v<T, Http_JsonResponseParams>) {
                     ret = Func(conn, meth, req);

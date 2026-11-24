@@ -43,6 +43,11 @@ Config ConfigStore::read() const {
     return Config::parse(archive.archive().at(admin_config_path).data);
 }
 
+AuthenticationStatus ConfigStore::authenticate(
+    std::string_view name, std::string_view password) const {
+    return read().authenticate(name, password);
+}
+
 MutationResult ConfigStore::create(
     std::string expected_revision,
     std::string expected_archive_hash,

@@ -8,6 +8,12 @@ namespace sx::admin {
 
 inline constexpr int config_schema_version = 1;
 
+enum class AuthenticationStatus {
+    not_configured,
+    denied,
+    authenticated,
+};
+
 // Administrator identifiers are shared by enrollment, persistent storage,
 // and every management transport.
 bool valid_name(std::string_view value);
@@ -29,6 +35,8 @@ public:
     [[nodiscard]] std::string serialize() const;
     [[nodiscard]] const std::vector<Administrator>& administrators() const noexcept;
     [[nodiscard]] const Administrator* find(std::string_view name) const noexcept;
+    [[nodiscard]] AuthenticationStatus authenticate(
+        std::string_view name, std::string_view password) const;
 
     void upsert(Administrator administrator);
     bool remove(std::string_view name);

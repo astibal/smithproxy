@@ -77,4 +77,8 @@ TEST(CryptoUtils, RejectsMalformedAndUnsupportedPasswordVerifiers) {
 TEST(CryptoUtils, RejectsEmptyAndUnreasonablyLargeManagementPasswords) {
     EXPECT_FALSE(sx::crypto::password_verifier(""));
     EXPECT_FALSE(sx::crypto::password_verifier(std::string(1025, 'x')));
+    const auto verifier = sx::crypto::password_verifier("valid password");
+    ASSERT_TRUE(verifier);
+    EXPECT_FALSE(sx::crypto::password_matches("", *verifier));
+    EXPECT_FALSE(sx::crypto::password_matches(std::string(1025, 'x'), *verifier));
 }

@@ -163,8 +163,10 @@ TEST_F(HttpSessionsTest, ArchiveKeysAreExplicitPrivilegedAccessKeys) {
     HttpSessions::replace_archive_keys({"backup-admin"});
 
     EXPECT_TRUE(HttpSessions::has_access_key("ordinary"));
+    EXPECT_FALSE(HttpSessions::has_admin_key("ordinary"));
     EXPECT_FALSE(HttpSessions::has_archive_key("ordinary"));
     EXPECT_TRUE(HttpSessions::has_access_key("backup-admin"));
+    EXPECT_TRUE(HttpSessions::has_admin_key("backup-admin"));
     EXPECT_TRUE(HttpSessions::has_archive_key("backup-admin"));
     EXPECT_EQ(HttpSessions::archive_keys_snapshot(),
               (std::set<std::string>{"backup-admin"}));
@@ -189,6 +191,27 @@ TEST_F(HttpSessionsTest, ArchiveCapabilityRequiresValidCsrfAndExplicitGrant) {
         "archive", "wrong-csrf"));
     EXPECT_TRUE(HttpSessions::validate_archive_tokens(
         "archive", "archive-csrf"));
+}
+
+TEST_F(HttpSessionsTest, AdministratorCapabilityIsIndependentFromOrdinaryAccess) {
+    {
+        auto lock = std::scoped_lock(HttpSessions::lock);
+        HttpSessions::access_keys["ordinary"]["csrf_token"] =
+            TimedOptional<std::string>("ordinary-csrf", 60);
+        HttpSessions::access_keys["ordinary"]["administrator_access"] =
+            TimedOptional<std::string>("0", 60);
+        HttpSessions::access_keys["administrator"]["csrf_token"] =
+            TimedOptional<std::string>("administrator-csrf", 60);
+        HttpSessions::access_keys["administrator"]["administrator_access"] =
+            TimedOptional<std::string>("1", 60);
+    }
+
+    EXPECT_FALSE(HttpSessions::validate_admin_tokens(
+        "ordinary", "ordinary-csrf"));
+    EXPECT_FALSE(HttpSessions::validate_admin_tokens(
+        "administrator", "wrong-csrf"));
+    EXPECT_TRUE(HttpSessions::validate_admin_tokens(
+        "administrator", "administrator-csrf"));
 }
 
 TEST_F(HttpSessionsTest, ArchiveKeyLoadsOnceFromEnvironmentAndIsRemoved) {
@@ -228,6 +251,7 @@ TEST_F(HttpSessionsTest, AdminBootKeyLoadsFromProtectedRuntimeFile) {
     EXPECT_TRUE(HttpSessions::load_admin_api_key_file_from_environment());
     EXPECT_EQ(::getenv("SMITHPROXY_ADMIN_API_KEY_FILE"), nullptr);
     EXPECT_FALSE(HttpSessions::has_archive_key(secret));
+    EXPECT_TRUE(HttpSessions::has_admin_key(secret));
     EXPECT_TRUE(HttpSessions::has_access_key(secret));
     EXPECT_TRUE(HttpSessions::has_archive_key("operator-archive-key"));
     // Boot keys are runtime capabilities and must never enter persisted API-key snapshots.

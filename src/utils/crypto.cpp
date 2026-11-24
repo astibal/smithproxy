@@ -124,6 +124,7 @@ std::optional<std::string> password_verifier(std::string_view password) {
 }
 
 bool password_matches(std::string_view password, std::string_view verifier) {
+    if(password.empty() || password.size() > maximum_password_bytes) return false;
     const auto parsed = parse_password_verifier(verifier);
     if(!parsed) return false;
 

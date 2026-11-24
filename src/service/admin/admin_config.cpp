@@ -13,6 +13,17 @@ namespace {
 
 using libconfig::Setting;
 
+// Unknown and disabled users perform the same PBKDF2 work as configured users
+// so the login boundary does not reveal administrator names through timing.
+const std::string& fallback_password_verifier() {
+    static const std::string verifier =
+        "$pbkdf2-sha256$" +
+        std::to_string(sx::crypto::password_pbkdf2_iterations) +
+        "$00000000000000000000000000000000$"
+        "0000000000000000000000000000000000000000000000000000000000000000";
+    return verifier;
+}
+
 void require_type(const Setting& setting, Setting::Type type, std::string_view description) {
     if(setting.getType() != type)
         throw std::invalid_argument(std::string(description) + " has an invalid type");
@@ -132,6 +143,21 @@ const Administrator* Config::find(std::string_view name) const noexcept {
         administrators_.begin(), administrators_.end(),
         [name](const Administrator& administrator) { return administrator.name == name; });
     return found == administrators_.end() ? nullptr : &*found;
+}
+
+AuthenticationStatus Config::authenticate(
+    std::string_view name, std::string_view password) const {
+    const auto* administrator = valid_name(name) ? find(name) : nullptr;
+    const bool configured = administrator != nullptr;
+    const bool enabled = configured && administrator->enabled;
+    const auto verifier = enabled
+        ? std::string_view(administrator->password_verifier)
+        : std::string_view(fallback_password_verifier());
+    const bool matches = sx::crypto::password_matches(password, verifier);
+    if(!configured) return AuthenticationStatus::not_configured;
+    return enabled && matches
+        ? AuthenticationStatus::authenticated
+        : AuthenticationStatus::denied;
 }
 
 void Config::upsert(Administrator administrator) {

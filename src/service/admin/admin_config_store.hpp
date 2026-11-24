@@ -44,6 +44,8 @@ public:
     explicit ConfigStore(Context context);
 
     [[nodiscard]] Config read() const;
+    [[nodiscard]] AuthenticationStatus authenticate(
+        std::string_view name, std::string_view password) const;
 
     MutationResult create(std::string expected_revision,
                           std::string expected_archive_hash,

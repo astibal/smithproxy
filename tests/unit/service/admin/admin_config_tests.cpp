@@ -45,6 +45,21 @@ TEST(AdminConfig, UpdatesAndRemovesAdministratorsByStableName) {
     EXPECT_EQ(config.find("admin"), nullptr);
 }
 
+TEST(AdminConfig, AuthenticatesEnabledAdministratorsWithoutLeakingUnknownNames) {
+    sx::admin::Config config;
+    config.upsert({"alice", true, verifier("correct password")});
+    config.upsert({"disabled", false, verifier("disabled password")});
+
+    EXPECT_EQ(config.authenticate("alice", "correct password"),
+              sx::admin::AuthenticationStatus::authenticated);
+    EXPECT_EQ(config.authenticate("alice", "wrong password"),
+              sx::admin::AuthenticationStatus::denied);
+    EXPECT_EQ(config.authenticate("disabled", "disabled password"),
+              sx::admin::AuthenticationStatus::denied);
+    EXPECT_EQ(config.authenticate("missing", "correct password"),
+              sx::admin::AuthenticationStatus::not_configured);
+}
+
 TEST(AdminConfig, RejectsUnknownSchemaIncompleteRecordsAndDuplicateNames) {
     const auto password = verifier();
     EXPECT_THROW(sx::admin::Config::parse(R"(

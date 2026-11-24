@@ -359,6 +359,7 @@ add_executable(smithproxy
         src/service/admin/admin_config_store.cpp
         src/service/httpd/administrator_api.cpp
         src/service/httpd/administrator_request.cpp
+        src/service/httpd/login_request.cpp
         src/service/httpd/cfg/save.cpp
         src/service/httpd/cfg/archive.cpp
         src/service/httpd/cfg/transaction.cpp
@@ -763,6 +764,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 tests/unit/service/admin/admin_config_store_tests.cpp
                 src/service/httpd/administrator_request.cpp
                 tests/unit/service/httpd/administrator_api_tests.cpp
+                src/service/httpd/login_request.cpp
+                tests/unit/service/httpd/login_request_tests.cpp
                 src/service/httpd/cfg/save.cpp
                 tests/unit/service/httpd/cfg_save_tests.cpp
                 src/service/httpd/cfg/transaction.cpp

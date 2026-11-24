@@ -236,6 +236,8 @@ public:
     // Expose typed administrator operations without granting callers raw
     // archive or filesystem write capabilities.
     static sx::admin::Config administrator_config();
+    static sx::admin::AuthenticationStatus authenticate_administrator(
+        std::string_view name, std::string_view password);
     static sx::admin::MutationResult create_administrator(
         std::string expected_revision,
         std::string expected_archive_hash,

@@ -210,6 +210,12 @@ struct HttpSessions {
                table_value(auth_token, "archive_access") == "1";
     }
 
+    static bool validate_admin_tokens(
+        std::string const& auth_token, std::string const& csrf_token) {
+        return validate_tokens(auth_token, csrf_token) &&
+               table_value(auth_token, "administrator_access") == "1";
+    }
+
     static bool has_api_key(std::string const& key) {
         auto lc_ = std::scoped_lock(lock);
         return api_keys.find(key) != api_keys.end();
@@ -218,6 +224,12 @@ struct HttpSessions {
     static bool has_archive_key(std::string const& key) {
         auto lc_ = std::scoped_lock(lock);
         return archive_keys.find(key) != archive_keys.end();
+    }
+
+    static bool has_admin_key(std::string const& key) {
+        auto lc_ = std::scoped_lock(lock);
+        return admin_api_keys.find(key) != admin_api_keys.end() ||
+               archive_keys.find(key) != archive_keys.end();
     }
 
     // Archive credentials are a strict superset of ordinary API access.
