@@ -297,4 +297,36 @@ TEST(RuntimeCredentialConfigTest, ParsesIndependentCredentialPolicies) {
     EXPECT_EQ(policy.administrator_auth_socket, "/run/custom/admin-auth.sock");
 }
 
+TEST(RuntimeCredentialConfigTest, IsolatesDefaultRuntimePathsByTenant) {
+    const auto primary = sx::auth::default_gui_runtime_credentials(0);
+    const auto tenant = sx::auth::default_gui_runtime_credentials(7);
+
+    EXPECT_EQ(primary.management_api.current_path, "/run/smithproxy/gui-api.key");
+    EXPECT_EQ(primary.administrator_auth_socket, "/run/smithproxy/admin-auth.sock");
+    EXPECT_EQ(
+        tenant.management_api.current_path,
+        "/run/smithproxy/tenant-7/gui-api.key");
+    EXPECT_EQ(
+        tenant.gateway.previous_path,
+        "/run/smithproxy/tenant-7/gui-gateway.previous.key");
+    EXPECT_EQ(
+        tenant.administrator_auth_socket,
+        "/run/smithproxy/tenant-7/admin-auth.sock");
+}
+
+TEST(RuntimeCredentialConfigTest, KeepsTenantDefaultsForUnspecifiedPaths) {
+    const auto policy = sx::auth::parse_gui_runtime_credentials(R"(
+        gui = {
+          smithproxy = { credential_rotation_seconds = 7200L; };
+        };
+    )", 3);
+
+    EXPECT_EQ(
+        policy.management_api.current_path,
+        "/run/smithproxy/tenant-3/gui-api.key");
+    EXPECT_EQ(
+        policy.administrator_auth_socket,
+        "/run/smithproxy/tenant-3/admin-auth.sock");
+}
+
 } // namespace

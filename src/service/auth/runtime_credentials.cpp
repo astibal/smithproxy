@@ -17,10 +17,6 @@ namespace {
 
 constexpr std::size_t minimum_size = 32U;
 constexpr std::size_t maximum_size = 256U;
-constexpr std::string_view default_api_current = "/run/smithproxy/gui-api.key";
-constexpr std::string_view default_api_previous = "/run/smithproxy/gui-api.previous.key";
-constexpr std::string_view default_gateway_current = "/run/smithproxy/gui-gateway.key";
-constexpr std::string_view default_gateway_previous = "/run/smithproxy/gui-gateway.previous.key";
 
 bool safe_byte(const unsigned char byte) {
     return byte >= 0x20U && byte != 0x7fU;
@@ -30,23 +26,38 @@ std::chrono::system_clock::time_point modified_time(const struct stat& metadata)
     return std::chrono::system_clock::from_time_t(metadata.st_mtime);
 }
 
+std::filesystem::path tenant_runtime_path(
+    const unsigned int tenant_index, const std::string_view filename) {
+    auto directory = std::filesystem::path("/run/smithproxy");
+    if(tenant_index != 0U)
+        directory /= "tenant-" + std::to_string(tenant_index);
+    return directory / filename;
+}
+
 } // namespace
 
 namespace sx::auth {
 
-GuiRuntimeCredentialPolicy default_gui_runtime_credentials() {
+GuiRuntimeCredentialPolicy default_gui_runtime_credentials(const unsigned int tenant_index) {
     GuiRuntimeCredentialPolicy policy;
     policy.management_api.enabled = true;
-    policy.management_api.current_path = default_api_current;
-    policy.management_api.previous_path = default_api_previous;
+    policy.management_api.current_path = tenant_runtime_path(
+        tenant_index, "gui-api.key");
+    policy.management_api.previous_path = tenant_runtime_path(
+        tenant_index, "gui-api.previous.key");
     policy.gateway.enabled = false;
-    policy.gateway.current_path = default_gateway_current;
-    policy.gateway.previous_path = default_gateway_previous;
+    policy.gateway.current_path = tenant_runtime_path(
+        tenant_index, "gui-gateway.key");
+    policy.gateway.previous_path = tenant_runtime_path(
+        tenant_index, "gui-gateway.previous.key");
+    policy.administrator_auth_socket = tenant_runtime_path(
+        tenant_index, "admin-auth.sock");
     return policy;
 }
 
-GuiRuntimeCredentialPolicy parse_gui_runtime_credentials(const std::string_view source) {
-    auto policy = default_gui_runtime_credentials();
+GuiRuntimeCredentialPolicy parse_gui_runtime_credentials(
+    const std::string_view source, const unsigned int tenant_index) {
+    auto policy = default_gui_runtime_credentials(tenant_index);
     if(source.empty()) return policy;
 
     libconfig::Config document;

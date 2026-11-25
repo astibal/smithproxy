@@ -1220,11 +1220,13 @@ int main(int argc, char *argv[]) {
     // available. Detection marks restart pending; it never mutates runtime.
     CfgFactory::get()->start_archive_monitor();
 
-    auto credential_policy = sx::auth::default_gui_runtime_credentials();
+    const auto tenant_index = CfgFactory::get()->tenant_index;
+    auto credential_policy = sx::auth::default_gui_runtime_credentials(tenant_index);
     if(CfgFactory::get()->using_native_archive()) {
         try {
             const auto resource = CfgFactory::get()->resolve_resource("gui.cfg", {});
-            credential_policy = sx::auth::parse_gui_runtime_credentials(resource.content());
+            credential_policy = sx::auth::parse_gui_runtime_credentials(
+                resource.content(), tenant_index);
         }
         catch(const std::exception& error) {
             log.event(WAR,

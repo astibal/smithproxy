@@ -47,7 +47,8 @@ Core owns the management and gateway credential files after bootstrap. It:
 
 Management credentials are enabled by default. Gateway credentials are
 disabled by default and use the same implementation with an independent path
-and policy.
+and policy. Default runtime paths are isolated below `tenant-N` for non-primary
+tenants; explicitly configured paths remain authoritative.
 
 ## Administrator lifecycle and recovery
 
@@ -95,6 +96,7 @@ the Core-owned runtime directory. `gui.smithproxy.administrator_auth_socket`
 and `administrator_auth_socket_enabled` configure it; the
 `SMITHPROXY_ADMIN_AUTH_SOCKET` environment variable is a one-time startup
 override and an empty value disables publication.
+Non-primary tenants default to `/run/smithproxy/tenant-N/admin-auth.sock`.
 
 Request:
 

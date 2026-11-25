@@ -42,8 +42,9 @@ struct GuiRuntimeCredentialPolicy {
 
 // Reads only Core-owned runtime credential policy from gui.cfg. The rest of
 // the GUI schema remains private to smithproxy-gui.
-GuiRuntimeCredentialPolicy parse_gui_runtime_credentials(std::string_view source);
-GuiRuntimeCredentialPolicy default_gui_runtime_credentials();
+GuiRuntimeCredentialPolicy parse_gui_runtime_credentials(
+    std::string_view source, unsigned int tenant_index = 0);
+GuiRuntimeCredentialPolicy default_gui_runtime_credentials(unsigned int tenant_index = 0);
 
 class RuntimeCredentialPair {
 public:
