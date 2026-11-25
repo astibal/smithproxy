@@ -35,8 +35,9 @@ restore an archive unless it is separately granted archive capability.
 
 Core owns the management and gateway credential files after bootstrap. It:
 
-- accepts only a fresh launcher seed with safe ownership, mode, size, content,
-  regular-file type, and modification time;
+- accepts only a fresh launcher seed owned by the Core user and trusted Core
+  group, with safe mode, size, content, regular-file type, and modification
+  time;
 - uses no-follow opens and atomic replacement;
 - rotates current material on schedule and accepts previous material only for
   a bounded overlap;

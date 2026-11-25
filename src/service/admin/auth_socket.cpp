@@ -85,8 +85,9 @@ bool secure_socket_directory(const std::filesystem::path& directory) {
 
     const bool directory_entry = S_ISDIR(metadata.st_mode);
     const bool trusted_owner = metadata.st_uid == ::geteuid();
+    const bool trusted_group = metadata.st_gid == ::getegid();
     const bool safe_mode = (metadata.st_mode & 0022) == 0;
-    return directory_entry && trusted_owner && safe_mode;
+    return directory_entry && trusted_owner && trusted_group && safe_mode;
 }
 
 } // namespace
@@ -155,7 +156,8 @@ bool AuthSocket::start() {
     const bool listening = permissions_set && ::listen(listener, 16) == 0;
     struct stat published {};
     const bool published_ok = listening && ::lstat(path.c_str(), &published) == 0 &&
-        S_ISSOCK(published.st_mode);
+        S_ISSOCK(published.st_mode) && published.st_uid == ::geteuid() &&
+        published.st_gid == ::getegid() && (published.st_mode & 0777) == 0660;
     if(!published_ok) {
         ::close(listener);
         if(bound) ::unlink(path.c_str());

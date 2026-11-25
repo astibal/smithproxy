@@ -140,8 +140,9 @@ bool RuntimeCredentialPair::ensure_directory() const {
 
     const bool directory = S_ISDIR(metadata.st_mode);
     const bool trusted_owner = metadata.st_uid == ::geteuid();
+    const bool trusted_group = metadata.st_gid == ::getegid();
     const bool safe_mode = (metadata.st_mode & 0022) == 0;
-    return directory && trusted_owner && safe_mode;
+    return directory && trusted_owner && trusted_group && safe_mode;
 }
 
 std::optional<RuntimeCredentialPair::LoadedCredential> RuntimeCredentialPair::load(
@@ -158,10 +159,12 @@ std::optional<RuntimeCredentialPair::LoadedCredential> RuntimeCredentialPair::lo
     struct stat metadata {};
     const bool metadata_ok = ::fstat(descriptor, &metadata) == 0;
     const bool trusted_owner = metadata_ok && metadata.st_uid == ::geteuid();
+    const bool trusted_group = metadata_ok && metadata.st_gid == ::getegid();
     const bool safe_mode = metadata_ok && (metadata.st_mode & 0027) == 0;
     const bool safe_size = metadata_ok && metadata.st_size >= static_cast<off_t>(minimum_size) &&
         metadata.st_size <= static_cast<off_t>(maximum_size + 2U);
-    if(!metadata_ok || !S_ISREG(metadata.st_mode) || !trusted_owner || !safe_mode || !safe_size) {
+    if(!metadata_ok || !S_ISREG(metadata.st_mode) || !trusted_owner ||
+       !trusted_group || !safe_mode || !safe_size) {
         ::close(descriptor);
         report(true, "runtime credential has unsafe ownership, mode, or size");
         return std::nullopt;

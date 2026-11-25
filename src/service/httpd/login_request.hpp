@@ -10,7 +10,7 @@ struct LoginRequest {
     LoginRequest(std::string username_value, std::string password_value);
     ~LoginRequest();
     LoginRequest(LoginRequest&&) noexcept = default;
-    LoginRequest& operator=(LoginRequest&&) noexcept = default;
+    LoginRequest& operator=(LoginRequest&&) = delete;
     LoginRequest(const LoginRequest&) = delete;
     LoginRequest& operator=(const LoginRequest&) = delete;
 
