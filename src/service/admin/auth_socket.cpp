@@ -243,8 +243,11 @@ void AuthSocket::serve_client(const int descriptor) noexcept {
                 request.contains("password") && request["password"].is_string();
             if(valid_envelope) {
                 const auto username = request["username"].get<std::string>();
-                Secret password{
-                    std::move(request["password"].get_ref<std::string&>())};
+                auto& parsed_password = request["password"].get_ref<std::string&>();
+                Secret password{parsed_password};
+                if(!parsed_password.empty())
+                    OPENSSL_cleanse(parsed_password.data(), parsed_password.size());
+                parsed_password.clear();
                 const bool valid_lengths = !username.empty() && username.size() <= 255U &&
                     !password.value.empty() && password.value.size() <= 1024U;
                 if(valid_lengths) {
