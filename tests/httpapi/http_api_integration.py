@@ -82,6 +82,20 @@ def api_request(port, method, path, body=None, headers=None):
         connection.close()
 
 
+def admin_auth_request(path, username, password):
+    request = json.dumps({
+        "version": 1,
+        "operation": "authenticate",
+        "username": username,
+        "password": password,
+    }).encode()
+    with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as connection:
+        connection.settimeout(5)
+        connection.connect(path)
+        connection.sendall(request)
+        return json.loads(connection.recv(4096))
+
+
 def wait_for_api(process, port, timeout=15):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -113,9 +127,11 @@ def run(args):
 
         api_key = "smithproxy-integration-api-key"
         administrator_api_key = "smithproxy-integration-administrator-key"
+        archive_api_key = "smithproxy-integration-archive-key-00000000000000000000000000000000"
         administrator_key_file = runtime / "administrator-api.key"
         administrator_key_file.write_text(administrator_api_key)
         administrator_key_file.chmod(0o600)
+        administrator_auth_socket = runtime / "administrator-auth.sock"
         api_settings = f'''accept_api = TRUE;
     http_api = {{
         keys = [ "{api_key}" ];
@@ -153,7 +169,9 @@ def run(args):
             cwd=source,
             env={**os.environ,
                  "SMITHPROXY_PID_FILE": str(runtime / "smithproxy.pid"),
-                 "SMITHPROXY_ADMIN_API_KEY_FILE": str(administrator_key_file)},
+                 "SMITHPROXY_ADMIN_API_KEY_FILE": str(administrator_key_file),
+                 "SMITHPROXY_ADMIN_AUTH_SOCKET": str(administrator_auth_socket),
+                 "SMITHPROXY_ARCHIVE_API_KEY": archive_api_key},
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -213,6 +231,39 @@ def run(args):
                 "Cookie": "; ".join(value.split(";", 1)[0] for value in cookie_values),
                 "csrf_token": authorization["csrf_token"],
             }
+
+            status, archive_headers_raw, payload = api_request(
+                api_port, "POST", "/api/authorize",
+                body=json.dumps({"access_key": archive_api_key}),
+                headers={"Content-Type": "application/json"})
+            assert status == 200, (status, payload)
+            archive_authorization = json.loads(payload)
+            archive_cookies = [
+                value for name, value in archive_headers_raw
+                if name.lower() == "set-cookie"
+            ]
+            archive_headers = {
+                "Content-Type": "application/json",
+                "Cookie": "; ".join(
+                    value.split(";", 1)[0] for value in archive_cookies),
+                "csrf_token": archive_authorization["csrf_token"],
+            }
+            status, _, payload = api_request(
+                api_port, "GET", "/api/session", headers=archive_headers)
+            assert status == 200, (status, payload)
+            assert json.loads(payload)["capabilities"] == {
+                "standard": False,
+                "administrator": False,
+                "archive": True,
+            }
+            status, _, payload = api_request(
+                api_port, "GET", "/api/diag/ssl/cache/stats",
+                headers=archive_headers)
+            assert status == 401, (status, payload)
+            status, _, payload = api_request(
+                api_port, "GET", "/api/admin/administrators",
+                headers={"X-API-Key": archive_api_key})
+            assert status == 401, (status, payload)
 
             status, _, payload = api_request(api_port, "GET", "/cacert")
             assert status == 200 and b"BEGIN CERTIFICATE" in payload
@@ -429,6 +480,10 @@ def run(args):
                 "execute admin enrollment issue integration-admin")
             assert "save config" in unavailable
             cli.command_ok("save config")
+            status, _, payload = api_request(
+                api_port, "GET", "/api/config/archive/download",
+                headers={"X-API-Key": archive_api_key})
+            assert status == 200 and payload, (status, payload)
             enrollment_output = cli.command_ok(
                 "execute admin enrollment issue integration-admin")
             enrollment_tokens = re.findall(r"\b[0-9a-f]{64}\b", enrollment_output)
@@ -464,6 +519,25 @@ def run(args):
             assert enrollment["administrator"] == "integration-admin"
             assert enrollment["changed"] is True
 
+            local_authentication = admin_auth_request(
+                str(administrator_auth_socket),
+                "integration-admin",
+                administrator_password)
+            assert local_authentication == {
+                "version": 1,
+                "status": "accepted",
+                "identity": "integration-admin",
+                "authentication_method": "password",
+            }
+            rejected_authentication = admin_auth_request(
+                str(administrator_auth_socket),
+                "integration-admin",
+                "incorrect-password")
+            assert rejected_authentication == {
+                "version": 1,
+                "status": "rejected",
+            }
+
             status, login_headers, payload = api_request(
                 api_port, "POST", "/api/login",
                 body=("username=integration-admin&password=" + administrator_password),
@@ -491,6 +565,21 @@ def run(args):
             assert inventory["administrators"] == [
                 {"name": "integration-admin", "enabled": True},
             ]
+
+            status, _, payload = api_request(
+                api_port, "GET", "/api/config/archive/resource?path=admin.cfg",
+                headers={"X-API-Key": archive_api_key})
+            assert status == 404, (status, payload)
+            protected_headers = {
+                **archive_headers,
+                "X-Smithproxy-Expected-Revision": inventory["revision"],
+                "X-Smithproxy-Archive-SHA256": inventory["content_hash"],
+            }
+            status, _, payload = api_request(
+                api_port, "DELETE", "/api/config/archive/resource?path=admin.cfg",
+                body="", headers=protected_headers)
+            assert status == 422, (status, payload)
+            assert json.loads(payload)["error"]["code"] == "invalid_resource"
 
             peer_password = "integration-peer-original-password"
             create_headers = {

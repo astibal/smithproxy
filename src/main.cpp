@@ -81,6 +81,7 @@
 #include <libconfig.h++>
 
 #include <service/auth/runtime_credentials.hpp>
+#include <service/admin/auth_socket.hpp>
 #include <service/cfgapi/cfg_pack.hpp>
 #include <service/cfgapi/cfgapi.hpp>
 #include <utils/tenants.hpp>
@@ -1238,6 +1239,11 @@ int main(int argc, char *argv[]) {
             std::string(override_path) + ".previous";
         ::unsetenv("SMITHPROXY_ADMIN_API_KEY_FILE");
     }
+    if(const char* socket_path = std::getenv("SMITHPROXY_ADMIN_AUTH_SOCKET")) {
+        credential_policy.administrator_auth_socket_enabled = *socket_path != '\0';
+        credential_policy.administrator_auth_socket = socket_path;
+        ::unsetenv("SMITHPROXY_ADMIN_AUTH_SOCKET");
+    }
 
     const auto credential_log = [&log](const bool warning, const std::string_view message) {
         log.event(warning ? WAR : INF, "GUI runtime credential: %.*s",
@@ -1260,6 +1266,18 @@ int main(int argc, char *argv[]) {
     gateway_credential.reconcile();
     management_api_credential.start();
     gateway_credential.start();
+
+    sx::admin::AuthSocket administrator_auth_socket(
+        credential_policy.administrator_auth_socket,
+        sx::admin::authenticate,
+        [&log](const bool warning, const std::string_view message) {
+            log.event(warning ? WAR : INF, "Admin authentication socket: %.*s",
+                      static_cast<int>(message.size()), message.data());
+        });
+    if(credential_policy.administrator_auth_socket_enabled &&
+       !administrator_auth_socket.start()) {
+        log.event(WAR, "local administrator authentication socket is unavailable");
+    }
 
     // openssl mem debugs
     prepare_mem_debugs();
@@ -1334,6 +1352,7 @@ int main(int argc, char *argv[]) {
         SmithProxy::instance().join_all();
     }
 
+    administrator_auth_socket.stop();
     management_api_credential.stop();
     gateway_credential.stop();
     do_cleanup();

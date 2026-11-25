@@ -7,6 +7,13 @@
 namespace sx::webserver {
 
 struct LoginRequest {
+    LoginRequest(std::string username_value, std::string password_value);
+    ~LoginRequest();
+    LoginRequest(LoginRequest&&) noexcept = default;
+    LoginRequest& operator=(LoginRequest&&) noexcept = default;
+    LoginRequest(const LoginRequest&) = delete;
+    LoginRequest& operator=(const LoginRequest&) = delete;
+
     std::string username;
     std::string password;
 };

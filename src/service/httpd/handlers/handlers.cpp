@@ -4,8 +4,8 @@
 #include <thread>
 
 #include <service/httpd/httpd.hpp>
+#include <service/admin/administrator_authenticator.hpp>
 #include <service/httpd/administrator_api.hpp>
-#include <service/httpd/login_throttle.hpp>
 #include <service/httpd/login_request.hpp>
 #include <service/core/smithproxy.hpp>
 
@@ -62,8 +62,7 @@ namespace sx::webserver {
     }
 
     struct SessionGrant {
-        bool administrator_access {false};
-        bool archive_access {false};
+        HttpSessions::AccessCapabilities capabilities;
         std::string principal;
         std::string authentication_method {"api_key"};
         bool managed_administrator {false};
@@ -92,11 +91,12 @@ namespace sx::webserver {
         response.headers.emplace_back("Set-Cookie", create_token_cookie_val(csrf_token, ttl));
         HttpSessions::access_keys[auth_token]["csrf_token"] = TimedOptional(csrf_token,
                                                                             ttl);
-        HttpSessions::access_keys[auth_token]["administrator_access"] = TimedOptional(
-            std::string(grant.administrator_access || grant.archive_access ? "1" : "0"),
-            ttl);
-        HttpSessions::access_keys[auth_token]["archive_access"] = TimedOptional(
-            std::string(grant.archive_access ? "1" : "0"), ttl);
+        HttpSessions::access_keys[auth_token][HttpSessions::ATT_STANDARD_ACCESS] =
+            TimedOptional(std::string(grant.capabilities.standard ? "1" : "0"), ttl);
+        HttpSessions::access_keys[auth_token][HttpSessions::ATT_ADMINISTRATOR_ACCESS] =
+            TimedOptional(std::string(grant.capabilities.administrator ? "1" : "0"), ttl);
+        HttpSessions::access_keys[auth_token][HttpSessions::ATT_ARCHIVE_ACCESS] =
+            TimedOptional(std::string(grant.capabilities.archive ? "1" : "0"), ttl);
         HttpSessions::access_keys[auth_token][HttpSessions::ATT_AUTHENTICATION_METHOD] =
             TimedOptional(std::move(grant.authentication_method), ttl);
         if(!grant.principal.empty()) {
@@ -125,60 +125,35 @@ namespace sx::webserver {
         const auto administrator_generation =
             HttpSessions::administrator_generation(username);
         const auto source = authorized::client_address(connection);
-        const auto throttle = LoginThrottle::instance().permit(source, username);
-        if(!throttle.allowed) {
+        const auto authentication = sx::admin::authenticate(source, username, password);
+        if(authentication.status == sx::admin::LoginStatus::throttled) {
             response.response_code = MHD_HTTP_TOO_MANY_REQUESTS;
             response.headers.emplace_back(
                 MHD_HTTP_HEADER_RETRY_AFTER,
-                std::to_string(throttle.retry_after_seconds));
+                std::to_string(authentication.retry_after_seconds));
             Log::get()->events().insert(
                 WAR, "administrator login throttled from %s as user %s",
                 source.c_str(), username.c_str());
             return response;
         }
-
-        auto administrator_status = sx::admin::AuthenticationStatus::denied;
-        try {
-            administrator_status = CfgFactory::authenticate_administrator(
-                username, password);
-        }
-        catch(const std::exception& error) {
+        if(authentication.status == sx::admin::LoginStatus::unavailable) {
             Log::get()->events().insert(
-                ERR, "administrator authentication unavailable: %s", error.what());
-        }
-
-        const bool administrator_authenticated =
-            administrator_status == sx::admin::AuthenticationStatus::authenticated;
-        const bool administrator_not_configured =
-            administrator_status == sx::admin::AuthenticationStatus::not_configured;
-        if(administrator_authenticated) {
-            LoginThrottle::instance().record_success(username);
-            authorize_response(
-                response, {true, false, username, "password", true, false,
-                           administrator_generation});
+                ERR, "administrator authentication unavailable for user %s",
+                username.c_str());
             return response;
         }
 
-        [[maybe_unused]] const bool pam_enabled = HttpSessions::pam_login_enabled();
-        std::string admin_group;
-        {
-            const auto guard = std::scoped_lock(CfgFactory::lock());
-            admin_group = CfgFactory::get()->admin_group;
-        }
-        if(admin_group.empty()) admin_group = "root";
-
-#ifdef USE_PAM
-        const bool pam_authenticated = pam_enabled && administrator_not_configured &&
-            auth::pam_auth_user_pass(username.c_str(), password.c_str()) &&
-            auth::unix_is_group_member(username.c_str(), admin_group.c_str());
-#else
-        const bool pam_authenticated = false;
-#endif
-        if(pam_authenticated) {
-            LoginThrottle::instance().record_success(username);
-            // Membership in the configured administrative group grants both
-            // administrator management and explicit backup/restore access.
-            authorize_response(response, {true, true, username, "pam", false, false});
+        if(authentication.status == sx::admin::LoginStatus::accepted) {
+            SessionGrant grant;
+            grant.capabilities.standard = true;
+            grant.capabilities.administrator = true;
+            grant.principal = authentication.identity;
+            grant.authentication_method = authentication.authentication_method;
+            grant.managed_administrator = authentication.managed_administrator;
+            grant.expose_auth_token = false;
+            if(grant.managed_administrator)
+                grant.administrator_generation = administrator_generation;
+            authorize_response(response, std::move(grant));
             return response;
         }
 
@@ -228,20 +203,26 @@ namespace sx::webserver {
 
         std::string principal;
         std::string authentication_method;
+        bool standard_access = false;
         bool administrator_access = false;
         bool archive_access = false;
         if(header_authenticated) {
             authentication_method = "api_key";
-            administrator_access = HttpSessions::has_admin_key(api_key);
-            archive_access = HttpSessions::has_archive_key(api_key);
+            const auto capabilities = HttpSessions::key_capabilities(api_key);
+            standard_access = capabilities.standard;
+            administrator_access = capabilities.administrator;
+            archive_access = capabilities.archive;
         }
         else {
             principal = HttpSessions::table_value(token, HttpSessions::ATT_PRINCIPAL);
             authentication_method = HttpSessions::table_value(
                 token, HttpSessions::ATT_AUTHENTICATION_METHOD);
-            administrator_access =
-                HttpSessions::table_value(token, "administrator_access") == "1";
-            archive_access = HttpSessions::table_value(token, "archive_access") == "1";
+            standard_access = HttpSessions::table_value(
+                token, HttpSessions::ATT_STANDARD_ACCESS) == "1";
+            administrator_access = HttpSessions::table_value(
+                token, HttpSessions::ATT_ADMINISTRATOR_ACCESS) == "1";
+            archive_access = HttpSessions::table_value(
+                token, HttpSessions::ATT_ARCHIVE_ACCESS) == "1";
         }
 
         Http_JsonResponseParams response;
@@ -252,7 +233,7 @@ namespace sx::webserver {
             {"authenticated", true},
             {"authentication_method", authentication_method},
             {"capabilities", {
-                {"standard", true},
+                {"standard", standard_access},
                 {"administrator", administrator_access},
                 {"archive", archive_access},
             }},
@@ -294,27 +275,23 @@ namespace sx::webserver {
                     if (not req.empty()) {
 
                         try {
-                            json jreq = json::parse(req);
-                            bool found = false;
-                            const auto access_key =
-                                jreq["access_key"].get<std::string>();
-                            found = HttpSessions::has_access_key(access_key);
-                            if (found) {
-                                authorize_response(
-                                    ret, {
-                                        HttpSessions::has_admin_key(access_key),
-                                        HttpSessions::has_archive_key(access_key),
-                                        {},
-                                        "api_key",
-                                        false,
-                                        true,
-                                    });
-                            } else {
-                                Log::get()->events().insert(ERR, "unauthorized API access attempt from %s",
-                                                            authorized::client_address(conn).c_str());
+                            const auto document = json::parse(req);
+                            const auto access_key = document["access_key"].get<std::string>();
+                            const auto capabilities =
+                                HttpSessions::key_capabilities(access_key);
+                            const bool recognized_key = capabilities.any();
+                            if(recognized_key) {
+                                SessionGrant grant;
+                                grant.capabilities = capabilities;
+                                authorize_response(ret, std::move(grant));
+                            }
+                            else {
+                                Log::get()->events().insert(
+                                    ERR, "unauthorized API access attempt from %s",
+                                    authorized::client_address(conn).c_str());
                             }
                         }
-                        catch (nlohmann::json::exception const &) {
+                        catch(const nlohmann::json::exception&) {
 
                             Log::get()->events().insert(ERR, "malformed API request from %s",
                                                         authorized::client_address(conn).c_str());
@@ -379,14 +356,16 @@ namespace sx::webserver {
 
         auto* logout = new Http_Responder(
             "POST", "/api/logout",
-            authorized::token_protected<Http_JsonResponseParams>(logout_response));
+            authorized::token_protected<Http_JsonResponseParams>(
+                logout_response, authorized::Access::authenticated));
         logout->Content_Type = "application/json";
         logout->Max_Request_Body_Size = administrator_request_limit;
         server.addController(std::shared_ptr<lmh::Controller>(logout));
 
         auto* session = new Http_Responder(
             "GET", "/api/session",
-            authorized::token_protected<Http_JsonResponseParams>(session_response));
+            authorized::token_protected<Http_JsonResponseParams>(
+                session_response, authorized::Access::authenticated));
         session->Content_Type = "application/json";
         server.addController(std::shared_ptr<lmh::Controller>(session));
     }

@@ -1578,6 +1578,14 @@ target_link_libraries (smithproxy crypt)
 target_link_libraries (smithproxy nlohmann_json::nlohmann_json)
 add_subdirectory(src/service/auth)
 target_link_libraries(smithproxy smithproxy_auth_client)
+target_sources(smithproxy PRIVATE
+        src/service/admin/administrator_authenticator.cpp
+        src/service/admin/auth_socket.cpp)
+if(TARGET sx_gtests)
+    target_sources(sx_gtests PRIVATE
+            src/service/admin/auth_socket.cpp
+            tests/unit/service/admin/auth_socket_tests.cpp)
+endif()
 target_link_libraries (smithproxy curl)
 
 if((CMAKE_SYSTEM_PROCESSOR MATCHES "arm") OR (CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64"))

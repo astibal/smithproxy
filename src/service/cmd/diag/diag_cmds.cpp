@@ -3261,8 +3261,8 @@ int cli_diag_api_info(DiagCli *cli, const char *command, char *argv[], int argc)
 
         const auto now = time(nullptr);
         ss << "Local API credentials:\r\n";
-        ss << "    standard boot keys: " << HttpSessions::api_keys.size() << "\r\n";
-        ss << "    administrator boot keys: " << HttpSessions::admin_api_keys.size()
+        ss << "    configured API keys: " << HttpSessions::api_keys.size() << "\r\n";
+        ss << "    GUI management keys: " << HttpSessions::admin_api_keys.size()
            << "\r\n";
         ss << "    archive keys: " << HttpSessions::archive_keys.size() << "\r\n";
         ss << "Active API sessions: " << HttpSessions::access_keys.size() << "\r\n";

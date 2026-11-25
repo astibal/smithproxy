@@ -1,5 +1,7 @@
 #include "login_request.hpp"
 
+#include <openssl/crypto.h>
+
 #include <algorithm>
 #include <map>
 #include <utility>
@@ -62,6 +64,16 @@ bool safe_password(std::string_view password) {
 
 }  // namespace
 
+LoginRequest::LoginRequest(
+    std::string username_value,
+    std::string password_value)
+    : username(std::move(username_value)),
+      password(std::move(password_value)) {}
+
+LoginRequest::~LoginRequest() {
+    if(!password.empty()) OPENSSL_cleanse(password.data(), password.size());
+}
+
 LoginRequestResult parse_login_request(std::string_view body) {
     std::map<std::string, std::string> fields;
     std::size_t start = 0;
@@ -95,7 +107,8 @@ LoginRequestResult parse_login_request(std::string_view body) {
         return {std::nullopt, "login username is invalid"};
     if(!safe_password(password->second))
         return {std::nullopt, "login password is invalid"};
-    return {LoginRequest{username->second, password->second}, {}};
+    return {LoginRequest{
+        std::move(username->second), std::move(password->second)}, {}};
 }
 
 }  // namespace sx::webserver

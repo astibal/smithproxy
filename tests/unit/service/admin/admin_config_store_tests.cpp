@@ -77,6 +77,17 @@ TEST_F(AdminConfigStoreTest, CreatesFirstAdministratorWithoutPersistingPlaintext
                   "correct horse battery staple"), std::string::npos);
 }
 
+TEST_F(AdminConfigStoreTest, MissingAdminConfigIsAnInertLegacyState) {
+    const auto config = store().read();
+
+    EXPECT_TRUE(config.administrators().empty());
+    EXPECT_EQ(store().authenticate("legacy-admin", "password"),
+              sx::admin::AuthenticationStatus::not_configured);
+    EXPECT_EQ(archive.writes, 0);
+    EXPECT_FALSE(archive.restart_needed);
+    EXPECT_FALSE(archive.source->archive().contains("admin.cfg"));
+}
+
 TEST_F(AdminConfigStoreTest, RejectsDuplicateAdministratorWithoutPublishing) {
     ASSERT_TRUE(store().create(board.revision_current(), hash(), "alice", "first password").ok());
 

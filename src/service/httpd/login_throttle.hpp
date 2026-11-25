@@ -39,7 +39,7 @@ public:
         std::int64_t now = unix_seconds()) {
         const auto source_key = source.empty() ? std::string("<unknown>")
                                                : std::string(source);
-        const auto principal_identifier = principal_key(principal);
+        const auto principal_identifier = scoped_principal_key(source_key, principal);
 
         auto guard = std::scoped_lock(lock_);
         prune(source_attempts_, now);
@@ -61,12 +61,14 @@ public:
         return {true, 0};
     }
 
-    // A successful login proves ownership of the principal and clears only
-    // that name's typo/brute-force budget. The source budget remains a CPU
-    // guard even when many valid accounts share one client address.
-    void record_success(std::string_view principal) {
+    // A successful login proves ownership of this principal from this source
+    // and clears only that pair's typo/brute-force budget. The source budget
+    // remains a CPU guard even when many valid accounts share one address.
+    void record_success(std::string_view source, std::string_view principal) {
         auto guard = std::scoped_lock(lock_);
-        principal_attempts_.erase(principal_key(principal));
+        const auto source_key = source.empty() ? std::string("<unknown>")
+                                               : std::string(source);
+        principal_attempts_.erase(scoped_principal_key(source_key, principal));
     }
 
     void clear() {
@@ -100,6 +102,14 @@ private:
         const bool valid = !principal.empty() &&
             principal.size() <= maximum_principal_key_bytes;
         return valid ? std::string(principal) : std::string("<invalid>");
+    }
+
+    static std::string scoped_principal_key(
+        std::string_view source, std::string_view principal) {
+        auto key = std::string(source);
+        key.push_back('\0');
+        key.append(principal_key(principal));
+        return key;
     }
 
     static bool window_expired(const Entry& value, std::int64_t now) {

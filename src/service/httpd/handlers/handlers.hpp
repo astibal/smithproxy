@@ -48,6 +48,7 @@ namespace sx::webserver {
         };
 
         enum class Access {
+            authenticated,
             standard,
             administrator,
             archive,
@@ -126,8 +127,11 @@ namespace sx::webserver::authorized {
             // lifetime of a privileged archive capability as a side effect.
             bool allowed = false;
             switch(required_access_) {
-                case Access::standard:
+                case Access::authenticated:
                     allowed = HttpSessions::validate_tokens(key, token);
+                    break;
+                case Access::standard:
+                    allowed = HttpSessions::validate_standard_tokens(key, token);
                     break;
                 case Access::administrator:
                     allowed = HttpSessions::validate_admin_tokens(key, token);
@@ -157,8 +161,11 @@ namespace sx::webserver::authorized {
         auto validate_api_key_and_call = [&](auto const& key) {
             bool allowed = false;
             switch(required_access_) {
+                case Access::authenticated:
+                    allowed = HttpSessions::has_any_key(key);
+                    break;
                 case Access::standard:
-                    allowed = HttpSessions::has_access_key(key);
+                    allowed = HttpSessions::has_standard_key(key);
                     break;
                 case Access::administrator:
                     allowed = HttpSessions::has_admin_key(key);

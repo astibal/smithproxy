@@ -213,6 +213,14 @@ sx::cfg::ResourceWriteResult CfgFactory::write_archive_resource(
     std::string path,
     std::optional<std::string> content,
     bool executable) {
+    if(!sx::cfg::CfgManifest::is_resource_path(sx::cfg::smithproxy_schema(), path)) {
+        return {
+            sx::cfg::ResourceWriteStatus::invalid_resource,
+            board()->revision_state(),
+            {},
+            "configuration control files require a typed Core API",
+        };
+    }
     auto factory = get();
     sx::cfg::CfgResourceWriter writer({
         *board(), *write_gate(), lock(), factory->archive_storage_,
@@ -232,6 +240,11 @@ sx::admin::Config CfgFactory::administrator_config() {
 sx::admin::AuthenticationStatus CfgFactory::authenticate_administrator(
     std::string_view name, std::string_view password) {
     auto factory = get();
+    // Legacy non-CFtar deployments have no managed administrator store. Keep
+    // their existing PAM path available after an upgrade; a native archive
+    // that exists but cannot be parsed still fails closed inside ConfigStore.
+    if(!factory->using_native_archive())
+        return sx::admin::AuthenticationStatus::not_configured;
     sx::admin::ConfigStore store({
         *board(), *write_gate(), lock(), factory->archive_storage_,
     });
@@ -511,7 +524,7 @@ std::string CfgFactory::previous_archive_payload() {
 std::string CfgFactory::archive_resource(std::string const& path) {
     std::scoped_lock<std::recursive_mutex> guard(CfgFactory::lock());
     if(!config_archive_ || !config_archive_->is_cftar() ||
-       !sx::cfg::CfgManifest::is_managed_path(sx::cfg::smithproxy_schema(), path)) {
+       !sx::cfg::CfgManifest::is_resource_path(sx::cfg::smithproxy_schema(), path)) {
         throw sx::cfg::CfgTarError("native configuration resource is unavailable");
     }
     return config_archive_->archive().at(path).data;

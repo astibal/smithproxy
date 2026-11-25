@@ -143,8 +143,21 @@ struct HttpSessions {
     constexpr static const char* ATT_CSRF_TOKEN = "csrf_token";
     constexpr static const char* ATT_PRINCIPAL = "principal";
     constexpr static const char* ATT_AUTHENTICATION_METHOD = "authentication_method";
+    constexpr static const char* ATT_STANDARD_ACCESS = "standard_access";
+    constexpr static const char* ATT_ADMINISTRATOR_ACCESS = "administrator_access";
+    constexpr static const char* ATT_ARCHIVE_ACCESS = "archive_access";
     constexpr static const char* ATT_ADMINISTRATOR_NAME = "administrator_name";
     constexpr static const char* ATT_ADMINISTRATOR_GENERATION = "administrator_generation";
+
+    struct AccessCapabilities {
+        bool standard {false};
+        bool administrator {false};
+        bool archive {false};
+
+        [[nodiscard]] bool any() const noexcept {
+            return standard || administrator || archive;
+        }
+    };
 
     static std::string table_value(std::string const& key, std::string const& varname, bool create=false) {
         auto lc_ = std::scoped_lock(lock);
@@ -285,18 +298,24 @@ public:
         return managed_session_current;
     }
 
-    // Validate the ordinary session pair before consulting the stronger
+    // Validate the session pair before consulting its independent archive
     // capability. Invalid CSRF must not refresh archive authorization.
     static bool validate_archive_tokens(
         std::string const& auth_token, std::string const& csrf_token) {
         return validate_tokens(auth_token, csrf_token) &&
-               table_value(auth_token, "archive_access") == "1";
+               table_value(auth_token, ATT_ARCHIVE_ACCESS) == "1";
     }
 
     static bool validate_admin_tokens(
         std::string const& auth_token, std::string const& csrf_token) {
         return validate_tokens(auth_token, csrf_token) &&
-               table_value(auth_token, "administrator_access") == "1";
+               table_value(auth_token, ATT_ADMINISTRATOR_ACCESS) == "1";
+    }
+
+    static bool validate_standard_tokens(
+        std::string const& auth_token, std::string const& csrf_token) {
+        return validate_tokens(auth_token, csrf_token) &&
+               table_value(auth_token, ATT_STANDARD_ACCESS) == "1";
     }
 
     // Persistent administrator sessions carry their identity so a password
@@ -319,27 +338,33 @@ public:
     }
 
     static bool has_archive_key(std::string const& key) {
-        auto lc_ = std::scoped_lock(lock);
-        return archive_keys.find(key) != archive_keys.end();
+        return key_capabilities(key).archive;
     }
 
     static bool has_admin_key(std::string const& key) {
-        auto lc_ = std::scoped_lock(lock);
-        return admin_api_keys.find(key) != admin_api_keys.end() ||
-               archive_keys.find(key) != archive_keys.end();
+        return key_capabilities(key).administrator;
     }
 
-    // Archive credentials are a strict superset of ordinary API access.
-    static bool has_access_key(std::string const& key) {
-        auto lc_ = std::scoped_lock(lock);
-        return api_keys.find(key) != api_keys.end() ||
-               admin_api_keys.find(key) != admin_api_keys.end() ||
-               archive_keys.find(key) != archive_keys.end();
+    static bool has_standard_key(std::string const& key) {
+        return key_capabilities(key).standard;
+    }
+
+    static AccessCapabilities key_capabilities(std::string const& key) {
+        auto guard = std::scoped_lock(lock);
+        const bool ordinary_key = api_keys.find(key) != api_keys.end();
+        const bool administrator_key =
+            admin_api_keys.find(key) != admin_api_keys.end();
+        const bool archive_key = archive_keys.find(key) != archive_keys.end();
+        return {ordinary_key || administrator_key, administrator_key, archive_key};
+    }
+
+    static bool has_any_key(std::string const& key) {
+        return key_capabilities(key).any();
     }
 
     static bool has_api_keys() {
-        auto lc_ = std::scoped_lock(lock);
-        return !api_keys.empty() || !admin_api_keys.empty() || !archive_keys.empty();
+        auto guard = std::scoped_lock(lock);
+        return !api_keys.empty();
     }
 
     static bool api_header_allowed() {

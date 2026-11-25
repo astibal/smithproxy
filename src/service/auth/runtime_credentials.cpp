@@ -83,6 +83,14 @@ GuiRuntimeCredentialPolicy parse_gui_runtime_credentials(const std::string_view 
             throw std::invalid_argument("gui.smithproxy is not a group");
         parse_group(smithproxy, policy.management_api,
                     "api_token_file", "previous_api_token_file");
+        smithproxy.lookupValue(
+            "administrator_auth_socket_enabled",
+            policy.administrator_auth_socket_enabled);
+        std::string administrator_auth_socket;
+        if(smithproxy.lookupValue(
+               "administrator_auth_socket", administrator_auth_socket)) {
+            policy.administrator_auth_socket = std::move(administrator_auth_socket);
+        }
     }
     if(gui.exists("gateway")) {
         const auto& gateway = gui["gateway"];

@@ -35,6 +35,9 @@ struct RuntimeCredentialSnapshot {
 struct GuiRuntimeCredentialPolicy {
     RuntimeCredentialSpec management_api;
     RuntimeCredentialSpec gateway;
+    bool administrator_auth_socket_enabled {true};
+    std::filesystem::path administrator_auth_socket {
+        "/run/smithproxy/admin-auth.sock"};
 };
 
 // Reads only Core-owned runtime credential policy from gui.cfg. The rest of

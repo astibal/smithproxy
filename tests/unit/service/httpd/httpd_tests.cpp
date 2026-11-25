@@ -174,18 +174,47 @@ TEST(HttpResponderTest, RecognizesEverySupportedBodyBearingMethod) {
     EXPECT_FALSE(request_method_accepts_body("CONNECT"));
 }
 
-TEST_F(HttpSessionsTest, ArchiveKeysAreExplicitPrivilegedAccessKeys) {
+TEST_F(HttpSessionsTest, ApiKeyCapabilitiesRemainIndependent) {
     HttpSessions::replace_api_keys({"ordinary"});
-    HttpSessions::replace_archive_keys({"backup-admin"});
+    HttpSessions::replace_admin_api_keys({"management"});
+    HttpSessions::replace_archive_keys({"backup"});
 
-    EXPECT_TRUE(HttpSessions::has_access_key("ordinary"));
+    EXPECT_TRUE(HttpSessions::has_standard_key("ordinary"));
     EXPECT_FALSE(HttpSessions::has_admin_key("ordinary"));
     EXPECT_FALSE(HttpSessions::has_archive_key("ordinary"));
-    EXPECT_TRUE(HttpSessions::has_access_key("backup-admin"));
-    EXPECT_TRUE(HttpSessions::has_admin_key("backup-admin"));
-    EXPECT_TRUE(HttpSessions::has_archive_key("backup-admin"));
+
+    EXPECT_TRUE(HttpSessions::has_standard_key("management"));
+    EXPECT_TRUE(HttpSessions::has_admin_key("management"));
+    EXPECT_FALSE(HttpSessions::has_archive_key("management"));
+
+    EXPECT_FALSE(HttpSessions::has_standard_key("backup"));
+    EXPECT_FALSE(HttpSessions::has_admin_key("backup"));
+    EXPECT_TRUE(HttpSessions::has_archive_key("backup"));
+    EXPECT_TRUE(HttpSessions::has_any_key("backup"));
     EXPECT_EQ(HttpSessions::archive_keys_snapshot(),
-              (std::set<std::string>{"backup-admin"}));
+              (std::set<std::string>{"backup"}));
+}
+
+TEST_F(HttpSessionsTest, StandardSessionCapabilityIsExplicit) {
+    {
+        auto lock = std::scoped_lock(HttpSessions::lock);
+        auto& ordinary = HttpSessions::access_keys["ordinary"];
+        ordinary["csrf_token"] = TimedOptional<std::string>("ordinary-csrf", 60);
+        ordinary[HttpSessions::ATT_STANDARD_ACCESS] =
+            TimedOptional<std::string>("1", 60);
+
+        auto& archive = HttpSessions::access_keys["archive"];
+        archive["csrf_token"] = TimedOptional<std::string>("archive-csrf", 60);
+        archive[HttpSessions::ATT_STANDARD_ACCESS] =
+            TimedOptional<std::string>("0", 60);
+        archive[HttpSessions::ATT_ARCHIVE_ACCESS] =
+            TimedOptional<std::string>("1", 60);
+    }
+
+    EXPECT_TRUE(HttpSessions::validate_standard_tokens("ordinary", "ordinary-csrf"));
+    EXPECT_FALSE(HttpSessions::validate_archive_tokens("ordinary", "ordinary-csrf"));
+    EXPECT_FALSE(HttpSessions::validate_standard_tokens("archive", "archive-csrf"));
+    EXPECT_TRUE(HttpSessions::validate_archive_tokens("archive", "archive-csrf"));
 }
 
 TEST_F(HttpSessionsTest, ArchiveCapabilityRequiresValidCsrfAndExplicitGrant) {
@@ -355,7 +384,8 @@ TEST_F(HttpSessionsTest, ArchiveKeyLoadsOnceFromEnvironmentAndIsRemoved) {
     EXPECT_TRUE(HttpSessions::load_archive_key_from_environment());
     EXPECT_EQ(::getenv("SMITHPROXY_ARCHIVE_API_KEY"), nullptr);
     EXPECT_TRUE(HttpSessions::has_archive_key(secret));
-    EXPECT_TRUE(HttpSessions::has_access_key(secret));
+    EXPECT_FALSE(HttpSessions::has_standard_key(secret));
+    EXPECT_FALSE(HttpSessions::has_admin_key(secret));
 }
 
 TEST_F(HttpSessionsTest, ShortArchiveEnvironmentKeyIsRejectedAndRemoved) {
@@ -394,6 +424,17 @@ TEST_F(LoginThrottleTest, LimitsOnePrincipalAndResetsAfterTheWindow) {
     EXPECT_TRUE(throttle.permit("192.0.2.1", "alice", 1060).allowed);
 }
 
+TEST_F(LoginThrottleTest, DoesNotLockAPrincipalOutFromAnotherSource) {
+    auto& throttle = LoginThrottle::instance();
+    for(std::size_t attempt = 0; attempt < LoginThrottle::principal_attempt_limit;
+        ++attempt) {
+        EXPECT_TRUE(throttle.permit("192.0.2.10", "alice", 1500).allowed);
+    }
+
+    EXPECT_FALSE(throttle.permit("192.0.2.10", "alice", 1500).allowed);
+    EXPECT_TRUE(throttle.permit("192.0.2.11", "alice", 1500).allowed);
+}
+
 TEST_F(LoginThrottleTest, LimitsRotatingPrincipalsFromOneSource) {
     auto& throttle = LoginThrottle::instance();
     for(std::size_t attempt = 0; attempt < LoginThrottle::source_attempt_limit;
@@ -413,7 +454,7 @@ TEST_F(LoginThrottleTest, SuccessfulPrincipalDoesNotResetSourceCpuBudget) {
         ++attempt) {
         EXPECT_TRUE(throttle.permit("192.0.2.3", "alice", 3000).allowed);
     }
-    throttle.record_success("alice");
+    throttle.record_success("192.0.2.3", "alice");
 
     EXPECT_TRUE(throttle.permit("192.0.2.3", "alice", 3000).allowed);
     const auto counts = throttle.entry_counts(3000);

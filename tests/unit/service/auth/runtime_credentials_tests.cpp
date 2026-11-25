@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -47,6 +48,19 @@ protected:
         output << value;
         output.close();
         ASSERT_EQ(::chmod(path.c_str(), 0640), 0);
+    }
+
+    void set_modified_time(
+        const std::filesystem::path& path,
+        const std::chrono::system_clock::time_point value) {
+        const auto seconds = std::chrono::time_point_cast<std::chrono::seconds>(value);
+        const auto nanoseconds = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            value - seconds);
+        const struct timespec timestamps[2] = {
+            {seconds.time_since_epoch().count(), nanoseconds.count()},
+            {seconds.time_since_epoch().count(), nanoseconds.count()},
+        };
+        ASSERT_EQ(::utimensat(AT_FDCWD, path.c_str(), timestamps, 0), 0);
     }
 
     std::filesystem::path directory_;
@@ -110,6 +124,90 @@ TEST_F(RuntimeCredentialsTest, RemovesPreviousAfterOverlap) {
     EXPECT_FALSE(std::filesystem::exists(policy.previous_path));
 }
 
+TEST_F(RuntimeCredentialsTest, ChangesCurrentCredentialOnSchedule) {
+    const auto policy = spec();
+    const std::string seed(64U, 'j');
+    write(policy.current_path, seed);
+    sx::auth::RuntimeCredentialSnapshot published;
+    sx::auth::RuntimeCredentialPair pair(
+        policy, [&published](const auto& snapshot) { published = snapshot; });
+
+    const auto initial = std::chrono::system_clock::now();
+    ASSERT_TRUE(pair.reconcile(initial));
+    ASSERT_TRUE(pair.reconcile(initial + policy.rotation_interval));
+    ASSERT_TRUE(published.current);
+    EXPECT_NE(*published.current, seed);
+}
+
+TEST_F(RuntimeCredentialsTest, RejectsFutureDatedLauncherSeed) {
+    const auto policy = spec();
+    const std::string seed(64U, 'k');
+    const auto now = std::chrono::system_clock::now();
+    write(policy.current_path, seed);
+    set_modified_time(policy.current_path, now + std::chrono::minutes(2));
+    sx::auth::RuntimeCredentialSnapshot published;
+    sx::auth::RuntimeCredentialPair pair(
+        policy, [&published](const auto& snapshot) { published = snapshot; });
+
+    ASSERT_TRUE(pair.reconcile(now));
+    ASSERT_TRUE(published.current);
+    EXPECT_NE(*published.current, seed);
+}
+
+TEST_F(RuntimeCredentialsTest, ReplacesCredentialWithUnsafePermissions) {
+    const auto policy = spec();
+    const std::string unsafe(64U, 'l');
+    write(policy.current_path, unsafe);
+    ASSERT_EQ(::chmod(policy.current_path.c_str(), 0660), 0);
+    sx::auth::RuntimeCredentialSnapshot published;
+    sx::auth::RuntimeCredentialPair pair(
+        policy, [&published](const auto& snapshot) { published = snapshot; });
+
+    ASSERT_TRUE(pair.reconcile());
+    ASSERT_TRUE(published.current);
+    EXPECT_NE(*published.current, unsafe);
+
+    struct stat metadata {};
+    ASSERT_EQ(::stat(policy.current_path.c_str(), &metadata), 0);
+    EXPECT_EQ(metadata.st_mode & 0777, 0640);
+}
+
+TEST_F(RuntimeCredentialsTest, ReplacesSymlinkWithoutFollowingIt) {
+    const auto policy = spec();
+    const auto target = directory_ / "outside.key";
+    const std::string outside(64U, 'm');
+    write(target, outside);
+    ASSERT_EQ(::symlink(target.c_str(), policy.current_path.c_str()), 0);
+    sx::auth::RuntimeCredentialSnapshot published;
+    sx::auth::RuntimeCredentialPair pair(
+        policy, [&published](const auto& snapshot) { published = snapshot; });
+
+    ASSERT_TRUE(pair.reconcile());
+    ASSERT_TRUE(published.current);
+    EXPECT_NE(*published.current, outside);
+    EXPECT_FALSE(std::filesystem::is_symlink(policy.current_path));
+
+    std::ifstream preserved(target);
+    std::string preserved_value;
+    preserved >> preserved_value;
+    EXPECT_EQ(preserved_value, outside);
+}
+
+TEST_F(RuntimeCredentialsTest, RemovesDuplicatePreviousGeneration) {
+    const auto policy = spec();
+    const std::string seed(64U, 'n');
+    write(policy.current_path, seed);
+    write(policy.previous_path, seed);
+    sx::auth::RuntimeCredentialSnapshot published;
+    sx::auth::RuntimeCredentialPair pair(
+        policy, [&published](const auto& snapshot) { published = snapshot; });
+
+    ASSERT_TRUE(pair.reconcile());
+    ASSERT_TRUE(published.current);
+    EXPECT_FALSE(published.previous);
+    EXPECT_FALSE(std::filesystem::exists(policy.previous_path));
+}
+
 TEST_F(RuntimeCredentialsTest, IgnoresReplacementAfterCoreAssumesOwnership) {
     const auto policy = spec();
     const std::string seed(64U, 'f');
@@ -156,6 +254,8 @@ TEST(RuntimeCredentialConfigTest, ParsesIndependentCredentialPolicies) {
             api_token_file = "/run/custom/api";
             previous_api_token_file = "/run/custom/api.previous";
             credential_rotation_seconds = 7200L;
+            administrator_auth_socket_enabled = false;
+            administrator_auth_socket = "/run/custom/admin-auth.sock";
           };
           gateway = {
             credential_enabled = true;
@@ -172,6 +272,8 @@ TEST(RuntimeCredentialConfigTest, ParsesIndependentCredentialPolicies) {
     EXPECT_TRUE(policy.gateway.enabled);
     EXPECT_EQ(policy.gateway.previous_path, "/run/custom/gateway.previous");
     EXPECT_EQ(policy.gateway.overlap, std::chrono::minutes(2));
+    EXPECT_FALSE(policy.administrator_auth_socket_enabled);
+    EXPECT_EQ(policy.administrator_auth_socket, "/run/custom/admin-auth.sock");
 }
 
 } // namespace
