@@ -80,8 +80,7 @@
 
 #include <libconfig.h++>
 
-#include <service/auth/runtime_credentials.hpp>
-#include <service/admin/auth_socket.hpp>
+#include <service/auth/external_authentication.hpp>
 #include <service/cfgapi/cfg_pack.hpp>
 #include <service/cfgapi/cfgapi.hpp>
 #include <utils/tenants.hpp>
@@ -440,6 +439,8 @@ void print_stats() {
 }
 
 void do_cleanup() {
+
+    sx::auth::stop_external_authentication();
 
     // this proven to be better idea than cleanup after exit() call
     CfgFactory::get()->cleanup();
@@ -1220,67 +1221,6 @@ int main(int argc, char *argv[]) {
     // available. Detection marks restart pending; it never mutates runtime.
     CfgFactory::get()->start_archive_monitor();
 
-    const auto tenant_index = CfgFactory::get()->tenant_index;
-    auto credential_policy = sx::auth::default_gui_runtime_credentials(tenant_index);
-    if(CfgFactory::get()->using_native_archive()) {
-        try {
-            const auto resource = CfgFactory::get()->resolve_resource("gui.cfg", {});
-            credential_policy = sx::auth::parse_gui_runtime_credentials(
-                resource.content(), tenant_index);
-        }
-        catch(const std::exception& error) {
-            log.event(WAR,
-                "GUI runtime credential policy is invalid; using secure defaults: %s",
-                error.what());
-        }
-    }
-    if(const char* override_path = std::getenv("SMITHPROXY_ADMIN_API_KEY_FILE")) {
-        credential_policy.management_api.enabled = true;
-        credential_policy.management_api.current_path = override_path;
-        credential_policy.management_api.previous_path =
-            std::string(override_path) + ".previous";
-        ::unsetenv("SMITHPROXY_ADMIN_API_KEY_FILE");
-    }
-    if(const char* socket_path = std::getenv("SMITHPROXY_ADMIN_AUTH_SOCKET")) {
-        credential_policy.administrator_auth_socket_enabled = *socket_path != '\0';
-        credential_policy.administrator_auth_socket = socket_path;
-        ::unsetenv("SMITHPROXY_ADMIN_AUTH_SOCKET");
-    }
-
-    const auto credential_log = [&log](const bool warning, const std::string_view message) {
-        log.event(warning ? WAR : INF, "GUI runtime credential: %.*s",
-                  static_cast<int>(message.size()), message.data());
-    };
-    sx::auth::RuntimeCredentialPair management_api_credential(
-        credential_policy.management_api,
-        [](const sx::auth::RuntimeCredentialSnapshot& snapshot) {
-            std::set<std::string> accepted;
-            if(snapshot.current) accepted.emplace(*snapshot.current);
-            if(snapshot.previous) accepted.emplace(*snapshot.previous);
-            sx::webserver::HttpSessions::replace_admin_api_keys(std::move(accepted));
-        },
-        credential_log);
-    sx::auth::RuntimeCredentialPair gateway_credential(
-        credential_policy.gateway,
-        [](const sx::auth::RuntimeCredentialSnapshot&) {},
-        credential_log);
-    management_api_credential.reconcile();
-    gateway_credential.reconcile();
-    management_api_credential.start();
-    gateway_credential.start();
-
-    sx::admin::AuthSocket administrator_auth_socket(
-        credential_policy.administrator_auth_socket,
-        sx::admin::authenticate,
-        [&log](const bool warning, const std::string_view message) {
-            log.event(warning ? WAR : INF, "Admin authentication socket: %.*s",
-                      static_cast<int>(message.size()), message.data());
-        });
-    if(credential_policy.administrator_auth_socket_enabled &&
-       !administrator_auth_socket.start()) {
-        log.event(WAR, "local administrator authentication socket is unavailable");
-    }
-
     // openssl mem debugs
     prepare_mem_debugs();
 
@@ -1303,6 +1243,8 @@ int main(int argc, char *argv[]) {
         gethostname(hostname.data(), hostname.size() - 1);
         return std::string(hostname.data());
     }();
+
+    sx::auth::manage_external_authentication();
 
     // create utility threads
     SmithProxy::instance().create_log_writer_thread();
@@ -1354,9 +1296,6 @@ int main(int argc, char *argv[]) {
         SmithProxy::instance().join_all();
     }
 
-    administrator_auth_socket.stop();
-    management_api_credential.stop();
-    gateway_credential.stop();
     do_cleanup();
     this_daemon->unlink_pidfile();
     // The socket helper is forked after the file helper and therefore inherits

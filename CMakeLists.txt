@@ -357,6 +357,7 @@ add_executable(smithproxy
         src/service/cfgapi/cfg_resource_write.cpp
         src/service/admin/admin_config.cpp
         src/service/admin/admin_config_store.cpp
+        src/service/auth/external_authentication.cpp
         src/service/auth/runtime_credentials.cpp
         src/service/httpd/administrator_api.cpp
         src/service/httpd/administrator_request.cpp
