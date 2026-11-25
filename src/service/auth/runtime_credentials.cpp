@@ -7,6 +7,7 @@
 #include <cerrno>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -100,6 +101,16 @@ GuiRuntimeCredentialPolicy parse_gui_runtime_credentials(
         std::string administrator_auth_socket;
         if(smithproxy.lookupValue(
                "administrator_auth_socket", administrator_auth_socket)) {
+            const bool absolute_path = !administrator_auth_socket.empty() &&
+                administrator_auth_socket.front() == '/';
+            const bool fits_unix_socket =
+                administrator_auth_socket.size() < sizeof(sockaddr_un::sun_path);
+            const bool contains_nul =
+                administrator_auth_socket.find('\0') != std::string::npos;
+            if(!absolute_path || !fits_unix_socket || contains_nul) {
+                throw std::invalid_argument(
+                    "administrator_auth_socket must use a bounded absolute Unix socket path");
+            }
             policy.administrator_auth_socket = std::move(administrator_auth_socket);
         }
     }

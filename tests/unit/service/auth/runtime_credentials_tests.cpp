@@ -329,4 +329,20 @@ TEST(RuntimeCredentialConfigTest, KeepsTenantDefaultsForUnspecifiedPaths) {
         "/run/smithproxy/tenant-3/admin-auth.sock");
 }
 
+TEST(RuntimeCredentialConfigTest, RejectsUnusableAdministratorSocketPaths) {
+    EXPECT_THROW(
+        sx::auth::parse_gui_runtime_credentials(R"(
+            gui = { smithproxy = { administrator_auth_socket = "relative.sock"; }; };
+        )"),
+        std::invalid_argument);
+
+    const std::string oversized_path = "/" + std::string(107U, 'a');
+    const std::string source =
+        "gui = { smithproxy = { administrator_auth_socket = \"" +
+        oversized_path + "\"; }; };";
+    EXPECT_THROW(
+        sx::auth::parse_gui_runtime_credentials(source),
+        std::invalid_argument);
+}
+
 } // namespace
