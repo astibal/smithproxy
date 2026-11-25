@@ -71,6 +71,24 @@ bool active_socket(const std::string& path) {
     return connected || connection_error != ECONNREFUSED;
 }
 
+bool secure_socket_directory(const std::filesystem::path& directory) {
+    struct stat metadata {};
+    if(::lstat(directory.c_str(), &metadata) != 0) {
+        if(errno != ENOENT) return false;
+        std::error_code error;
+        const bool created = std::filesystem::create_directories(directory, error);
+        if(error || (!created && !std::filesystem::is_directory(directory, error)))
+            return false;
+        if(::chmod(directory.c_str(), 0750) != 0 ||
+           ::lstat(directory.c_str(), &metadata) != 0) return false;
+    }
+
+    const bool directory_entry = S_ISDIR(metadata.st_mode);
+    const bool trusted_owner = metadata.st_uid == ::geteuid();
+    const bool safe_mode = (metadata.st_mode & 0022) == 0;
+    return directory_entry && trusted_owner && safe_mode;
+}
+
 } // namespace
 
 namespace sx::admin {
@@ -100,10 +118,8 @@ bool AuthSocket::start() {
         return false;
     }
 
-    std::error_code directory_error;
-    std::filesystem::create_directories(path_.parent_path(), directory_error);
-    if(directory_error) {
-        report(true, "administrator authentication socket directory is unavailable");
+    if(!secure_socket_directory(path_.parent_path())) {
+        report(true, "administrator authentication socket directory is unsafe or unavailable");
         return false;
     }
 

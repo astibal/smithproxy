@@ -113,13 +113,24 @@ void RuntimeCredentialPair::report(const bool warning, std::string message) cons
 }
 
 bool RuntimeCredentialPair::ensure_directory() const {
-    std::error_code error;
     const auto parent = spec_.current_path.parent_path();
     if(parent.empty() || parent != spec_.previous_path.parent_path()) return false;
-    std::filesystem::create_directories(parent, error);
-    if(error) return false;
-    const int result = ::chmod(parent.c_str(), 0750);
-    return result == 0;
+
+    struct stat metadata {};
+    if(::lstat(parent.c_str(), &metadata) != 0) {
+        if(errno != ENOENT) return false;
+        std::error_code error;
+        const bool created = std::filesystem::create_directories(parent, error);
+        if(error || (!created && !std::filesystem::is_directory(parent, error)))
+            return false;
+        if(::chmod(parent.c_str(), 0750) != 0 ||
+           ::lstat(parent.c_str(), &metadata) != 0) return false;
+    }
+
+    const bool directory = S_ISDIR(metadata.st_mode);
+    const bool trusted_owner = metadata.st_uid == ::geteuid();
+    const bool safe_mode = (metadata.st_mode & 0022) == 0;
+    return directory && trusted_owner && safe_mode;
 }
 
 std::optional<RuntimeCredentialPair::LoadedCredential> RuntimeCredentialPair::load(

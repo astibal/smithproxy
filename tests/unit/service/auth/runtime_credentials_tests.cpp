@@ -208,6 +208,27 @@ TEST_F(RuntimeCredentialsTest, RemovesDuplicatePreviousGeneration) {
     EXPECT_FALSE(std::filesystem::exists(policy.previous_path));
 }
 
+TEST_F(RuntimeCredentialsTest, RejectsUnsafeParentWithoutChangingItsMode) {
+    const auto shared = directory_ / "shared";
+    ASSERT_TRUE(std::filesystem::create_directory(shared));
+    ASSERT_EQ(::chmod(shared.c_str(), 0777), 0);
+    auto policy = spec();
+    policy.current_path = shared / "current.key";
+    policy.previous_path = shared / "previous.key";
+    sx::auth::RuntimeCredentialSnapshot published{
+        std::string(64U, 'o'), std::string(64U, 'p')};
+    sx::auth::RuntimeCredentialPair pair(
+        policy, [&published](const auto& snapshot) { published = snapshot; });
+
+    EXPECT_FALSE(pair.reconcile());
+    EXPECT_FALSE(published.current);
+    EXPECT_FALSE(published.previous);
+
+    struct stat metadata {};
+    ASSERT_EQ(::stat(shared.c_str(), &metadata), 0);
+    EXPECT_EQ(metadata.st_mode & 0777, 0777);
+}
+
 TEST_F(RuntimeCredentialsTest, IgnoresReplacementAfterCoreAssumesOwnership) {
     const auto policy = spec();
     const std::string seed(64U, 'f');

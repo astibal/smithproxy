@@ -475,6 +475,23 @@ TEST_F(LoginThrottleTest, BoundsRuntimeStateUnderHostileIdentifiers) {
     EXPECT_EQ(counts.second, LoginThrottle::capacity);
 }
 
+TEST_F(LoginThrottleTest, CollapsesOversizedSourceIdentifiersIntoOneBudget) {
+    auto& throttle = LoginThrottle::instance();
+    for(std::size_t attempt = 0; attempt < LoginThrottle::source_attempt_limit;
+        ++attempt) {
+        auto source = std::string(LoginThrottle::maximum_source_key_bytes + 1U, 'a');
+        source += std::to_string(attempt);
+        EXPECT_TRUE(throttle.permit(
+            source, "principal-" + std::to_string(attempt), 5000).allowed);
+    }
+
+    const auto denied = throttle.permit(
+        std::string(LoginThrottle::maximum_source_key_bytes + 2U, 'b'),
+        "another-principal", 5000);
+    EXPECT_FALSE(denied.allowed);
+    EXPECT_EQ(denied.retry_after_seconds, LoginThrottle::window_seconds);
+}
+
 class AdminEnrollmentStoreTest : public testing::Test {
 protected:
     void SetUp() override { sx::webserver::AdminEnrollmentStore::instance().clear(); }

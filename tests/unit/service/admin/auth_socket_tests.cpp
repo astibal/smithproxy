@@ -4,6 +4,7 @@
 #include <nlohmann/json.hpp>
 
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -192,6 +193,23 @@ TEST_F(AdminAuthSocketTest, DoesNotReplaceAnotherLiveServer) {
     });
     EXPECT_EQ(response["status"], "accepted");
     EXPECT_EQ(response["identity"], "first-server");
+}
+
+TEST_F(AdminAuthSocketTest, RejectsUnsafeDirectoryWithoutChangingItsMode) {
+    ASSERT_EQ(::chmod(directory_.c_str(), 0777), 0);
+    sx::admin::AuthSocket server(
+        socket_path_,
+        [](std::string_view, std::string_view, std::string_view) {
+            return sx::admin::LoginResult{
+                sx::admin::LoginStatus::accepted, {}, {}, false, 0};
+        });
+
+    EXPECT_FALSE(server.start());
+    EXPECT_FALSE(std::filesystem::exists(socket_path_));
+
+    struct stat metadata {};
+    ASSERT_EQ(::stat(directory_.c_str(), &metadata), 0);
+    EXPECT_EQ(metadata.st_mode & 0777, 0777);
 }
 
 } // namespace

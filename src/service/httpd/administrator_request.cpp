@@ -2,6 +2,8 @@
 
 #include <service/httpd/httpd.hpp>
 
+#include <openssl/crypto.h>
+
 #include <set>
 #include <string_view>
 #include <utility>
@@ -29,7 +31,32 @@ bool has_string(const nlohmann::json& document, std::string_view name) {
     return found != document.end() && found->is_string();
 }
 
+void cleanse(std::string& value) noexcept {
+    if(!value.empty()) OPENSSL_cleanse(value.data(), value.size());
+}
+
 }  // namespace
+
+AdministratorCreateRequest::AdministratorCreateRequest(
+    std::string name_value, std::string password_value)
+    : name(std::move(name_value)), password(std::move(password_value)) {}
+
+AdministratorCreateRequest::~AdministratorCreateRequest() { cleanse(password); }
+
+AdministratorPasswordRequest::AdministratorPasswordRequest(
+    std::string name_value, std::string password_value)
+    : name(std::move(name_value)), password(std::move(password_value)) {}
+
+AdministratorPasswordRequest::~AdministratorPasswordRequest() { cleanse(password); }
+
+AdministratorEnrollmentRequest::AdministratorEnrollmentRequest(
+    std::string token_value, std::string password_value)
+    : enrollment_token(std::move(token_value)), password(std::move(password_value)) {}
+
+AdministratorEnrollmentRequest::~AdministratorEnrollmentRequest() {
+    cleanse(enrollment_token);
+    cleanse(password);
+}
 
 AdministratorRequestResult<AdministratorCreateRequest>
 parse_administrator_create_request(const nlohmann::json& document) {

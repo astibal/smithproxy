@@ -12,11 +12,25 @@ namespace sx::webserver {
 struct AdministratorCreateRequest {
     std::string name;
     std::string password;
+
+    AdministratorCreateRequest(std::string name, std::string password);
+    ~AdministratorCreateRequest();
+    AdministratorCreateRequest(AdministratorCreateRequest&&) noexcept = default;
+    AdministratorCreateRequest& operator=(AdministratorCreateRequest&&) = delete;
+    AdministratorCreateRequest(const AdministratorCreateRequest&) = delete;
+    AdministratorCreateRequest& operator=(const AdministratorCreateRequest&) = delete;
 };
 
 struct AdministratorPasswordRequest {
     std::string name;
     std::string password;
+
+    AdministratorPasswordRequest(std::string name, std::string password);
+    ~AdministratorPasswordRequest();
+    AdministratorPasswordRequest(AdministratorPasswordRequest&&) noexcept = default;
+    AdministratorPasswordRequest& operator=(AdministratorPasswordRequest&&) = delete;
+    AdministratorPasswordRequest(const AdministratorPasswordRequest&) = delete;
+    AdministratorPasswordRequest& operator=(const AdministratorPasswordRequest&) = delete;
 };
 
 struct AdministratorEnabledRequest {
@@ -31,6 +45,13 @@ struct AdministratorRemoveRequest {
 struct AdministratorEnrollmentRequest {
     std::string enrollment_token;
     std::string password;
+
+    AdministratorEnrollmentRequest(std::string enrollment_token, std::string password);
+    ~AdministratorEnrollmentRequest();
+    AdministratorEnrollmentRequest(AdministratorEnrollmentRequest&&) noexcept = default;
+    AdministratorEnrollmentRequest& operator=(AdministratorEnrollmentRequest&&) = delete;
+    AdministratorEnrollmentRequest(const AdministratorEnrollmentRequest&) = delete;
+    AdministratorEnrollmentRequest& operator=(const AdministratorEnrollmentRequest&) = delete;
 };
 
 template<class Request>

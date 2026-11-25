@@ -26,6 +26,7 @@ public:
     static constexpr std::size_t source_attempt_limit = 30;
     static constexpr std::int64_t window_seconds = 60;
     static constexpr std::size_t capacity = 1024;
+    static constexpr std::size_t maximum_source_key_bytes = 128;
     static constexpr std::size_t maximum_principal_key_bytes = 64;
 
     static LoginThrottle& instance() {
@@ -37,8 +38,7 @@ public:
         std::string_view source,
         std::string_view principal,
         std::int64_t now = unix_seconds()) {
-        const auto source_key = source.empty() ? std::string("<unknown>")
-                                               : std::string(source);
+        const auto source_key = bounded_source_key(source);
         const auto principal_identifier = scoped_principal_key(source_key, principal);
 
         auto guard = std::scoped_lock(lock_);
@@ -66,8 +66,7 @@ public:
     // remains a CPU guard even when many valid accounts share one address.
     void record_success(std::string_view source, std::string_view principal) {
         auto guard = std::scoped_lock(lock_);
-        const auto source_key = source.empty() ? std::string("<unknown>")
-                                               : std::string(source);
+        const auto source_key = bounded_source_key(source);
         principal_attempts_.erase(scoped_principal_key(source_key, principal));
     }
 
@@ -102,6 +101,12 @@ private:
         const bool valid = !principal.empty() &&
             principal.size() <= maximum_principal_key_bytes;
         return valid ? std::string(principal) : std::string("<invalid>");
+    }
+
+    static std::string bounded_source_key(std::string_view source) {
+        if(source.empty()) return "<unknown>";
+        if(source.size() > maximum_source_key_bytes) return "<invalid>";
+        return std::string(source);
     }
 
     static std::string scoped_principal_key(
