@@ -82,11 +82,26 @@ GuiRuntimeCredentialPolicy parse_gui_runtime_credentials(
         const char* current_name, const char* previous_name) {
         group.lookupValue("credential_enabled", spec.enabled);
         std::string path;
-        if(group.lookupValue(current_name, path)) spec.current_path = std::move(path);
-        if(group.lookupValue(previous_name, path)) spec.previous_path = std::move(path);
+        const bool current_configured = group.lookupValue(current_name, path);
+        if(current_configured) spec.current_path = std::move(path);
+        const bool previous_configured = group.lookupValue(previous_name, path);
+        if(previous_configured) {
+            spec.previous_path = std::move(path);
+        } else if(current_configured) {
+            spec.previous_path = spec.current_path;
+            spec.previous_path += ".previous";
+        }
         parse_seconds(group, "credential_bootstrap_freshness_seconds", spec.bootstrap_freshness);
         parse_seconds(group, "credential_rotation_seconds", spec.rotation_interval);
         parse_seconds(group, "credential_overlap_seconds", spec.overlap);
+    };
+    const auto validate_generation_layout = [](const RuntimeCredentialSpec& spec) {
+        const bool distinct_paths = spec.current_path != spec.previous_path;
+        const bool shared_directory =
+            spec.current_path.parent_path() == spec.previous_path.parent_path();
+        if(!distinct_paths || !shared_directory)
+            throw std::invalid_argument(
+                "runtime credential generations must use distinct files in one directory");
     };
 
     if(gui.exists("smithproxy")) {
@@ -95,6 +110,7 @@ GuiRuntimeCredentialPolicy parse_gui_runtime_credentials(
             throw std::invalid_argument("gui.smithproxy is not a group");
         parse_group(smithproxy, policy.management_api,
                     "api_token_file", "previous_api_token_file");
+        validate_generation_layout(policy.management_api);
         smithproxy.lookupValue(
             "administrator_auth_socket_enabled",
             policy.administrator_auth_socket_enabled);
@@ -120,6 +136,7 @@ GuiRuntimeCredentialPolicy parse_gui_runtime_credentials(
             throw std::invalid_argument("gui.gateway is not a group");
         policy.gateway.enabled = true;
         parse_group(gateway, policy.gateway, "secret_file", "previous_secret_file");
+        validate_generation_layout(policy.gateway);
     }
     return policy;
 }
