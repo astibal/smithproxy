@@ -35,7 +35,7 @@ protected:
         std::filesystem::remove_all(directory_, error);
     }
 
-    nlohmann::json exchange(const nlohmann::json& request) const {
+    nlohmann::json exchange_payload(const std::string& payload) const {
         const int descriptor = ::socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
         EXPECT_GE(descriptor, 0);
         if(descriptor < 0) return {};
@@ -49,7 +49,6 @@ protected:
         EXPECT_EQ(::connect(
             descriptor, reinterpret_cast<const sockaddr*>(&address), address_size), 0);
 
-        const auto payload = request.dump();
         EXPECT_EQ(::send(descriptor, payload.data(), payload.size(), MSG_NOSIGNAL),
                   static_cast<ssize_t>(payload.size()));
         std::array<char, 4096> response {};
@@ -58,6 +57,10 @@ protected:
         ::close(descriptor);
         if(received <= 0) return {};
         return nlohmann::json::parse(response.data(), response.data() + received);
+    }
+
+    nlohmann::json exchange(const nlohmann::json& request) const {
+        return exchange_payload(request.dump());
     }
 
     std::filesystem::path directory_;
@@ -147,6 +150,53 @@ TEST_F(AdminAuthSocketTest, RejectsUnknownAndOversizedRequestsWithoutAuthenticat
         {"password", std::string(5000U, 'p')},
     });
     EXPECT_EQ(oversized_packet["status"], "invalid_request");
+    EXPECT_EQ(authentication_calls, 0U);
+}
+
+TEST_F(AdminAuthSocketTest, RejectsMalformedAndIncompleteJsonWithoutAuthentication) {
+    std::size_t authentication_calls = 0;
+    sx::admin::AuthSocket server(
+        socket_path_,
+        [&](std::string_view, std::string_view, std::string_view) {
+            ++authentication_calls;
+            return sx::admin::LoginResult{
+                sx::admin::LoginStatus::accepted, {}, {}, false, 0};
+        });
+    ASSERT_TRUE(server.start());
+
+    const auto malformed = exchange_payload("{not-json");
+    EXPECT_EQ(malformed["status"], "invalid_request");
+
+    const auto missing_password = exchange({
+        {"version", 1},
+        {"operation", "authenticate"},
+        {"username", "alice"},
+    });
+    EXPECT_EQ(missing_password["status"], "invalid_request");
+
+    const auto wrong_password_type = exchange({
+        {"version", 1},
+        {"operation", "authenticate"},
+        {"username", "alice"},
+        {"password", 42},
+    });
+    EXPECT_EQ(wrong_password_type["status"], "invalid_request");
+
+    const auto empty_username = exchange({
+        {"version", 1},
+        {"operation", "authenticate"},
+        {"username", ""},
+        {"password", "password"},
+    });
+    EXPECT_EQ(empty_username["status"], "invalid_request");
+
+    const auto empty_password = exchange({
+        {"version", 1},
+        {"operation", "authenticate"},
+        {"username", "alice"},
+        {"password", ""},
+    });
+    EXPECT_EQ(empty_password["status"], "invalid_request");
     EXPECT_EQ(authentication_calls, 0U);
 }
 
