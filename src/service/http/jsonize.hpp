@@ -45,6 +45,7 @@
 #include <nlohmann/json.hpp>
 
 #include "src/proxy/mitmproxy.hpp"
+#include <proxy/session_epitaph.hpp>
 #include <libconfig.h++>
 
 namespace jsonize {
@@ -52,6 +53,7 @@ namespace jsonize {
     nlohmann::json from(baseCom* xcom, int verbosity);
     nlohmann::json from(MitmProxy* what, int verbosity);
     nlohmann::json from(MitmHostCX* what, int verbosity);
+    nlohmann::json from(sx::proxy::SessionEpitaph const& what);
 
     template <typename T>
     std::optional<T> load_json_params(std::string const& args, const char* varname) {

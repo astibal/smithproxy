@@ -6,6 +6,30 @@ namespace jsonize {
 
     using namespace nlohmann;
 
+    nlohmann::json from(sx::proxy::SessionEpitaph const& what) {
+
+        nlohmann::json info = {
+            {"session", what.connection_label},
+            {"policy", what.policy},
+            {"bytes_up", what.bytes_up},
+            {"bytes_down", what.bytes_down},
+            {"ja4_ch", what.ja4_client_hello},
+            {"ja4_ch_standard", what.ja4_client_hello_standard},
+            {"ja4_ch_no_sni", what.ja4_client_hello_no_sni},
+            {"ja4_ch_ignore_sni", what.ja4_client_hello_ignore_sni},
+            {"ja4_sh", what.ja4_server_hello},
+        };
+
+        if(what.parent_connection_id && what.stream_id) {
+
+            info["scope"] = "stream";
+            info["parent_id"] = *what.parent_connection_id;
+            info["stream_id"] = *what.stream_id;
+        }
+
+        return {{"info", std::move(info)}};
+    }
+
     nlohmann::json from(baseCom *xcom, int verbosity) {
 
         nlohmann::json ret;

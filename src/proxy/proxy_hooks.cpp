@@ -10,6 +10,7 @@
 #include <proxy/httpconnect/httpconnectreply.hpp>
 #include <proxy/directional_content.hpp>
 #include <service/http/webhooks.hpp>
+#include <service/http/jsonize.hpp>
 #include <socle/common/base64.hpp>
 
 #include <netdb.h>
@@ -650,32 +651,10 @@ bool ProxyHooks::start(MitmProxy& proxy, const StartArgs&) {
     return !proxy.state().dead();
 }
 
-ProxyHooks::Epitaph ProxyHooks::prepare_stop(const MitmProxy& proxy, const StopArgs&) {
+ProxyHooks::Epitaph ProxyHooks::prepare_stop(const SessionEpitaph& session,
+                                             const StopArgs&) {
 
-    nlohmann::json j;
-    auto cl = proxy.to_connection_label();
-
-    uint64_t uB = 0L;
-    uint64_t dB = 0L;
-    auto const* l = proxy.first_left();
-    if(l) {
-        uB = l->meter_read_bytes;
-        dB = l->meter_write_bytes;
-    }
-
-    j["info"] = { {"session", cl },
-                  {"policy", proxy.matched_policy() },
-                  { "bytes_up", uB },
-                  { "bytes_down", dB },
-                  { "ja4_ch", proxy.ja4.ClientHello },
-                  { "ja4_ch_standard", proxy.ja4.ClientHelloStandard },
-                  { "ja4_ch_no_sni", proxy.ja4.ClientHelloNoSNI },
-                  { "ja4_ch_ignore_sni", proxy.acct_opts.ja4_clienthello_ignore_sni },
-                  { "ja4_sh", proxy.ja4.ServerHello },
-    };
-
-    proxy.add_webhook_stream_details(j["info"]);
-    return {proxy.to_connection_ID(), std::move(j), nullptr};
+    return {session.connection_id, jsonize::from(session), nullptr};
 }
 
 void ProxyHooks::enrich_stop(Epitaph& epitaph, const MitmProxy& proxy) {
