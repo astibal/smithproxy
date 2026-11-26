@@ -454,7 +454,9 @@ std::string CfgFactory::materialize_runtime_archive() {
     if(!runtime_tree_) {
         log.inf("creating runtime view of archived configuration resources");
         runtime_tree_.emplace(
-            sx::cfg::CfgRuntimeTree::create(sx::cfg::smithproxy_schema(), config_archive_->archive()));
+            sx::cfg::CfgRuntimeTree::create(
+                sx::cfg::smithproxy_schema(), config_archive_->archive(),
+                std::make_shared<sx::cfg::SmithproxyRuntimeIo>()));
     }
     return runtime_tree_->root();
 }

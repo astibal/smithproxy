@@ -67,6 +67,17 @@
 #include <service/reload/file_reload_service.hpp>
 
 namespace sx::cfg {
+
+// Keep application-owned runtime paths consistent with the AppArmor profile.
+// Use this provider only when materializing Smithproxy's private runtime tree.
+class SmithproxyRuntimeIo final : public CfgIo {
+public:
+    int create_temp_directory(std::string& pattern) const override {
+        pattern = "/tmp/smithproxy-cftar-runtime-XXXXXX";
+        return CfgIo::create_temp_directory(pattern);
+    }
+};
+
 struct SaveResult;
 }
 
