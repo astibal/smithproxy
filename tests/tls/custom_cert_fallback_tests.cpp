@@ -221,3 +221,150 @@ TEST_F(CustomCertFallback, RenewalLoadsNewCertificateBytes) {
     EXPECT_NE(std::string(reinterpret_cast<char*>(old_digest), old_length),
               std::string(reinterpret_cast<char*>(new_digest), new_length));
 }
+
+TEST_F(CustomCertFallback, RoutedBackendDoesNotChangeFrontendCertificate) {
+    for (const bool primary : {true, false}) {
+        const auto directory = root / (primary ? "primary/server/ip" : "external/ip");
+        identity(directory / "192.0.2.30");
+        identity(directory / "192.0.2.22");
+        ASSERT_TRUE(factory.load_custom_certificates());
+
+        auto* connection = new IdentityProbe();
+        baseHostCX client(connection, "192.0.2.100", "12345");
+        baseHostCX origin(new TCPCom(), "192.0.2.30", "443");
+        client.peer(&origin);
+        connection->nonlocal_dst_host() = "192.0.2.30";
+        connection->nonlocal_dst_resolved(true);
+        connection->opt.cert.mitm_cert_sni_search = false;
+        connection->opt.cert.mitm_cert_ip_search = true;
+        connection->opt.cert.mitm_cert_searched_only = true;
+
+        // Routing replaces the origin endpoint after accepting the frontend.
+        origin.host("192.0.2.22");
+        SpoofOptions options;
+        ASSERT_TRUE(connection->spoof_cert(nullptr, options));
+        const auto key = std::string(primary ? "ip:" : "fallback:ip:") + "192.0.2.30";
+        auto expected = factory.find_custom(key);
+        ASSERT_TRUE(expected);
+        EXPECT_EQ(connection->selected_certificate(), expected->chain.cert);
+
+        connection->use_cert_null();
+        client.peer(nullptr);
+        fs::remove_all(directory);
+    }
+}
+
+TEST_F(CustomCertFallback, OriginalDestinationDoesNotFallBackToBackendIdentity) {
+    identity(root / "external/ip/192.0.2.22");
+    ASSERT_TRUE(factory.load_custom_certificates());
+    auto* connection = new IdentityProbe();
+    baseHostCX client(connection, "192.0.2.100", "12345");
+    baseHostCX origin(new TCPCom(), "192.0.2.22", "443");
+    client.peer(&origin);
+    connection->nonlocal_dst_host() = "192.0.2.30";
+    connection->nonlocal_dst_resolved(true);
+    connection->opt.cert.mitm_cert_sni_search = false;
+    connection->opt.cert.mitm_cert_ip_search = true;
+    connection->opt.cert.mitm_cert_searched_only = true;
+    SpoofOptions options;
+    EXPECT_FALSE(connection->spoof_cert(nullptr, options));
+    connection->use_cert_null();
+    client.peer(nullptr);
+}
+
+TEST_F(CustomCertFallback, AcceptedSocketRetainsDestinationAfterBackendRewrite) {
+    struct SocketGuard {
+        int fd = -1;
+        ~SocketGuard() { if (fd >= 0) ::close(fd); }
+    };
+    SocketGuard listener{::socket(AF_INET, SOCK_STREAM, 0)};
+    ASSERT_GE(listener.fd, 0);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ASSERT_EQ(::bind(listener.fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
+    ASSERT_EQ(::listen(listener.fd, 1), 0);
+    socklen_t size = sizeof(address);
+    ASSERT_EQ(::getsockname(listener.fd, reinterpret_cast<sockaddr*>(&address), &size), 0);
+    SocketGuard caller{::socket(AF_INET, SOCK_STREAM, 0)};
+    ASSERT_GE(caller.fd, 0);
+    ASSERT_EQ(::connect(caller.fd, reinterpret_cast<sockaddr*>(&address), size), 0);
+    SocketGuard accepted{::accept(listener.fd, nullptr, nullptr)};
+    ASSERT_GE(accepted.fd, 0);
+
+    identity(root / "external/ip/127.0.0.1");
+    ASSERT_TRUE(factory.load_custom_certificates());
+    auto* connection = new IdentityProbe();
+    baseHostCX client(connection, "127.0.0.1", "12345");
+    baseHostCX origin(new TCPCom(), "127.0.0.1", "443");
+    client.peer(&origin);
+    ASSERT_TRUE(connection->resolve_nonlocal_dst_socket(accepted.fd));
+    origin.host("192.0.2.22");
+    connection->opt.cert.mitm_cert_sni_search = false;
+    connection->opt.cert.mitm_cert_ip_search = true;
+    connection->opt.cert.mitm_cert_searched_only = true;
+    SpoofOptions options;
+    EXPECT_TRUE(connection->spoof_cert(nullptr, options));
+    auto expected = factory.find_custom("fallback:ip:127.0.0.1");
+    ASSERT_TRUE(expected);
+    EXPECT_EQ(connection->selected_certificate(), expected->chain.cert);
+    connection->use_cert_null();
+    client.peer(nullptr);
+}
+
+TEST_F(CustomCertFallback, DestinationLookupHandlesAbsentAndUnresolvedEndpoints) {
+    IdentityProbe detached;
+    EXPECT_TRUE(detached.original_destination_ip().empty());
+    auto* connection = new IdentityProbe();
+    baseHostCX client(connection, "192.0.2.100", "12345");
+    EXPECT_TRUE(connection->original_destination_ip().empty());
+    baseHostCX origin(new TCPCom(), "192.0.2.22", "443");
+    client.peer(&origin);
+    connection->nonlocal_dst_host() = "192.0.2.30";
+    EXPECT_EQ(connection->original_destination_ip(), "192.0.2.22");
+    connection->nonlocal_dst_resolved(true);
+    connection->nonlocal_dst_host().clear();
+    EXPECT_EQ(connection->original_destination_ip(), "192.0.2.22");
+    client.peer(nullptr);
+}
+
+TEST_F(CustomCertFallback, MissingFrontendCustomAllowsMitmOnlyWhenConfigured) {
+    identity(root / "external/ip/192.0.2.22");
+    ASSERT_TRUE(factory.load_custom_certificates());
+    auto close_file = [](FILE* file) { fclose(file); };
+    std::unique_ptr<FILE, decltype(close_file)> file(
+        fopen("etc/certs/default/srv-cert.pem", "r"), close_file);
+    ASSERT_TRUE(file);
+    std::unique_ptr<X509, decltype(&X509_free)> backend(
+        PEM_read_X509(file.get(), nullptr, nullptr, nullptr), X509_free);
+    ASSERT_TRUE(backend);
+
+    for (const bool custom_only : {true, false}) {
+        auto* connection = new IdentityProbe();
+        baseHostCX client(connection, "192.0.2.100", "12345");
+        baseHostCX origin(new TCPCom(), "192.0.2.22", "443");
+        client.peer(&origin);
+        connection->nonlocal_dst_host() = "192.0.2.30";
+        connection->nonlocal_dst_resolved(true);
+        connection->opt.cert.mitm_cert_sni_search = false;
+        connection->opt.cert.mitm_cert_ip_search = true;
+        connection->opt.cert.mitm_cert_searched_only = custom_only;
+        SpoofOptions options;
+        const bool selected = connection->spoof_cert(backend.get(), options);
+        EXPECT_EQ(selected, !custom_only);
+        if (custom_only) {
+            EXPECT_EQ(connection->selected_certificate(), nullptr);
+        } else {
+            auto* generated = connection->selected_certificate();
+            ASSERT_NE(generated, nullptr);
+            EXPECT_NE(X509_cmp(generated, backend.get()), 0);
+            EXPECT_EQ(X509_NAME_cmp(X509_get_subject_name(generated),
+                                    X509_get_subject_name(backend.get())), 0);
+            auto cached = factory.find_mitm(SSLFactory::make_store_key(backend.get(), options));
+            ASSERT_TRUE(cached);
+            EXPECT_EQ(generated, cached->chain.cert);
+        }
+        connection->use_cert_null();
+        client.peer(nullptr);
+    }
+}
