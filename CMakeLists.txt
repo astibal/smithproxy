@@ -24,6 +24,8 @@ include(CTest)
 include(${PROJECT_SOURCE_DIR}/cmake/QuicBackend.cmake)
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}")
 
+option(SMITHPROXY_SKIP_GIT_HOOKS "Do not install repository hooks during packaging" OFF)
+
 option(SMITHPROXY_COVERAGE "Instrument Smithproxy tests for GCC line coverage" OFF)
 if(SMITHPROXY_COVERAGE)
     if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -104,7 +106,9 @@ if("${USE_PAM}" STREQUAL "Y")
 endif()
 
 
-create_git_hooks()
+if(NOT SMITHPROXY_SKIP_GIT_HOOKS)
+    create_git_hooks()
+endif()
 
 include_directories ("${SOCLE_DIR}")
 include_directories ("${SOCLE_COMMON_DIR}")

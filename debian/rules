@@ -1,0 +1,19 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@ --buildsystem=cmake
+
+override_dh_auto_configure:
+	dh_auto_configure -- \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_INSTALL_PREFIX=/usr \
+		-DBUILD_TESTING=OFF \
+		-DSMITHPROXY_SKIP_GIT_HOOKS=ON \
+		$(DEB_CMAKE_EXTRA_FLAGS)
+
+override_dh_auto_test:
+	# The project test suite requires a separate, explicitly configured test profile.
+
+override_dh_fixperms:
+	dh_fixperms
+	chmod 0600 debian/smithproxy/etc/smithproxy/smithproxy.cftar
