@@ -117,7 +117,16 @@ protected:
             );
             signatures = ();
         )");
+        prototype_config.readString(R"(
+            policy = (
+                { name = ""; proto = "tcp"; src = []; features = []; }
+            );
+        )");
         access.root = [&]() -> libconfig::Setting& { return config.getRoot(); };
+        access.prototype = [&](std::string_view path) -> libconfig::Setting const* {
+            return path.substr(0, 7) == "policy."
+                ? &prototype_config.lookup("policy.[0]") : nullptr;
+        };
         access.collection_kind = [](std::string_view path) {
             if (path == "policy" || path == "signatures") return ConfigCollectionKind::ordered_objects;
             if (path == "objects") return ConfigCollectionKind::named_objects;
@@ -217,6 +226,7 @@ protected:
     }
 
     libconfig::Config config;
+    libconfig::Config prototype_config;
     ConfigCli2Access access;
     std::unique_ptr<ConfigCli2Session> state;
     libcli2::Cli cli;
@@ -334,6 +344,22 @@ TEST_F(ConfigCli2Test, CompletionReadsCurrentNodeAndPreviousArgument) {
     auto values = cli.complete("set proto u", context);
     ASSERT_EQ(values.items.size(), 1U);
     EXPECT_EQ(values.items.front().value, "udp");
+}
+
+TEST_F(ConfigCli2Test, CompletionIncludesPropertiesMissingFromTheLiveObject) {
+    ASSERT_TRUE(cli.execute("configure terminal", context));
+    ASSERT_TRUE(cli.execute("edit policy [1]", context));
+
+    const auto scalar = cli.complete("set s", context);
+    ASSERT_EQ(scalar.items.size(), 1U);
+    EXPECT_EQ(scalar.items.front().value, "src");
+
+    const auto collection = cli.complete("toggle f", context);
+    ASSERT_EQ(collection.items.size(), 1U);
+    EXPECT_EQ(collection.items.front().value, "features");
+
+    EXPECT_TRUE(cli.execute("set src any", context));
+    EXPECT_EQ(last_set, "policy.[1]:src=any");
 }
 
 TEST_F(ConfigCli2Test, SetForwardsAllValuesIncludingQuotedTokens) {

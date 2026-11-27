@@ -31,6 +31,9 @@ struct ConfigCli2Access {
                                               const std::vector<std::string>& values, std::string& error)>;
 
     std::function<libconfig::Setting&()> root;
+    // Returns the canonical shape for the object at path. Live values remain
+    // authoritative; the prototype only supplies absent editable properties.
+    std::function<libconfig::Setting const*(std::string_view path)> prototype;
     // Protects traversal while another Smithproxy thread may replace/reload
     // parts of the live libconfig tree. Optional for standalone users/tests.
     std::recursive_mutex* mutex = nullptr;

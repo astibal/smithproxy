@@ -321,8 +321,12 @@ std::string policy_description(const libconfig::Setting& policy, const libconfig
 }  // namespace
 
 ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
+
     ConfigCli2Access access;
     access.root = []() -> libconfig::Setting& { return CfgFactory::cfg_root(); };
+    access.prototype = [](std::string_view path) {
+        return CfgFactory::get()->new_entry_prototype(path);
+    };
     access.mutex = &CfgFactory::lock();
     access.collection_kind = collection_kind;
     access.can_add = [](std::string_view path) {
@@ -369,18 +373,34 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
         }
         if (!CfgFactory::cfg_obj().exists(section)) { error = "unknown configuration section"; return false; }
         auto& setting = CfgFactory::cfg_obj().lookup(section);
-        if (!setting.exists(name.c_str())) { error = "unknown property: " + name; return false; }
-        auto& property_setting = setting[name.c_str()];
+        auto* property_setting = setting.exists(name.c_str())
+            ? &setting[name.c_str()] : nullptr;
+
+        if(!property_setting) {
+            const auto* prototype = CfgFactory::get()->new_entry_prototype(path);
+
+            if(prototype && prototype->exists(name.c_str())) {
+                property_setting = &(*prototype)[name.c_str()];
+            }
+        }
+
+        if(!property_setting) {
+            error = "unknown property: " + name;
+            return false;
+        }
+
         if(live_apply == CfgValue::live_apply_t::none &&
-           (property_setting.isScalar() || property_setting.isArray())) {
+           (property_setting->isScalar() || property_setting->isArray())) {
             // CLI arguments are text. Convert them while the referenced
             // libconfig setting is protected, then release the ordinary
             // writer guard before acquiring the transaction lease. Keeping
             // the guard here would recursively acquire the gate's
             // non-recursive writer mutex and deadlock the CLI session.
-            auto value = transaction_value(property_setting, values, error);
+            auto value = transaction_value(*property_setting, values, error);
+
             if(!value) return false;
-            std::string transaction_path = property_setting.getPath();
+
+            std::string transaction_path = section + "." + name;
             guard.reset();
             return transaction_set(
                 subscriber_id,
@@ -389,6 +409,12 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
                 error);
         }
         std::string previous_value;
+
+        if(!setting.exists(name.c_str())) {
+            error = "live setting cannot create this property";
+            return false;
+        }
+
         if (is_worker_action(live_apply))
             previous_value = std::to_string(static_cast<int>(setting[name.c_str()]));
         auto [written, message] = CfgFactory::get()->cfg_write_value(setting, false, name, values);
@@ -448,10 +474,30 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
                                        const std::vector<std::string>& values, std::string& error) mutable {
         std::vector<std::string> current;
         auto toggles = values;
+
         try {
+
             const std::string property_name(property);
-            const auto& setting = CfgFactory::cfg_obj().lookup(std::string(path))[property_name.c_str()];
-            for (int i = 0; i < setting.getLength(); ++i) current.emplace_back(static_cast<const char*>(setting[i]));
+            const auto& parent = CfgFactory::cfg_obj().lookup(std::string(path));
+            const libconfig::Setting* setting = parent.exists(property_name.c_str())
+                ? &parent[property_name.c_str()] : nullptr;
+
+            if(!setting) {
+                const auto* prototype = CfgFactory::get()->new_entry_prototype(path);
+
+                if(prototype && prototype->exists(property_name.c_str())) {
+                    setting = &(*prototype)[property_name.c_str()];
+                }
+            }
+
+            if(!setting || (!setting->isArray() && !setting->isList())) {
+                error = "unknown collection property: " + property_name;
+                return false;
+            }
+
+            for (int i = 0; i < setting->getLength(); ++i) {
+                current.emplace_back(static_cast<const char*>((*setting)[i]));
+            }
         } catch (const libconfig::SettingException& exception) {
             error = exception.what();
             return false;

@@ -1250,7 +1250,12 @@ bool SmithProxy::apply_config_hooks(bool reload) {
             //init crashlog file with dafe default
             this_daemon->set_crashlog("/tmp/smithproxy_crash.log");
 
-            if(load_if_exists(CfgFactory::cfg_root()["settings"], "log_file",CfgFactory::get()->log_file_base)) {
+            const bool log_file_loaded = load_if_exists_or_keep(
+                CfgFactory::cfg_root()["settings"],
+                "log_file",
+                CfgFactory::get()->log_file_base);
+
+            if(log_file_loaded) {
 
                 CfgFactory::get()->log_file = CfgFactory::get()->log_file_base;
 
@@ -1278,7 +1283,12 @@ bool SmithProxy::apply_config_hooks(bool reload) {
                 }
             }
             //
-            if(load_if_exists(CfgFactory::cfg_root()["settings"], "sslkeylog_file", CfgFactory::get()->sslkeylog_file_base)) {
+            const bool key_log_file_loaded = load_if_exists_or_keep(
+                CfgFactory::cfg_root()["settings"],
+                "sslkeylog_file",
+                CfgFactory::get()->sslkeylog_file_base);
+
+            if(key_log_file_loaded) {
 
                 CfgFactory::get()->sslkeylog_file = CfgFactory::get()->sslkeylog_file_base;
 
@@ -1311,7 +1321,12 @@ bool SmithProxy::apply_config_hooks(bool reload) {
                 }
             }
 
-            if(load_if_exists(CfgFactory::cfg_root()["settings"],"log_console", CfgFactory::get()->log_console)) {
+            const bool console_log_loaded = load_if_exists_or_keep(
+                CfgFactory::cfg_root()["settings"],
+                "log_console",
+                CfgFactory::get()->log_console);
+
+            if(console_log_loaded) {
                 Log::get()->dup2_cout(CfgFactory::get()->log_console);
             }
         }

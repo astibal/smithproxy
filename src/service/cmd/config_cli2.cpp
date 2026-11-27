@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <set>
 
 namespace {
 
@@ -185,29 +186,72 @@ bool ConfigCli2Session::navigable(const libconfig::Setting& setting) const {
 }
 
 std::vector<libcli2::CompletionItem> ConfigCli2Session::properties() const {
+
     std::unique_lock<std::recursive_mutex> lock;
     if (access_.mutex) lock = std::unique_lock<std::recursive_mutex>(*access_.mutex);
     std::vector<libcli2::CompletionItem> result;
     const auto* setting = current();
+
     if (!setting || !setting->isAggregate()) return result;
-    for (int i = 0; i < setting->getLength(); ++i) {
-        const auto& child = (*setting)[i];
-        if (child.isAggregate() && !child.isArray() && !child.isList()) continue;
-        result.push_back({child.getName() ? child.getName() : "[" + std::to_string(i) + "]", {}});
+
+    std::set<std::string, std::less<>> names;
+
+    auto append_properties = [&](libconfig::Setting const& source) {
+
+        for (int i = 0; i < source.getLength(); ++i) {
+            const auto& child = source[i];
+
+            if (child.isGroup() || child.isList()) continue;
+
+            const std::string name = child.getName()
+                ? child.getName() : "[" + std::to_string(i) + "]";
+
+            if(names.insert(name).second) result.push_back({name, {}});
+        }
+    };
+
+    append_properties(*setting);
+
+    if(access_.prototype) {
+        const auto* prototype = access_.prototype(path());
+
+        if(prototype) append_properties(*prototype);
     }
+
     return result;
 }
 
 std::vector<libcli2::CompletionItem> ConfigCli2Session::toggle_properties() const {
+
     std::unique_lock<std::recursive_mutex> lock;
     if (access_.mutex) lock = std::unique_lock<std::recursive_mutex>(*access_.mutex);
     std::vector<libcli2::CompletionItem> result;
     const auto* setting = current();
+
     if (!setting || !setting->isAggregate()) return result;
-    for (int i = 0; i < setting->getLength(); ++i) {
-        const auto& child = (*setting)[i];
-        if ((child.isArray() || child.isList()) && child.getName()) result.push_back({child.getName(), {}});
+
+    std::set<std::string, std::less<>> names;
+
+    auto append_properties = [&](libconfig::Setting const& source) {
+
+        for (int i = 0; i < source.getLength(); ++i) {
+            const auto& child = source[i];
+
+            if(child.isArray() && child.getName() &&
+               names.insert(child.getName()).second) {
+                result.push_back({child.getName(), {}});
+            }
+        }
+    };
+
+    append_properties(*setting);
+
+    if(access_.prototype) {
+        const auto* prototype = access_.prototype(path());
+
+        if(prototype) append_properties(*prototype);
     }
+
     return result;
 }
 
