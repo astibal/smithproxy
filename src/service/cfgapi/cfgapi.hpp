@@ -44,7 +44,10 @@
 #include <map>
 #include <mutex>
 #include <chrono>
+#include <functional>
 #include <optional>
+#include <string_view>
+#include <type_traits>
 #include <utility>
  
 #include <libconfig.h++>
@@ -68,6 +71,17 @@
 #include <service/reload/file_reload_service.hpp>
 
 namespace sx::cfg {
+
+// Keep application-owned runtime paths consistent with the AppArmor profile.
+// Use this provider only when materializing Smithproxy's private runtime tree.
+class SmithproxyRuntimeIo final : public CfgIo {
+public:
+    int create_temp_directory(std::string& pattern) const override {
+        pattern = "/tmp/smithproxy-cftar-runtime-XXXXXX";
+        return CfgIo::create_temp_directory(pattern);
+    }
+};
+
 struct SaveResult;
 }
 
@@ -151,6 +165,9 @@ class CfgFactory : public CfgFactoryBase {
     };
 
     libconfig::Config cfgapi;
+    // Canonical editable shape of every object created by the configuration
+    // API. The CLI reads this catalog when a live object is incomplete.
+    libconfig::Config new_entry_catalog_;
     // Describes the persistent bytes backing cfgapi. Keeping source policy
     // beside the parsed config prevents save and backup paths from guessing
     // whether config_file names a legacy text file or a native archive. It is
@@ -187,7 +204,10 @@ public:
         "Certificate Transparency is enabled by policy, but the CT log list is "
         "unavailable. CT validation remains FAIL-CLOSED.";
 
-    CfgFactory(): archive_storage_(*this) {}
+    CfgFactory(): archive_storage_(*this) {
+
+        build_new_entry_catalog();
+    }
     CfgFactory(CfgFactory const &) = delete;
     void operator=(const CfgFactory&) = delete;
     ~CfgFactory() override {
@@ -290,6 +310,8 @@ public:
     sx::cfg::tx::Result<sx::cfg::tx::Prepared> prepare_operations(
         sx::cfg::tx::Transaction& transaction,
         std::vector<sx::cfg::tx::Op> operations);
+    [[nodiscard]] libconfig::Setting const* new_entry_prototype(
+        std::string_view path) const;
     static libconfig::Setting& cfg_root() { return get()->cfgapi.getRoot(); }
     static libconfig::Config&  cfg_obj() { return get()->cfgapi; }
 
@@ -561,6 +583,7 @@ public:
     bool build_new_entry(libconfig::Setting& collection,
                          std::string const& section,
                          std::string const& entry_name) const;
+    void build_new_entry_catalog();
     [[nodiscard]] bool supports_new_entry(std::string const& section) const;
     static bool _apply_new_entry(std::string const& section, std::string const& entry_name);
 
@@ -771,11 +794,13 @@ inline std::shared_ptr<T> CfgFactory::section_element(std::string const& section
 
 // HELPERS
 
-// load value from config if the config key exists - this is workaround to some versions
-// of libconfig++ on armhf which don't keep the promise and lookupValue throws an exception
+// Load a value when its key and type are valid. Missing or malformed values
+// use the explicit fallback, which may also be a profile-owned defaults
+// callback accepting the key and destination.
 
-template <class T>
-bool load_if_exists(libconfig::Setting const& s, const char* key, T& valref) {
+template <class T, class Default>
+bool load_if_exists(libconfig::Setting const& s, const char* key, T& valref,
+                    Default&& default_value) {
 
     try {
         std::string str_key(key);
@@ -800,7 +825,24 @@ bool load_if_exists(libconfig::Setting const& s, const char* key, T& valref) {
         _war("cannot load: %s: %s", key, e.what());
     }
 
+    if constexpr(std::is_invocable_v<Default, std::string_view, T&>) {
+        std::invoke(std::forward<Default>(default_value), key, valref);
+    } else {
+        valref = std::forward<Default>(default_value);
+    }
+
     return false;
+}
+
+template <class T>
+bool load_if_exists_or_keep(libconfig::Setting const& s, const char* key,
+                            T& valref) {
+
+    return load_if_exists(
+        s,
+        key,
+        valref,
+        [](std::string_view, T&) {});
 }
 
 template <class T>

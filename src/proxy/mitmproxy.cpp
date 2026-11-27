@@ -995,49 +995,120 @@ void MitmProxy::prepare_capture_stop() noexcept {
     });
 }
 
+sx::proxy::SessionEpitaph MitmProxy::make_session_epitaph() const {
+
+    sx::proxy::SessionEpitaph epitaph;
+    epitaph.connection_id = to_connection_ID();
+    epitaph.connection_label = to_connection_label();
+    epitaph.policy = matched_policy();
+
+    if(auto const* left = first_left(); left) {
+
+        epitaph.bytes_up = left->meter_read_bytes;
+        epitaph.bytes_down = left->meter_write_bytes;
+    }
+
+    epitaph.ja4_client_hello = ja4.ClientHello;
+    epitaph.ja4_client_hello_standard = ja4.ClientHelloStandard;
+    epitaph.ja4_client_hello_no_sni = ja4.ClientHelloNoSNI;
+    epitaph.ja4_client_hello_ignore_sni = acct_opts.ja4_clienthello_ignore_sni;
+    epitaph.ja4_server_hello = ja4.ServerHello;
+
+    if(webhook_stream) {
+
+        epitaph.parent_connection_id = webhook_stream->parent_id;
+        epitaph.stream_id = webhook_stream->stream_id;
+    }
+
+    return epitaph;
+}
+
 void MitmProxy::prepare_session_stop() {
+
     // Capture output also retires without webhooks, while CXs still exist.
     prepare_capture_stop();
-    if(!wh_start || wh_stop || (!sx::http::webhooks::is_enabled() &&
-                               !sx::http::webhooks::sift_enabled())) return;
 
-    // Commit the minimal owned snapshot first. Hooks and optional metadata may
-    // fail, but must not take the terminal notification with them. wh_stop guards
-    // reentrant shutdown from retirement hooks only after that snapshot exists.
-    try {
-        epitaph_ = std::make_unique<sx::proxy::ProxyHooks::Epitaph>(
-            sx::proxy::ProxyHooks::prepare_stop(*this, sx::proxy::ProxyHooks::StopArgs{}));
+    // Preserve the terminal identity independently of webhook configuration.
+    // Repeated shutdown paths reuse the first snapshot while contexts still exist.
+    if(!session_epitaph_) {
+
+        try {
+
+            session_epitaph_ = std::make_unique<sx::proxy::SessionEpitaph>(
+                make_session_epitaph());
+        }
+        catch(const std::exception& error) {
+
+            _err("MitmProxy::prepare_session_stop: failed to prepare session epitaph: %s",
+                 error.what());
+            return;
+        }
     }
-    catch(...) {
-        try { _err("MitmProxy::prepare_session_stop: failed to prepare session epitaph"); }
-        catch(...) {}
+
+    const bool hook_sink_enabled = sx::http::webhooks::is_enabled()
+                                   || sx::http::webhooks::sift_enabled();
+    const bool prepare_hook_epitaph = wh_start && !wh_stop && hook_sink_enabled;
+
+    if(!prepare_hook_epitaph) return;
+
+    try {
+
+        hook_epitaph_ = std::make_unique<sx::proxy::ProxyHooks::Epitaph>(
+            sx::proxy::ProxyHooks::prepare_stop(
+                *session_epitaph_, sx::proxy::ProxyHooks::StopArgs{}));
+    }
+    catch(const std::exception& error) {
+
+        _err("MitmProxy::prepare_session_stop: failed to serialize hook epitaph: %s",
+             error.what());
         return;
     }
+
+    // Optional metadata may fail, but must not take the terminal notification
+    // with it. wh_stop guards reentrant hook retirement.
     wh_stop = true;
 
     const auto attempt = [this](const char* stage, auto&& operation) noexcept {
+
         sx::proxy::retirement_step(operation, [&] {
+
             _err("MitmProxy::prepare_session_stop: failed %s", stage);
         });
     };
+
     attempt("TLS retirement", [&] {
+
         if(observe_tls(true) == ObserverStatus::Terminate) state().dead(true);
     });
     attempt("server retirement", [&] { finish_server_hooks(); });
-    attempt("stop metadata", [&] { sx::proxy::ProxyHooks::enrich_stop(*epitaph_, *this); });
+    attempt("stop metadata", [&] {
+
+        sx::proxy::ProxyHooks::enrich_stop(*hook_epitaph_, *this);
+    });
+
     for(auto& [name, filter] : filters_) {
+
         attempt("filter snapshot", [&] {
-            if(filter->update_states()) epitaph_->filter_info[name] = filter->to_json(iINF);
+
+            if(filter->update_states())
+                hook_epitaph_->filter_info[name] = filter->to_json(iINF);
         });
     }
+
     attempt("capture snapshot", [&] {
+
         auto capture = nlohmann::json::object();
+
         if(capture_metadata_payload_) capture["metadata"] = *capture_metadata_payload_;
+
         if(capture_statistics_payload_) capture["statistics"] = *capture_statistics_payload_;
+
         if(capture_tls_payload_) capture["tls"] = *capture_tls_payload_;
+
         if(auto profile = capture_protocol_profile(); profile)
             capture["protocol_profile"] = std::move(*profile);
-        if(!capture.empty()) epitaph_->filter_info["capture"] = std::move(capture);
+
+        if(!capture.empty()) hook_epitaph_->filter_info["capture"] = std::move(capture);
     });
 }
 
@@ -1046,17 +1117,18 @@ void MitmProxy::finalize() noexcept {
 
     // Consume once. The asynchronous request owns its own payload before this
     // snapshot is released; callbacks must never retain the proxy or its CXs.
-    auto snapshot = std::move(epitaph_);
+    if(!wh_stop) return;
+
+    auto snapshot = std::move(hook_epitaph_);
+
     if(!snapshot) return;
 
     try {
         sx::proxy::ProxyHooks::stop(*snapshot, sx::proxy::ProxyHooks::StopArgs{});
     }
-    catch(...) {
-        // Finalization is best effort. Even diagnostic allocation may fail;
-        // neither failure may escape into the owner's resource cleanup.
-        try { _err("MitmProxy::finalize: failed to enqueue session stop"); }
-        catch(...) {}
+    catch(const std::exception& error) {
+        // Finalization is best effort; hook failures must not escape cleanup.
+        _err("MitmProxy::finalize: failed to enqueue session stop: %s", error.what());
     }
 }
 
@@ -1078,7 +1150,22 @@ std::string MitmProxy::to_string(int verbosity) const {
     std::stringstream r;
     if(verbosity >= INF) r <<  "MitM|";
 
-    r << baseProxy::to_string(verbosity);
+    const bool endpoints_present = !left_sockets.empty() || !right_sockets.empty()
+        || !left_bind_sockets.empty() || !right_bind_sockets.empty()
+        || !left_pc_cx.empty() || !right_pc_cx.empty()
+        || !left_delayed_accepts.empty() || !right_delayed_accepts.empty();
+    const auto epitaph_session = session_epitaph_
+        ? session_epitaph_->connection_label : std::string{};
+    const auto endpoint_separator = epitaph_session.find('+');
+    const bool epitaph_available = endpoint_separator != std::string::npos;
+
+    if(!endpoints_present && epitaph_available) {
+        const auto left = epitaph_session.substr(0, endpoint_separator);
+        const auto right = epitaph_session.substr(endpoint_separator + 1);
+        r << "l:<" << left << "> <X> r:<" << right << "> ";
+    } else {
+        r << baseProxy::to_string(verbosity);
+    }
     
     if(verbosity >= INF) {
         r << string_format(" policy: %d ", matched_policy());

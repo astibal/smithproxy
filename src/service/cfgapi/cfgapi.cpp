@@ -536,7 +536,9 @@ std::string CfgFactory::materialize_runtime_archive() {
     if(!runtime_tree_) {
         log.inf("creating runtime view of archived configuration resources");
         runtime_tree_.emplace(
-            sx::cfg::CfgRuntimeTree::create(sx::cfg::smithproxy_schema(), config_archive_->archive()));
+            sx::cfg::CfgRuntimeTree::create(
+                sx::cfg::smithproxy_schema(), config_archive_->archive(),
+                std::make_shared<sx::cfg::SmithproxyRuntimeIo>()));
     }
     return runtime_tree_->root();
 }
@@ -1180,7 +1182,9 @@ bool CfgFactory::upgrade_to_0_9_23 () {
 
     std::cout << "upgrade script to 0.9.23" << std::endl;
 
-    if(long long tmp; load_if_exists(CfgFactory::cfg_root()["settings"], "write_pcap_single_quota", tmp)) {
+    if(long long tmp = 0;
+       load_if_exists(CfgFactory::cfg_root()["settings"],
+                      "write_pcap_single_quota", tmp, 0LL)) {
         traflog::PcapLog::single_instance().stat_bytes_quota = tmp / (1024 * 1024);
     }
     return true;
@@ -1263,7 +1267,7 @@ bool CfgFactory::upgrade_and_save() {
     int our_schema = SCHEMA_VERSION;
     int cfg_schema = 1000;
 
-    if(not load_if_exists(internal, "schema", cfg_schema)) {
+    if(not load_if_exists_or_keep(internal, "schema", cfg_schema)) {
         std::cerr << "schema versioning info not found, assuming 1000\n";
         internal.add("schema", libconfig::Setting::TypeInt) = 1000;
     }
@@ -1290,7 +1294,7 @@ bool CfgFactory::upgrade_and_save() {
     }
 
 
-    if(std::string v1; load_if_exists(internal, "version", v1)) {
+    if(std::string v1; load_if_exists_or_keep(internal, "version", v1)) {
 
         if (v1 != SMITH_VERSION) {
             if(!config_file_check_only && !backup_before_upgrade(v1)) {
@@ -1327,8 +1331,14 @@ bool CfgFactory::load_internal() {
         return false;
     }
 
-    auto having_version = load_if_exists(cfgapi.getRoot()["*_internal_*"], "version", internal_version);
-    auto having_schema  = load_if_exists(cfgapi.getRoot()["*_internal_*"], "schema", schema_version);
+    auto having_version = load_if_exists_or_keep(
+        cfgapi.getRoot()["*_internal_*"],
+        "version",
+        internal_version);
+    auto having_schema = load_if_exists_or_keep(
+        cfgapi.getRoot()["*_internal_*"],
+        "schema",
+        schema_version);
 
     if(not having_version) { Log::get()->events().insert(CRI,"config: internal 'version' not found"); CfgFactory::LOAD_ERRORS = true; }
     if(not having_schema) { Log::get()->events().insert(CRI,"config: internal 'schema' not found"); CfgFactory::LOAD_ERRORS = true; }
@@ -1356,17 +1366,20 @@ bool CfgFactory::load_settings () {
         return false;
     }
 
-    load_if_exists(cfgapi.getRoot()["settings"], "accept_tproxy", accept_tproxy);
-    load_if_exists(cfgapi.getRoot()["settings"], "accept_redirect", accept_redirect);
-    load_if_exists(cfgapi.getRoot()["settings"], "accept_socks", accept_socks);
-    load_if_exists(cfgapi.getRoot()["settings"], "accept_http_connect", accept_http_connect);
-    load_if_exists(cfgapi.getRoot()["settings"], "accept_api", accept_api);
-    load_if_exists(cfgapi.getRoot()["settings"],
+    load_if_exists_or_keep(cfgapi.getRoot()["settings"], "accept_tproxy", accept_tproxy);
+    load_if_exists_or_keep(cfgapi.getRoot()["settings"], "accept_redirect", accept_redirect);
+    load_if_exists_or_keep(cfgapi.getRoot()["settings"], "accept_socks", accept_socks);
+    load_if_exists_or_keep(
+        cfgapi.getRoot()["settings"],
+        "accept_http_connect",
+        accept_http_connect);
+    load_if_exists_or_keep(cfgapi.getRoot()["settings"], "accept_api", accept_api);
+    load_if_exists_or_keep(cfgapi.getRoot()["settings"],
                    "extended_local_destination_protection",
                    extended_local_destination_protection);
     const bool previous_fail_open = policy_fail_open;
     bool configured_fail_open = false;
-    const bool loaded_fail_open = load_if_exists(
+    const bool loaded_fail_open = load_if_exists_or_keep(
         cfgapi.getRoot()["settings"], "policy_fail_open", configured_fail_open);
     policy_fail_open = cfgapi_detail::fail_open_setting(loaded_fail_open, configured_fail_open);
     // A settings-only apply does not rebuild policies. Revoking no-match
@@ -1374,7 +1387,7 @@ bool CfgFactory::load_settings () {
     if(previous_fail_open != policy_fail_open)
         sx::proxy::policy_state_t::generation.fetch_add(1, std::memory_order_release);
     configured_fail_open = false;
-    const bool loaded_access_fail_open = load_if_exists(
+    const bool loaded_access_fail_open = load_if_exists_or_keep(
         cfgapi.getRoot()["settings"], "policy_access_request_fail_open", configured_fail_open);
     policy_access_request_fail_open = cfgapi_detail::fail_open_setting(
         loaded_access_fail_open, configured_fail_open);
@@ -1382,7 +1395,7 @@ bool CfgFactory::load_settings () {
     auto load_listener_port = [&](char const* name, std::string& base,
                                   std::string& effective) {
         std::string candidate = base;
-        const bool loaded = load_if_exists(settings, name, candidate);
+        const bool loaded = load_if_exists_or_keep(settings, name, candidate);
         if((settings.exists(name) && !loaded) ||
            !sx::cfg::parse_transport_port(candidate)) {
             _err("load_settings: settings.%s has invalid transport port '%s'; keeping '%s'",
@@ -1400,15 +1413,15 @@ bool CfgFactory::load_settings () {
     };
 
     load_listener_port("plaintext_port", listen_tcp_port_base, listen_tcp_port);
-    load_if_exists(cfgapi.getRoot()["settings"], "plaintext_workers",num_workers_tcp);
+    load_if_exists_or_keep(cfgapi.getRoot()["settings"], "plaintext_workers",num_workers_tcp);
     load_listener_port("ssl_port", listen_tls_port_base, listen_tls_port);
-    load_if_exists(cfgapi.getRoot()["settings"], "ssl_workers",num_workers_tls);
+    load_if_exists_or_keep(cfgapi.getRoot()["settings"], "ssl_workers",num_workers_tls);
     load_listener_port("udp_port", listen_udp_port_base, listen_udp_port);
-    load_if_exists(cfgapi.getRoot()["settings"], "udp_workers",num_workers_udp);
+    load_if_exists_or_keep(cfgapi.getRoot()["settings"], "udp_workers",num_workers_udp);
     load_listener_port("dtls_port", listen_dtls_port_base, listen_dtls_port);
-    load_if_exists(cfgapi.getRoot()["settings"], "dtls_workers",num_workers_dtls);
+    load_if_exists_or_keep(cfgapi.getRoot()["settings"], "dtls_workers",num_workers_dtls);
     load_listener_port("quic_port", listen_quic_port_base, listen_quic_port);
-    load_if_exists(cfgapi.getRoot()["settings"], "quic_workers",num_workers_quic);
+    load_if_exists_or_keep(cfgapi.getRoot()["settings"], "quic_workers",num_workers_quic);
 
     auto udp_redirect_port = sx::cfg::parse_transport_port(listen_udp_port, 973);
     if(!udp_redirect_port) {
@@ -1430,7 +1443,7 @@ bool CfgFactory::load_settings () {
     }
 
     bool collect_val = false;
-    load_if_exists(cfgapi.getRoot()["settings"], "tpool_log", collect_val);
+    load_if_exists_or_keep(cfgapi.getRoot()["settings"], "tpool_log", collect_val);
     sx::tp::ThreadPool::collect_tasks_info = collect_val;
 
 
@@ -1464,8 +1477,7 @@ bool CfgFactory::load_settings () {
                 if(ai.pack()) {
                     db_nameservers.push_back(ai);
                     _deb("load_settings: %s nameserver %s - added", famstr, ns.c_str());
-                }
-                else {
+                } else {
                     _err("load_settings: %s nameserver %s - cannot pack", famstr, ns.c_str());
                     Log::get()->events().insert(WAR, "CONFIG: settings.nameservers[%d]: '%s' - cannot be applied", i, famstr);
                     CfgFactory::LOAD_ERRORS = true;
@@ -1508,31 +1520,60 @@ bool CfgFactory::load_settings () {
     // materialized tree.
     auto& fallback_dir = SSLFactory::factory().custom_cert_fallback_dir();
     fallback_dir.clear();
-    load_if_exists(cfgapi.getRoot()["settings"], "custom_cert_fallback_dir", fallback_dir);
+    load_if_exists_or_keep(cfgapi.getRoot()["settings"], "custom_cert_fallback_dir", fallback_dir);
     fallback_dir = cfgapi_detail::custom_cert_directory(fallback_dir);
 
     configured_certs_path = "/etc/smithproxy/certs/default/";
     configured_ca_bundle_path.clear();
     configured_ca_bundle_file.clear();
     dir_msg_templates = "/etc/smithproxy/msg/en/";
-    load_if_exists(cfgapi.getRoot()["settings"], "certs_path", configured_certs_path);
+    load_if_exists_or_keep(cfgapi.getRoot()["settings"], "certs_path", configured_certs_path);
     SSLFactory::factory().certs_path() = configured_certs_path;
-    load_if_exists(cfgapi.getRoot()["settings"], "certs_ca_key_password",SSLFactory::factory().certs_password());
+    load_if_exists_or_keep(
+        cfgapi.getRoot()["settings"],
+        "certs_ca_key_password",
+        SSLFactory::factory().certs_password());
 
-    if(! load_if_exists(cfgapi.getRoot()["settings"], "certs_ctlog",SSLFactory::factory().ctlogfile())) {
+    const bool ct_log_loaded = load_if_exists_or_keep(
+        cfgapi.getRoot()["settings"],
+        "certs_ctlog",
+        SSLFactory::factory().ctlogfile());
+
+    if(!ct_log_loaded) {
         SSLFactory::factory().ctlogfile() = "/var/smithproxy/data/ct_log_list.cnf";
     }
 
 
-    load_if_exists(cfgapi.getRoot()["settings"], "ca_bundle_path", configured_ca_bundle_path);
-    load_if_exists(cfgapi.getRoot()["settings"], "ca_bundle_file", configured_ca_bundle_file);
+    load_if_exists_or_keep(
+        cfgapi.getRoot()["settings"],
+        "ca_bundle_path",
+        configured_ca_bundle_path);
+    load_if_exists_or_keep(
+        cfgapi.getRoot()["settings"],
+        "ca_bundle_file",
+        configured_ca_bundle_file);
     apply_runtime_resource_paths();
 
-    load_if_exists(cfgapi.getRoot()["settings"], "ssl_autodetect",MitmMasterProxy::ssl_autodetect);
-    load_if_exists(cfgapi.getRoot()["settings"], "ssl_autodetect_harder",MitmMasterProxy::ssl_autodetect_harder);
-    load_if_exists(cfgapi.getRoot()["settings"], "ssl_ocsp_status_ttl",SSLFactory::options::ocsp_status_ttl);
-    load_if_exists(cfgapi.getRoot()["settings"], "ssl_crl_status_ttl",SSLFactory::options::crl_status_ttl);
-    load_if_exists(cfgapi.getRoot()["settings"], "ssl_use_ktls",SSLFactory::options::ktls);
+    load_if_exists_or_keep(
+        cfgapi.getRoot()["settings"],
+        "ssl_autodetect",
+        MitmMasterProxy::ssl_autodetect);
+    load_if_exists_or_keep(
+        cfgapi.getRoot()["settings"],
+        "ssl_autodetect_harder",
+        MitmMasterProxy::ssl_autodetect_harder);
+    load_if_exists_or_keep(
+        cfgapi.getRoot()["settings"],
+        "ssl_ocsp_status_ttl",
+        SSLFactory::options::ocsp_status_ttl);
+    load_if_exists_or_keep(
+        cfgapi.getRoot()["settings"],
+        "ssl_crl_status_ttl",
+        SSLFactory::options::crl_status_ttl);
+    load_if_exists_or_keep(
+        cfgapi.getRoot()["settings"],
+        "ssl_use_ktls",
+        SSLFactory::options::ktls);
 
     if(cfgapi.getRoot()["settings"].exists("udp_quick_ports")) {
 
@@ -1549,10 +1590,13 @@ bool CfgFactory::load_settings () {
     }
 
     load_listener_port("socks_port", listen_socks_port_base, listen_socks_port);
-    load_if_exists(cfgapi.getRoot()["settings"], "socks_workers",num_workers_socks);
+    load_if_exists_or_keep(cfgapi.getRoot()["settings"], "socks_workers",num_workers_socks);
     load_listener_port("http_connect_port", listen_http_connect_port_base,
                        listen_http_connect_port);
-    load_if_exists(cfgapi.getRoot()["settings"], "http_connect_workers",num_workers_http_connect);
+    load_if_exists_or_keep(
+        cfgapi.getRoot()["settings"],
+        "http_connect_workers",
+        num_workers_http_connect);
 
     // Missing options preserve anonymous access, including after a reload.
     // Publish each setting only after its complete value has been loaded.
@@ -1560,13 +1604,25 @@ bool CfgFactory::load_settings () {
     bool http_connect_authorization = false;
     if(cfgapi.getRoot().exists("settings")) {
         if(cfgapi.getRoot()["settings"].exists("socks")) {
-            load_if_exists(cfgapi.getRoot()["settings"]["socks"], "proxy_authorization", socks_authorization);
-            load_if_exists(cfgapi.getRoot()["settings"]["socks"], "async_dns", socksServerCX::global_async_dns);
-            load_if_exists(cfgapi.getRoot()["settings"]["socks"], "ipver_mixing", socksServerCX::mixed_ip_versions);
-            load_if_exists(cfgapi.getRoot()["settings"]["socks"], "prefer_ipv6", socksServerCX::prefer_ipv6);
+            load_if_exists_or_keep(
+                cfgapi.getRoot()["settings"]["socks"],
+                "proxy_authorization",
+                socks_authorization);
+            load_if_exists_or_keep(
+                cfgapi.getRoot()["settings"]["socks"],
+                "async_dns",
+                socksServerCX::global_async_dns);
+            load_if_exists_or_keep(
+                cfgapi.getRoot()["settings"]["socks"],
+                "ipver_mixing",
+                socksServerCX::mixed_ip_versions);
+            load_if_exists_or_keep(
+                cfgapi.getRoot()["settings"]["socks"],
+                "prefer_ipv6",
+                socksServerCX::prefer_ipv6);
         }
         if(cfgapi.getRoot()["settings"].exists("http_connect")) {
-            load_if_exists(cfgapi.getRoot()["settings"]["http_connect"],
+            load_if_exists_or_keep(cfgapi.getRoot()["settings"]["http_connect"],
                            "proxy_authorization", http_connect_authorization);
         }
     }
@@ -1575,23 +1631,27 @@ bool CfgFactory::load_settings () {
 
     load_if_exists_atomic(cfgapi.getRoot()["settings"], "log_level", CfgFactory::get()->internal_init_level.level_ref());
 
-    load_if_exists(cfgapi.getRoot()["settings"], "syslog_server", syslog_server);
-    load_if_exists(cfgapi.getRoot()["settings"], "syslog_port", syslog_port);
-    load_if_exists(cfgapi.getRoot()["settings"], "syslog_facility", syslog_facility);
+    load_if_exists_or_keep(cfgapi.getRoot()["settings"], "syslog_server", syslog_server);
+    load_if_exists_or_keep(cfgapi.getRoot()["settings"], "syslog_port", syslog_port);
+    load_if_exists_or_keep(cfgapi.getRoot()["settings"], "syslog_facility", syslog_facility);
     load_if_exists_atomic(cfgapi.getRoot()["settings"], "syslog_level", syslog_level.level_ref());
-    load_if_exists(cfgapi.getRoot()["settings"], "syslog_family", syslog_family);
+    load_if_exists_or_keep(cfgapi.getRoot()["settings"], "syslog_family", syslog_family);
 
-    load_if_exists(cfgapi.getRoot()["settings"], "messages_dir", dir_msg_templates);
+    load_if_exists_or_keep(cfgapi.getRoot()["settings"], "messages_dir", dir_msg_templates);
 
     if(cfgapi.getRoot()["settings"].exists("cli")) {
-        load_if_exists<int>(cfgapi.getRoot()["settings"]["cli"], "port", CfgFactory::get()->cli_port_base);
+        load_if_exists_or_keep<int>(cfgapi.getRoot()["settings"]["cli"], "port",
+                            CfgFactory::get()->cli_port_base);
         CfgFactory::get()->cli_port = CfgFactory::get()->cli_port_base;
 
-        load_if_exists(cfgapi.getRoot()["settings"]["cli"], "enable_password", CfgFactory::get()->cli_enable_password);
+        load_if_exists_or_keep(
+            cfgapi.getRoot()["settings"]["cli"],
+            "enable_password",
+            CfgFactory::get()->cli_enable_password);
     }
 
     if(cfgapi.getRoot()["settings"].exists("admin")) {
-        load_if_exists(cfgapi.getRoot()["settings"]["admin"], "group", admin_group);
+        load_if_exists_or_keep(cfgapi.getRoot()["settings"]["admin"], "group", admin_group);
     }
 
     if(cfgapi.getRoot()["settings"].exists("tuning")) {
@@ -1602,23 +1662,35 @@ bool CfgFactory::load_settings () {
         }
 
         int hostcx_min = 0;
-        load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "host_bufsz_min", hostcx_min);
+        load_if_exists_or_keep(cfgapi.getRoot()["settings"]["tuning"], "host_bufsz_min", hostcx_min);
         if(hostcx_min >= 1500 and hostcx_min < 10000000) { baseHostCX::params.buffsize = hostcx_min; } // maximum initial bufsize is guarded at 10MB
 
         int hostcx_maxmul = 0;
-        load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "host_bufsz_max_multiplier", hostcx_maxmul);
+        load_if_exists_or_keep(
+            cfgapi.getRoot()["settings"]["tuning"],
+            "host_bufsz_max_multiplier",
+            hostcx_maxmul);
         if(hostcx_maxmul > 0) { baseHostCX::params.buffsize_maxmul = hostcx_maxmul; }
 
         int hostcx_write_full = 0;
-        load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "host_write_full", hostcx_write_full);
+        load_if_exists_or_keep(
+            cfgapi.getRoot()["settings"]["tuning"],
+            "host_write_full",
+            hostcx_write_full);
         if(hostcx_write_full >= 1024) { baseHostCX::params.write_full = hostcx_write_full; }
 
         int hostcx_io_batch = 0;
-        load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "host_io_batch", hostcx_io_batch);
+        load_if_exists_or_keep(
+            cfgapi.getRoot()["settings"]["tuning"],
+            "host_io_batch",
+            hostcx_io_batch);
         if(hostcx_io_batch >= 16384) { baseHostCX::params.io_batch = hostcx_io_batch; }
 
         int tls_write_chunk = 0;
-        load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "tls_write_chunk", tls_write_chunk);
+        load_if_exists_or_keep(
+            cfgapi.getRoot()["settings"]["tuning"],
+            "tls_write_chunk",
+            tls_write_chunk);
         if(tls_write_chunk >= 1024 && tls_write_chunk <= 1048576) {
             SSLComOptions::write_chunk = static_cast<std::size_t>(tls_write_chunk);
         }
@@ -1626,34 +1698,41 @@ bool CfgFactory::load_settings () {
         // Match CLI validation for file-loaded settings as well. Existing
         // listeners retain their capacities until recreated (normally restart).
         int listener_rcvbuf = quic_listener_rcvbuf;
-        if (load_if_exists(tuning, "quic_listener_rcvbuf", listener_rcvbuf)) {
+        if (load_if_exists_or_keep(tuning, "quic_listener_rcvbuf", listener_rcvbuf)) {
             if (listener_rcvbuf >= 0 && listener_rcvbuf <= 1073741824)
                 quic_listener_rcvbuf = listener_rcvbuf;
             else _war("ignoring invalid settings.tuning.quic_listener_rcvbuf (expected 0..1073741824)");
         }
         int inbox_packets = quic_inbox_packets;
-        if (load_if_exists(tuning, "quic_inbox_packets", inbox_packets)) {
+        if (load_if_exists_or_keep(tuning, "quic_inbox_packets", inbox_packets)) {
             if (inbox_packets >= 1 && inbox_packets <= 1048576)
                 quic_inbox_packets = inbox_packets;
             else _war("ignoring invalid settings.tuning.quic_inbox_packets (expected 1..1048576)");
         }
         int inbox_bytes = quic_inbox_bytes;
-        if (load_if_exists(tuning, "quic_inbox_bytes", inbox_bytes)) {
+        if (load_if_exists_or_keep(tuning, "quic_inbox_bytes", inbox_bytes)) {
             if (inbox_bytes >= 1024 && inbox_bytes <= 1073741824)
                 quic_inbox_bytes = inbox_bytes;
             else _war("ignoring invalid settings.tuning.quic_inbox_bytes (expected 1024..1073741824)");
         }
 
         int nbr_cache_size = 0;
-        load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "nbr_cache_size", nbr_cache_size);
+        load_if_exists_or_keep(
+            cfgapi.getRoot()["settings"]["tuning"],
+            "nbr_cache_size",
+            nbr_cache_size);
         if( nbr_cache_size > 0 and (static_cast<size_t>(nbr_cache_size) != NbrHood::instance().cache().capacity())) {
             NbrHood::instance().cache().set_capacity(static_cast<size_t>(nbr_cache_size));
         }
 
-        if(int open_timeout = 0; load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "host_open_timeout", open_timeout)) {
+        if(int open_timeout = 0;
+           load_if_exists(cfgapi.getRoot()["settings"]["tuning"],
+                          "host_open_timeout", open_timeout, 0)) {
             baseHostCX::params.open_timeout = open_timeout;
         }
-        if(int idle_timeout = 0; load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "host_idle_timeout", idle_timeout)) {
+        if(int idle_timeout = 0;
+           load_if_exists(cfgapi.getRoot()["settings"]["tuning"],
+                          "host_idle_timeout", idle_timeout, 0)) {
             baseHostCX::params.idle_delay = idle_timeout;
         }
 
@@ -1671,12 +1750,30 @@ bool CfgFactory::load_settings () {
         }
         sx::webserver::HttpSessions::replace_api_keys(std::move(key_storage));
         auto http_lock = std::scoped_lock(sx::webserver::HttpSessions::lock);
-        load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "key_timeout", sx::webserver::HttpSessions::session_ttl);
-        load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "key_extend_on_access", sx::webserver::HttpSessions::extend_on_access);
-        load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "loopback_only", sx::webserver::HttpSessions::loopback_only);
-        load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "bind_address", sx::webserver::HttpSessions::bind_address);
-        load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "bind_interface", sx::webserver::HttpSessions::bind_interface);
-        load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "allow_api_header", sx::webserver::HttpSessions::allow_api_header);
+        load_if_exists_or_keep(
+            cfgapi.getRoot()["settings"]["http_api"],
+            "key_timeout",
+            sx::webserver::HttpSessions::session_ttl);
+        load_if_exists_or_keep(
+            cfgapi.getRoot()["settings"]["http_api"],
+            "key_extend_on_access",
+            sx::webserver::HttpSessions::extend_on_access);
+        load_if_exists_or_keep(
+            cfgapi.getRoot()["settings"]["http_api"],
+            "loopback_only",
+            sx::webserver::HttpSessions::loopback_only);
+        load_if_exists_or_keep(
+            cfgapi.getRoot()["settings"]["http_api"],
+            "bind_address",
+            sx::webserver::HttpSessions::bind_address);
+        load_if_exists_or_keep(
+            cfgapi.getRoot()["settings"]["http_api"],
+            "bind_interface",
+            sx::webserver::HttpSessions::bind_interface);
+        load_if_exists_or_keep(
+            cfgapi.getRoot()["settings"]["http_api"],
+            "allow_api_header",
+            sx::webserver::HttpSessions::allow_api_header);
 
         if(cfgapi.getRoot()["settings"]["http_api"].exists("allowed_ips")) {
             sx::webserver::HttpSessions::allowed_ips.clear();
@@ -1688,7 +1785,7 @@ bool CfgFactory::load_settings () {
         }
 
         int api_port = 55555;
-        load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "port", api_port);
+        load_if_exists_or_keep(cfgapi.getRoot()["settings"]["http_api"], "port", api_port);
         if(api_port < 1025 or api_port >= 65535)  {
             log.event(ERR, "invalid API port number");
             sx::webserver::HttpSessions::api_port = 55555;
@@ -1697,25 +1794,49 @@ bool CfgFactory::load_settings () {
         } else {
             sx::webserver::HttpSessions::api_port = api_port;
         }
-        load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "pam_login", sx::webserver::HttpSessions::pam_login);
+        load_if_exists_or_keep(
+            cfgapi.getRoot()["settings"]["http_api"],
+            "pam_login",
+            sx::webserver::HttpSessions::pam_login);
     }
 
     if(cfgapi.getRoot()["settings"].exists("webhook")) {
 
-        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "enabled", settings_webhook.enabled);
-        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "url", settings_webhook.cfg_url);
-        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "tls_verify", settings_webhook.cfg_tls_verify);
-        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "synchronous_mode",
+        load_if_exists_or_keep(
+            cfgapi.getRoot()["settings"]["webhook"],
+            "enabled",
+            settings_webhook.enabled);
+        load_if_exists_or_keep(
+            cfgapi.getRoot()["settings"]["webhook"],
+            "url",
+            settings_webhook.cfg_url);
+        load_if_exists_or_keep(
+            cfgapi.getRoot()["settings"]["webhook"],
+            "tls_verify",
+            settings_webhook.cfg_tls_verify);
+        load_if_exists_or_keep(cfgapi.getRoot()["settings"]["webhook"], "synchronous_mode",
                        settings_webhook.cfg_synchronous_mode);
-        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "sift", settings_webhook.sift);
-        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "sift_url", settings_webhook.sift_url);
-        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "sift_tenant_id", settings_webhook.sift_tenant_id);
-        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "sift_instance_id", settings_webhook.sift_instance_id);
-        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "sift_payload_limit_per_direction",
+        load_if_exists_or_keep(
+            cfgapi.getRoot()["settings"]["webhook"],
+            "sift",
+            settings_webhook.sift);
+        load_if_exists_or_keep(
+            cfgapi.getRoot()["settings"]["webhook"],
+            "sift_url",
+            settings_webhook.sift_url);
+        load_if_exists_or_keep(
+            cfgapi.getRoot()["settings"]["webhook"],
+            "sift_tenant_id",
+            settings_webhook.sift_tenant_id);
+        load_if_exists_or_keep(
+            cfgapi.getRoot()["settings"]["webhook"],
+            "sift_instance_id",
+            settings_webhook.sift_instance_id);
+        load_if_exists_or_keep(cfgapi.getRoot()["settings"]["webhook"], "sift_payload_limit_per_direction",
                        settings_webhook.sift_payload_limit_per_direction);
-        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "sift_lored_mode",
+        load_if_exists_or_keep(cfgapi.getRoot()["settings"]["webhook"], "sift_lored_mode",
                        settings_webhook.sift_lored_mode);
-        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "sift_lored_include_url",
+        load_if_exists_or_keep(cfgapi.getRoot()["settings"]["webhook"], "sift_lored_include_url",
                        settings_webhook.sift_lored_include_url);
         if(settings_webhook.sift_lored_mode != "disabled" &&
            settings_webhook.sift_lored_mode != "optional" &&
@@ -1727,18 +1848,42 @@ bool CfgFactory::load_settings () {
         MitmProxy::sift_payload_limit_per_direction().store(
             static_cast<std::uint64_t>(std::max(0, settings_webhook.sift_payload_limit_per_direction)),
             std::memory_order_relaxed);
-        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "api_override", settings_webhook.allow_api_override);
+        load_if_exists_or_keep(
+            cfgapi.getRoot()["settings"]["webhook"],
+            "api_override",
+            settings_webhook.allow_api_override);
 
         sx::http::webhooks::set_enabled(settings_webhook.enabled);
 
-        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "hostid", settings_webhook.hostid);
-        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "bind_interface", settings_webhook.bind_interface);
-        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "ping_interval", settings_webhook.ping_interval);
-        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "nbr_update_interval", settings_webhook.nbr_update_interval);
-        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "nbr_tag_refresh_age", settings_webhook.nbr_tag_refresh_age);
+        load_if_exists_or_keep(
+            cfgapi.getRoot()["settings"]["webhook"],
+            "hostid",
+            settings_webhook.hostid);
+        load_if_exists_or_keep(
+            cfgapi.getRoot()["settings"]["webhook"],
+            "bind_interface",
+            settings_webhook.bind_interface);
+        load_if_exists_or_keep(
+            cfgapi.getRoot()["settings"]["webhook"],
+            "ping_interval",
+            settings_webhook.ping_interval);
+        load_if_exists_or_keep(
+            cfgapi.getRoot()["settings"]["webhook"],
+            "nbr_update_interval",
+            settings_webhook.nbr_update_interval);
+        load_if_exists_or_keep(
+            cfgapi.getRoot()["settings"]["webhook"],
+            "nbr_tag_refresh_age",
+            settings_webhook.nbr_tag_refresh_age);
 
-        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "task_debug", sx::http::Request::DEBUG);
-        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "task_debug_dump", sx::http::Request::DEBUG_DUMP_OK);
+        load_if_exists_or_keep(
+            cfgapi.getRoot()["settings"]["webhook"],
+            "task_debug",
+            sx::http::Request::DEBUG);
+        load_if_exists_or_keep(
+            cfgapi.getRoot()["settings"]["webhook"],
+            "task_debug_dump",
+            sx::http::Request::DEBUG_DUMP_OK);
 
         sx::http::webhooks::set_hostid(settings_webhook.hostid);
     }
@@ -1750,8 +1895,11 @@ bool CfgFactory::load_settings () {
 bool CfgFactory::load_experiment() {
 
     if(cfgapi.getRoot().exists("experiment")) {
-        load_if_exists(cfgapi.getRoot()["experiment"], "enabled_1", experiment_1.enabled);
-        load_if_exists(cfgapi.getRoot()["experiment"], "param_1", experiment_1.param);
+        load_if_exists_or_keep(
+            cfgapi.getRoot()["experiment"],
+            "enabled_1",
+            experiment_1.enabled);
+        load_if_exists_or_keep(cfgapi.getRoot()["experiment"], "param_1", experiment_1.param);
     }
 
     return true;
@@ -1772,13 +1920,19 @@ bool CfgFactory::load_captures() {
         if(captures.exists("local")) {
             Setting const& local = captures["local"];
 
-            load_if_exists(local, "enabled", factory->capture_local.enabled);
-            load_if_exists(local, "dir", factory->capture_local.dir);
-            load_if_exists(local, "file_prefix", factory->capture_local.file_prefix);
-            load_if_exists(local, "file_suffix", factory->capture_local.file_suffix);
+            load_if_exists_or_keep(local, "enabled", factory->capture_local.enabled);
+            load_if_exists_or_keep(local, "dir", factory->capture_local.dir);
+            load_if_exists_or_keep(
+                local,
+                "file_prefix",
+                factory->capture_local.file_prefix);
+            load_if_exists_or_keep(
+                local,
+                "file_suffix",
+                factory->capture_local.file_suffix);
 
             std::string fmt_str;
-            if(load_if_exists(local, "format", fmt_str)) {
+            if(load_if_exists_or_keep(local, "format", fmt_str)) {
                 factory->capture_local.format = fmt_str;
 
                 if (fmt_str == "pcap_single") {
@@ -1802,8 +1956,8 @@ bool CfgFactory::load_captures() {
                 }
             }
 
-            int quota_megabytes;
-            load_if_exists(local, "pcap_quota", quota_megabytes);
+            int quota_megabytes = 0;
+            load_if_exists(local, "pcap_quota", quota_megabytes, 0);
 
             if(fmt_str == "pcap_single")
                 traflog::PcapLog::single_instance().stat_bytes_quota = quota_megabytes*1024*1024;
@@ -1811,38 +1965,72 @@ bool CfgFactory::load_captures() {
         if(captures.exists("remote")) {
             Setting const& remote = captures["remote"];
 
-            load_if_exists(remote, "enabled", CfgFactory::get()->capture_remote.enabled);
-            load_if_exists(remote, "tun_type", CfgFactory::get()->capture_remote.tun_type);
-            load_if_exists(remote, "gre_format", CfgFactory::get()->capture_remote.gre_format);
+            load_if_exists_or_keep(
+                remote,
+                "enabled",
+                CfgFactory::get()->capture_remote.enabled);
+            load_if_exists_or_keep(
+                remote,
+                "tun_type",
+                CfgFactory::get()->capture_remote.tun_type);
+            load_if_exists_or_keep(
+                remote,
+                "gre_format",
+                CfgFactory::get()->capture_remote.gre_format);
             if(CfgFactory::get()->capture_remote.gre_format == "spq1") {
                 _war("GRE capture format 'spq1' is deprecated; use 'traffic'");
                 CfgFactory::get()->capture_remote.gre_format = "traffic";
             }
-            load_if_exists(remote, "tun_dst", CfgFactory::get()->capture_remote.tun_dst);
-            load_if_exists(remote, "tun_ttl", CfgFactory::get()->capture_remote.tun_ttl);
-            load_if_exists(remote, "bind_interface", CfgFactory::get()->capture_remote.bind_interface);
+            load_if_exists_or_keep(
+                remote,
+                "tun_dst",
+                CfgFactory::get()->capture_remote.tun_dst);
+            load_if_exists_or_keep(
+                remote,
+                "tun_ttl",
+                CfgFactory::get()->capture_remote.tun_ttl);
+            load_if_exists_or_keep(
+                remote,
+                "bind_interface",
+                CfgFactory::get()->capture_remote.bind_interface);
 
             CfgFactory::gre_export_apply(&traflog::PcapLog::single_instance());
         }
         if(captures.exists("options")) {
             Setting const& remote = captures["options"];
-            load_if_exists(remote, "calculate_checksums", socle::pcap::CONFIG::CALCULATE_CHECKSUMS);
-            load_if_exists(remote, "metadata", capture_options.metadata);
-            load_if_exists(remote, "statistics", capture_options.statistics);
-            load_if_exists(remote, "transport", capture_options.transport);
-            load_if_exists(remote, "protocol_events", capture_options.protocol_events);
+            load_if_exists_or_keep(
+                remote,
+                "calculate_checksums",
+                socle::pcap::CONFIG::CALCULATE_CHECKSUMS);
+            load_if_exists_or_keep(remote, "metadata", capture_options.metadata);
+            load_if_exists_or_keep(remote, "statistics", capture_options.statistics);
+            load_if_exists_or_keep(remote, "transport", capture_options.transport);
+            load_if_exists_or_keep(
+                remote,
+                "protocol_events",
+                capture_options.protocol_events);
             if(capture_options.metadata) SSLComOptions::server_hello_copy = true;
         }
     }
     else {
         // try to load old variables
 
-        load_if_exists(CfgFactory::cfg_root()["settings"], "write_payload_dir", CfgFactory::get()->capture_local.dir);
-        load_if_exists(CfgFactory::cfg_root()["settings"], "write_payload_file_prefix", CfgFactory::get()->capture_local.file_prefix);
-        load_if_exists(CfgFactory::cfg_root()["settings"], "write_payload_file_suffix", CfgFactory::get()->capture_local.file_suffix);
+        load_if_exists_or_keep(
+            CfgFactory::cfg_root()["settings"],
+            "write_payload_dir",
+            CfgFactory::get()->capture_local.dir);
+        load_if_exists_or_keep(
+            CfgFactory::cfg_root()["settings"],
+            "write_payload_file_prefix",
+            CfgFactory::get()->capture_local.file_prefix);
+        load_if_exists_or_keep(
+            CfgFactory::cfg_root()["settings"],
+            "write_payload_file_suffix",
+            CfgFactory::get()->capture_local.file_suffix);
 
-        int quota_megabytes;
-        load_if_exists(CfgFactory::cfg_root()["settings"], "write_pcap_single_quota", quota_megabytes);
+        int quota_megabytes = 0;
+        load_if_exists(CfgFactory::cfg_root()["settings"],
+                       "write_pcap_single_quota", quota_megabytes, 0);
         traflog::PcapLog::single_instance().stat_bytes_quota = quota_megabytes*1024*1024;
 
     }
@@ -1856,11 +2044,26 @@ int CfgFactory::load_debug() {
 
     if(cfgapi.getRoot().exists("debug")) {
 
-        load_if_exists(CfgFactory::cfg_root()["debug"], "log_data_crc", baseCom::debug_log_data_crc);
-        load_if_exists(CfgFactory::cfg_root()["debug"], "log_sockets", baseHostCX::socket_in_name);
-        load_if_exists(CfgFactory::cfg_root()["debug"], "log_online_cx_name", baseHostCX::online_name);
-        load_if_exists(CfgFactory::cfg_root()["debug"], "log_srclines", Log::get()->print_srcline());
-        load_if_exists(CfgFactory::cfg_root()["debug"], "log_srclines_always", Log::get()->print_srcline_always());
+        load_if_exists_or_keep(
+            CfgFactory::cfg_root()["debug"],
+            "log_data_crc",
+            baseCom::debug_log_data_crc);
+        load_if_exists_or_keep(
+            CfgFactory::cfg_root()["debug"],
+            "log_sockets",
+            baseHostCX::socket_in_name);
+        load_if_exists_or_keep(
+            CfgFactory::cfg_root()["debug"],
+            "log_online_cx_name",
+            baseHostCX::online_name);
+        load_if_exists_or_keep(
+            CfgFactory::cfg_root()["debug"],
+            "log_srclines",
+            Log::get()->print_srcline());
+        load_if_exists_or_keep(
+            CfgFactory::cfg_root()["debug"],
+            "log_srclines_always",
+            Log::get()->print_srcline_always());
 
         if (cfgapi.getRoot()["debug"].exists("log")) {
 
@@ -1873,8 +2076,14 @@ int CfgFactory::load_debug() {
                                                                SSLFactory::get_log().level()->level_ref());
             load_if_exists_atomic(CfgFactory::cfg_root()["debug"]["log"], "proxy", baseProxy::log_level().level_ref());
             load_if_exists_atomic(CfgFactory::cfg_root()["debug"]["log"], "proxy", epoll::log_level.level_ref());
-            load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "mtrace", cfg_mtrace_enable);
-            load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "openssl_mem_dbg", cfg_openssl_mem_dbg);
+            load_if_exists_or_keep(
+                CfgFactory::cfg_root()["debug"]["log"],
+                "mtrace",
+                cfg_mtrace_enable);
+            load_if_exists_or_keep(
+                CfgFactory::cfg_root()["debug"]["log"],
+                "openssl_mem_dbg",
+                cfg_openssl_mem_dbg);
 
             /*DNS ALG EXPLICIT LOG*/
             load_if_exists_atomic(CfgFactory::cfg_root()["debug"]["log"], "alg_dns", DNS_Inspector::log_level().level_ref());
@@ -1925,14 +2134,14 @@ int CfgFactory::load_db_address () {
             auto load_addr_09_30 = [&]() {
 
                 std::string address;
-                int type;
+                int type = 0;
 
                 _deb("cfgapi_load_addresses: processing '%s'", name.c_str());
 
-                if (load_if_exists(cur_object, "type", type)) {
+                if (load_if_exists(cur_object, "type", type, 0)) {
                     switch (type) {
                         case 0: // CIDR notation
-                            if (load_if_exists(cur_object, "cidr", address)) {
+                            if (load_if_exists_or_keep(cur_object, "cidr", address)) {
                                 auto *c = cidr::cidr_from_str(address.c_str());
                                 if(valid_cidr(c)) {
                                     db_address[name] = std::make_shared<CfgAddress>(
@@ -1951,7 +2160,7 @@ int CfgFactory::load_db_address () {
                             }
                             break;
                         case 1: // FQDN notation
-                            if (load_if_exists(cur_object, "fqdn", address)) {
+                            if (load_if_exists_or_keep(cur_object, "fqdn", address)) {
                                 if(address.find_first_not_of(" \t\r\n") != std::string::npos) {
                                     db_address[name] = std::make_shared<CfgAddress>(
                                             std::shared_ptr<AddressObject>(new FqdnAddress(address)));
@@ -1980,7 +2189,7 @@ int CfgFactory::load_db_address () {
 
                 _deb("cfgapi_load_addresses: processing '%s'", name.c_str());
 
-                if (not load_if_exists(cur_object, "type", type)) {
+                if (not load_if_exists_or_keep(cur_object, "type", type)) {
                     _dia("cfgapi_load_addresses: '%s': not ok", name.c_str());
 
                     Log::get()->events().insert(WAR, "CONFIG: address: '%s': 'type' attribute is missing", name.c_str());
@@ -1989,7 +2198,7 @@ int CfgFactory::load_db_address () {
                 }
 
                 if(type == "cidr") {
-                    if (load_if_exists(cur_object, "value", address)) {
+                    if (load_if_exists_or_keep(cur_object, "value", address)) {
                         auto *c = cidr::cidr_from_str(address.c_str());
                         if(valid_cidr(c)) {
                             db_address[name] = std::make_shared<CfgAddress>(
@@ -2008,7 +2217,7 @@ int CfgFactory::load_db_address () {
                     }
                 }
                 else if(type == "fqdn") {
-                    if (load_if_exists(cur_object, "value", address)) {
+                    if (load_if_exists_or_keep(cur_object, "value", address)) {
                         if(address.find_first_not_of(" \t\r\n") != std::string::npos) {
                             db_address[name] = std::make_shared<CfgAddress>(
                                     std::shared_ptr<AddressObject>(new FqdnAddress(address)));
@@ -2071,8 +2280,8 @@ int CfgFactory::load_db_port () {
 
         for( int i = 0; i < num; i++) {
             std::string name;
-            int a;
-            int b;
+            int a = 0;
+            int b = 65535;
             
             Setting& cur_object = curr_set[i];
 
@@ -2090,8 +2299,8 @@ int CfgFactory::load_db_port () {
 
             _deb("cfgapi_load_ports: processing '%s'", name.c_str());
             
-            if( load_if_exists(cur_object, "start", a) &&
-                    load_if_exists(cur_object, "end", b)   ) {
+            if( load_if_exists(cur_object, "start", a, 0) &&
+                    load_if_exists(cur_object, "end", b, 65535)   ) {
 
                 if(a < 0 or a > 65535 or b < 0 or b > 65535) {
                     _err("cfgapi_load_ports: '%s': values must be in 0..65535", name.c_str());
@@ -2158,8 +2367,8 @@ int CfgFactory::load_db_proto () {
 
             _deb("cfgapi_load_proto: processing '%s'", name.c_str());
 
-            int ia;
-            if( load_if_exists(cur_object, "id", ia) ) {
+            int ia = 0;
+            if( load_if_exists(cur_object, "id", ia, 0) ) {
 
                 if(ia < 0 or ia > 255) {
                     _err("cfgapi_load_proto: '%s': id %d is outside 0..255",
@@ -2286,16 +2495,22 @@ int CfgFactory::load_db_policy () {
                 }
             }
 
-            load_if_exists(cur_object, "name", rule->policy_name);
+            load_if_exists_or_keep(cur_object, "name", rule->policy_name);
+
             for(const auto* field : {"ingress_role", "egress_role"}) {
+
                 if(!cur_object.exists(field)) continue;
+
                 auto& target = std::string(field) == "ingress_role" ? rule->ingress_role : rule->egress_role;
-                if(cur_object[field].getType() != Setting::TypeString ||
-                   std::string(static_cast<const char*>(cur_object[field])).empty()) {
+
+                if(cur_object[field].getType() != Setting::TypeString) {
                     rule->cfg_err_is_disabled = true;
                     soft_error = true;
-                    err_event(policy_index, "interface role must be a nonempty string");
-                } else target = static_cast<const char*>(cur_object[field]);
+                    err_event(policy_index, "interface role must be a string");
+                }
+                else {
+                    target = static_cast<const char*>(cur_object[field]);
+                }
             }
 
             rule->element_name() = rule->policy_name.empty()
@@ -2783,17 +2998,17 @@ int CfgFactory::load_db_prof_detection () {
 
             _dia("cfgapi_load_obj_profile_detect: processing '%s'", name.c_str());
             
-            if( load_if_exists(cur_object, "mode", new_prof->mode)
+            if( load_if_exists_or_keep(cur_object, "mode", new_prof->mode)
                 and ProfileDetection::valid_mode(new_prof->mode) ) {
 
                 new_prof->element_name() = name;
                 const bool engines_valid =
                     !cur_object.exists("engines_enabled") ||
-                    load_if_exists(cur_object, "engines_enabled",
+                    load_if_exists_or_keep(cur_object, "engines_enabled",
                                    new_prof->engines_enabled);
                 const bool kb_valid =
                     !cur_object.exists("kb_enabled") ||
-                    load_if_exists(cur_object, "kb_enabled", new_prof->kb_enabled);
+                    load_if_exists_or_keep(cur_object, "kb_enabled", new_prof->kb_enabled);
                 if(!engines_valid || !kb_valid) {
                     _err("detection profile '%s': boolean option has an invalid type",
                          name.c_str());
@@ -2851,7 +3066,7 @@ int CfgFactory::load_db_prof_content_subrules(Setting& cur_object, ProfileConten
 
         auto load_rule_value = [&](const char* key, auto& destination) {
             if(!cur_replace_rule.exists(key)) return false;
-            if(load_if_exists(cur_replace_rule, key, destination)) return true;
+            if(load_if_exists_or_keep(cur_replace_rule, key, destination)) return true;
             _err("content profile '%s' rule %d: %s has an invalid type",
                  new_profile->element_name().c_str(), j, key);
             Log::get()->events().insert(
@@ -2909,7 +3124,7 @@ int CfgFactory::load_db_prof_content_subrules(Setting& cur_object, ProfileConten
 bool CfgFactory::load_db_prof_content_write_format(Setting& cur_object, ProfileContent* new_profile) {
     std::string write_format = "pcap_single";
     if(cur_object.exists("write_format") &&
-       !load_if_exists(cur_object, "write_format", write_format)) {
+       !load_if_exists_or_keep(cur_object, "write_format", write_format)) {
         return false;
     }
     write_format = string_tolower(write_format);
@@ -2961,7 +3176,7 @@ int CfgFactory::load_db_prof_content () {
 
         auto load_checked = [&]<typename T>(const char* key, T& destination) {
             if(!cur_object.exists(key)) return true;
-            if(load_if_exists(cur_object, key, destination)) return true;
+            if(load_if_exists_or_keep(cur_object, key, destination)) return true;
             _err("content profile '%s': %s has an invalid type",
                  name.c_str(), key);
             Log::get()->events().insert(
@@ -3082,7 +3297,7 @@ int CfgFactory::load_db_prof_tls () {
 
             auto load_checked = [&]<typename T>(const char* key, T& destination) {
                 if(!cur_object.exists(key)) return true;
-                if(load_if_exists(cur_object, key, destination)) return true;
+                if(load_if_exists_or_keep(cur_object, key, destination)) return true;
                 _err("TLS profile '%s': %s has an invalid type", name.c_str(), key);
                 Log::get()->events().insert(
                     ERR, "CONFIG: tls_profile '%s': %s has an invalid type",
@@ -3318,7 +3533,7 @@ int CfgFactory::load_db_prof_ssh () {
 
         auto profile = std::make_shared<ProfileSsh>();
         profile->element_name() = name;
-        if (!load_if_exists(item, "host_key", profile->host_key)
+        if (!load_if_exists_or_keep(item, "host_key", profile->host_key)
             || profile->host_key.empty()) {
             _err("load_db_prof_ssh: '%s': host_key not specified", name.c_str());
             Log::get()->events().insert(
@@ -3327,7 +3542,7 @@ int CfgFactory::load_db_prof_ssh () {
             continue;
         }
         if(item.exists("hostkey_policy") &&
-           !load_if_exists(item, "hostkey_policy", profile->hostkey_policy)) {
+           !load_if_exists_or_keep(item, "hostkey_policy", profile->hostkey_policy)) {
             _err("load_db_prof_ssh: '%s': hostkey_policy has an invalid type",
                  name.c_str());
             Log::get()->events().insert(
@@ -3352,7 +3567,7 @@ int CfgFactory::load_db_prof_ssh () {
         bool valid = true;
         auto load_action = [&](char const* key, bool& destination) {
             std::string action = "pass";
-            if(item.exists(key) && !load_if_exists(item, key, action)) {
+            if(item.exists(key) && !load_if_exists_or_keep(item, key, action)) {
                 _err("load_db_prof_ssh: '%s': %s has an invalid type",
                      name.c_str(), key);
                 Log::get()->events().insert(
@@ -3432,7 +3647,7 @@ int CfgFactory::load_db_prof_alg_dns () {
             bool valid = true;
             auto load_checked = [&](const char* key, bool& destination) {
                 if(!cur_object.exists(key)) return;
-                if(load_if_exists(cur_object, key, destination)) return;
+                if(load_if_exists_or_keep(cur_object, key, destination)) return;
                 _err("DNS ALG profile '%s': %s has an invalid type",
                      name.c_str(), key);
                 Log::get()->events().insert(
@@ -3488,8 +3703,8 @@ int CfgFactory::load_db_prof_script () {
             _dia("load_db_prof_script: processing '%s'", name.c_str());
 
             new_prof->element_name() = name;
-            load_if_exists(cur_object, "type", new_prof->script_type);
-            load_if_exists(cur_object, "script-file", new_prof->module_path);
+            load_if_exists_or_keep(cur_object, "type", new_prof->script_type);
+            load_if_exists_or_keep(cur_object, "script-file", new_prof->module_path);
 
             db_prof_script[name] = std::shared_ptr<ProfileScript>(std::move(new_prof));
         }
@@ -3541,8 +3756,8 @@ int CfgFactory::load_db_prof_auth () {
             _deb("load_db_prof_auth: processing '%s'", name.c_str());
 
             a->element_name() = name;
-            load_if_exists(cur_object, "authenticate", a->authenticate);
-            load_if_exists(cur_object, "resolve", a->resolve);
+            load_if_exists_or_keep(cur_object, "authenticate", a->authenticate);
+            load_if_exists_or_keep(cur_object, "resolve", a->resolve);
             
             if(cur_object.exists("identities")) {
                 _dia("load_db_prof_auth: profiles: subpolicies exists");
@@ -3572,7 +3787,7 @@ int CfgFactory::load_db_prof_auth () {
                     std::string name_auth;
                     std::string name_alg_dns;
                     
-                    if(load_if_exists(cur_subpol, "detection_profile", name_detection)) {
+                    if(load_if_exists_or_keep(cur_subpol, "detection_profile", name_detection)) {
                         auto prf  = lookup_prof_detection(name_detection.c_str());
                         if(prf) {
                             _dia("load_db_prof_auth[sub-profile:%s]: detect profile %s", n_subpol->element_name().c_str(), name_detection.c_str());
@@ -3586,7 +3801,7 @@ int CfgFactory::load_db_prof_auth () {
                         }
                     }
                     
-                    if(load_if_exists(cur_subpol, "content_profile", name_content)) {
+                    if(load_if_exists_or_keep(cur_subpol, "content_profile", name_content)) {
                         auto prf  = lookup_prof_content(name_content.c_str());
                         if(prf) {
                             _dia("load_db_prof_auth[sub-profile:%s]: content profile %s", n_subpol->element_name().c_str(), name_content.c_str());
@@ -3599,7 +3814,7 @@ int CfgFactory::load_db_prof_auth () {
                             CfgFactory::LOAD_ERRORS = true;
                         }
                     }                
-                    if(load_if_exists(cur_subpol, "tls_profile", name_tls)) {
+                    if(load_if_exists_or_keep(cur_subpol, "tls_profile", name_tls)) {
                         auto tls  = lookup_prof_tls(name_tls.c_str());
                         if(tls) {
                             _dia("load_db_prof_auth[sub-profile:%s]: tls profile %s", n_subpol->element_name().c_str(), name_tls.c_str());
@@ -3615,7 +3830,7 @@ int CfgFactory::load_db_prof_auth () {
 
                     // we don't need auth profile in auth sub-profile
                     
-                    if(load_if_exists(cur_subpol, "alg_dns_profile", name_alg_dns)) {
+                    if(load_if_exists_or_keep(cur_subpol, "alg_dns_profile", name_alg_dns)) {
                         auto dns  = lookup_prof_alg_dns(name_alg_dns.c_str());
                         if(dns) {
                             _dia("load_db_prof_auth[sub-profile:%s]: DNS alg profile %s", n_subpol->element_name().c_str(), name_alg_dns.c_str());
@@ -3760,7 +3975,7 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, MitmProxy *mitm_pro
     auto const& log = log::policy();
 
     bool ret = true;
-    bool cfg_wrt;
+    bool cfg_wrt = false;
 
     if(mitm_proxy != nullptr) {
         if(pc != nullptr) {
@@ -3813,7 +4028,8 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, MitmProxy *mitm_pro
                 mitm_proxy->content_replace(pc->content_rules);
             }
         }
-        else if(load_if_exists(cfgapi.getRoot()["settings"], "default_write_payload", cfg_wrt)) {
+        else if(load_if_exists(cfgapi.getRoot()["settings"],
+                               "default_write_payload", cfg_wrt, false)) {
             _dia("policy_apply: global content profile: %d", cfg_wrt);
             mitm_proxy->writer_opts()->write_payload = cfg_wrt;
             const auto options = capture_options.for_payload(cfg_wrt);
@@ -4359,13 +4575,13 @@ int CfgFactory::load_signatures(libconfig::Config &cfg, const char *name, Signat
 
 
         const Setting& signature = cfg_signatures[i];
-        load_if_exists(signature, "name", newsig->name());
-        load_if_exists(signature, "side", newsig->sig_side);
-        load_if_exists(signature, "cat", newsig->sig_category);
-        load_if_exists(signature, "severity", newsig->sig_severity);
-        load_if_exists(signature, "group", newsig->sig_group);
-        load_if_exists(signature, "enables", newsig->sig_enables);
-        load_if_exists(signature, "engine", newsig->sig_engine);
+        load_if_exists_or_keep(signature, "name", newsig->name());
+        load_if_exists_or_keep(signature, "side", newsig->sig_side);
+        load_if_exists_or_keep(signature, "cat", newsig->sig_category);
+        load_if_exists_or_keep(signature, "severity", newsig->sig_severity);
+        load_if_exists_or_keep(signature, "group", newsig->sig_group);
+        load_if_exists_or_keep(signature, "enables", newsig->sig_enables);
+        load_if_exists_or_keep(signature, "engine", newsig->sig_engine);
 
         const Setting& signature_flow = cfg_signatures[i]["flow"];
         int flow_count = signature_flow.getLength();
@@ -4378,14 +4594,14 @@ int CfgFactory::load_signatures(libconfig::Config &cfg, const char *name, Signat
             std::string side;
             std::string type;
             std::string sigtext;
-            int bytes_start;
-            int bytes_max;
+            int bytes_start = 0;
+            int bytes_max = 1;
 
-            if(!( load_if_exists(signature_flow[j], "side", side)
-                  && load_if_exists(signature_flow[j], "type", type)
-                  && load_if_exists(signature_flow[j], "signature", sigtext)
-                  && load_if_exists(signature_flow[j], "bytes_start", bytes_start)
-                  && load_if_exists(signature_flow[j], "bytes_max", bytes_max))) {
+            if(!( load_if_exists_or_keep(signature_flow[j], "side", side)
+                  && load_if_exists_or_keep(signature_flow[j], "type", type)
+                  && load_if_exists_or_keep(signature_flow[j], "signature", sigtext)
+                  && load_if_exists(signature_flow[j], "bytes_start", bytes_start, 0)
+                  && load_if_exists(signature_flow[j], "bytes_max", bytes_max, 1))) {
 
                 _war("Starttls signature %s properties failed to load: index %d",newsig->name().c_str(), i);
                 Log::get()->events().insert(WAR,"CONFIG: signature[%s/%s/%d]: missing mandatory settings", name, newsig->name().c_str(), j);
@@ -4962,50 +5178,57 @@ int CfgFactory::load_db_routing () {
                 }
             }
 
-            std::string lb_meth;
-            if(cur_object.exists("dnat_lb_method")) {
-                if(!load_if_exists(cur_object, "dnat_lb_method", lb_meth)) {
-                    _err("load_db_routing[%d]: dnat_lb_method has an invalid type", i);
-                    CfgFactory::LOAD_ERRORS = true;
-                    valid = false;
-                } else {
-                auto const method = ProfileRouting::parse_lb_method(lb_meth);
-                if(method) {
-                    new_profile->dnat_lb_method = *method;
-                } else {
-                    _err("load_db_routing[%d]: invalid load-balancing method '%s'",
-                         i, lb_meth.c_str());
-                    Log::get()->events().insert(
-                        WAR,
-                        "CONFIG: routing_profile[%s]: invalid dnat_lb_method '%s'",
-                        name.c_str(), lb_meth.c_str());
-                    CfgFactory::LOAD_ERRORS = true;
-                    valid = false;
-                }
-                }
+            std::string lb_method = "round-robin";
+            const bool lb_method_loaded = load_if_exists_or_keep(
+                cur_object,
+                "dnat_lb_method",
+                lb_method);
+
+            if(cur_object.exists("dnat_lb_method") && !lb_method_loaded) {
+                _err("load_db_routing[%d]: dnat_lb_method has an invalid type; using round-robin", i);
+                CfgFactory::LOAD_ERRORS = true;
+            }
+
+            auto const parsed_method = ProfileRouting::parse_lb_method(lb_method);
+
+            if(parsed_method) {
+                new_profile->dnat_lb_method = *parsed_method;
+            }
+            else {
+                _err("load_db_routing[%d]: invalid load-balancing method '%s'; using round-robin",
+                     i, lb_method.c_str());
+                Log::get()->events().insert(
+                    WAR,
+                    "CONFIG: routing_profile[%s]: invalid dnat_lb_method '%s'; using round-robin",
+                    name.c_str(), lb_method.c_str());
+                CfgFactory::LOAD_ERRORS = true;
             }
 
             for(auto const* key: {"rewrite_sni", "rewrite_sni_to"}) {
                 auto& destination = std::string_view(key) == "rewrite_sni"
                     ? new_profile->rewrite_sni : new_profile->rewrite_sni_to;
-                if(cur_object.exists(key) &&
-                   !load_if_exists(cur_object, key, destination)) {
-                    _err("load_db_routing[%d]: %s has an invalid type", i, key);
+                const bool loaded = load_if_exists_or_keep(
+                    cur_object,
+                    key,
+                    destination);
+
+                if(cur_object.exists(key) && !loaded) {
+                    _err("load_db_routing[%d]: %s has an invalid type; using an empty value", i, key);
                     CfgFactory::LOAD_ERRORS = true;
-                    valid = false;
                 }
             }
 
             if(!ProfileRouting::valid_sni_rewrite_pair(
                     new_profile->rewrite_sni, new_profile->rewrite_sni_to)) {
-                _err("load_db_routing[%d]: rewrite_sni and rewrite_sni_to must be configured together",
+                _err("load_db_routing[%d]: rewrite_sni and rewrite_sni_to must be configured together; disabling rewrite",
                      i);
                 Log::get()->events().insert(
                     WAR,
-                    "CONFIG: routing_profile[%s]: rewrite_sni and rewrite_sni_to must be configured together",
+                    "CONFIG: routing_profile[%s]: rewrite_sni and rewrite_sni_to must be configured together; rewrite disabled",
                     name.c_str());
                 CfgFactory::LOAD_ERRORS = true;
-                valid = false;
+                new_profile->rewrite_sni.clear();
+                new_profile->rewrite_sni_to.clear();
             }
 
             if(!valid) {
@@ -5202,6 +5425,8 @@ bool CfgFactory::new_detection_profile(Setting& ex, std::string const& name) con
     try {
         Setting& item = ex.add(name, Setting::TypeGroup);
         item.add("mode", Setting::TypeInt) = 1; // PRE
+        item.add("engines_enabled", Setting::TypeBoolean) = true;
+        item.add("kb_enabled", Setting::TypeBoolean) = true;
     }
     catch(libconfig::SettingNameException const& e) {
         _war("cannot add new section %s: %s", name.c_str(), e.what());
@@ -5241,6 +5466,14 @@ bool CfgFactory::new_content_profile(Setting& ex, std::string const& name) const
     try {
         Setting & item = ex.add(name, Setting::TypeGroup);
         item.add("write_payload", Setting::TypeBoolean) = false;
+        item.add("write_format", Setting::TypeString) = "pcap_single";
+        item.add("webhook_enable", Setting::TypeBoolean) = false;
+        item.add("webhook_lock_traffic", Setting::TypeBoolean) = false;
+        item.add("ja4_tls_ch", Setting::TypeBoolean) = false;
+        item.add("ja4_tls_ch_ignore_sni", Setting::TypeBoolean) = false;
+        item.add("ja4_tls_sh", Setting::TypeBoolean) = false;
+        item.add("ja4_http", Setting::TypeBoolean) = false;
+        item.add("rules_session_filter", Setting::TypeString) = "";
         item.add("content_rules", Setting::TypeList);
     }
     catch(libconfig::SettingNameException const& e) {
@@ -5587,6 +5820,8 @@ bool CfgFactory::new_policy (Setting &ex, const std::string &name) const {
         auto& newpol = ex.add(Setting::TypeGroup);
         newpol.add("disabled", Setting::TypeBoolean) = true;
         newpol.add("name", Setting::TypeString);
+        newpol.add("ingress_role", Setting::TypeString);
+        newpol.add("egress_role", Setting::TypeString);
 
         newpol.add("proto", Setting::TypeString) = "tcp";
 
@@ -5606,6 +5841,7 @@ bool CfgFactory::new_policy (Setting &ex, const std::string &name) const {
         newpol.add("content_profile", Setting::TypeString);
         newpol.add("auth_profile", Setting::TypeString);
         newpol.add("alg_dns_profile", Setting::TypeString);
+        newpol.add("script_profile", Setting::TypeString);
         newpol.add("routing", Setting::TypeString);
     }
     catch(libconfig::SettingNameException const& e) {
@@ -5756,6 +5992,55 @@ bool CfgFactory::supports_new_entry(std::string const& section) const {
         "routing",
     };
     return sections.find(section) != sections.end();
+}
+
+void CfgFactory::build_new_entry_catalog() {
+
+    auto& root = new_entry_catalog_.getRoot();
+
+    for(auto const* section: {
+            "proto_objects",
+            "port_objects",
+            "address_objects",
+            "detection_profiles",
+            "content_profiles",
+            "tls_ca",
+            "tls_profiles",
+            "ssh_profiles",
+            "alg_dns_profiles",
+            "auth_profiles",
+            "routing"}) {
+
+        auto& collection = root.add(section, Setting::TypeGroup);
+        build_new_entry(collection, section, "__new__");
+    }
+
+    auto& policy = root.add("policy", Setting::TypeList);
+    build_new_entry(policy, "policy", "__new__");
+}
+
+libconfig::Setting const* CfgFactory::new_entry_prototype(
+        std::string_view path) const {
+
+    const auto separator = path.find('.');
+
+    if(separator == std::string_view::npos) return nullptr;
+
+    const bool nested_path = path.find('.', separator + 1) != std::string_view::npos;
+
+    if(nested_path) return nullptr;
+
+    const std::string section(path.substr(0, separator));
+
+    if(!new_entry_catalog_.exists(section)) return nullptr;
+
+    auto const& collection = new_entry_catalog_.lookup(section);
+
+    if(section == "policy") {
+        return collection.getLength() == 1 ? &collection[0] : nullptr;
+    }
+
+    return collection.exists("__new__") ? &collection["__new__"] : nullptr;
 }
 
 bool CfgFactory::_apply_new_entry(std::string const& section, std::string const& entry_name) {

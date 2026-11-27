@@ -450,7 +450,9 @@ public:
     void add_webhook_stream_details(nlohmann::json& info) const;
 
     mutable bool wh_stop = false;
-    std::unique_ptr<sx::proxy::ProxyHooks::Epitaph> epitaph_;
+    std::unique_ptr<sx::proxy::SessionEpitaph> session_epitaph_;
+    std::unique_ptr<sx::proxy::ProxyHooks::Epitaph> hook_epitaph_;
+    sx::proxy::SessionEpitaph make_session_epitaph() const;
     void prepare_session_stop();
     void finalize() noexcept override;
     void shutdown() override;

@@ -41,6 +41,20 @@ bool selects_rule(PolicyRule& rule, Context&&... context) {
 
 using namespace cidr;
 
+TEST(CfgDefaults, ExplicitFallbackRepairsAMissingOrMalformedValue) {
+    libconfig::Config config;
+    auto& routing = config.getRoot().add("routing", libconfig::Setting::TypeGroup);
+    routing.add("dnat_lb_method", libconfig::Setting::TypeInt) = 7;
+
+    std::string method = "stale";
+    EXPECT_FALSE(load_if_exists_or_keep(routing, "missing", method));
+    EXPECT_EQ(method, "stale");
+
+    EXPECT_FALSE(load_if_exists(
+        routing, "dnat_lb_method", method, std::string{"round-robin"}));
+    EXPECT_EQ(method, "round-robin");
+}
+
 TEST(PolicyRuntimeOptions, ProfileNamesHaveOwnedLifetimeAndFallback) {
     auto profile = std::make_shared<ProfileTls>();
     profile->element_name() = "strict-tls";

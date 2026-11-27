@@ -6,6 +6,7 @@
 #include <nlohmann/json.hpp>
 #include <vars.hpp>
 #include <service/auth/pap.hpp>
+#include <proxy/session_epitaph.hpp>
 
 class MitmProxy;
 class baseHostCX;
@@ -28,7 +29,8 @@ public:
         nlohmann::json observation;
     };
     static nlohmann::json quic(const QuicArgs& args);
-    // Owned snapshots only: no proxy/CX references survive transport teardown.
+    // Hook-owned serialization of a session epitaph. No transport references
+    // survive in this payload after retirement.
     struct Epitaph {
         std::string connection_id;
         nlohmann::json details;
@@ -156,7 +158,7 @@ public:
     // Non-blocking lifecycle notification; normal connection setup uses this.
     static bool start(MitmProxy& proxy, const StartArgs& args);
 
-    static Epitaph prepare_stop(const MitmProxy& proxy, const StopArgs& args);
+    static Epitaph prepare_stop(const SessionEpitaph& session, const StopArgs& args);
     static void enrich_stop(Epitaph& epitaph, const MitmProxy& proxy);
     static void stop(const Epitaph& epitaph, const StopArgs& args);
     static void readiness(const MitmProxy& proxy, const ReadinessArgs& args);

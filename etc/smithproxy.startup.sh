@@ -82,6 +82,11 @@ SMITH_DTLS_TPROXY='50443'
 DIVERT_FWMARK=1
 DIVERT_FWMASK=1
 DIVERT_IP_RULE=100
+# Use an explicit integration priority to avoid relying on automatic ordering
+# and reduce collisions with policy rules installed by other services.
+# Override in smithproxy.startup.cfg; this is a priority, not a table number.
+DIVERT_RULE_PRIORITY=29100
+SMITH_POLICY_HELPER="${SMITH_POLICY_HELPER:-/usr/libexec/smithproxy/fwmark-policy-rule.py}"
 
 REDIRECT_TLS_PORT='51443'
 REDIRECT_TCP_PORT='51080'
@@ -498,10 +503,12 @@ function setup_tproxy {
         logit
 
         logit "Applying local lookup for sockets"
-        ip rule add fwmark ${DIVERT_FWMARK}/${DIVERT_FWMASK} lookup ${DIVERT_IP_RULE}
+        python3 "${SMITH_POLICY_HELPER}" 4 "${DIVERT_RULE_PRIORITY}" \
+            "${DIVERT_FWMARK}" "${DIVERT_FWMASK}" "${DIVERT_IP_RULE}" || return 1
         ip route add local 0.0.0.0/0 dev lo table ${DIVERT_IP_RULE}
 
-        ip -6 rule add fwmark ${DIVERT_FWMARK}/${DIVERT_FWMASK} lookup ${DIVERT_IP_RULE}
+        python3 "${SMITH_POLICY_HELPER}" 6 "${DIVERT_RULE_PRIORITY}" \
+            "${DIVERT_FWMARK}" "${DIVERT_FWMASK}" "${DIVERT_IP_RULE}" || return 1
         ip -6 route add local ::/0 dev lo table ${DIVERT_IP_RULE}
 
         logit " done"
@@ -884,14 +891,14 @@ fi
 case "$1" in
 
     stop|bypass)
-      setup_tproxy $1
+      setup_tproxy $1 || exit 1
       setup_redirect $1
 
       ;;
 
     start|unbypass)
     if [[ ${SMITH_RUN_TRANSPARENT} -gt 0 ]]; then
-        setup_tproxy $1
+        setup_tproxy $1 || exit 1
     fi
 
     if [[ ${SMITH_RUN_REDIRECT} -gt 0 ]]; then

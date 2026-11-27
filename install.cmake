@@ -1,6 +1,7 @@
 if(UNIX)
     SET(CMAKE_INSTALL_PREFIX /usr)
     install(TARGETS smithproxy smithproxy-cftar DESTINATION bin)
+    install(FILES etc/fwmark-policy-rule.py DESTINATION libexec/smithproxy)
     install(FILES man/smithproxy.1 DESTINATION share/man/man1)
     install(FILES man/smithproxy-cftar.1 DESTINATION share/man/man1)
     install(FILES man/smithproxy.cfg.5 DESTINATION share/man/man5)

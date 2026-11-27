@@ -959,6 +959,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 src/service/cfgapi/cfg_revision.cpp
                 src/service/cfgapi/cfg_write_gate.cpp
                 src/service/cfgapi/cfg_lease.cpp
+                tests/unit/service/cfg_runtime_io_tests.cpp
                 tests/unit/service/cfg_template_maintenance_tests.cpp
                 src/resources/default_templates.cpp
                 tests/unit/service/default_templates_tests.cpp
@@ -968,8 +969,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                 src/ext/libsxcftar/tests/unit/service/cfg_archive_session_tests.cpp
                 src/ext/libsxcftar/tests/unit/service/cfg_pack_tests.cpp
                 src/ext/libsxcftar/tests/unit/service/cfg_runtime_tree_tests.cpp)
-        target_link_libraries(sx_gtests_cfg_tar PRIVATE sxcftar::sxcftar gtest gtest_main
-                pthread crypto LibArchive::LibArchive nlohmann_json::nlohmann_json
+        target_link_libraries(sx_gtests_cfg_tar PRIVATE sxcftar::sxcftar socle_common_lib gtest gtest_main
+                pthread crypto ssl LibArchive::LibArchive nlohmann_json::nlohmann_json
                 ${LIBCONFIGPP_LIBRARIES})
         target_compile_definitions(sx_gtests_cfg_tar PRIVATE
                 SMITHPROXY_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
