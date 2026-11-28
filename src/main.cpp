@@ -58,6 +58,7 @@
 #include <pwd.h>
 #include <sys/stat.h>
 #include <sys/resource.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 #include <ostream>
@@ -108,31 +109,43 @@ std::atomic<bool> gre_broker_failed{false};
 std::atomic<bool> cli_broker_failed{false};
 std::atomic<bool> api_broker_failed{false};
 
+struct ProcessIdentity {
+    uid_t uid{};
+    gid_t gid{};
+};
+
+// Resolve the account that will own and be allowed to use local runtime sockets.
+std::optional<ProcessIdentity> lookup_process_identity(const std::string& user) {
+    long buffer_size = sysconf(_SC_GETPW_R_SIZE_MAX);
+    if(buffer_size < 0) buffer_size = 16384;
+
+    std::vector<char> buffer(static_cast<size_t>(buffer_size));
+    passwd entry {};
+    passwd* result = nullptr;
+    const int lookup_result = getpwnam_r(
+        user.c_str(), &entry, buffer.data(), buffer.size(), &result);
+    if(lookup_result != 0 || result == nullptr) {
+        errno = lookup_result != 0 ? lookup_result : ENOENT;
+        return std::nullopt;
+    }
+    return ProcessIdentity{entry.pw_uid, entry.pw_gid};
+}
+
 int drop_process_identity(const std::string& run_as) {
     if(geteuid() != 0) {
         errno = EPERM;
         return -1;
     }
 
-    long buffer_size = sysconf(_SC_GETPW_R_SIZE_MAX);
-    if(buffer_size < 0) {
-        buffer_size = 16384;
-    }
-    std::vector<char> buffer(static_cast<size_t>(buffer_size));
-    passwd entry{};
-    passwd* result = nullptr;
-    const int lookup_rc = getpwnam_r(run_as.c_str(), &entry, buffer.data(), buffer.size(), &result);
-    if(lookup_rc != 0 || result == nullptr) {
-        errno = lookup_rc != 0 ? lookup_rc : ENOENT;
-        return -1;
-    }
-    if(entry.pw_uid == 0) {
+    const auto identity = lookup_process_identity(run_as);
+    if(!identity) return -1;
+    if(identity->uid == 0) {
         errno = EINVAL;
         return -1;
     }
 
     try {
-        CfgFactory::get()->transfer_runtime_owner(entry.pw_uid, entry.pw_gid);
+        CfgFactory::get()->transfer_runtime_owner(identity->uid, identity->gid);
     }
     catch(const std::exception& error) {
         DaemonFactory::instance()->get_log().fat(
@@ -141,17 +154,37 @@ int drop_process_identity(const std::string& run_as) {
         return -1;
     }
 
-    if(initgroups(entry.pw_name, entry.pw_gid) != 0 ||
-       setgid(entry.pw_gid) != 0 ||
-       setuid(entry.pw_uid) != 0) {
+    if(initgroups(run_as.c_str(), identity->gid) != 0 ||
+       setgid(identity->gid) != 0 ||
+       setuid(identity->uid) != 0) {
         return -1;
     }
-    if(geteuid() != entry.pw_uid || getegid() != entry.pw_gid) {
+    if(geteuid() != identity->uid || getegid() != identity->gid) {
         errno = EPERM;
         return -1;
     }
 
     return 0;
+}
+
+// Keep the standard deployment path stable while isolating tenants and
+// parallel instances that explicitly select a different CLI port.
+std::string cli_socket_path(const unsigned int tenant_index, const int cli_port) {
+    const std::string prefix = ::geteuid() == 0
+        ? "/run/smithproxy-cli"
+        : "/tmp/smithproxy-cli-" + std::to_string(::geteuid());
+    if(tenant_index != 0U) {
+        return prefix + "-tenant-" + std::to_string(tenant_index) + ".sock";
+    }
+    if(cli_port == 50000) return prefix + ".sock";
+    return prefix + "-port-" + std::to_string(cli_port) + ".sock";
+}
+
+// Reject paths that cannot be represented safely by a filesystem Unix socket.
+bool valid_cli_socket_path(const std::string& path) {
+    return !path.empty() && path.front() == '/' &&
+        path.size() < sizeof(sockaddr_un::sun_path) &&
+        path.find_first_of("\r\n") == std::string::npos;
 }
 
 std::optional<std::string> resolve_run_as(const std::optional<std::string>& command_line_user) {
@@ -169,7 +202,8 @@ int prepare_privilege_separation(DaemonFactory& daemon, const std::string& confi
                                  const std::optional<std::string>& comm_cli,
                                  const std::optional<std::string>& comm_api,
                                  const std::optional<std::string>& comm_webhook,
-                                 const std::optional<std::string>& comm_sift) {
+                                 const std::optional<std::string>& comm_sift,
+                                 const std::optional<std::string>& public_cli_socket) {
     auto const& log = DaemonFactory::instance()->get_log();
 
     if(sx::privsep::files::start_local_helper({config_file, daemon.pid_file}) != 0) {
@@ -198,10 +232,23 @@ int prepare_privilege_separation(DaemonFactory& daemon, const std::string& confi
     }
 
     // apply_tenant_config() has already validated and added the CLI port offset.
+    const auto broker_identity = run_as
+        ? lookup_process_identity(*run_as)
+        : std::optional<ProcessIdentity>{ProcessIdentity{::geteuid(), ::getegid()}};
+    if(!broker_identity) {
+        _fat("cannot resolve CLI broker identity: %s", string_error().c_str());
+        socle::privsep::stop_local_helper();
+        sx::privsep::files::stop_local_helper();
+        return -1;
+    }
+
     const int cli_result = comm_cli
         ? sx::comm::cli::prepare_external_ingress(*comm_cli)
         : sx::comm::cli::start_internal_broker(
-            static_cast<std::uint16_t>(CfgFactory::get()->cli_port));
+            static_cast<std::uint16_t>(CfgFactory::get()->cli_port),
+            public_cli_socket.value_or(cli_socket_path(
+                CfgFactory::get()->tenant_index, CfgFactory::get()->cli_port)),
+            broker_identity->uid, broker_identity->gid);
     if(cli_result != 0) {
         _fat("cannot initialize CLI broker: %s", string_error().c_str());
         socle::privsep::stop_local_helper();
@@ -604,6 +651,7 @@ void print_help() {
     std::cerr << "    --config-check-only, -o      :  perform configuration file check" << std::endl;
     std::cerr << "    --no-pidfile                 :  disable PID file management (for service managers)" << std::endl;
     std::cerr << "    --no-gui                     :  disable GUI credentials and administrator entry points" << std::endl;
+    std::cerr << "    --cli-socket <path>          :  override the public CLI Unix socket path" << std::endl;
     std::cerr << "    --run-as <user>              :  drop core identity after starting privileged helper" << std::endl;
     std::cerr << "    --comm-gre <path>            :  use an external GRE comm broker" << std::endl;
     std::cerr << "    --comm-cli <path>            :  use an external CLI comm broker" << std::endl;
@@ -664,6 +712,7 @@ int main(int argc, char *argv[]) {
     constexpr int option_no_pidfile = 1006;
     constexpr int option_comm_auth = 1007;
     constexpr int option_no_gui = 1008;
+    constexpr int option_cli_socket = 1009;
     static struct option long_options[] =
             {
                     /* These options set a flag. */
@@ -685,6 +734,7 @@ int main(int argc, char *argv[]) {
                     {"comm-sift", required_argument, nullptr, option_comm_sift},
                     {"comm-auth", required_argument, nullptr, option_comm_auth},
                     {"no-gui", no_argument, nullptr, option_no_gui},
+                    {"cli-socket", required_argument, nullptr, option_cli_socket},
 
                     // multi-tenancy support: listening ports will be shifted by number 'i', while 't' controls logging, pidfile, etc.
                     // both, or none of them have to be set
@@ -709,6 +759,7 @@ int main(int argc, char *argv[]) {
     std::optional<std::string> command_line_comm_api;
     std::optional<std::string> command_line_comm_webhook;
     std::optional<std::string> command_line_comm_sift;
+    std::optional<std::string> command_line_cli_socket;
 
     while(true) {
     /* getopt_long stores the option index here. */
@@ -763,6 +814,15 @@ int main(int argc, char *argv[]) {
 
             case option_no_gui:
                 CfgFactory::get()->gui_enabled = false;
+                break;
+
+            case option_cli_socket:
+                if(optarg == nullptr || !valid_cli_socket_path(optarg)) {
+                    std::cerr << "--cli-socket requires a bounded absolute Unix socket path"
+                              << std::endl;
+                    return EXIT_FAILURE;
+                }
+                command_line_cli_socket = optarg;
                 break;
 
             case option_comm_gre:
@@ -1219,7 +1279,7 @@ int main(int argc, char *argv[]) {
     if(prepare_privilege_separation(*this_daemon, CfgFactory::get()->config_file, run_as,
                                     command_line_comm_gre, command_line_comm_cli,
                                     command_line_comm_api, command_line_comm_webhook,
-                                    command_line_comm_sift) != 0) {
+                                    command_line_comm_sift, command_line_cli_socket) != 0) {
         CfgFactory::get()->cleanup();
         return EXIT_FAILURE;
     }
@@ -1276,7 +1336,7 @@ int main(int argc, char *argv[]) {
     SmithProxy::instance().create_dns_thread();
 
     auto start_api = [&]() {
-        if (CfgFactory::get()->accept_api) {
+        if(CfgFactory::get()->accept_api) {
             // The listener may safely precede its runtime credential. Until
             // Core publishes one, every authenticated endpoint rejects the
             // request; a later credential file therefore needs no restart.

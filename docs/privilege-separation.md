@@ -45,6 +45,14 @@ Without a `--comm-*` option, Smithproxy uses its standalone/internal transport.
 Unix socket ownership, mode and parent-directory access remain deployment
 policy; do not expose the communication directory to untrusted users.
 
+The standalone CLI broker publishes `/run/smithproxy-cli.sock` for the GUI and
+future SSH frontend. `--cli-socket PATH` overrides that location. The broker
+requires a root or Smithproxy run-as peer through `SO_PEERCRED`; the socket is
+created as owner/group read-write only. The legacy loopback TCP console remains
+enabled for compatibility and can be removed independently with `--no-console`.
+`--console` makes that compatibility choice explicit. Neither switch disables
+the Unix broker ingress or the internal CLI engine.
+
 Verify the effective identity and helper activity from the CLI:
 
 ```text

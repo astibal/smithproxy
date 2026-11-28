@@ -8,6 +8,7 @@
 #include <fstream>
 #include <sstream>
 #include <poll.h>
+#include <pwd.h>
 #include <cerrno>
 #include <fcntl.h>
 #include <thread>
@@ -15,6 +16,7 @@
 #include <arpa/inet.h>
 #include <signal.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -205,6 +207,22 @@ int connect_loopback(std::uint16_t port) {
     return -1;
 }
 
+int connect_unix_socket(const std::string& path) {
+    const int fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if(fd < 0) return -1;
+    sockaddr_un address {};
+    address.sun_family = AF_UNIX;
+    std::memcpy(address.sun_path, path.c_str(), path.size() + 1U);
+    const auto size = static_cast<socklen_t>(
+        offsetof(sockaddr_un, sun_path) + path.size() + 1U);
+    for(unsigned attempt = 0; attempt < 100; ++attempt) {
+        if(::connect(fd, reinterpret_cast<sockaddr*>(&address), size) == 0) return fd;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    ::close(fd);
+    return -1;
+}
+
 TEST(CliBrokerTest, InternalBrokerRelaysBothDirections) {
     const auto port = unused_loopback_port();
     ASSERT_NE(port, 0);
@@ -239,6 +257,146 @@ TEST(CliBrokerTest, InternalBrokerRelaysBothDirections) {
     ::close(listener);
     ::close(tcp);
     EXPECT_EQ(sx::comm::cli::stop_broker(), 0);
+}
+
+TEST(CliBrokerPeerTest, RootWithValidPidIsAllowed) {
+    EXPECT_TRUE(sx::comm::stream::unix_peer_allowed(42, 0, {0, 1000}));
+}
+
+TEST(CliBrokerPeerTest, ConfiguredRunAsUidWithValidPidIsAllowed) {
+    EXPECT_TRUE(sx::comm::stream::unix_peer_allowed(42, 1000, {0, 1000}));
+}
+
+TEST(CliBrokerPeerTest, ForeignUidIsRejected) {
+    EXPECT_FALSE(sx::comm::stream::unix_peer_allowed(42, 2000, {0, 1000}));
+}
+
+TEST(CliBrokerPeerTest, RootIsRejectedWhenNotExplicitlyAllowed) {
+    EXPECT_FALSE(sx::comm::stream::unix_peer_allowed(42, 0, {1000}));
+}
+
+TEST(CliBrokerPeerTest, ZeroPidIsRejectedForTrustedUid) {
+    EXPECT_FALSE(sx::comm::stream::unix_peer_allowed(0, 1000, {0, 1000}));
+}
+
+TEST(CliBrokerPeerTest, NegativePidIsRejectedForRoot) {
+    EXPECT_FALSE(sx::comm::stream::unix_peer_allowed(-1, 0, {0, 1000}));
+}
+
+TEST(CliBrokerPeerTest, EmptyAllowListRejectsValidPeer) {
+    EXPECT_FALSE(sx::comm::stream::unix_peer_allowed(42, 0, {}));
+}
+
+TEST(CliBrokerTest, PublicUnixSocketRelaysWhileTcpConsoleIsDisabled) {
+    char directory_template[] = "./smithproxy-cli-public-test-XXXXXX";
+    char* directory = ::mkdtemp(directory_template);
+    ASSERT_NE(directory, nullptr);
+    const std::string socket_path = std::string(directory) + "/cli.sock";
+    const auto port = unused_loopback_port();
+    ASSERT_NE(port, 0);
+    ASSERT_EQ(sx::comm::cli::start_internal_broker(
+        port, socket_path, ::geteuid(), ::getegid(), false), 0);
+
+    const int client = connect_unix_socket(socket_path);
+    ASSERT_GE(client, 0);
+    EXPECT_EQ(connect_loopback(port), -1);
+
+    const int listener = sx::comm::cli::ingress_fd();
+    ASSERT_GE(listener, 0);
+    const int core = ::accept4(listener, nullptr, nullptr, SOCK_CLOEXEC);
+    ASSERT_GE(core, 0);
+    ASSERT_TRUE(sx::comm::cli::receive_handshake(core));
+    ASSERT_EQ(::send(client, "unix", 4, MSG_NOSIGNAL), 4);
+    std::array<char, 8> data {};
+    ASSERT_EQ(::read(core, data.data(), data.size()), 4);
+    EXPECT_EQ(std::string_view(data.data(), 4), "unix");
+
+    const auto permissions = std::filesystem::status(socket_path).permissions();
+    EXPECT_NE(permissions & std::filesystem::perms::owner_read,
+              std::filesystem::perms::none);
+    EXPECT_NE(permissions & std::filesystem::perms::group_write,
+              std::filesystem::perms::none);
+    EXPECT_EQ(permissions & std::filesystem::perms::others_all,
+              std::filesystem::perms::none);
+
+    ::close(core);
+    ::close(listener);
+    ::close(client);
+    EXPECT_EQ(sx::comm::cli::stop_broker(), 0);
+    EXPECT_FALSE(std::filesystem::exists(socket_path));
+    EXPECT_EQ(::rmdir(directory), 0);
+}
+
+TEST(CliBrokerTest, PublicUnixSocketRejectsForeignUidAfterConnect) {
+    if(::geteuid() != 0) {
+        GTEST_SKIP() << "dropping privileges requires root";
+    }
+
+    const passwd* foreign_user = ::getpwnam("nobody");
+    ASSERT_NE(foreign_user, nullptr);
+    ASSERT_NE(foreign_user->pw_uid, 0U);
+
+    char directory_template[] = "./smithproxy-cli-peer-test-XXXXXX";
+    char* directory = ::mkdtemp(directory_template);
+    ASSERT_NE(directory, nullptr);
+    ASSERT_EQ(::chmod(directory, 0777), 0);
+
+    const std::string socket_path = std::string(directory) + "/cli.sock";
+    const auto port = unused_loopback_port();
+    ASSERT_NE(port, 0);
+    ASSERT_EQ(sx::comm::cli::start_internal_broker(
+        port, socket_path, 0, foreign_user->pw_gid, false), 0);
+
+    const pid_t child = ::fork();
+    ASSERT_GE(child, 0);
+    if(child == 0) {
+        if(::setgid(foreign_user->pw_gid) != 0 ||
+           ::setuid(foreign_user->pw_uid) != 0) {
+            ::_exit(2);
+        }
+
+        const int client = connect_unix_socket(socket_path);
+        if(client < 0) ::_exit(3);
+
+        static constexpr std::string_view payload = "untrusted command\n";
+        const ssize_t sent = ::send(
+            client, payload.data(), payload.size(), MSG_NOSIGNAL);
+        if(sent < 0 && errno != EPIPE && errno != ECONNRESET) ::_exit(4);
+
+        char byte = 0;
+        const ssize_t received = ::read(client, &byte, sizeof(byte));
+        const bool closed_cleanly = received == 0;
+        const bool connection_reset = received < 0 && errno == ECONNRESET;
+        const bool rejected = closed_cleanly || connection_reset;
+        ::close(client);
+        ::_exit(rejected ? EXIT_SUCCESS : 5);
+    }
+
+    int status = 0;
+    ASSERT_EQ(::waitpid(child, &status, 0), child);
+    ASSERT_TRUE(WIFEXITED(status));
+    EXPECT_EQ(WEXITSTATUS(status), EXIT_SUCCESS);
+
+    for(unsigned attempt = 0;
+        attempt < 100 && sx::comm::cli::stats().rejected == 0;
+        ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    const auto stats = sx::comm::cli::stats();
+    EXPECT_EQ(stats.accepted, 1);
+    EXPECT_EQ(stats.rejected, 1);
+    EXPECT_EQ(stats.core_connect_errors, 0);
+    EXPECT_EQ(stats.active, 0);
+
+    const int listener = sx::comm::cli::ingress_fd();
+    ASSERT_GE(listener, 0);
+    pollfd core_listener {listener, POLLIN, 0};
+    ASSERT_EQ(::poll(&core_listener, 1, 100), 0)
+        << "an unauthorized peer reached the CLI core";
+    ::close(listener);
+    EXPECT_EQ(sx::comm::cli::stop_broker(), 0);
+    EXPECT_FALSE(std::filesystem::exists(socket_path));
+    EXPECT_EQ(::rmdir(directory), 0);
 }
 
 unsigned long long process_cpu_ticks(pid_t pid) {

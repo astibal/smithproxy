@@ -12,6 +12,15 @@
 namespace sx::comm::stream {
 
 struct BrokerConfig {
+    BrokerConfig() = default;
+    BrokerConfig(std::string address, std::uint16_t port, std::string core_path,
+                 std::string core_preamble, std::vector<std::string> permitted_ips,
+                 std::string interface, std::size_t session_limit)
+        : listen_address(std::move(address)), listen_port(port),
+          comm_path(std::move(core_path)), preamble(std::move(core_preamble)),
+          allowed_ips(std::move(permitted_ips)), bind_interface(std::move(interface)),
+          max_active_sessions(session_limit) {}
+
     std::string listen_address = "127.0.0.1";
     std::uint16_t listen_port = 50000;
     std::string comm_path;
@@ -19,6 +28,11 @@ struct BrokerConfig {
     std::vector<std::string> allowed_ips{"*"};
     std::string bind_interface;
     std::size_t max_active_sessions = 256;
+    std::string unix_socket_path;
+    std::vector<uid_t> allowed_unix_uids;
+    uid_t unix_socket_owner = static_cast<uid_t>(-1);
+    gid_t unix_socket_group = static_cast<gid_t>(-1);
+    bool tcp_enabled = true;
 };
 
 struct Stats {
@@ -60,6 +74,11 @@ SharedStats* create_shared_stats();
 void destroy_shared_stats(SharedStats* stats);
 Stats snapshot(const SharedStats* stats) noexcept;
 
+// Validate kernel-supplied Unix peer identity. A usable process ID and an
+// explicitly trusted effective UID are both required.
+bool unix_peer_allowed(pid_t peer_pid, uid_t peer_uid,
+                       const std::vector<uid_t>& allowed_uids) noexcept;
+
 } // namespace sx::comm::stream
 
 namespace sx::comm::cli {
@@ -70,7 +89,12 @@ using BrokerConfig = sx::comm::stream::BrokerConfig;
 
 std::string handshake();
 
-int start_internal_broker(std::uint16_t port);
+int start_internal_broker(
+    std::uint16_t port,
+    std::string public_socket_path = {},
+    uid_t public_socket_owner = static_cast<uid_t>(-1),
+    gid_t public_socket_group = static_cast<gid_t>(-1),
+    bool console_enabled = true);
 int prepare_external_ingress(const std::string& path);
 int stop_broker();
 int ingress_fd();

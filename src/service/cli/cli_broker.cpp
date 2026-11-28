@@ -120,6 +120,71 @@ int make_tcp_listener(const sx::comm::stream::BrokerConfig& config) {
     return fd;
 }
 
+// Distinguish a live endpoint from a stale socket left after an unclean exit.
+bool active_unix_socket(const std::string& path) {
+    const int probe = connect_unix(path);
+    if(probe >= 0) {
+        ::close(probe);
+        return true;
+    }
+    return errno != ECONNREFUSED && errno != ENOENT;
+}
+
+// Publish the local administrative ingress with deployment-owned permissions.
+int make_public_unix_listener(const sx::comm::stream::BrokerConfig& config) {
+    if(config.unix_socket_path.empty() || config.unix_socket_path.front() == '@') {
+        errno = EINVAL;
+        return -1;
+    }
+
+    struct stat existing {};
+    if(::lstat(config.unix_socket_path.c_str(), &existing) == 0) {
+        const bool expected_owner = config.unix_socket_owner == static_cast<uid_t>(-1) ||
+            existing.st_uid == config.unix_socket_owner;
+        const bool reclaimable = S_ISSOCK(existing.st_mode) && expected_owner &&
+            !active_unix_socket(config.unix_socket_path);
+        if(!reclaimable) {
+            errno = EADDRINUSE;
+            return -1;
+        }
+        if(::unlink(config.unix_socket_path.c_str()) != 0) return -1;
+    } else if(errno != ENOENT) {
+        return -1;
+    }
+
+    const int listener = make_unix_listener(config.unix_socket_path);
+    if(listener < 0) return -1;
+
+    const mode_t socket_mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP;
+    const bool owner_changed = ::chown(
+        config.unix_socket_path.c_str(),
+        config.unix_socket_owner,
+        config.unix_socket_group) == 0;
+    const bool mode_changed = owner_changed &&
+        ::chmod(config.unix_socket_path.c_str(), socket_mode) == 0;
+    if(!mode_changed) {
+        const int saved = errno;
+        ::close(listener);
+        ::unlink(config.unix_socket_path.c_str());
+        errno = saved;
+        return -1;
+    }
+    return listener;
+}
+
+// Authenticate local callers from kernel-owned credentials, never client input.
+bool unix_socket_peer_allowed(
+    const int client, const sx::comm::stream::BrokerConfig& config) {
+    struct ucred peer {};
+    socklen_t size = sizeof(peer);
+    if(::getsockopt(client, SOL_SOCKET, SO_PEERCRED, &peer, &size) != 0 ||
+       size != sizeof(peer)) {
+        return false;
+    }
+    return sx::comm::stream::unix_peer_allowed(
+        peer.pid, peer.uid, config.allowed_unix_uids);
+}
+
 void request_stop(int) { broker_stop.store(true, std::memory_order_relaxed); }
 
 } // namespace
@@ -159,6 +224,16 @@ Stats snapshot(const SharedStats* stats) noexcept {
             stats->peak_active.load(), stats->completed.load(),
             stats->relay_errors.load(), stats->bytes_to_core.load(),
             stats->bytes_from_core.load()};
+}
+
+// Keep the authorization decision independent from getsockopt so every
+// fail-closed branch can be covered without forging kernel credentials.
+bool unix_peer_allowed(const pid_t peer_pid, const uid_t peer_uid,
+                       const std::vector<uid_t>& allowed_uids) noexcept {
+    const bool valid_process = peer_pid > 0;
+    const bool trusted_user = std::find(
+        allowed_uids.begin(), allowed_uids.end(), peer_uid) != allowed_uids.end();
+    return valid_process && trusted_user;
 }
 
 int create_unix_listener(const std::string& path) { return make_unix_listener(path); }
@@ -287,8 +362,18 @@ int BrokerServer::run(int stop_fd) {
     ::sigemptyset(&action.sa_mask);
     ::sigaction(SIGINT, &action, nullptr);
     ::sigaction(SIGTERM, &action, nullptr);
-    const int listener = make_tcp_listener(config_);
-    if(listener < 0) return -1;
+    const int unix_listener = config_.unix_socket_path.empty()
+        ? -1 : make_public_unix_listener(config_);
+    if(!config_.unix_socket_path.empty() && unix_listener < 0) return -1;
+
+    const int tcp_listener = config_.tcp_enabled ? make_tcp_listener(config_) : -1;
+    if(config_.tcp_enabled && tcp_listener < 0) {
+        const int saved = errno;
+        if(unix_listener >= 0) ::close(unix_listener);
+        if(!config_.unix_socket_path.empty()) ::unlink(config_.unix_socket_path.c_str());
+        errno = saved;
+        return -1;
+    }
     struct Session {
         std::thread worker;
         std::shared_ptr<std::atomic<bool>> done;
@@ -297,7 +382,9 @@ int BrokerServer::run(int stop_fd) {
     try {
         sessions.reserve(config_.max_active_sessions);
     } catch(...) {
-        ::close(listener);
+        if(unix_listener >= 0) ::close(unix_listener);
+        if(tcp_listener >= 0) ::close(tcp_listener);
+        if(!config_.unix_socket_path.empty()) ::unlink(config_.unix_socket_path.c_str());
         errno = ENOMEM;
         return -1;
     }
@@ -311,44 +398,89 @@ int BrokerServer::run(int stop_fd) {
                 ++it;
             }
         }
-        pollfd descriptors[2]{{listener, POLLIN, 0}, {stop_fd, POLLIN, 0}};
-        const nfds_t descriptor_count = stop_fd >= 0 ? 2 : 1;
-        int ready;
-        do { ready = ::poll(descriptors, descriptor_count, 250); } while(ready < 0 && errno == EINTR);
-        if(ready < 0) { ::close(listener); return -1; }
-        if(stop_fd >= 0 && (descriptors[1].revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL))) {
+        pollfd descriptors[3]{
+            {unix_listener, static_cast<short>(unix_listener >= 0 ? POLLIN : 0), 0},
+            {tcp_listener, static_cast<short>(tcp_listener >= 0 ? POLLIN : 0), 0},
+            {stop_fd, static_cast<short>(stop_fd >= 0 ? POLLIN : 0), 0},
+        };
+
+        int ready = 0;
+        bool poll_interrupted = false;
+        do {
+            ready = ::poll(descriptors, 3, 250);
+            poll_interrupted = ready < 0 && errno == EINTR;
+        } while(poll_interrupted);
+
+        if(ready < 0) break;
+
+        const bool stop_descriptor_ready = stop_fd >= 0 &&
+            (descriptors[2].revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL));
+        if(stop_descriptor_ready) {
             broker_stop.store(true, std::memory_order_relaxed);
             continue;
         }
-        if(ready == 0 || !(descriptors[0].revents & POLLIN)) continue;
-        sockaddr_in peer{};
+        if(ready == 0) continue;
+
+        const bool unix_ready = descriptors[0].revents & POLLIN;
+        const bool tcp_ready = descriptors[1].revents & POLLIN;
+
+        int ready_listener = -1;
+        if(unix_ready) {
+            ready_listener = unix_listener;
+        }
+        else if(tcp_ready) {
+            ready_listener = tcp_listener;
+        }
+        if(ready_listener < 0) continue;
+
+        sockaddr_storage peer {};
         socklen_t peer_size = sizeof(peer);
-        const int client = ::accept4(listener, reinterpret_cast<sockaddr*>(&peer), &peer_size,
-                                     SOCK_CLOEXEC);
+        const int client = ::accept4(
+            ready_listener, reinterpret_cast<sockaddr*>(&peer), &peer_size, SOCK_CLOEXEC);
         if(client < 0) continue;
         if(stats_) stats_->accepted.fetch_add(1);
-        std::array<char, INET_ADDRSTRLEN> peer_text{};
-        const char* converted = ::inet_ntop(AF_INET, &peer.sin_addr,
-                                            peer_text.data(), peer_text.size());
-        const std::string peer_ip = converted ? converted : std::string{};
-        const bool allowed = std::any_of(config_.allowed_ips.begin(), config_.allowed_ips.end(),
-            [&peer_ip](const std::string& value) {
-                return value == "*" || value == "all" || value == peer_ip;
-            });
+
+        bool allowed = false;
+        if(unix_ready) {
+            allowed = unix_socket_peer_allowed(client, config_);
+        }
+        else {
+            const auto* ipv4_peer = reinterpret_cast<const sockaddr_in*>(&peer);
+            std::array<char, INET_ADDRSTRLEN> peer_text {};
+            const char* converted = ::inet_ntop(
+                AF_INET, &ipv4_peer->sin_addr, peer_text.data(), peer_text.size());
+
+            const std::string peer_ip = converted != nullptr
+                ? converted
+                : std::string {};
+            allowed = std::any_of(
+                config_.allowed_ips.begin(), config_.allowed_ips.end(),
+                [&peer_ip](const std::string& value) {
+                    return value == "*" || value == "all" || value == peer_ip;
+                });
+        }
+
         if(!allowed) {
             if(stats_) stats_->rejected.fetch_add(1);
-            ::close(client); continue;
+            ::close(client);
+            continue;
         }
+
         if(active_sessions.load(std::memory_order_relaxed) >= config_.max_active_sessions) {
             if(stats_) stats_->rejected.fetch_add(1);
-            ::close(client); continue;
+            ::close(client);
+            continue;
         }
+
         active_sessions.fetch_add(1, std::memory_order_relaxed);
         if(stats_) {
             const auto active = stats_->active.fetch_add(1) + 1;
             auto peak = stats_->peak_active.load();
-            while(active > peak && !stats_->peak_active.compare_exchange_weak(peak, active)) {}
+            while(active > peak &&
+                  !stats_->peak_active.compare_exchange_weak(peak, active)) {
+            }
         }
+
         try {
             auto done = std::make_shared<std::atomic<bool>>(false);
             Session session;
@@ -383,9 +515,15 @@ int BrokerServer::run(int stop_fd) {
             }
         }
     }
-    ::close(listener);
-    for(auto& session: sessions) if(session.worker.joinable()) session.worker.join();
-    return 0;
+
+    if(unix_listener >= 0) ::close(unix_listener);
+    if(tcp_listener >= 0) ::close(tcp_listener);
+    if(!config_.unix_socket_path.empty()) ::unlink(config_.unix_socket_path.c_str());
+    for(auto& session: sessions) {
+        if(session.worker.joinable()) session.worker.join();
+    }
+
+    return broker_stop.load(std::memory_order_relaxed) ? 0 : -1;
 }
 
 } // namespace sx::comm::stream
@@ -394,7 +532,9 @@ namespace sx::comm::cli {
 
 std::string handshake() { return {cli_handshake.data(), cli_handshake.size()}; }
 
-int start_internal_broker(std::uint16_t port) {
+int start_internal_broker(std::uint16_t port, std::string public_socket_path,
+                          uid_t public_socket_owner, gid_t public_socket_group,
+                          bool console_enabled) {
     std::lock_guard lock(state_mutex);
     if(core_listener >= 0 || broker_pid > 0) { errno = EALREADY; return -1; }
     shared_stats = sx::comm::stream::create_shared_stats();
@@ -419,7 +559,19 @@ int start_internal_broker(std::uint16_t port) {
     if(child == 0) {
         ::close(controls[0]);
         ::close(core_listener);
-        CliBrokerServer server({"127.0.0.1", port, path, handshake(), {"*"}, {}, 256}, shared_stats);
+        BrokerConfig config;
+        config.listen_address = "127.0.0.1";
+        config.listen_port = port;
+        config.comm_path = path;
+        config.preamble = handshake();
+        config.allowed_ips = {"*"};
+        config.max_active_sessions = 256;
+        config.unix_socket_path = std::move(public_socket_path);
+        config.allowed_unix_uids = {0, public_socket_owner};
+        config.unix_socket_owner = public_socket_owner;
+        config.unix_socket_group = public_socket_group;
+        config.tcp_enabled = console_enabled;
+        CliBrokerServer server(std::move(config), shared_stats);
         ::_exit(server.run(controls[1]) == 0 ? EXIT_SUCCESS : EXIT_FAILURE);
     }
     ::close(controls[1]);
