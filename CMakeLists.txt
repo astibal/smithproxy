@@ -1272,6 +1272,11 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                         ${PROJECT_SOURCE_DIR}/tests/httpapi/http_api_integration.py
                         --smithproxy $<TARGET_FILE:smithproxy>
                         --source ${PROJECT_SOURCE_DIR})
+                add_test(NAME integration.http_api_no_gui
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/httpapi/no_gui_integration.py
+                        --smithproxy $<TARGET_FILE:smithproxy>
+                        --source ${PROJECT_SOURCE_DIR})
                 add_test(NAME integration.webhook_need_more
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/tests/httpapi/need_more_integration.py
@@ -1403,13 +1408,13 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug" OR SMITHPROXY_OPTIMIZED_TESTS)
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/tools/wireshark/test_spquic.py)
                 set_tests_properties(
-                        integration.httpconnect integration.starttls_socks integration.socks5_udp integration.http_api
+                        integration.httpconnect integration.starttls_socks integration.socks5_udp integration.http_api integration.http_api_no_gui
                         integration.libcli2_process integration.main_process integration.redirect integration.wireshark_spq1
                         PROPERTIES LABELS "native;integration")
                 set_tests_properties(unit.logging_concurrency PROPERTIES LABELS "native;unit" TIMEOUT 30)
                 set_tests_properties(stress.httpconnect PROPERTIES LABELS "native;integration;stress")
                 set_tests_properties(
-                        integration.httpconnect stress.httpconnect integration.starttls_socks integration.socks5_udp integration.http_api
+                        integration.httpconnect stress.httpconnect integration.starttls_socks integration.socks5_udp integration.http_api integration.http_api_no_gui
                         integration.libcli2_process integration.main_process integration.redirect PROPERTIES TIMEOUT 120)
                 set_tests_properties(
                         unit.patch_runner_fuzz_areas unit.patch_runner_fuzz_seeds

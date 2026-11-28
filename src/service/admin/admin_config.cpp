@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <set>
 #include <stdexcept>
+#include <sys/un.h>
 
 namespace {
 
@@ -77,7 +78,9 @@ bool Administrator::operator==(const Administrator& other) const noexcept {
            password_verifier == other.password_verifier;
 }
 
-Config Config::parse(std::string_view content) {
+// Parse the complete resource before exposing any administrator. This keeps a
+// malformed entry from activating an otherwise partially valid configuration.
+Admins Admins::parse(std::string_view content) {
     libconfig::Config parsed;
     try {
         parsed.readString(std::string(content));
@@ -93,7 +96,7 @@ Config Config::parse(std::string_view content) {
 
     const auto& admin = root["admin"];
     require_type(admin, Setting::TypeGroup, "admin section");
-    require_members(admin, {"schema_version", "administrators"});
+    require_members(admin, {"schema_version", "authentication", "administrators"});
 
     int schema_version = 0;
     if(!admin.lookupValue("schema_version", schema_version) ||
@@ -102,10 +105,30 @@ Config Config::parse(std::string_view content) {
     if(!admin.exists("administrators"))
         throw std::invalid_argument("admin.cfg has no administrator list");
 
+    Admins result;
+    if(admin.exists("authentication")) {
+        const auto& authentication = admin["authentication"];
+        require_type(authentication, Setting::TypeGroup, "authentication section");
+        require_members(authentication, {"socket_enabled", "socket_path"});
+
+        authentication.lookupValue(
+            "socket_enabled", result.authentication_.socket_enabled);
+        std::string socket_path;
+        if(authentication.lookupValue("socket_path", socket_path)) {
+            const bool absolute = !socket_path.empty() && socket_path.front() == '/';
+            const bool bounded = socket_path.size() < sizeof(sockaddr_un::sun_path);
+            const bool contains_nul = socket_path.find('\0') != std::string::npos;
+            if(!absolute || !bounded || contains_nul) {
+                throw std::invalid_argument(
+                    "admin authentication socket must use a bounded absolute path");
+            }
+            result.authentication_.socket_path = std::move(socket_path);
+        }
+    }
+
     const auto& entries = admin["administrators"];
     require_type(entries, Setting::TypeList, "administrator list");
 
-    Config result;
     std::set<std::string> names;
     for(int index = 0; index < entries.getLength(); ++index) {
         auto administrator = parse_administrator(entries[index]);
@@ -116,10 +139,18 @@ Config Config::parse(std::string_view content) {
     return result;
 }
 
-std::string Config::serialize() const {
+// Emit one deterministic schema-versioned document for archive persistence.
+std::string Admins::serialize() const {
     libconfig::Config output;
     auto& admin = output.getRoot().add("admin", Setting::TypeGroup);
     admin.add("schema_version", Setting::TypeInt) = config_schema_version;
+    auto& authentication = admin.add("authentication", Setting::TypeGroup);
+    authentication.add("socket_enabled", Setting::TypeBoolean) =
+        authentication_.socket_enabled;
+    if(authentication_.socket_path) {
+        authentication.add("socket_path", Setting::TypeString) =
+            authentication_.socket_path->string();
+    }
     auto& entries = admin.add("administrators", Setting::TypeList);
     for(const auto& administrator : administrators_) {
         auto& entry = entries.add(Setting::TypeGroup);
@@ -134,19 +165,25 @@ std::string Config::serialize() const {
     return std::move(*serialized);
 }
 
-const std::vector<Administrator>& Config::administrators() const noexcept {
+const std::vector<Administrator>& Admins::administrators() const noexcept {
     return administrators_;
 }
 
-const Administrator* Config::find(std::string_view name) const noexcept {
+const AuthenticationPolicy& Admins::authentication() const noexcept {
+    return authentication_;
+}
+
+const Administrator* Admins::find(std::string_view name) const noexcept {
     const auto found = std::find_if(
         administrators_.begin(), administrators_.end(),
         [name](const Administrator& administrator) { return administrator.name == name; });
     return found == administrators_.end() ? nullptr : &*found;
 }
 
-AuthenticationStatus Config::authenticate(
+AuthenticationStatus Admins::authenticate(
     std::string_view name, std::string_view password) const {
+    // Always perform one verifier operation, including unknown and disabled
+    // names, so account discovery does not gain a cheap timing distinction.
     const auto* administrator = valid_name(name) ? find(name) : nullptr;
     const bool configured = administrator != nullptr;
     const bool enabled = configured && administrator->enabled;
@@ -160,7 +197,7 @@ AuthenticationStatus Config::authenticate(
         : AuthenticationStatus::denied;
 }
 
-void Config::upsert(Administrator administrator) {
+void Admins::upsert(Administrator administrator) {
     if(!valid_name(administrator.name))
         throw std::invalid_argument("administrator name is invalid");
     if(!sx::crypto::password_verifier_supported(administrator.password_verifier))
@@ -175,7 +212,7 @@ void Config::upsert(Administrator administrator) {
     else *found = std::move(administrator);
 }
 
-bool Config::remove(std::string_view name) {
+bool Admins::remove(std::string_view name) {
     const auto found = std::find_if(
         administrators_.begin(), administrators_.end(),
         [name](const Administrator& administrator) { return administrator.name == name; });

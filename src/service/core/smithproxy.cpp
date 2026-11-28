@@ -149,7 +149,9 @@ void SmithProxy::create_api_thread() {
         return;
     }
     api_thread = std::shared_ptr<std::thread>(sx::webserver::create_httpd_thread(
-        sx::webserver::HttpSessions::api_port + tenant_index(), listener));
+        sx::webserver::HttpSessions::api_port + tenant_index(),
+        listener,
+        CfgFactory::get()->gui_enabled));
     if(api_thread) {
         pthread_setname_np( api_thread->native_handle(),
                             string_format("sxy_api_%d",tenant_index()).c_str());

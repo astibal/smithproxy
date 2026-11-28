@@ -23,7 +23,9 @@ struct LoginRequestResult {
     std::string error;
 };
 
-// Strictly decode one application/x-www-form-urlencoded login request.
+// Strictly decodes one application/x-www-form-urlencoded login request.
+// Unknown, duplicate, missing or unsafe fields return an explanatory error;
+// the returned request cleanses its password when destroyed.
 LoginRequestResult parse_login_request(std::string_view body);
 
 }  // namespace sx::webserver

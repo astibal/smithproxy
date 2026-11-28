@@ -7,7 +7,6 @@
 #include <cerrno>
 #include <fcntl.h>
 #include <sys/stat.h>
-#include <sys/un.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -51,8 +50,6 @@ GuiRuntimeCredentialPolicy default_gui_runtime_credentials(const unsigned int te
         tenant_index, "gui-gateway.key");
     policy.gateway.previous_path = tenant_runtime_path(
         tenant_index, "gui-gateway.previous.key");
-    policy.administrator_auth_socket = tenant_runtime_path(
-        tenant_index, "admin-auth.sock");
     return policy;
 }
 
@@ -61,6 +58,8 @@ GuiRuntimeCredentialPolicy parse_gui_runtime_credentials(
     auto policy = default_gui_runtime_credentials(tenant_index);
     if(source.empty()) return policy;
 
+    // Parsing starts from secure tenant-aware defaults. Supplied values refine
+    // policy and paths but never carry credential material themselves.
     libconfig::Config document;
     document.readString(std::string(source));
     const auto& root = document.getRoot();
@@ -111,24 +110,6 @@ GuiRuntimeCredentialPolicy parse_gui_runtime_credentials(
         parse_group(smithproxy, policy.management_api,
                     "api_token_file", "previous_api_token_file");
         validate_generation_layout(policy.management_api);
-        smithproxy.lookupValue(
-            "administrator_auth_socket_enabled",
-            policy.administrator_auth_socket_enabled);
-        std::string administrator_auth_socket;
-        if(smithproxy.lookupValue(
-               "administrator_auth_socket", administrator_auth_socket)) {
-            const bool absolute_path = !administrator_auth_socket.empty() &&
-                administrator_auth_socket.front() == '/';
-            const bool fits_unix_socket =
-                administrator_auth_socket.size() < sizeof(sockaddr_un::sun_path);
-            const bool contains_nul =
-                administrator_auth_socket.find('\0') != std::string::npos;
-            if(!absolute_path || !fits_unix_socket || contains_nul) {
-                throw std::invalid_argument(
-                    "administrator_auth_socket must use a bounded absolute Unix socket path");
-            }
-            policy.administrator_auth_socket = std::move(administrator_auth_socket);
-        }
     }
     if(gui.exists("gateway")) {
         const auto& gateway = gui["gateway"];
@@ -152,6 +133,8 @@ void RuntimeCredentialPair::report(const bool warning, std::string message) cons
 }
 
 bool RuntimeCredentialPair::ensure_directory() const {
+    // Both generations share one trusted directory so atomic rename cannot
+    // cross filesystems or escape into an independently owned path.
     const auto parent = spec_.current_path.parent_path();
     if(parent.empty() || parent != spec_.previous_path.parent_path()) return false;
 
@@ -177,6 +160,8 @@ std::optional<RuntimeCredentialPair::LoadedCredential> RuntimeCredentialPair::lo
     const std::filesystem::path& path,
     const std::chrono::system_clock::time_point now,
     const bool report_missing) const {
+    // Open without following symlinks, then validate the opened inode before
+    // reading bounded printable credential material.
     const int descriptor = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
     if(descriptor < 0) {
         if(report_missing || errno != ENOENT)
@@ -231,6 +216,8 @@ std::optional<RuntimeCredentialPair::LoadedCredential> RuntimeCredentialPair::lo
 
 bool RuntimeCredentialPair::publish_file(
     const std::filesystem::path& path, const std::string_view value) const {
+    // Write, sync and atomically rename a fresh sibling before syncing the
+    // directory. Readers therefore observe either the old or complete value.
     if(!ensure_directory()) return false;
     const auto nonce = sx::crypto::random_hex(8U);
     if(!nonce) return false;
@@ -272,6 +259,8 @@ bool RuntimeCredentialPair::remove_file(const std::filesystem::path& path) const
 }
 
 bool RuntimeCredentialPair::reconcile(const std::chrono::system_clock::time_point now) {
+    // Invalid or disabled policy publishes no accepted credentials. Disabled
+    // pairs also remove both on-disk generations.
     const bool valid_paths = !spec_.current_path.empty() && !spec_.previous_path.empty() &&
         spec_.current_path.is_absolute() && spec_.previous_path.is_absolute() &&
         spec_.current_path != spec_.previous_path &&
@@ -296,6 +285,8 @@ bool RuntimeCredentialPair::reconcile(const std::chrono::system_clock::time_poin
         return false;
     }
 
+    // After the first reconciliation Core owns current. An external overwrite
+    // is rejected and the last active value is restored.
     auto current = load(spec_.current_path, now, false);
     const bool runtime_file_replaced = boot_reconciled_ && active_current_ &&
         (!current || current->value != *active_current_);
@@ -322,6 +313,8 @@ bool RuntimeCredentialPair::reconcile(const std::chrono::system_clock::time_poin
         return false;
     }
 
+    // The first pass accepts only a fresh launcher seed. Later passes rotate by
+    // Core's remembered generation age rather than attacker-controlled mtime.
     const auto effective_modified = boot_reconciled_ && active_modified_
         ? *active_modified_
         : current->modified;
@@ -351,6 +344,8 @@ bool RuntimeCredentialPair::reconcile(const std::chrono::system_clock::time_poin
             ? "stale boot credential replaced" : "runtime credential rotated");
     }
 
+    // Previous remains accepted only for the configured overlap and can never
+    // duplicate current.
     auto previous = load(spec_.previous_path, now, false);
     if(previous && now - previous->modified > spec_.overlap) {
         if(!remove_file(spec_.previous_path))

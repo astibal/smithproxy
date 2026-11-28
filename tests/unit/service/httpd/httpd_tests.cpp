@@ -511,34 +511,34 @@ TEST_F(AdminEnrollmentStoreTest, IssuesAndConsumesOneCapabilityExactlyOnce) {
     EXPECT_EQ(store.size(1059), 0U);
 }
 
-TEST_F(AdminEnrollmentStoreTest, ClaimBlocksReuseAndRollsBackWithoutCommit) {
+TEST_F(AdminEnrollmentStoreTest, ReservationBlocksReuseAndRollsBackWithoutCommit) {
     auto& store = sx::webserver::AdminEnrollmentStore::instance();
     const auto issued = store.issue("security-admin", 1000, 60);
     ASSERT_TRUE(issued);
 
     {
-        auto claim = store.claim(issued->token, 1001);
-        ASSERT_TRUE(claim);
-        EXPECT_EQ(claim->administrator(), "security-admin");
-        EXPECT_FALSE(store.claim(issued->token, 1001));
+        auto reservation = store.reserve(issued->token, 1001);
+        ASSERT_TRUE(reservation);
+        EXPECT_EQ(reservation->administrator(), "security-admin");
+        EXPECT_FALSE(store.reserve(issued->token, 1001));
     }
 
-    auto retry = store.claim(issued->token, 1002);
+    auto retry = store.reserve(issued->token, 1002);
     ASSERT_TRUE(retry);
     EXPECT_TRUE(retry->commit());
-    EXPECT_FALSE(store.claim(issued->token, 1002));
+    EXPECT_FALSE(store.reserve(issued->token, 1002));
 }
 
-TEST_F(AdminEnrollmentStoreTest, ClearInvalidatesOutstandingClaim) {
+TEST_F(AdminEnrollmentStoreTest, ClearInvalidatesOutstandingReservation) {
     auto& store = sx::webserver::AdminEnrollmentStore::instance();
     const auto issued = store.issue("security-admin", 1000, 60);
     ASSERT_TRUE(issued);
-    auto claim = store.claim(issued->token, 1001);
-    ASSERT_TRUE(claim);
+    auto reservation = store.reserve(issued->token, 1001);
+    ASSERT_TRUE(reservation);
 
     store.clear();
 
-    EXPECT_FALSE(claim->commit());
+    EXPECT_FALSE(reservation->commit());
     EXPECT_EQ(store.size(1001), 0U);
 }
 

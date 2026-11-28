@@ -250,6 +250,8 @@ public:
     }
 
     static bool managed_session_is_current(std::string const& auth_token) {
+        // Generation comparison closes the login/change race: a session
+        // published after its administrator changed is stale immediately.
         auto guard = std::scoped_lock(lock);
         const auto session = access_keys.find(auth_token);
         if(session == access_keys.end()) return false;
@@ -350,6 +352,8 @@ public:
     }
 
     static AccessCapabilities key_capabilities(std::string const& key) {
+        // Capability sets deliberately do not form one implicit super-key:
+        // ordinary, administrator and archive access remain independently held.
         auto guard = std::scoped_lock(lock);
         const bool ordinary_key = api_keys.find(key) != api_keys.end();
         const bool administrator_key =
@@ -457,7 +461,10 @@ public:
     }
 };
 
-std::thread* create_httpd_thread(unsigned short port, int listener_fd = -1);
+std::thread* create_httpd_thread(
+    unsigned short port,
+    int listener_fd = -1,
+    bool gui_enabled = true);
 
 // One HTTP response may carry either structured JSON or exact binary bytes.
 // Keeping both forms in the common envelope lets authentication and routing

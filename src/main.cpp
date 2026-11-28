@@ -603,6 +603,7 @@ void print_help() {
     std::cerr << "    --config-file, -c <filename> :  specify/override configuration file" << std::endl;
     std::cerr << "    --config-check-only, -o      :  perform configuration file check" << std::endl;
     std::cerr << "    --no-pidfile                 :  disable PID file management (for service managers)" << std::endl;
+    std::cerr << "    --no-gui                     :  disable GUI credentials and administrator entry points" << std::endl;
     std::cerr << "    --run-as <user>              :  drop core identity after starting privileged helper" << std::endl;
     std::cerr << "    --comm-gre <path>            :  use an external GRE comm broker" << std::endl;
     std::cerr << "    --comm-cli <path>            :  use an external CLI comm broker" << std::endl;
@@ -662,6 +663,7 @@ int main(int argc, char *argv[]) {
     constexpr int option_comm_sift = 1005;
     constexpr int option_no_pidfile = 1006;
     constexpr int option_comm_auth = 1007;
+    constexpr int option_no_gui = 1008;
     static struct option long_options[] =
             {
                     /* These options set a flag. */
@@ -682,6 +684,7 @@ int main(int argc, char *argv[]) {
                     {"comm-webhook", required_argument, nullptr, option_comm_webhook},
                     {"comm-sift", required_argument, nullptr, option_comm_sift},
                     {"comm-auth", required_argument, nullptr, option_comm_auth},
+                    {"no-gui", no_argument, nullptr, option_no_gui},
 
                     // multi-tenancy support: listening ports will be shifted by number 'i', while 't' controls logging, pidfile, etc.
                     // both, or none of them have to be set
@@ -756,6 +759,10 @@ int main(int argc, char *argv[]) {
 
             case option_no_pidfile:
                 this_daemon->pid_file_enabled = false;
+                break;
+
+            case option_no_gui:
+                CfgFactory::get()->gui_enabled = false;
                 break;
 
             case option_comm_gre:
@@ -1244,7 +1251,7 @@ int main(int argc, char *argv[]) {
         return std::string(hostname.data());
     }();
 
-    sx::auth::manage_external_authentication();
+    sx::auth::manage_external_authentication(CfgFactory::get()->gui_enabled);
 
     // create utility threads
     SmithProxy::instance().create_log_writer_thread();

@@ -255,25 +255,25 @@ public:
         bool executable = false);
     // Expose typed administrator operations without granting callers raw
     // archive or filesystem write capabilities.
-    static sx::admin::Config administrator_config();
+    static sx::admin::Admins administrator_config();
     static sx::admin::AuthenticationStatus authenticate_administrator(
         std::string_view name, std::string_view password);
-    static sx::admin::MutationResult create_administrator(
+    static sx::admin::ChangeResult create_administrator(
         std::string expected_revision,
         std::string expected_archive_hash,
         std::string name,
         std::string_view password);
-    static sx::admin::MutationResult change_administrator_password(
+    static sx::admin::ChangeResult change_administrator_password(
         std::string expected_revision,
         std::string expected_archive_hash,
         std::string_view name,
         std::string_view password);
-    static sx::admin::MutationResult set_administrator_enabled(
+    static sx::admin::ChangeResult set_administrator_enabled(
         std::string expected_revision,
         std::string expected_archive_hash,
         std::string_view name,
         bool enabled);
-    static sx::admin::MutationResult remove_administrator(
+    static sx::admin::ChangeResult remove_administrator(
         std::string expected_revision,
         std::string expected_archive_hash,
         std::string_view name);
@@ -318,6 +318,9 @@ public:
     [[nodiscard]] bool ct_requested() const;
 
     loglevel args_debug_flag = NON;
+    // Process-level kill switch set only by --no-gui. Configuration and
+    // environment inputs cannot re-enable management GUI entry points.
+    bool gui_enabled = true;
 
     std::string internal_version;
     int         schema_version = SCHEMA_VERSION;

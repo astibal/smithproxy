@@ -55,6 +55,8 @@ namespace sx::webserver {
         };
 
         std::string client_address(MHD_Connection* mc);
+        // Resolves audit identity from an already validated browser session.
+        // Missing legacy metadata receives explicit non-secret fallback labels.
         inline Actor session_actor(std::string_view auth_token) {
             const auto token = std::string(auth_token);
             auto principal = HttpSessions::table_value(
@@ -66,6 +68,8 @@ namespace sx::webserver {
             return {std::move(principal), std::move(authentication_method)};
         }
 
+        // API keys currently identify a credential class rather than a named
+        // administrator. Future key metadata can refine this identity here.
         inline Actor api_key_actor() {
             return {"api-key", "api_key"};
         }
@@ -122,6 +126,8 @@ namespace sx::webserver::authorized {
         ret.response = {{"error", "access denied"}};
         ret.response_code = MHD_HTTP_UNAUTHORIZED;
 
+        // Browser sessions require both the requested capability and a valid
+        // CSRF pair before the business handler receives control.
         auto validate_and_call = [&](auto const& key, auto const& token) {
             // Validate CSRF first. An invalid request must not extend the
             // lifetime of a privileged archive capability as a side effect.
@@ -158,6 +164,8 @@ namespace sx::webserver::authorized {
             }
         };
 
+        // Header API keys carry capabilities directly and therefore establish
+        // a generic API-key audit identity instead of a browser principal.
         auto validate_api_key_and_call = [&](auto const& key) {
             bool allowed = false;
             switch(required_access_) {

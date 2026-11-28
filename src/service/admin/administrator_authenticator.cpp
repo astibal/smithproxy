@@ -27,6 +27,7 @@ LoginResult authenticate(
     const std::string_view source,
     const std::string_view username,
     const std::string_view password) {
+    // Charge the attempt before any expensive password verifier or PAM work.
     auto& throttle = sx::webserver::LoginThrottle::instance();
     const auto throttle_decision = throttle.permit(source, username);
     if(!throttle_decision.allowed) {
@@ -39,6 +40,8 @@ LoginResult authenticate(
         };
     }
 
+    // A configured managed store is authoritative. Parse or storage failures
+    // fail closed and must never silently reopen the legacy PAM path.
     AuthenticationStatus managed_status = AuthenticationStatus::denied;
     try {
         managed_status = CfgFactory::authenticate_administrator(username, password);
@@ -70,6 +73,8 @@ LoginResult authenticate(
     }
     if(administrator_group.empty()) administrator_group = "root";
 
+    // PAM preserves upgrade compatibility only while no managed administrator
+    // configuration exists in the native archive.
 #ifdef USE_PAM
     const PamCredentials credentials{std::string(username), std::string(password)};
     const bool pam_authenticated = pam_enabled && managed_not_configured &&

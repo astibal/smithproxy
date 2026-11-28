@@ -94,7 +94,7 @@ TEST_F(AdminConfigStoreTest, RejectsDuplicateAdministratorWithoutPublishing) {
     const auto result = store().create(
         board.revision_current(), hash(), "alice", "second password");
 
-    EXPECT_EQ(result.status, sx::admin::MutationStatus::already_exists);
+    EXPECT_EQ(result.status, sx::admin::ChangeStatus::already_exists);
     EXPECT_EQ(archive.writes, 1);
     const auto config = store().read();
     const auto* administrator = config.find("alice");
@@ -102,7 +102,7 @@ TEST_F(AdminConfigStoreTest, RejectsDuplicateAdministratorWithoutPublishing) {
     EXPECT_TRUE(sx::crypto::password_matches("first password", administrator->password_verifier));
 }
 
-TEST_F(AdminConfigStoreTest, ChangesPasswordThroughTypedResourceMutation) {
+TEST_F(AdminConfigStoreTest, ChangesPasswordThroughTypedResourceUpdate) {
     ASSERT_TRUE(store().create(board.revision_current(), hash(), "alice", "first password").ok());
 
     const auto result = store().change_password(
@@ -138,8 +138,8 @@ TEST_F(AdminConfigStoreTest, PreservesAtLeastOneEnabledAdministrator) {
         board.revision_current(), hash(), "bob", false);
     const auto remove_last = store().remove(board.revision_current(), hash(), "bob");
 
-    EXPECT_EQ(disable_last.status, sx::admin::MutationStatus::last_enabled_administrator);
-    EXPECT_EQ(remove_last.status, sx::admin::MutationStatus::last_enabled_administrator);
+    EXPECT_EQ(disable_last.status, sx::admin::ChangeStatus::last_enabled_administrator);
+    EXPECT_EQ(remove_last.status, sx::admin::ChangeStatus::last_enabled_administrator);
     EXPECT_EQ(archive.writes, 3);
     const auto config = store().read();
     ASSERT_NE(config.find("bob"), nullptr);
@@ -161,13 +161,13 @@ TEST_F(AdminConfigStoreTest, RemovesDisabledAndNonFinalAdministrators) {
 
 TEST_F(AdminConfigStoreTest, RejectsInvalidInputsAndStaleArchiveGeneration) {
     EXPECT_EQ(store().create(board.revision_current(), hash(), "bad name", "password").status,
-              sx::admin::MutationStatus::invalid_name);
+              sx::admin::ChangeStatus::invalid_name);
     EXPECT_EQ(store().create(board.revision_current(), hash(), "alice", "").status,
-              sx::admin::MutationStatus::invalid_password);
+              sx::admin::ChangeStatus::invalid_password);
 
     const auto stale = store().create(
         board.revision_current(), "sha256:stale", "alice", "password");
-    EXPECT_EQ(stale.status, sx::admin::MutationStatus::persistence_error);
+    EXPECT_EQ(stale.status, sx::admin::ChangeStatus::persistence_error);
     EXPECT_EQ(stale.persistence.status, sx::cfg::ResourceWriteStatus::hash_mismatch);
     EXPECT_EQ(archive.writes, 0);
 }
@@ -180,9 +180,9 @@ TEST_F(AdminConfigStoreTest, RejectsChangesToUnknownAdministrator) {
     const auto removed = store().remove(
         board.revision_current(), hash(), "missing");
 
-    EXPECT_EQ(password.status, sx::admin::MutationStatus::not_found);
-    EXPECT_EQ(enabled.status, sx::admin::MutationStatus::not_found);
-    EXPECT_EQ(removed.status, sx::admin::MutationStatus::not_found);
+    EXPECT_EQ(password.status, sx::admin::ChangeStatus::not_found);
+    EXPECT_EQ(enabled.status, sx::admin::ChangeStatus::not_found);
+    EXPECT_EQ(removed.status, sx::admin::ChangeStatus::not_found);
     EXPECT_EQ(archive.writes, 0);
 }
 
@@ -194,7 +194,7 @@ TEST_F(AdminConfigStoreTest, MalformedExistingAdminConfigFailsClosed) {
     const auto result = store().create(
         board.revision_current(), hash(), "alice", "password");
 
-    EXPECT_EQ(result.status, sx::admin::MutationStatus::persistence_error);
+    EXPECT_EQ(result.status, sx::admin::ChangeStatus::persistence_error);
     EXPECT_EQ(result.persistence.status, sx::cfg::ResourceWriteStatus::invalid_resource);
     EXPECT_EQ(archive.writes, 0);
     EXPECT_THROW({

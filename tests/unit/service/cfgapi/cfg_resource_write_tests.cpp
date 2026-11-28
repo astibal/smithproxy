@@ -109,9 +109,13 @@ TEST_F(ResourceWriteTest, TransformsTheCurrentResourceUnderTheWriteGate) {
     sx::cfg::CfgResourceWriter writer({board, gate, mutex, archive});
     const auto result = writer.transform(
         board.revision_current(), hash(), "gui.cfg",
-        [](std::optional<std::string> current) {
+        [](const std::optional<std::string>& current) {
             EXPECT_EQ(current, "generation=1");
-            return sx::cfg::ResourceTransformResult{true, "generation=2", {}};
+            return sx::cfg::ResourceTransformResult{
+                sx::cfg::ResourceTransformAction::replace,
+                "generation=2",
+                {},
+            };
         },
         false);
 
@@ -129,8 +133,12 @@ TEST_F(ResourceWriteTest, RejectedTransformDoesNotPublishOrChangeTheArchive) {
     sx::cfg::CfgResourceWriter writer({board, gate, mutex, archive});
     const auto result = writer.transform(
         board.revision_current(), hash(), "gui.cfg",
-        [](std::optional<std::string>) {
-            return sx::cfg::ResourceTransformResult{false, {}, "invalid typed content"};
+        [](const std::optional<std::string>&) {
+            return sx::cfg::ResourceTransformResult{
+                sx::cfg::ResourceTransformAction::reject,
+                {},
+                "invalid typed content",
+            };
         },
         false);
 
@@ -148,8 +156,12 @@ TEST_F(ResourceWriteTest, UnchangedTransformSucceedsWithoutPublicationOrRestart)
     sx::cfg::CfgResourceWriter writer({board, gate, mutex, archive});
     const auto result = writer.transform(
         board.revision_current(), hash(), "gui.cfg",
-        [](std::optional<std::string> current) {
-            return sx::cfg::ResourceTransformResult{true, std::move(current), {}};
+        [](const std::optional<std::string>&) {
+            return sx::cfg::ResourceTransformResult{
+                sx::cfg::ResourceTransformAction::unchanged,
+                {},
+                {},
+            };
         },
         false);
 
@@ -158,13 +170,146 @@ TEST_F(ResourceWriteTest, UnchangedTransformSucceedsWithoutPublicationOrRestart)
     EXPECT_FALSE(archive.restart_needed);
 }
 
+TEST_F(ResourceWriteTest, EmptyReplacementPreservesAZeroLengthResource) {
+    ASSERT_TRUE(write(board.revision_current(), hash(), "gui.cfg", std::string("content"))
+                    .ok());
+    archive.restart_needed = false;
+
+    sx::cfg::CfgResourceWriter writer({board, gate, mutex, archive});
+    const auto result = writer.transform(
+        board.revision_current(), hash(), "gui.cfg",
+        [](const std::optional<std::string>&) {
+            return sx::cfg::ResourceTransformResult{
+                sx::cfg::ResourceTransformAction::replace,
+                std::string {},
+                {},
+            };
+        },
+        false);
+
+    EXPECT_TRUE(result.ok());
+    ASSERT_TRUE(archive.source->archive().contains("gui.cfg"));
+    EXPECT_TRUE(archive.source->archive().at("gui.cfg").data.empty());
+    EXPECT_EQ(archive.installs, 2);
+    EXPECT_TRUE(archive.restart_needed);
+}
+
+TEST_F(ResourceWriteTest, RemoveTransformRemovesTheCurrentResource) {
+    ASSERT_TRUE(write(board.revision_current(), hash(), "gui.cfg", std::string("content"))
+                    .ok());
+    archive.restart_needed = false;
+
+    sx::cfg::CfgResourceWriter writer({board, gate, mutex, archive});
+    const auto result = writer.transform(
+        board.revision_current(), hash(), "gui.cfg",
+        [](const std::optional<std::string>&) {
+            return sx::cfg::ResourceTransformResult{
+                sx::cfg::ResourceTransformAction::remove,
+                {},
+                {},
+            };
+        },
+        false);
+
+    EXPECT_TRUE(result.ok());
+    EXPECT_FALSE(archive.source->archive().contains("gui.cfg"));
+    EXPECT_EQ(archive.installs, 2);
+    EXPECT_TRUE(archive.restart_needed);
+}
+
+TEST_F(ResourceWriteTest, RemoveTransformOfMissingResourceIsANoOp) {
+    sx::cfg::CfgResourceWriter writer({board, gate, mutex, archive});
+    const auto result = writer.transform(
+        board.revision_current(), hash(), "gui.cfg",
+        [](const std::optional<std::string>&) {
+            return sx::cfg::ResourceTransformResult{
+                sx::cfg::ResourceTransformAction::remove,
+                {},
+                {},
+            };
+        },
+        false);
+
+    EXPECT_TRUE(result.ok());
+    EXPECT_FALSE(archive.source->archive().contains("gui.cfg"));
+    EXPECT_EQ(archive.installs, 0);
+    EXPECT_FALSE(archive.restart_needed);
+}
+
+TEST_F(ResourceWriteTest, ReplaceTransformWithoutContentIsRejected) {
+    sx::cfg::CfgResourceWriter writer({board, gate, mutex, archive});
+    const auto result = writer.transform(
+        board.revision_current(), hash(), "gui.cfg",
+        [](const std::optional<std::string>&) {
+            return sx::cfg::ResourceTransformResult{
+                sx::cfg::ResourceTransformAction::replace,
+                {},
+                {},
+            };
+        },
+        false);
+
+    EXPECT_EQ(result.status, sx::cfg::ResourceWriteStatus::invalid_resource);
+    EXPECT_EQ(archive.installs, 0);
+}
+
+TEST_F(ResourceWriteTest, RemoveTransformWithContentIsRejected) {
+    sx::cfg::CfgResourceWriter writer({board, gate, mutex, archive});
+    const auto result = writer.transform(
+        board.revision_current(), hash(), "gui.cfg",
+        [](const std::optional<std::string>&) {
+            return sx::cfg::ResourceTransformResult{
+                sx::cfg::ResourceTransformAction::remove,
+                "unexpected",
+                {},
+            };
+        },
+        false);
+
+    EXPECT_EQ(result.status, sx::cfg::ResourceWriteStatus::invalid_resource);
+    EXPECT_EQ(archive.installs, 0);
+}
+
+TEST_F(ResourceWriteTest, UnchangedTransformWithContentIsRejected) {
+    sx::cfg::CfgResourceWriter writer({board, gate, mutex, archive});
+    const auto result = writer.transform(
+        board.revision_current(), hash(), "gui.cfg",
+        [](const std::optional<std::string>&) {
+            return sx::cfg::ResourceTransformResult{
+                sx::cfg::ResourceTransformAction::unchanged,
+                "unexpected",
+                {},
+            };
+        },
+        false);
+
+    EXPECT_EQ(result.status, sx::cfg::ResourceWriteStatus::invalid_resource);
+    EXPECT_EQ(archive.installs, 0);
+}
+
+TEST_F(ResourceWriteTest, DirectNullContentStillRemovesAResource) {
+    ASSERT_TRUE(write(board.revision_current(), hash(), "gui.cfg", std::string("content"))
+                    .ok());
+    archive.restart_needed = false;
+
+    const auto result = write(
+        board.revision_current(), hash(), "gui.cfg", std::nullopt);
+
+    EXPECT_TRUE(result.ok());
+    EXPECT_FALSE(archive.source->archive().contains("gui.cfg"));
+    EXPECT_EQ(archive.installs, 2);
+}
+
 TEST_F(ResourceWriteTest, ImmediateTransformPublishesWithoutRequiringRestart) {
     sx::cfg::CfgResourceWriter writer({board, gate, mutex, archive});
     const auto result = writer.transform(
         board.revision_current(), hash(), "admin.cfg",
-        [](std::optional<std::string>) {
+        [](const std::optional<std::string>&) {
             return sx::cfg::ResourceTransformResult{
-                true, "admin = { schema_version = 1; administrators = (); };\n", {}};
+                sx::cfg::ResourceTransformAction::replace,
+                "admin = { schema_version = 1; administrators = (); };\n",
+                {},
+            };
         },
         false,
         sx::cfg::ResourceActivation::immediate);
@@ -179,9 +324,12 @@ TEST_F(ResourceWriteTest, ImmediateTransformCanComposeWithPendingStartupChange) 
     sx::cfg::CfgResourceWriter writer({board, gate, mutex, archive});
     const auto result = writer.transform(
         board.revision_current(), hash(), "admin.cfg",
-        [](std::optional<std::string>) {
+        [](const std::optional<std::string>&) {
             return sx::cfg::ResourceTransformResult{
-                true, "admin = { schema_version = 1; administrators = (); };\n", {}};
+                sx::cfg::ResourceTransformAction::replace,
+                "admin = { schema_version = 1; administrators = (); };\n",
+                {},
+            };
         },
         false,
         sx::cfg::ResourceActivation::immediate);

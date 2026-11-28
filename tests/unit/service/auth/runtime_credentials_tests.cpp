@@ -275,8 +275,6 @@ TEST(RuntimeCredentialConfigTest, ParsesIndependentCredentialPolicies) {
             api_token_file = "/run/custom/api";
             previous_api_token_file = "/run/custom/api.previous";
             credential_rotation_seconds = 7200L;
-            administrator_auth_socket_enabled = false;
-            administrator_auth_socket = "/run/custom/admin-auth.sock";
           };
           gateway = {
             credential_enabled = true;
@@ -293,8 +291,6 @@ TEST(RuntimeCredentialConfigTest, ParsesIndependentCredentialPolicies) {
     EXPECT_TRUE(policy.gateway.enabled);
     EXPECT_EQ(policy.gateway.previous_path, "/run/custom/gateway.previous");
     EXPECT_EQ(policy.gateway.overlap, std::chrono::minutes(2));
-    EXPECT_FALSE(policy.administrator_auth_socket_enabled);
-    EXPECT_EQ(policy.administrator_auth_socket, "/run/custom/admin-auth.sock");
 }
 
 TEST(RuntimeCredentialConfigTest, IsolatesDefaultRuntimePathsByTenant) {
@@ -302,16 +298,12 @@ TEST(RuntimeCredentialConfigTest, IsolatesDefaultRuntimePathsByTenant) {
     const auto tenant = sx::auth::default_gui_runtime_credentials(7);
 
     EXPECT_EQ(primary.management_api.current_path, "/run/smithproxy/gui-api.key");
-    EXPECT_EQ(primary.administrator_auth_socket, "/run/smithproxy/admin-auth.sock");
     EXPECT_EQ(
         tenant.management_api.current_path,
         "/run/smithproxy/tenant-7/gui-api.key");
     EXPECT_EQ(
         tenant.gateway.previous_path,
         "/run/smithproxy/tenant-7/gui-gateway.previous.key");
-    EXPECT_EQ(
-        tenant.administrator_auth_socket,
-        "/run/smithproxy/tenant-7/admin-auth.sock");
 }
 
 TEST(RuntimeCredentialConfigTest, KeepsTenantDefaultsForUnspecifiedPaths) {
@@ -324,9 +316,6 @@ TEST(RuntimeCredentialConfigTest, KeepsTenantDefaultsForUnspecifiedPaths) {
     EXPECT_EQ(
         policy.management_api.current_path,
         "/run/smithproxy/tenant-3/gui-api.key");
-    EXPECT_EQ(
-        policy.administrator_auth_socket,
-        "/run/smithproxy/tenant-3/admin-auth.sock");
 }
 
 TEST(RuntimeCredentialConfigTest, DerivesPreviousGenerationBesideCustomCurrentPath) {
@@ -357,22 +346,6 @@ TEST(RuntimeCredentialConfigTest, RejectsUnsafeCredentialGenerationLayout) {
               previous_secret_file = "/run/shared/gateway";
             }; };
         )"),
-        std::invalid_argument);
-}
-
-TEST(RuntimeCredentialConfigTest, RejectsUnusableAdministratorSocketPaths) {
-    EXPECT_THROW(
-        sx::auth::parse_gui_runtime_credentials(R"(
-            gui = { smithproxy = { administrator_auth_socket = "relative.sock"; }; };
-        )"),
-        std::invalid_argument);
-
-    const std::string oversized_path = "/" + std::string(107U, 'a');
-    const std::string source =
-        "gui = { smithproxy = { administrator_auth_socket = \"" +
-        oversized_path + "\"; }; };";
-    EXPECT_THROW(
-        sx::auth::parse_gui_runtime_credentials(source),
         std::invalid_argument);
 }
 

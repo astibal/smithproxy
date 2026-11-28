@@ -10,8 +10,11 @@ namespace sx::webserver {
     using json = nlohmann::json;
 
 
-std::thread* create_httpd_thread(unsigned short port, int listener_fd) {
-    return new std::thread([port, listener_fd]() {
+std::thread* create_httpd_thread(
+    const unsigned short port,
+    const int listener_fd,
+    const bool gui_enabled) {
+    return new std::thread([port, listener_fd, gui_enabled]() {
 
         lmh::WebServer server(port);
         server.options().bind_loopback = HttpSessions::loopback_only;
@@ -27,7 +30,12 @@ std::thread* create_httpd_thread(unsigned short port, int listener_fd) {
                 SSLFactory::factory().config.def_po_key_str,
                 SSLFactory::factory().config.def_po_cert_str);
 
-        dispatchers::controller_add_authorization(server);
+        // Direct API-key authentication remains available without the GUI.
+        // Browser sessions, administrator enrollment and administrator CRUD
+        // are registered only when the process permits GUI management.
+        if(gui_enabled) {
+            dispatchers::controller_add_authorization(server);
+        }
 
         dispatchers::controller_add_status(server);
         dispatchers::controller_add_commons(server);

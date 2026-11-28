@@ -21,8 +21,10 @@ struct LoginResult {
     std::int64_t retry_after_seconds {0};
 };
 
-// Applies the same managed-administrator precedence, PAM compatibility and
-// online-attempt limits for every management transport.
+// Authenticates one management login from the supplied transport source.
+// Managed administrators take precedence; PAM is considered only when the
+// managed store is not configured. The result also carries throttle timing
+// and the identity metadata needed to create a management session.
 LoginResult authenticate(
     std::string_view source,
     std::string_view username,

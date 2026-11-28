@@ -60,6 +60,8 @@ struct AdministratorRequestResult {
     std::string error;
 };
 
+// Strict request decoders accept only the fields required by each operation.
+// Password-bearing results cleanse their secrets when destroyed.
 AdministratorRequestResult<AdministratorCreateRequest>
 parse_administrator_create_request(const nlohmann::json& document);
 AdministratorRequestResult<AdministratorPasswordRequest>
@@ -71,12 +73,22 @@ parse_administrator_remove_request(const nlohmann::json& document);
 AdministratorRequestResult<AdministratorEnrollmentRequest>
 parse_administrator_enrollment_request(const nlohmann::json& document);
 
+// Lists or creates managed administrators. Mutation requests require the
+// expected Core revision and archive hash preconditions.
 Http_JsonResponseParams administrator_collection(
     MHD_Connection* connection, const std::string& method, const std::string& request);
+
+// Replaces one managed administrator's password using optimistic concurrency.
 Http_JsonResponseParams administrator_password(
     MHD_Connection* connection, const std::string& method, const std::string& request);
+
+// Enables or disables one managed administrator while preserving the final
+// enabled account and protecting the active password-authenticated identity.
 Http_JsonResponseParams administrator_enabled(
     MHD_Connection* connection, const std::string& method, const std::string& request);
+
+// Consumes a short-lived enrollment token only after the administrator has
+// been durably persisted. Failed writes leave the token available for retry.
 Http_JsonResponseParams administrator_enrollment(
     MHD_Connection* connection, const std::string& method, const std::string& request);
 

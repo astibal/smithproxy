@@ -63,9 +63,11 @@ bool is_active_managed_administrator(std::string_view administrator) {
     return password_session && same_administrator;
 }
 
-Http_JsonResponseParams mutation_response(
-    const sx::admin::MutationResult& result, std::string_view success_state,
+Http_JsonResponseParams change_response(
+    const sx::admin::ChangeResult& result, std::string_view success_state,
     std::string_view administrator) {
+    // Preserve Core's typed failure semantics at the HTTP boundary instead of
+    // collapsing validation, conflicts and persistence failures into one code.
     if(result.ok()) {
         Http_JsonResponseParams response;
         response.response_code = MHD_HTTP_OK;
@@ -81,28 +83,28 @@ Http_JsonResponseParams mutation_response(
         return response;
     }
 
-    using Mutation = sx::admin::MutationStatus;
+    using Change = sx::admin::ChangeStatus;
     using Persistence = sx::cfg::ResourceWriteStatus;
     std::string code;
     unsigned int status = MHD_HTTP_CONFLICT;
     switch(result.status) {
-        case Mutation::invalid_name:
+        case Change::invalid_name:
             code = "invalid_administrator_name";
             status = MHD_HTTP_UNPROCESSABLE_CONTENT;
             break;
-        case Mutation::invalid_password:
+        case Change::invalid_password:
             code = "invalid_administrator_password";
             status = MHD_HTTP_UNPROCESSABLE_CONTENT;
             break;
-        case Mutation::already_exists: code = "administrator_exists"; break;
-        case Mutation::not_found:
+        case Change::already_exists: code = "administrator_exists"; break;
+        case Change::not_found:
             code = "administrator_not_found";
             status = MHD_HTTP_NOT_FOUND;
             break;
-        case Mutation::last_enabled_administrator:
+        case Change::last_enabled_administrator:
             code = "final_enabled_administrator";
             break;
-        case Mutation::persistence_error:
+        case Change::persistence_error:
             switch(result.persistence.status) {
                 case Persistence::invalid_resource:
                     code = "administrator_config_invalid";
@@ -125,7 +127,7 @@ Http_JsonResponseParams mutation_response(
                     break;
             }
             break;
-        case Mutation::written: break;
+        case Change::written: break;
     }
 
     auto response = error_response(std::move(code), result.detail, status);
@@ -135,14 +137,16 @@ Http_JsonResponseParams mutation_response(
 }
 
 template<class Request>
-using MutationGuard =
+using ChangeGuard =
     std::function<std::optional<Http_JsonResponseParams>(const Request&)>;
 
-template<class Request, class Parser, class Mutation, class Success>
-Http_JsonResponseParams mutate_administrator(
+template<class Request, class Parser, class Change, class Success>
+Http_JsonResponseParams change_administrator(
     MHD_Connection* connection, const std::string& request, Parser parser,
-    Mutation mutation, Success success, std::string_view success_state,
-    MutationGuard<Request> guard = {}) {
+    Change change, Success success, std::string_view success_state,
+    ChangeGuard<Request> guard = {}) {
+    // Every authenticated mutation follows the same optimistic-concurrency,
+    // parsing, optional self-lockout guard, audit and session-invalidation path.
     const auto expected = preconditions(connection);
     if(!expected) {
         return error_response(
@@ -158,8 +162,8 @@ Http_JsonResponseParams mutate_administrator(
             const auto rejection = guard(*decoded.request);
             if(rejection) return *rejection;
         }
-        const auto result = mutation(*expected, *decoded.request);
-        auto response = mutation_response(
+        const auto result = change(*expected, *decoded.request);
+        auto response = change_response(
             result, success_state, decoded.request->name);
         if(result.ok()) {
             const auto actor = authorized::current_actor();
@@ -184,7 +188,7 @@ Http_JsonResponseParams mutate_administrator(
 Http_JsonResponseParams administrator_collection(
     MHD_Connection* connection, const std::string& method, const std::string& request) {
     if(method == "POST") {
-        return mutate_administrator<AdministratorCreateRequest>(
+        return change_administrator<AdministratorCreateRequest>(
             connection, request, parse_administrator_create_request,
             [](const Preconditions& expected, const AdministratorCreateRequest& decoded) {
                 return CfgFactory::create_administrator(
@@ -196,7 +200,7 @@ Http_JsonResponseParams administrator_collection(
             "created");
     }
     if(method == "DELETE") {
-        return mutate_administrator<AdministratorRemoveRequest>(
+        return change_administrator<AdministratorRemoveRequest>(
             connection, request, parse_administrator_remove_request,
             [](const Preconditions& expected, const AdministratorRemoveRequest& decoded) {
                 return CfgFactory::remove_administrator(
@@ -246,7 +250,7 @@ Http_JsonResponseParams administrator_collection(
 
 Http_JsonResponseParams administrator_password(
     MHD_Connection* connection, const std::string&, const std::string& request) {
-    return mutate_administrator<AdministratorPasswordRequest>(
+    return change_administrator<AdministratorPasswordRequest>(
         connection, request, parse_administrator_password_request,
         [](const Preconditions& expected, const AdministratorPasswordRequest& decoded) {
             return CfgFactory::change_administrator_password(
@@ -260,7 +264,7 @@ Http_JsonResponseParams administrator_password(
 
 Http_JsonResponseParams administrator_enabled(
     MHD_Connection* connection, const std::string&, const std::string& request) {
-    return mutate_administrator<AdministratorEnabledRequest>(
+    return change_administrator<AdministratorEnabledRequest>(
         connection, request, parse_administrator_enabled_request,
         [](const Preconditions& expected, const AdministratorEnabledRequest& decoded) {
             return CfgFactory::set_administrator_enabled(
@@ -284,7 +288,7 @@ Http_JsonResponseParams administrator_enrollment(
     // The high-entropy, short-lived, single-use enrollment token is the
     // authorization capability for this endpoint. Requiring an existing
     // administrator session here would make first-administrator bootstrap
-    // impossible. Every other administrator mutation remains session
+    // impossible. Every other administrator change remains session
     // protected at controller registration.
     const auto expected = preconditions(connection);
     if(!expected) {
@@ -299,9 +303,9 @@ Http_JsonResponseParams administrator_enrollment(
             nlohmann::json::parse(request));
         if(!decoded.request) return invalid_json_request(std::move(decoded.error));
 
-        auto claim = AdminEnrollmentStore::instance().claim(
+        auto reservation = AdminEnrollmentStore::instance().reserve(
             decoded.request->enrollment_token);
-        if(!claim) {
+        if(!reservation) {
             Log::get()->events().insert(
                 WAR, "invalid, expired, or busy administrator enrollment attempt from %s",
                 authorized::client_address(connection).c_str());
@@ -311,17 +315,19 @@ Http_JsonResponseParams administrator_enrollment(
         }
 
         const auto result = CfgFactory::create_administrator(
-            expected->revision, expected->archive_hash, claim->administrator(),
+            expected->revision, expected->archive_hash, reservation->administrator(),
             decoded.request->password);
-        auto response = mutation_response(result, "enrolled", claim->administrator());
+        auto response = change_response(
+            result, "enrolled", reservation->administrator());
         if(!result.ok()) return response;
 
-        const auto administrator = claim->administrator();
+        const auto administrator = reservation->administrator();
         HttpSessions::administrator_changed(administrator);
-        const bool consumed = claim->commit();
+        const bool consumed = reservation->commit();
         if(!consumed) {
             Log::get()->events().insert(
-                WAR, "administrator %s persisted after its enrollment claim was cleared",
+                WAR,
+                "administrator %s persisted after its enrollment reservation was cleared",
                 administrator.c_str());
         }
         Log::get()->events().insert(

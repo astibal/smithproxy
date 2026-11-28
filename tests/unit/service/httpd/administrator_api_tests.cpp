@@ -51,7 +51,7 @@ TEST(AdministratorApiRequestTest, DecodesPasswordEnabledAndRemoveRequests) {
     EXPECT_EQ(removed.request->name, "admin");
 }
 
-TEST(AdministratorApiRequestTest, RequiresExactMutationShapes) {
+TEST(AdministratorApiRequestTest, RequiresExactChangeShapes) {
     EXPECT_FALSE(sx::webserver::parse_administrator_password_request({
         {"name", "admin"},
     }).request);

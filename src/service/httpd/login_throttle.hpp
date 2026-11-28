@@ -34,6 +34,8 @@ public:
         return throttle;
     }
 
+    // Charges one authentication attempt against both the client source and
+    // the source/principal pair. Denied calls report the remaining delay.
     Decision permit(
         std::string_view source,
         std::string_view principal,
@@ -76,6 +78,7 @@ public:
         principal_attempts_.clear();
     }
 
+    // Returns bounded source and principal entry counts after expiry pruning.
     std::pair<std::size_t, std::size_t> entry_counts(
         std::int64_t now = unix_seconds()) {
         auto guard = std::scoped_lock(lock_);

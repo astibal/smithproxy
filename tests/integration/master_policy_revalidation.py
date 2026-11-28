@@ -307,7 +307,15 @@ try:
         # Each scenario starts with its own legacy-to-native migration.
         cfg.with_suffix('.cftar').unlink(missing_ok=True)
         with (root / f'{label}.log').open('w') as log:
-            proxy = subprocess.Popen([str(binary), '--no-pidfile', '--diagnose', '-c', str(cfg)], stdout=log, stderr=subprocess.STDOUT)
+            proxy = subprocess.Popen([
+                str(binary),
+                '--no-pidfile',
+                '--diagnose',
+                '--cli-socket',
+                str(pathlib.Path('/tmp') / f'smithproxy-cli-{root.name}-{os.getpid()}.sock'),
+                '-c',
+                str(cfg),
+            ], stdout=log, stderr=subprocess.STDOUT)
             eventually(lambda: api('status/ping'))
             lease = api('v2/webhook/lease', {
                 'url': 'http://127.0.0.1:18081/', 'tls_verify': False,

@@ -60,6 +60,8 @@ AdministratorEnrollmentRequest::~AdministratorEnrollmentRequest() {
 
 AdministratorRequestResult<AdministratorCreateRequest>
 parse_administrator_create_request(const nlohmann::json& document) {
+    // Reject unknown fields so misspellings and future-incompatible requests
+    // cannot be silently interpreted as valid administrator changes.
     const bool valid_fields = has_only_fields(
         document, {"name", "password", HttpSessions::ATT_AUTH_TOKEN,
                    HttpSessions::ATT_CSRF_TOKEN});
@@ -110,6 +112,8 @@ parse_administrator_remove_request(const nlohmann::json& document) {
 
 AdministratorRequestResult<AdministratorEnrollmentRequest>
 parse_administrator_enrollment_request(const nlohmann::json& document) {
+    // Enrollment deliberately carries no administrator name: the short-lived
+    // capability already binds the request to the issuer-selected identity.
     const bool valid_fields = has_only_fields(
         document, {"enrollment_token", "password", HttpSessions::ATT_AUTH_TOKEN,
                    HttpSessions::ATT_CSRF_TOKEN});

@@ -151,6 +151,7 @@ TEST_F(AdminAuthSocketTest, RejectsUnknownAndOversizedRequestsWithoutAuthenticat
     });
     EXPECT_EQ(oversized_packet["status"], "invalid_request");
     EXPECT_EQ(authentication_calls, 0U);
+    EXPECT_EQ(server.invalid_requests(), 4U);
 }
 
 TEST_F(AdminAuthSocketTest, RejectsMalformedAndIncompleteJsonWithoutAuthentication) {
@@ -198,6 +199,7 @@ TEST_F(AdminAuthSocketTest, RejectsMalformedAndIncompleteJsonWithoutAuthenticati
     });
     EXPECT_EQ(empty_password["status"], "invalid_request");
     EXPECT_EQ(authentication_calls, 0U);
+    EXPECT_EQ(server.invalid_requests(), 5U);
 }
 
 TEST_F(AdminAuthSocketTest, PreservesThrottleResultInProtocol) {

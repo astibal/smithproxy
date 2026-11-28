@@ -31,8 +31,17 @@ struct ResourceWriteResult {
     [[nodiscard]] bool ok() const noexcept { return status == ResourceWriteStatus::written; }
 };
 
+enum class ResourceTransformAction {
+    reject,
+    unchanged,
+    replace,
+    remove,
+};
+
 struct ResourceTransformResult {
-    bool apply = false;
+    ResourceTransformAction action = ResourceTransformAction::reject;
+    // Content is required only by replace. An empty replacement remains a
+    // valid zero-length resource and is distinct from remove.
     std::optional<std::string> content;
     std::string detail;
 };
@@ -63,7 +72,8 @@ public:
         std::string expected_revision,
         std::string expected_archive_hash,
         std::string path,
-        std::function<ResourceTransformResult(std::optional<std::string>)> transformer,
+        std::function<ResourceTransformResult(
+            const std::optional<std::string>&)> transformer,
         bool executable,
         ResourceActivation activation = ResourceActivation::deferred_until_restart);
 

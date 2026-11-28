@@ -35,15 +35,14 @@ struct RuntimeCredentialSnapshot {
 struct GuiRuntimeCredentialPolicy {
     RuntimeCredentialSpec management_api;
     RuntimeCredentialSpec gateway;
-    bool administrator_auth_socket_enabled {true};
-    std::filesystem::path administrator_auth_socket {
-        "/run/smithproxy/admin-auth.sock"};
 };
 
 // Reads only Core-owned runtime credential policy from gui.cfg. The rest of
 // the GUI schema remains private to smithproxy-gui.
 GuiRuntimeCredentialPolicy parse_gui_runtime_credentials(
     std::string_view source, unsigned int tenant_index = 0);
+
+// Builds the secure tenant-aware policy used when gui.cfg is absent or invalid.
 GuiRuntimeCredentialPolicy default_gui_runtime_credentials(unsigned int tenant_index = 0);
 
 class RuntimeCredentialPair {
@@ -58,7 +57,11 @@ public:
     bool reconcile(std::chrono::system_clock::time_point now =
                        std::chrono::system_clock::now());
 
+    // Starts periodic reconciliation. The first explicit reconcile normally
+    // happens before this call so consumers receive credentials immediately.
     void start(std::chrono::seconds poll_interval = std::chrono::seconds(5));
+
+    // Stops and joins the worker without removing the published credentials.
     void stop();
     ~RuntimeCredentialPair();
 

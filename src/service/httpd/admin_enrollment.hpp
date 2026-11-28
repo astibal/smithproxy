@@ -28,60 +28,64 @@ public:
     };
 
     // Exclusively reserves one capability while its administrator record is
-    // persisted. Destruction releases an uncommitted claim for a safe retry.
-    class Claim {
+    // persisted. Destruction releases an uncommitted reservation for a safe retry.
+    class TokenReservation {
     public:
-        Claim(const Claim&) = delete;
-        Claim& operator=(const Claim&) = delete;
+        TokenReservation(const TokenReservation&) = delete;
+        TokenReservation& operator=(const TokenReservation&) = delete;
 
-        Claim(Claim&& other) noexcept
+        TokenReservation(TokenReservation&& other) noexcept
             : store_(std::exchange(other.store_, nullptr)),
               verifier_(std::move(other.verifier_)),
-              claim_id_(std::exchange(other.claim_id_, 0)),
+              reservation_id_(std::exchange(other.reservation_id_, 0)),
               administrator_(std::move(other.administrator_)) {}
 
-        Claim& operator=(Claim&& other) noexcept {
+        TokenReservation& operator=(TokenReservation&& other) noexcept {
             if(this == &other) return *this;
             release();
             store_ = std::exchange(other.store_, nullptr);
             verifier_ = std::move(other.verifier_);
-            claim_id_ = std::exchange(other.claim_id_, 0);
+            reservation_id_ = std::exchange(other.reservation_id_, 0);
             administrator_ = std::move(other.administrator_);
             return *this;
         }
 
-        ~Claim() { release(); }
+        ~TokenReservation() { release(); }
 
         [[nodiscard]] const std::string& administrator() const noexcept {
             return administrator_;
         }
 
-        // Permanently consumes the claimed capability after durable success.
+        // Permanently consumes the reserved capability after durable success.
         [[nodiscard]] bool commit() {
             if(!store_) return false;
-            const bool consumed = store_->finish_claim(verifier_, claim_id_, true);
+            const bool consumed = store_->finish_reservation(
+                verifier_, reservation_id_, true);
             store_ = nullptr;
-            claim_id_ = 0;
+            reservation_id_ = 0;
             return consumed;
         }
 
     private:
         friend class AdminEnrollmentStore;
 
-        Claim(AdminEnrollmentStore& store, std::string verifier,
-              std::uint64_t claim_id, std::string administrator)
-            : store_(&store), verifier_(std::move(verifier)), claim_id_(claim_id),
+        TokenReservation(AdminEnrollmentStore& store, std::string verifier,
+                         std::uint64_t reservation_id, std::string administrator)
+            : store_(&store), verifier_(std::move(verifier)),
+              reservation_id_(reservation_id),
               administrator_(std::move(administrator)) {}
 
         void release() noexcept {
-            if(store_) store_->finish_claim(verifier_, claim_id_, false);
+            if(store_) {
+                store_->finish_reservation(verifier_, reservation_id_, false);
+            }
             store_ = nullptr;
-            claim_id_ = 0;
+            reservation_id_ = 0;
         }
 
         AdminEnrollmentStore* store_ {nullptr};
         std::string verifier_;
-        std::uint64_t claim_id_ {0};
+        std::uint64_t reservation_id_ {0};
         std::string administrator_;
     };
 
@@ -125,9 +129,9 @@ public:
         return IssuedToken{std::move(*token), expires_at};
     }
 
-    // Exclusively claims a capability so persistence can fail without losing
+    // Exclusively reserves a capability so persistence can fail without losing
     // it and parallel callers still cannot reuse it.
-    std::optional<Claim> claim(
+    std::optional<TokenReservation> reserve(
         std::string_view token,
         std::int64_t now = unix_seconds()) {
         const bool valid_length = token.size() == 64U;
@@ -149,21 +153,22 @@ public:
             entries_.erase(found);
             return std::nullopt;
         }
-        if(found->second.claim_id != 0) return std::nullopt;
+        if(found->second.reservation_id != 0) return std::nullopt;
 
-        const auto claim_id = next_claim_id_locked();
-        found->second.claim_id = claim_id;
-        return Claim(*this, *verifier, claim_id, found->second.administrator);
+        const auto reservation_id = next_reservation_id_locked();
+        found->second.reservation_id = reservation_id;
+        return TokenReservation(
+            *this, *verifier, reservation_id, found->second.administrator);
     }
 
     // Compatibility helper for transports that complete no persistent work.
     std::optional<std::string> consume(
         std::string_view token,
         std::int64_t now = unix_seconds()) {
-        auto claimed = claim(token, now);
-        if(!claimed) return std::nullopt;
-        auto administrator = claimed->administrator();
-        if(!claimed->commit()) return std::nullopt;
+        auto reservation = reserve(token, now);
+        if(!reservation) return std::nullopt;
+        auto administrator = reservation->administrator();
+        if(!reservation->commit()) return std::nullopt;
         return administrator;
     }
 
@@ -186,7 +191,7 @@ private:
     struct Entry {
         std::string administrator;
         std::int64_t expires_at_unix_seconds {0};
-        std::uint64_t claim_id {0};
+        std::uint64_t reservation_id {0};
     };
 
     // Produces wall-clock seconds used by externally visible expiry values.
@@ -205,29 +210,33 @@ private:
         }
     }
 
-    std::uint64_t next_claim_id_locked() noexcept {
-        ++last_claim_id_;
-        if(last_claim_id_ == 0) ++last_claim_id_;
-        return last_claim_id_;
+    std::uint64_t next_reservation_id_locked() noexcept {
+        ++last_reservation_id_;
+        if(last_reservation_id_ == 0) ++last_reservation_id_;
+        return last_reservation_id_;
     }
 
-    bool finish_claim(
-        const std::string& verifier, std::uint64_t claim_id, bool consume) noexcept {
+    // Completes a reservation owned by reservation_id. A committed reservation
+    // consumes the token; an uncommitted one becomes available for safe retry.
+    bool finish_reservation(
+        const std::string& verifier,
+        std::uint64_t reservation_id,
+        bool consume) noexcept {
         auto guard = std::scoped_lock(lock_);
         const auto found = entries_.find(verifier);
-        const bool owns_claim = found != entries_.end() &&
-                                found->second.claim_id == claim_id;
-        if(!owns_claim) return false;
+        const bool owns_reservation = found != entries_.end() &&
+            found->second.reservation_id == reservation_id;
+        if(!owns_reservation) return false;
         if(consume)
             entries_.erase(found);
         else
-            found->second.claim_id = 0;
+            found->second.reservation_id = 0;
         return true;
     }
 
     std::mutex lock_;
     std::map<std::string, Entry> entries_;
-    std::uint64_t last_claim_id_ {0};
+    std::uint64_t last_reservation_id_ {0};
 };
 
 }  // namespace sx::webserver
