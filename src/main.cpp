@@ -203,7 +203,8 @@ int prepare_privilege_separation(DaemonFactory& daemon, const std::string& confi
                                  const std::optional<std::string>& comm_api,
                                  const std::optional<std::string>& comm_webhook,
                                  const std::optional<std::string>& comm_sift,
-                                 const std::optional<std::string>& public_cli_socket) {
+                                 const std::optional<std::string>& public_cli_socket,
+                                 const bool console_enabled) {
     auto const& log = DaemonFactory::instance()->get_log();
 
     if(sx::privsep::files::start_local_helper({config_file, daemon.pid_file}) != 0) {
@@ -248,7 +249,7 @@ int prepare_privilege_separation(DaemonFactory& daemon, const std::string& confi
             static_cast<std::uint16_t>(CfgFactory::get()->cli_port),
             public_cli_socket.value_or(cli_socket_path(
                 CfgFactory::get()->tenant_index, CfgFactory::get()->cli_port)),
-            broker_identity->uid, broker_identity->gid);
+            broker_identity->uid, broker_identity->gid, console_enabled);
     if(cli_result != 0) {
         _fat("cannot initialize CLI broker: %s", string_error().c_str());
         socle::privsep::stop_local_helper();
@@ -259,7 +260,7 @@ int prepare_privilege_separation(DaemonFactory& daemon, const std::string& confi
     // The broker must remain available for a credential that Core creates or
     // rotates after startup. Until a key is published every request still
     // fails authentication in HttpSessions.
-    if(CfgFactory::get()->accept_api) {
+    if(CfgFactory::get()->http_api_enabled()) {
         const std::string api_address = sx::webserver::HttpSessions::loopback_only
             ? "127.0.0.1"
             : (sx::webserver::HttpSessions::bind_address.empty()
@@ -651,6 +652,9 @@ void print_help() {
     std::cerr << "    --config-check-only, -o      :  perform configuration file check" << std::endl;
     std::cerr << "    --no-pidfile                 :  disable PID file management (for service managers)" << std::endl;
     std::cerr << "    --no-gui                     :  disable GUI credentials and administrator entry points" << std::endl;
+    std::cerr << "    --no-api                     :  disable the complete HTTP API listener" << std::endl;
+    std::cerr << "    --console                    :  enable the legacy plaintext TCP console" << std::endl;
+    std::cerr << "    --no-console                 :  disable the legacy plaintext TCP console" << std::endl;
     std::cerr << "    --cli-socket <path>          :  override the public CLI Unix socket path" << std::endl;
     std::cerr << "    --run-as <user>              :  drop core identity after starting privileged helper" << std::endl;
     std::cerr << "    --comm-gre <path>            :  use an external GRE comm broker" << std::endl;
@@ -712,7 +716,10 @@ int main(int argc, char *argv[]) {
     constexpr int option_no_pidfile = 1006;
     constexpr int option_comm_auth = 1007;
     constexpr int option_no_gui = 1008;
-    constexpr int option_cli_socket = 1009;
+    constexpr int option_no_api = 1009;
+    constexpr int option_console = 1010;
+    constexpr int option_no_console = 1011;
+    constexpr int option_cli_socket = 1012;
     static struct option long_options[] =
             {
                     /* These options set a flag. */
@@ -734,6 +741,9 @@ int main(int argc, char *argv[]) {
                     {"comm-sift", required_argument, nullptr, option_comm_sift},
                     {"comm-auth", required_argument, nullptr, option_comm_auth},
                     {"no-gui", no_argument, nullptr, option_no_gui},
+                    {"no-api", no_argument, nullptr, option_no_api},
+                    {"console", no_argument, nullptr, option_console},
+                    {"no-console", no_argument, nullptr, option_no_console},
                     {"cli-socket", required_argument, nullptr, option_cli_socket},
 
                     // multi-tenancy support: listening ports will be shifted by number 'i', while 't' controls logging, pidfile, etc.
@@ -760,6 +770,9 @@ int main(int argc, char *argv[]) {
     std::optional<std::string> command_line_comm_webhook;
     std::optional<std::string> command_line_comm_sift;
     std::optional<std::string> command_line_cli_socket;
+    bool console_enabled = true;
+    bool console_option_seen = false;
+    bool no_console_option_seen = false;
 
     while(true) {
     /* getopt_long stores the option index here. */
@@ -814,6 +827,20 @@ int main(int argc, char *argv[]) {
 
             case option_no_gui:
                 CfgFactory::get()->gui_enabled = false;
+                break;
+
+            case option_no_api:
+                CfgFactory::get()->api_enabled = false;
+                break;
+
+            case option_console:
+                console_enabled = true;
+                console_option_seen = true;
+                break;
+
+            case option_no_console:
+                console_enabled = false;
+                no_console_option_seen = true;
                 break;
 
             case option_cli_socket:
@@ -879,6 +906,11 @@ int main(int argc, char *argv[]) {
                 std::cerr << "unknown option: '" << (char)c << "'"<< std::endl;
                 return EXIT_FAILURE;
         }
+    }
+
+    if(console_option_seen && no_console_option_seen) {
+        std::cerr << "--console and --no-console cannot be used together" << std::endl;
+        return EXIT_FAILURE;
     }
 
     // set synchronous logger for the beginning
@@ -1279,7 +1311,8 @@ int main(int argc, char *argv[]) {
     if(prepare_privilege_separation(*this_daemon, CfgFactory::get()->config_file, run_as,
                                     command_line_comm_gre, command_line_comm_cli,
                                     command_line_comm_api, command_line_comm_webhook,
-                                    command_line_comm_sift, command_line_cli_socket) != 0) {
+                                    command_line_comm_sift, command_line_cli_socket,
+                                    console_enabled) != 0) {
         CfgFactory::get()->cleanup();
         return EXIT_FAILURE;
     }
@@ -1311,7 +1344,8 @@ int main(int argc, char *argv[]) {
         return std::string(hostname.data());
     }();
 
-    sx::auth::manage_external_authentication(CfgFactory::get()->gui_enabled);
+    sx::auth::manage_external_authentication(
+        CfgFactory::get()->gui_enabled && CfgFactory::get()->api_enabled);
 
     // create utility threads
     SmithProxy::instance().create_log_writer_thread();
@@ -1336,7 +1370,7 @@ int main(int argc, char *argv[]) {
     SmithProxy::instance().create_dns_thread();
 
     auto start_api = [&]() {
-        if(CfgFactory::get()->accept_api) {
+        if(CfgFactory::get()->http_api_enabled()) {
             // The listener may safely precede its runtime credential. Until
             // Core publishes one, every authenticated endpoint rejects the
             // request; a later credential file therefore needs no restart.

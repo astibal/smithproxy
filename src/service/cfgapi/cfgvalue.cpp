@@ -453,7 +453,7 @@ void CfgValueHelp::init() {
 
 
     add("settings.accept_api", "whether to accept HTTP API request")
-            .help_quick("<bool>: set to 'true' to disable API server (default: true)")
+            .help_quick("<bool>: set to 'false' to disable API server (default: true)")
             .may_be_empty(false)
             .value_filter(CfgValue::VALUE_BOOL);
 

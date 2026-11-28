@@ -321,6 +321,13 @@ public:
     // Process-level kill switch set only by --no-gui. Configuration and
     // environment inputs cannot re-enable management GUI entry points.
     bool gui_enabled = true;
+    // Process-level HTTP API kill switch. Unlike settings.accept_api this
+    // value can only be disabled by the command line and is never reloaded.
+    bool api_enabled = true;
+
+    [[nodiscard]] bool http_api_enabled() const noexcept {
+        return api_enabled && accept_api;
+    }
 
     std::string internal_version;
     int         schema_version = SCHEMA_VERSION;
